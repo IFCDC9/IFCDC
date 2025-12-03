@@ -1,22 +1,32 @@
 import Layout from "@/components/Layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { MOCK_CHAPTERS, MOCK_FORMS } from "@/lib/data";
 import { BarChart, Users, FileText, BookOpen, ArrowUpRight } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { chapterApi, formApi } from "@/lib/api";
 
 export default function Dashboard() {
-  const totalChapters = MOCK_CHAPTERS.length;
-  const totalForms = MOCK_FORMS.length;
-  const totalSubmissions = MOCK_FORMS.reduce((acc, form) => acc + form.submissions, 0);
+  const { data: chapters = [] } = useQuery({
+    queryKey: ["chapters"],
+    queryFn: chapterApi.getAll,
+  });
+
+  const { data: forms = [] } = useQuery({
+    queryKey: ["forms"],
+    queryFn: formApi.getAll,
+  });
+
+  const totalChapters = chapters.length;
+  const totalForms = forms.length;
+  const totalSubmissions = forms.reduce((acc, form) => acc + form.submissions, 0);
 
   return (
     <Layout>
       <div className="space-y-8">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
+          <h2 className="text-3xl font-bold tracking-tight" data-testid="text-dashboard-title">Dashboard</h2>
           <p className="text-muted-foreground mt-2">Overview of your content and engagement.</p>
         </div>
 
-        {/* Stats Grid */}
         <div className="grid gap-4 md:grid-cols-3">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -24,7 +34,7 @@ export default function Dashboard() {
               <BookOpen className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{totalChapters}</div>
+              <div className="text-2xl font-bold" data-testid="text-total-chapters">{totalChapters}</div>
               <p className="text-xs text-muted-foreground">+1 from last month</p>
             </CardContent>
           </Card>
@@ -34,7 +44,7 @@ export default function Dashboard() {
               <FileText className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{totalForms}</div>
+              <div className="text-2xl font-bold" data-testid="text-total-forms">{totalForms}</div>
               <p className="text-xs text-muted-foreground">+2 new this week</p>
             </CardContent>
           </Card>
@@ -44,13 +54,12 @@ export default function Dashboard() {
               <Users className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{totalSubmissions}</div>
+              <div className="text-2xl font-bold" data-testid="text-total-submissions">{totalSubmissions}</div>
               <p className="text-xs text-muted-foreground">+12% from last month</p>
             </CardContent>
           </Card>
         </div>
 
-        {/* Recent Activity / Content */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
           <Card className="col-span-4">
             <CardHeader>
@@ -58,8 +67,8 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {MOCK_CHAPTERS.slice(0, 3).map((chapter) => (
-                  <div key={chapter.id} className="flex items-center justify-between p-4 border rounded-lg bg-muted/20">
+                {chapters.slice(0, 3).map((chapter) => (
+                  <div key={chapter.id} className="flex items-center justify-between p-4 border rounded-lg bg-muted/20" data-testid={`card-chapter-${chapter.id}`}>
                     <div className="space-y-1">
                       <p className="font-medium leading-none">{chapter.title}</p>
                       <p className="text-sm text-muted-foreground line-clamp-1">{chapter.description}</p>
@@ -75,6 +84,9 @@ export default function Dashboard() {
                     </div>
                   </div>
                 ))}
+                {chapters.length === 0 && (
+                  <p className="text-center text-muted-foreground py-8">No chapters yet</p>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -85,8 +97,8 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
                <div className="space-y-4">
-                {MOCK_FORMS.sort((a,b) => b.submissions - a.submissions).slice(0, 3).map((form) => (
-                  <div key={form.id} className="flex items-center justify-between">
+                {forms.sort((a,b) => b.submissions - a.submissions).slice(0, 3).map((form) => (
+                  <div key={form.id} className="flex items-center justify-between" data-testid={`row-form-${form.id}`}>
                     <div className="flex items-center gap-4">
                       <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary">
                         <FileText size={14} />
@@ -99,6 +111,9 @@ export default function Dashboard() {
                     <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
                   </div>
                 ))}
+                {forms.length === 0 && (
+                  <p className="text-center text-muted-foreground py-8">No forms yet</p>
+                )}
               </div>
             </CardContent>
           </Card>
