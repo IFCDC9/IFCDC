@@ -1,0 +1,72 @@
+import React from 'react';
+
+export default function QueuesPanel({ highRisk, myQueue, currentUser }) {
+  return (
+    <div className="queues-grid">
+      <div className="panel">
+        <div className="panel-header">
+          <h3>High-Risk Incidents</h3>
+          <span className="panel-subtitle">Weapons, serious injury, self-harm, law enforcement</span>
+        </div>
+        <div className="panel-body">
+          {(!highRisk || highRisk.length === 0) ? (
+            <div className="empty-state">No high-risk incidents in queue.</div>
+          ) : (
+            <ul className="queue-list">
+              {highRisk.map((item) => (
+                <li key={item.id} className="queue-item queue-item-high">
+                  <div className="queue-main">
+                    <div className="queue-title">
+                      Incident #{item.id} • {item.data?.program || 'Program N/A'}
+                    </div>
+                    <div className="queue-meta">
+                      <span>{new Date(item.createdAt).toLocaleString()}</span>
+                      <span>Status: {item.status}</span>
+                    </div>
+                  </div>
+                  <div className="queue-foot">
+                    <span>Reported by: {item.submittedBy?.name || 'Unknown'}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-header">
+          <h3>My Supervisor Queue</h3>
+          <span className="panel-subtitle">
+            Items assigned to {currentUser?.name || 'you'} for review
+          </span>
+        </div>
+        <div className="panel-body">
+          {(!myQueue || myQueue.length === 0) ? (
+            <div className="empty-state">No assigned items at this time.</div>
+          ) : (
+            <ul className="queue-list">
+              {myQueue.map((item) => (
+                <li key={item.id} className="queue-item">
+                  <div className="queue-main">
+                    <div className="queue-title">
+                      {item.form?.title || 'Submission'} #{item.id}
+                    </div>
+                    <div className="queue-meta">
+                      <span>{new Date(item.createdAt).toLocaleString()}</span>
+                      <span>Status: {item.status}</span>
+                      <span>Risk: {item.riskLevel}</span>
+                    </div>
+                  </div>
+                  <div className="queue-foot">
+                    <span>From: {item.submittedBy?.name || 'Unknown'}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
