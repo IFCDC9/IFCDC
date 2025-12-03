@@ -10,6 +10,7 @@ import CompliancePage from './pages/CompliancePage';
 import AdminUsersPage from './pages/AdminUsersPage';
 import ProfilePage from './pages/ProfilePage';
 import BarbershopPage from './pages/BarbershopPage';
+import HrOnboardingPage from './pages/HrOnboardingPage';
 import Layout from './components/Layout';
 
 function ProtectedRoute({ children, roles }) {
@@ -51,6 +52,11 @@ export default function App() {
             } />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="barbershop" element={<BarbershopPage />} />
+            <Route path="hr" element={
+              <ProtectedRoute roles={['admin']}>
+                <HrOnboardingPage />
+              </ProtectedRoute>
+            } />
           </Route>
         </Routes>
       </BrowserRouter>

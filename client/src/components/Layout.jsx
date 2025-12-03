@@ -19,6 +19,7 @@ export default function Layout() {
           <NavLink to="/training">Training</NavLink>
           <NavLink to="/compliance">Compliance</NavLink>
           <NavLink to="/barbershop">Barbershop</NavLink>
+          {user?.role === 'admin' && <NavLink to="/hr">HR</NavLink>}
           {user?.role === 'admin' && <NavLink to="/admin/users">Admin</NavLink>}
           <NavLink to="/profile">My Profile</NavLink>
         </nav>

@@ -994,3 +994,123 @@ body {
   background: #ffebee;
   color: #c62828;
 }
+
+/* HR Onboarding Page */
+.hr-onboarding-page .page-header {
+  margin-bottom: 1.5rem;
+}
+
+.hr-onboarding-page .page-header h1 {
+  margin: 0;
+  font-size: 1.4rem;
+  color: #1a1a2e;
+}
+
+.hr-content {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr;
+  gap: 1.5rem;
+}
+
+.onboarding-form-card,
+.employees-list-card {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.onboarding-form-card h2,
+.employees-list-card h2 {
+  margin: 0 0 1rem 0;
+  font-size: 1.1rem;
+  color: #1a1a2e;
+}
+
+.onboarding-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.onboarding-form .form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.onboarding-form .form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.onboarding-form label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #555;
+}
+
+.onboarding-form input,
+.onboarding-form select,
+.onboarding-form textarea {
+  padding: 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.onboarding-form input:focus,
+.onboarding-form select:focus,
+.onboarding-form textarea:focus {
+  outline: none;
+  border-color: #4a90d9;
+}
+
+.employees-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.employees-table th,
+.employees-table td {
+  padding: 0.75rem 0.5rem;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+}
+
+.employees-table th {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+}
+
+.employees-table td {
+  font-size: 0.9rem;
+  color: #333;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.status-onboarding {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.status-active {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.status-inactive {
+  background: #f5f5f5;
+  color: #666;
+}
