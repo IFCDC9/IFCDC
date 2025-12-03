@@ -8,14 +8,15 @@ datasource db {
 }
 
 model User {
-  id           Int       @id @default(autoincrement())
-  name         String
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email        String    @unique
   passwordHash String    @map("password_hash")
-  role         String    @default("staff")
-  isActive     Boolean   @default(true) @map("is_active")
-  lastLogin    DateTime? @map("last_login")
+  role         String
+  employeeId   String?   @map("employee_id") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
 
+  employee               Employee?                @relation(fields: [employeeId], references: [id], onDelete: SetNull)
   acknowledgements       PolicyAcknowledgement[]
   formSubmissions        FormSubmission[]
   assignedSubmissions    FormSubmission[]         @relation("SupervisorAssigned")
@@ -42,7 +43,7 @@ model Chapter {
 
 model PolicyAcknowledgement {
   id             Int      @id @default(autoincrement())
-  userId         Int      @map("user_id")
+  userId         String   @map("user_id") @db.Uuid
   chapterId      Int      @map("chapter_id")
   version        Int
   acknowledgedAt DateTime @default(now()) @map("acknowledged_at")
@@ -71,14 +72,14 @@ model Form {
 model FormSubmission {
   id            Int      @id @default(autoincrement())
   formId        Int      @map("form_id")
-  submittedById Int?     @map("submitted_by_id")
+  submittedById String?  @map("submitted_by_id") @db.Uuid
   data          Json
 
   status        String   @default("open")
   riskLevel     String   @default("low") @map("risk_level")
   flagged       Boolean  @default(false)
 
-  assignedToId  Int?     @map("assigned_to_id")
+  assignedToId  String?  @map("assigned_to_id") @db.Uuid
 
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
@@ -114,6 +115,8 @@ model Employee {
   notes     String?
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
+
+  users     User[]
 
   @@map("employees")
 }
