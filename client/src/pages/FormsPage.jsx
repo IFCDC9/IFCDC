@@ -260,7 +260,7 @@ export default function FormsPage() {
   const handleSubmit = async (values) => {
     try {
       if (selectedForm.id && typeof selectedForm.id === 'number') {
-        await submitForm(selectedForm.id, user.id, values, token);
+        await submitForm(selectedForm.id, user?.id, values, token);
       }
       console.log('Form submitted:', selectedForm?.slug, values);
       setSubmitted(true);

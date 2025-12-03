@@ -16,8 +16,8 @@ model User {
   isActive     Boolean   @default(true) @map("is_active")
   lastLogin    DateTime? @map("last_login")
 
-  acknowledgements PolicyAcknowledgement[]
-  formSubmissions  FormSubmission[]
+  acknowledgements    PolicyAcknowledgement[]
+  formSubmissions     FormSubmission[]
 
   @@map("users")
 }
@@ -68,14 +68,15 @@ model Form {
 }
 
 model FormSubmission {
-  id          Int      @id @default(autoincrement())
-  formId      Int      @map("form_id")
-  userId      Int      @map("user_id")
-  data        Json
-  submittedAt DateTime @default(now()) @map("submitted_at")
+  id            Int      @id @default(autoincrement())
+  formId        Int      @map("form_id")
+  submittedById Int?     @map("submitted_by_id")
+  data          Json
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
-  form Form @relation(fields: [formId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  form        Form  @relation(fields: [formId], references: [id], onDelete: Cascade)
+  submittedBy User? @relation(fields: [submittedById], references: [id], onDelete: SetNull)
 
   @@map("form_submissions")
 }

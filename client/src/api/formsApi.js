@@ -32,10 +32,10 @@ export async function deleteForm(id, token) {
   }, token);
 }
 
-export async function submitForm(formId, userId, data, token) {
+export async function submitForm(formId, submittedById, data, token) {
   return apiRequest(`/api/forms/${formId}/submissions`, {
     method: 'POST',
-    body: JSON.stringify({ userId, data }),
+    body: JSON.stringify({ submittedById, data }),
   }, token);
 }
 

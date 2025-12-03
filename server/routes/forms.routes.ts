@@ -102,11 +102,11 @@ router.get("/:id/submissions", async (req: Request, res: Response) => {
 router.post("/:id/submissions", async (req: Request, res: Response) => {
   try {
     const formId = parseInt(req.params.id);
-    const { userId, data } = req.body;
-    if (!userId || !data) {
-      return res.status(400).json({ error: "Missing required fields: userId, data" });
+    const { submittedById, data } = req.body;
+    if (!data) {
+      return res.status(400).json({ error: "Missing required field: data" });
     }
-    const submission = await storage.createFormSubmission({ formId, userId, data });
+    const submission = await storage.createFormSubmission({ formId, submittedById, data });
     res.status(201).json(submission);
   } catch (error) {
     res.status(500).json({ error: "Failed to create submission" });

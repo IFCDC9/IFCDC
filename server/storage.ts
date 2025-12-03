@@ -47,7 +47,7 @@ export type UpdateForm = Partial<InsertForm>;
 
 export type InsertFormSubmission = {
   formId: number;
-  userId: number;
+  submittedById?: number;
   data: any;
 };
 
@@ -81,7 +81,7 @@ export interface IStorage {
   deleteForm(id: number): Promise<boolean>;
   
   getFormSubmissions(formId: number): Promise<FormSubmission[]>;
-  getUserFormSubmissions(userId: number): Promise<FormSubmission[]>;
+  getUserFormSubmissions(submittedById: number): Promise<FormSubmission[]>;
   createFormSubmission(submission: InsertFormSubmission): Promise<FormSubmission>;
 }
 
@@ -242,14 +242,14 @@ export class DatabaseStorage implements IStorage {
   async getFormSubmissions(formId: number): Promise<FormSubmission[]> {
     return prisma.formSubmission.findMany({
       where: { formId },
-      orderBy: { submittedAt: "desc" },
+      orderBy: { createdAt: "desc" },
     });
   }
 
-  async getUserFormSubmissions(userId: number): Promise<FormSubmission[]> {
+  async getUserFormSubmissions(submittedById: number): Promise<FormSubmission[]> {
     return prisma.formSubmission.findMany({
-      where: { userId },
-      orderBy: { submittedAt: "desc" },
+      where: { submittedById },
+      orderBy: { createdAt: "desc" },
     });
   }
 
