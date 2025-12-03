@@ -30,9 +30,9 @@ export function Sidebar() {
           const Icon = link.icon;
           const isActive = location === link.href;
           return (
-            <Link key={link.href} href={link.href}>
-              <a
-                className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+            <Link key={link.href} href={link.href} asChild>
+              <div
+                className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer ${
                   isActive
                     ? "bg-sidebar-primary text-sidebar-primary-foreground"
                     : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
@@ -40,18 +40,18 @@ export function Sidebar() {
               >
                 <Icon size={18} />
                 {link.label}
-              </a>
+              </div>
             </Link>
           );
         })}
       </nav>
 
       <div className="p-4 border-t border-sidebar-border">
-        <Link href="/login">
-          <a className="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
+        <Link href="/login" asChild>
+          <div className="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors cursor-pointer">
             <LogOut size={18} />
             Sign Out
-          </a>
+          </div>
         </Link>
       </div>
     </div>
