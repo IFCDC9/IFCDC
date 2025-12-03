@@ -2,7 +2,7 @@
 
 ## Overview
 
-ChapterForm Admin is a full-stack web application for managing educational chapters and their associated forms. The application provides an administrative interface for creating, organizing, and tracking chapters and forms with submission metrics. Built with a modern React frontend and Express backend, it uses PostgreSQL for data persistence and includes authentication for secure access.
+ChapterForm Admin is a Policy Acknowledgement System for managing policy chapters and tracking user acknowledgements. Staff members can view policy chapters and track which policies have been acknowledged. Built with a modern React frontend and Express backend, it uses PostgreSQL for data persistence and includes authentication for secure access.
 
 ## User Preferences
 
@@ -40,11 +40,12 @@ Preferred communication style: Simple, everyday language.
 **API Design**: RESTful API with the following endpoint structure:
 - `/api/auth/*` - Authentication endpoints (login, register)
 - `/api/chapters/*` - Chapter CRUD operations
-- `/api/forms/*` - Form CRUD operations
+- `/api/users/*` - User management
+- `/api/acknowledgements/*` - Policy acknowledgement tracking
 
 **Data Access Layer**: Storage abstraction pattern with an `IStorage` interface implemented by `DatabaseStorage`, allowing for potential storage backend changes without affecting business logic.
 
-**ORM**: Drizzle ORM for type-safe database operations and schema management.
+**ORM**: Prisma 7 with driver adapters for type-safe database operations and schema management.
 
 **Validation**: Zod schemas for runtime type validation, shared between frontend and backend via the `shared/` directory.
 
@@ -64,17 +65,22 @@ Preferred communication style: Simple, everyday language.
 
 ### Data Storage
 
-**Database**: PostgreSQL accessed via Neon serverless driver with WebSocket support.
+**Database**: PostgreSQL accessed via Prisma with @prisma/adapter-pg.
 
-**Schema Design**:
-- `users` table: User authentication with username/password
-- `chapters` table: Educational chapters with title, description, status (draft/published/archived), and timestamps
-- `forms` table: Forms associated with chapters, tracking submissions count and status (active/closed)
-- Foreign key relationship: forms reference chapters with cascade delete
+**Schema Design** (Prisma models):
+- `User` - Staff members with name, email, password, role (admin/director/staff), active status
+- `Chapter` - Policy chapters with number, title, section, slug, body content, version, and active status
+- `PolicyAcknowledgement` - Tracks which users acknowledged which policy versions
+- Foreign key relationships with cascade delete on user/chapter deletion
 
-**Connection Management**: Connection pooling via `@neondatabase/serverless` Pool.
+**Connection Management**: Connection pooling via `pg` Pool with PrismaPg adapter.
 
-**Migrations**: Drizzle Kit for schema migrations, configured to output to `./migrations` directory.
+**Migrations**: Prisma Migrate for schema migrations, stored in `prisma/migrations/` directory.
+
+**Prisma Commands**:
+- `npx prisma migrate dev` - Create and apply migrations
+- `npx prisma db push` - Push schema changes directly
+- `npx prisma generate` - Regenerate Prisma client
 
 ### External Dependencies
 
@@ -94,15 +100,27 @@ Preferred communication style: Simple, everyday language.
 **Third-party Services Integration Points**:
 - Session store ready (connect-pg-simple in dependencies)
 - Authentication infrastructure prepared for expansion
-- File upload capability via multer (installed but not implemented)
 
 ### Shared Code
 
 **Location**: `shared/` directory containing TypeScript code used by both frontend and backend.
 
-**Schema Definitions**: Database table schemas and Zod validation schemas defined once and shared across the stack, ensuring type safety and validation consistency.
+**Schema Definitions**: Zod validation schemas defined once and shared across the stack, ensuring type safety and validation consistency.
 
 **Import Pattern**: Path aliases configured for clean imports:
 - `@/` maps to client source
 - `@shared/` maps to shared directory
 - `@assets/` maps to attached_assets directory
+
+### Prisma 7 Configuration
+
+The project uses Prisma 7 with the new adapter-based approach:
+
+**Schema Location**: `prisma/schema.prisma`
+**Generated Client**: `generated/prisma/`
+**Config File**: `prisma.config.ts`
+
+**Key Changes from Drizzle**:
+- Schema defined in Prisma Schema Language (PSL)
+- Driver adapters required (using @prisma/adapter-pg)
+- Types imported from generated client path
