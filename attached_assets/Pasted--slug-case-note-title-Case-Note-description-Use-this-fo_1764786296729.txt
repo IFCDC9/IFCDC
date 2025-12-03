@@ -1,0 +1,143 @@
+{
+  "slug": "case_note",
+  "title": "Case Note",
+  "description": "Use this form to document contacts, sessions, and follow-up with participants.",
+  "version": 1,
+  "fields": [
+    {
+      "name": "note_date",
+      "label": "Date of Contact/Session",
+      "type": "date",
+      "required": true
+    },
+    {
+      "name": "note_time",
+      "label": "Time of Contact/Session",
+      "type": "time",
+      "required": false
+    },
+    {
+      "name": "participant_identifier",
+      "label": "Participant Name or ID",
+      "type": "text",
+      "required": true,
+      "helpText": "Use participant ID if available; otherwise full name."
+    },
+    {
+      "name": "program",
+      "label": "Program Area",
+      "type": "select",
+      "required": true,
+      "options": [
+        { "value": "youth_development", "label": "Youth Development" },
+        { "value": "cvi", "label": "Community Violence Intervention (CVI)" },
+        { "value": "workforce", "label": "Workforce Development" },
+        { "value": "barbershop", "label": "Barbershop Workforce Pipeline" },
+        { "value": "family_services", "label": "Family Services" },
+        { "value": "radio_media", "label": "IFCDC Radio & Media" }
+      ]
+    },
+    {
+      "name": "contact_type",
+      "label": "Type of Contact",
+      "type": "select",
+      "required": true,
+      "options": [
+        { "value": "in_person", "label": "In-person session" },
+        { "value": "phone_call", "label": "Phone call" },
+        { "value": "video", "label": "Video session" },
+        { "value": "text_message", "label": "Text message" },
+        { "value": "field_outreach", "label": "Field outreach contact" }
+      ]
+    },
+    {
+      "name": "contact_location",
+      "label": "Location (If In-Person or Field)",
+      "type": "text",
+      "required": false,
+      "placeholder": "Program site, community location, home visit, etc."
+    },
+    {
+      "name": "session_focus",
+      "label": "Primary Focus of Session",
+      "type": "multiselect",
+      "required": false,
+      "options": [
+        { "value": "engagement_checkin", "label": "Engagement / check-in" },
+        { "value": "school_support", "label": "School support" },
+        { "value": "employment", "label": "Employment / job search" },
+        { "value": "conflict_mediation", "label": "Conflict mediation" },
+        { "value": "court_probation", "label": "Court/probation related" },
+        { "value": "family_support", "label": "Family support" },
+        { "value": "mental_health_referral", "label": "Mental health referral/support" },
+        { "value": "safety_planning", "label": "Safety planning" },
+        { "value": "other", "label": "Other" }
+      ]
+    },
+    {
+      "name": "summary",
+      "label": "Summary of Contact/Session",
+      "type": "textarea",
+      "required": true,
+      "helpText": "Briefly summarize what occurred and what was discussed.",
+      "maxLength": 2000
+    },
+    {
+      "name": "participant_response",
+      "label": "Participant Response / Engagement Level",
+      "type": "textarea",
+      "required": false,
+      "maxLength": 800
+    },
+    {
+      "name": "goals_addressed",
+      "label": "Goals or Service Plan Items Addressed",
+      "type": "textarea",
+      "required": false,
+      "maxLength": 800
+    },
+    {
+      "name": "referrals_made",
+      "label": "Referrals or Linkages Made",
+      "type": "textarea",
+      "required": false,
+      "helpText": "Include partner agencies or services.",
+      "maxLength": 800
+    },
+    {
+      "name": "followup_actions",
+      "label": "Follow-Up Actions / Next Steps",
+      "type": "textarea",
+      "required": false,
+      "maxLength": 800
+    },
+    {
+      "name": "followup_date",
+      "label": "Planned Follow-Up Date (If Any)",
+      "type": "date",
+      "required": false
+    },
+    {
+      "name": "staff_name",
+      "label": "Staff Completing Note",
+      "type": "text",
+      "required": true
+    },
+    {
+      "name": "staff_role",
+      "label": "Staff Role",
+      "type": "text",
+      "required": true
+    },
+    {
+      "name": "supervisor_review_required",
+      "label": "Flag for Supervisor Review?",
+      "type": "radio",
+      "required": false,
+      "options": [
+        { "value": "yes", "label": "Yes" },
+        { "value": "no", "label": "No" }
+      ]
+    }
+  ]
+}
