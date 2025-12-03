@@ -1,8 +1,8 @@
 import { Response } from "express";
 import prisma from "../db/client";
-import { AuthRequest } from "../middleware/auth";
+import { AuthedRequest } from "../middleware/auth";
 
-export const listForms = async (_req: AuthRequest, res: Response) => {
+export const listForms = async (_req: AuthedRequest, res: Response) => {
   try {
     const forms = await prisma.form.findMany({
       where: { active: true },
@@ -23,7 +23,7 @@ export const listForms = async (_req: AuthRequest, res: Response) => {
   }
 };
 
-export const getFormBySlug = async (req: AuthRequest, res: Response) => {
+export const getFormBySlug = async (req: AuthedRequest, res: Response) => {
   try {
     const { slug } = req.params;
 
@@ -48,11 +48,11 @@ export const getFormBySlug = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const submitForm = async (req: AuthRequest, res: Response) => {
+export const submitForm = async (req: AuthedRequest, res: Response) => {
   try {
     const { slug } = req.params;
     const payload = req.body || {};
-    const user = req.user || null;
+    const userId = req.user?.id || null;
 
     const form = await prisma.form.findUnique({
       where: { slug },
@@ -86,7 +86,7 @@ export const submitForm = async (req: AuthRequest, res: Response) => {
     const submission = await prisma.formSubmission.create({
       data: {
         formId: form.id,
-        submittedById: user ? user.sub : null,
+        submittedById: userId,
         data: payload,
         riskLevel,
         flagged,
@@ -106,7 +106,7 @@ export const submitForm = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const listSubmissionsForForm = async (req: AuthRequest, res: Response) => {
+export const listSubmissionsForForm = async (req: AuthedRequest, res: Response) => {
   try {
     const { slug } = req.params;
 
@@ -144,7 +144,7 @@ export const listSubmissionsForForm = async (req: AuthRequest, res: Response) =>
   }
 };
 
-export const getSubmissionById = async (req: AuthRequest, res: Response) => {
+export const getSubmissionById = async (req: AuthedRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id);
 
@@ -155,7 +155,7 @@ export const getSubmissionById = async (req: AuthRequest, res: Response) => {
           select: { id: true, slug: true, title: true },
         },
         submittedBy: {
-          select: { id: true, name: true, email: true, role: true },
+          select: { id: true, email: true, role: true },
         },
       },
     });
@@ -171,7 +171,7 @@ export const getSubmissionById = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const updateSubmissionStatus = async (req: AuthRequest, res: Response) => {
+export const updateSubmissionStatus = async (req: AuthedRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     const { status, riskLevel, flagged } = req.body;
@@ -192,7 +192,7 @@ export const updateSubmissionStatus = async (req: AuthRequest, res: Response) =>
   }
 };
 
-export const assignSubmission = async (req: AuthRequest, res: Response) => {
+export const assignSubmission = async (req: AuthedRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     const { supervisorId } = req.body;
@@ -204,7 +204,7 @@ export const assignSubmission = async (req: AuthRequest, res: Response) => {
         status: "in_review",
       },
       include: {
-        assignedTo: { select: { id: true, name: true, email: true } },
+        assignedTo: { select: { id: true, email: true } },
       },
     });
 

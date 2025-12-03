@@ -1,12 +1,12 @@
 import { Router } from "express";
 import * as reportsController from "../controllers/reports.controller";
-import { requireAdminOrSupervisor } from "../middleware/auth";
+import { requireAuth } from "../middleware/auth";
 
 const router = Router();
 
-router.get("/overview", requireAdminOrSupervisor, reportsController.overview);
-router.get("/incidents/by-program", requireAdminOrSupervisor, reportsController.incidentsByProgram);
-router.get("/incidents/time-series", requireAdminOrSupervisor, reportsController.incidentsTimeSeries);
-router.get("/incidents/export/csv", requireAdminOrSupervisor, reportsController.exportIncidentsCsv);
+router.get("/overview", requireAuth(["admin", "supervisor"]), reportsController.overview);
+router.get("/incidents/by-program", requireAuth(["admin", "supervisor"]), reportsController.incidentsByProgram);
+router.get("/incidents/time-series", requireAuth(["admin", "supervisor"]), reportsController.incidentsTimeSeries);
+router.get("/incidents/export/csv", requireAuth(["admin", "supervisor"]), reportsController.exportIncidentsCsv);
 
 export default router;

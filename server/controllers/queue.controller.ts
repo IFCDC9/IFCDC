@@ -1,10 +1,10 @@
 import { Response } from "express";
 import prisma from "../db/client";
-import { AuthRequest } from "../middleware/auth";
+import { AuthedRequest } from "../middleware/auth";
 
-export const myQueue = async (req: AuthRequest, res: Response) => {
+export const myQueue = async (req: AuthedRequest, res: Response) => {
   try {
-    const userId = req.user?.sub;
+    const userId = req.user?.id;
 
     const submissions = await prisma.formSubmission.findMany({
       where: {
@@ -14,7 +14,7 @@ export const myQueue = async (req: AuthRequest, res: Response) => {
       orderBy: { createdAt: "desc" },
       include: {
         form: { select: { slug: true, title: true } },
-        submittedBy: { select: { id: true, name: true } },
+        submittedBy: { select: { id: true, email: true } },
       },
     });
 
@@ -25,7 +25,7 @@ export const myQueue = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const highRiskQueue = async (_req: AuthRequest, res: Response) => {
+export const highRiskQueue = async (_req: AuthedRequest, res: Response) => {
   try {
     const incidentForm = await prisma.form.findUnique({
       where: { slug: "incident_report" },
@@ -42,7 +42,7 @@ export const highRiskQueue = async (_req: AuthRequest, res: Response) => {
       },
       orderBy: { createdAt: "desc" },
       include: {
-        submittedBy: { select: { id: true, name: true } },
+        submittedBy: { select: { id: true, email: true } },
       },
     });
 

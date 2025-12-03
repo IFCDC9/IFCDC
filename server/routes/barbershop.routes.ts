@@ -4,7 +4,7 @@ import { requireAuth } from '../middleware/auth';
 
 const router = Router();
 
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', requireAuth(), async (req, res) => {
   try {
     const bookings = await prisma.barbershopBooking.findMany({
       orderBy: { datetime: 'asc' },
@@ -37,7 +37,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-router.patch('/:id/status', requireAuth, async (req, res) => {
+router.patch('/:id/status', requireAuth(), async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -54,7 +54,7 @@ router.patch('/:id/status', requireAuth, async (req, res) => {
   }
 });
 
-router.delete('/:id', requireAuth, async (req, res) => {
+router.delete('/:id', requireAuth(), async (req, res) => {
   try {
     const { id } = req.params;
 

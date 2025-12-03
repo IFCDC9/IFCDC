@@ -1,8 +1,8 @@
 import { Response } from "express";
 import prisma from "../db/client";
-import { AuthRequest } from "../middleware/auth";
+import { AuthedRequest } from "../middleware/auth";
 
-export const overview = async (_req: AuthRequest, res: Response) => {
+export const overview = async (_req: AuthedRequest, res: Response) => {
   try {
     const incidentForm = await prisma.form.findUnique({
       where: { slug: "incident_report" },
@@ -68,7 +68,7 @@ export const overview = async (_req: AuthRequest, res: Response) => {
   }
 };
 
-export const incidentsByProgram = async (_req: AuthRequest, res: Response) => {
+export const incidentsByProgram = async (_req: AuthedRequest, res: Response) => {
   try {
     const incidentForm = await prisma.form.findUnique({
       where: { slug: "incident_report" },
@@ -102,7 +102,7 @@ export const incidentsByProgram = async (_req: AuthRequest, res: Response) => {
   }
 };
 
-export const incidentsTimeSeries = async (req: AuthRequest, res: Response) => {
+export const incidentsTimeSeries = async (req: AuthedRequest, res: Response) => {
   try {
     const days = parseInt((req.query.days as string) || "30", 10);
     const since = new Date();
@@ -149,7 +149,7 @@ function escapeCsv(value: any): string {
   return value;
 }
 
-export const exportIncidentsCsv = async (req: AuthRequest, res: Response) => {
+export const exportIncidentsCsv = async (req: AuthedRequest, res: Response) => {
   try {
     const { start, end } = req.query as { start?: string; end?: string };
 
