@@ -1,0 +1,93 @@
+exports.exportIncidentsCsv = async (req, res) => {
+  try {
+    const { start, end } = req.query; // expected YYYY-MM-DD
+    const incidentForm = await prisma.form.findUnique({
+      where: { slug: 'incident_report' },
+      select: { id: true },
+    });
+
+    if (!incidentForm) {
+      return res.status(404).send('Incident form not found');
+    }
+
+    const where = { formId: incidentForm.id };
+
+    if (start || end) {
+      where.createdAt = {};
+      if (start) where.createdAt.gte = new Date(start);
+      if (end) {
+        const endDate = new Date(end);
+        endDate.setHours(23, 59, 59, 999);
+        where.createdAt.lte = endDate;
+      }
+    }
+
+    const submissions = await prisma.formSubmission.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        createdAt: true,
+        riskLevel: true,
+        status: true,
+        flagged: true,
+        data: true,
+      },
+    });
+
+    // Basic columns we care about
+    const header = [
+      'id',
+      'createdAt',
+      'riskLevel',
+      'status',
+      'flagged',
+      'incidentDate',
+      'incidentTime',
+      'location',
+      'program',
+      'incidentType',
+      'staffName'
+    ];
+
+    const rows = [header.join(',')];
+
+    submissions.forEach((sub) => {
+      const d = sub.data || {};
+      const row = [
+        sub.id,
+        sub.createdAt.toISOString(),
+        sub.riskLevel,
+        sub.status,
+        sub.flagged ? '1' : '0',
+        d.incident_date || '',
+        d.incident_time || '',
+        escapeCsv(d.location || ''),
+        d.program || '',
+        Array.isArray(d.incident_type) ? d.incident_type.join('|') : (d.incident_type || ''),
+        d.staff_name || ''
+      ];
+      rows.push(row.join(','));
+    });
+
+    const csv = rows.join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="ifcdc_incidents_${Date.now()}.csv"`
+    );
+    res.send(csv);
+  } catch (err) {
+    console.error('Error exporting CSV:', err);
+    res.status(500).send('Error exporting CSV');
+  }
+};
+
+function escapeCsv(value) {
+  if (typeof value !== 'string') return value;
+  if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}

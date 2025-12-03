@@ -141,77 +141,96 @@ export const incidentsTimeSeries = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const exportIncidentsCsv = async (_req: AuthRequest, res: Response) => {
+function escapeCsv(value: any): string {
+  if (typeof value !== "string") return String(value ?? "");
+  if (value.includes(",") || value.includes('"') || value.includes("\n")) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+export const exportIncidentsCsv = async (req: AuthRequest, res: Response) => {
   try {
+    const { start, end } = req.query as { start?: string; end?: string };
+
     const incidentForm = await prisma.form.findUnique({
       where: { slug: "incident_report" },
       select: { id: true },
     });
 
     if (!incidentForm) {
-      res.setHeader("Content-Type", "text/csv");
-      res.setHeader("Content-Disposition", "attachment; filename=incidents.csv");
-      return res.send("No incident form found");
+      return res.status(404).send("Incident form not found");
     }
 
-    const incidents = await prisma.formSubmission.findMany({
-      where: { formId: incidentForm.id },
-      include: {
-        submittedBy: { select: { id: true, name: true, email: true } },
-        assignedTo: { select: { id: true, name: true, email: true } },
-      },
+    const where: any = { formId: incidentForm.id };
+
+    if (start || end) {
+      where.createdAt = {};
+      if (start) where.createdAt.gte = new Date(start);
+      if (end) {
+        const endDate = new Date(end);
+        endDate.setHours(23, 59, 59, 999);
+        where.createdAt.lte = endDate;
+      }
+    }
+
+    const submissions = await prisma.formSubmission.findMany({
+      where,
       orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        createdAt: true,
+        riskLevel: true,
+        status: true,
+        flagged: true,
+        data: true,
+      },
     });
 
-    const headers = [
+    const header = [
       "id",
       "createdAt",
-      "status",
       "riskLevel",
+      "status",
       "flagged",
-      "submittedBy",
-      "assignedTo",
-      "program",
       "incidentDate",
       "incidentTime",
       "location",
-      "description",
+      "program",
+      "incidentType",
+      "staffName",
     ];
 
-    const escapeCSV = (val: any): string => {
-      if (val === null || val === undefined) return "";
-      const str = String(val);
-      if (str.includes(",") || str.includes('"') || str.includes("\n")) {
-        return `"${str.replace(/"/g, '""')}"`;
-      }
-      return str;
-    };
+    const rows = [header.join(",")];
 
-    const rows = incidents.map((inc) => {
-      const data = inc.data as Record<string, any>;
-      return [
-        inc.id,
-        inc.createdAt.toISOString(),
-        inc.status,
-        inc.riskLevel,
-        inc.flagged ? "Yes" : "No",
-        inc.submittedBy?.name || "",
-        inc.assignedTo?.name || "",
-        data.program || "",
-        data.incidentDate || "",
-        data.incidentTime || "",
-        data.location || "",
-        data.description || "",
-      ].map(escapeCSV).join(",");
+    submissions.forEach((sub) => {
+      const d = (sub.data || {}) as Record<string, any>;
+      const row = [
+        sub.id,
+        sub.createdAt.toISOString(),
+        sub.riskLevel,
+        sub.status,
+        sub.flagged ? "1" : "0",
+        d.incident_date || "",
+        d.incident_time || "",
+        escapeCsv(d.location || ""),
+        d.program || "",
+        Array.isArray(d.incident_type) ? d.incident_type.join("|") : (d.incident_type || ""),
+        d.staff_name || "",
+      ];
+      rows.push(row.join(","));
     });
 
-    const csv = [headers.join(","), ...rows].join("\n");
+    const csv = rows.join("\n");
 
     res.setHeader("Content-Type", "text/csv");
-    res.setHeader("Content-Disposition", "attachment; filename=incidents.csv");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="ifcdc_incidents_${Date.now()}.csv"`
+    );
     res.send(csv);
   } catch (err) {
-    console.error("Error exporting incidents CSV:", err);
-    res.status(500).json({ message: "Error exporting incidents" });
+    console.error("Error exporting CSV:", err);
+    res.status(500).send("Error exporting CSV");
   }
 };
