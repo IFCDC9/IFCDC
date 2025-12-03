@@ -1,8 +1,8 @@
-# ChapterForm Admin
+# IFCDC Manual API
 
 ## Overview
 
-ChapterForm Admin is a Policy Acknowledgement System for managing policy chapters and tracking user acknowledgements. Staff members can view policy chapters and track which policies have been acknowledged. Built with a modern React frontend and Express backend, it uses PostgreSQL for data persistence and includes authentication for secure access.
+IFCDC Manual API is a Policy Acknowledgement System for managing policy chapters and tracking user acknowledgements. Staff members can view policy chapters and track which policies have been acknowledged. This is a standalone REST API built with Express and TypeScript, using PostgreSQL for data persistence via Prisma ORM.
 
 ## User Preferences
 
@@ -10,38 +10,25 @@ Preferred communication style: Simple, everyday language.
 
 ## System Architecture
 
-### Frontend Architecture
-
-**Framework**: React with TypeScript using Vite as the build tool and development server.
-
-**UI Component Library**: shadcn/ui components built on Radix UI primitives, providing a comprehensive set of accessible, customizable components with Tailwind CSS styling.
-
-**Routing**: wouter for client-side routing, a lightweight alternative to React Router.
-
-**State Management**: 
-- TanStack Query (React Query) for server state management, caching, and data synchronization
-- Local component state using React hooks
-
-**Styling**: 
-- Tailwind CSS with custom theme configuration
-- CSS variables for dynamic theming
-- Custom design tokens defined in index.css with support for dark mode
-
-**Design Pattern**: The frontend follows a component-based architecture with:
-- Page components in `client/src/pages/` for each route
-- Reusable UI components in `client/src/components/ui/`
-- Shared layout component for consistent navigation and structure
-- API client abstraction in `client/src/lib/api.ts`
-
 ### Backend Architecture
 
 **Framework**: Express.js with TypeScript, running on Node.js.
 
 **API Design**: RESTful API with the following endpoint structure:
-- `/api/auth/*` - Authentication endpoints (login, register)
-- `/api/chapters/*` - Chapter CRUD operations
-- `/api/users/*` - User management
-- `/api/acknowledgements/*` - Policy acknowledgement tracking
+- `GET /` - API status check
+- `/health` - Health check endpoints
+- `/auth/*` - Authentication endpoints (login, register)
+- `/chapters/*` - Chapter CRUD operations
+- `/users/*` - User management
+- `/acknowledgements/*` - Policy acknowledgement tracking
+
+**Route Organization**: Routes are organized into separate files:
+- `server/routes/health.routes.ts` - Health check endpoints
+- `server/routes/auth.routes.ts` - Authentication (register, login)
+- `server/routes/chapters.routes.ts` - Chapter CRUD
+- `server/routes/users.routes.ts` - User management
+- `server/routes/acknowledgements.routes.ts` - Acknowledgement tracking
+- `server/routes/index.ts` - Route registration
 
 **Data Access Layer**: Storage abstraction pattern with an `IStorage` interface implemented by `DatabaseStorage`, allowing for potential storage backend changes without affecting business logic.
 
@@ -52,16 +39,6 @@ Preferred communication style: Simple, everyday language.
 **Authentication**: 
 - bcryptjs for password hashing
 - Session-based authentication (infrastructure present in dependencies)
-
-**Build Strategy**: 
-- esbuild for server bundling with selective dependency bundling
-- Vite for client bundling
-- Custom build script that bundles allowlisted dependencies to reduce cold start times
-
-**Development Environment**:
-- Vite middleware for HMR in development
-- Custom logging middleware for request tracking
-- Replit-specific plugins for development experience
 
 ### Data Storage
 
@@ -82,45 +59,57 @@ Preferred communication style: Simple, everyday language.
 - `npx prisma db push` - Push schema changes directly
 - `npx prisma generate` - Regenerate Prisma client
 
-### External Dependencies
+### Configuration
 
-**Database Service**: 
-- Neon PostgreSQL serverless database
-- Requires `DATABASE_URL` environment variable for connection
-
-**UI Component Libraries**:
-- Radix UI for accessible, unstyled component primitives
-- Lucide React for icons
-- cmdk for command palette functionality
-
-**Development Tools**:
-- Replit-specific plugins for dev banner, cartographer, and runtime error overlay
-- Custom Vite plugin for OpenGraph image meta tag management
-
-**Third-party Services Integration Points**:
-- Session store ready (connect-pg-simple in dependencies)
-- Authentication infrastructure prepared for expansion
+**Environment Configuration**: `server/config/env.ts` exports configuration from environment variables:
+- `port` - Server port (default: 5000)
+- `nodeEnv` - Node environment
+- `databaseUrl` - PostgreSQL connection string
+- `jwtSecret` - JWT secret for authentication
 
 ### Shared Code
 
-**Location**: `shared/` directory containing TypeScript code used by both frontend and backend.
+**Location**: `shared/` directory containing TypeScript code used by the API.
 
 **Schema Definitions**: Zod validation schemas defined once and shared across the stack, ensuring type safety and validation consistency.
 
 **Import Pattern**: Path aliases configured for clean imports:
-- `@/` maps to client source
 - `@shared/` maps to shared directory
-- `@assets/` maps to attached_assets directory
 
-### Prisma 7 Configuration
+### Development Commands
 
-The project uses Prisma 7 with the new adapter-based approach:
+- `npm run dev` - Start development server with hot reload
+- `npm run build` - Build for production
+- `npm run start` - Run production build
+- `npm run check` - TypeScript type checking
 
-**Schema Location**: `prisma/schema.prisma`
-**Generated Client**: `generated/prisma/`
-**Config File**: `prisma.config.ts`
+### API Endpoints
 
-**Key Changes from Drizzle**:
-- Schema defined in Prisma Schema Language (PSL)
-- Driver adapters required (using @prisma/adapter-pg)
-- Types imported from generated client path
+#### Root
+- `GET /` - Returns `{ status: "IFCDC Manual API online" }`
+
+#### Health
+- `GET /health` - Health check with timestamp and uptime
+- `GET /health/ready` - Readiness check
+
+#### Authentication
+- `POST /auth/register` - Register new user
+- `POST /auth/login` - Login user
+
+#### Chapters
+- `GET /chapters` - List all chapters with acknowledgement counts
+- `GET /chapters/active` - List active chapters only
+- `GET /chapters/:id` - Get chapter by ID
+- `POST /chapters` - Create new chapter
+- `PATCH /chapters/:id` - Update chapter
+- `DELETE /chapters/:id` - Delete chapter
+
+#### Users
+- `GET /users` - List all users
+- `GET /users/:id` - Get user by ID
+
+#### Acknowledgements
+- `GET /acknowledgements` - Get acknowledgement statistics
+- `GET /acknowledgements/user/:userId` - Get user's acknowledgements
+- `GET /acknowledgements/chapter/:chapterId` - Get chapter's acknowledgements
+- `POST /acknowledgements` - Create acknowledgement
