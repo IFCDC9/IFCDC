@@ -12,7 +12,7 @@ model User {
   email        String    @unique
   passwordHash String    @map("password_hash")
   role         String
-  employeeId   String?   @map("employee_id") @db.Uuid
+  employeeId   String?   @unique @map("employee_id") @db.Uuid
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
@@ -116,7 +116,7 @@ model Employee {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  users     User[]
+  user      User?
 
   @@map("employees")
 }
