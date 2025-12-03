@@ -9,6 +9,7 @@ import reportsRoutes from "./reports.routes";
 import queueRoutes from "./queue.routes";
 import barbershopRoutes from "./barbershop.routes";
 import twilioRoutes from "./twilio.routes";
+import hrRoutes from "./hr.routes";
 
 export function registerRoutes(app: Express): void {
   app.use("/api/health", healthRoutes);
@@ -21,4 +22,5 @@ export function registerRoutes(app: Express): void {
   app.use("/api/queue", queueRoutes);
   app.use("/api/bookings", barbershopRoutes);
   app.use("/twiml", twilioRoutes);
+  app.use("/api/hr", hrRoutes);
 }
