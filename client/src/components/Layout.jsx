@@ -1,5 +1,6 @@
 import { Outlet, NavLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import logo from '../assets/logo.jpeg';
 
 export default function Layout() {
   const { user, logout } = useAuth();
@@ -8,7 +9,8 @@ export default function Layout() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="sidebar-logo">
-          IFCDC<br />Staff Portal
+          <img src={logo} alt="IFCDC Logo" className="sidebar-logo-img" />
+          <span>Staff Portal</span>
         </div>
         <nav>
           <NavLink to="/dashboard">Dashboard</NavLink>
