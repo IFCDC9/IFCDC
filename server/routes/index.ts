@@ -8,6 +8,7 @@ import formsRoutes from "./forms.routes";
 import reportsRoutes from "./reports.routes";
 import queueRoutes from "./queue.routes";
 import barbershopRoutes from "./barbershop.routes";
+import twilioRoutes from "./twilio.routes";
 
 export function registerRoutes(app: Express): void {
   app.use("/api/health", healthRoutes);
@@ -19,4 +20,5 @@ export function registerRoutes(app: Express): void {
   app.use("/api/reports", reportsRoutes);
   app.use("/api/queue", queueRoutes);
   app.use("/api/bookings", barbershopRoutes);
+  app.use("/twiml", twilioRoutes);
 }

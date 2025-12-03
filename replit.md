@@ -113,3 +113,21 @@ Preferred communication style: Simple, everyday language.
 - `GET /acknowledgements/user/:userId` - Get user's acknowledgements
 - `GET /acknowledgements/chapter/:chapterId` - Get chapter's acknowledgements
 - `POST /acknowledgements` - Create acknowledgement
+
+#### Bookings (Barbershop)
+- `GET /api/bookings` - List all barbershop bookings
+- `POST /api/bookings` - Create a new booking
+- `PATCH /api/bookings/:id/status` - Update booking status
+- `DELETE /api/bookings/:id` - Delete a booking
+
+#### Twilio Webhooks
+- `POST /twiml/voice` - Voice call TwiML handler (routes based on called number)
+- `POST /twiml/sms` - SMS TwiML handler (routes based on called number)
+- `POST /twiml/voicemail-complete` - Voicemail completion handler
+
+**Twilio Phone Numbers**:
+- `+13313168167` - IFCDC Barbershop line (forwards to +17327435048)
+- `+18587588791` - IFCDC Radio line (voicemail for shoutouts)
+- Default - General IFCDC greeting
+
+**Note**: Twilio integration is configured manually (not using Replit integration). If credentials are needed in the future, they should be stored as TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN secrets.
