@@ -51,41 +51,37 @@ export const register = async (req: Request, res: Response) => {
 };
 
 export const login = async (req: Request, res: Response) => {
-  try {
-    const { email, password } = loginSchema.parse(req.body);
+  const { email, password } = req.body;
 
-    const user = await prisma.user.findUnique({ 
-      where: { email },
-      include: { employee: true },
-    });
+  if (!email || !password) {
+    return res.status(400).json({ error: "Missing credentials" });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({ where: { email } });
+
     if (!user) {
-      return res.status(401).json({ error: "Invalid credentials" });
+      return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    const matches = await bcrypt.compare(password, user.passwordHash);
-    if (!matches) {
-      return res.status(401).json({ error: "Invalid credentials" });
+    const match = await bcrypt.compare(password, user.passwordHash);
+    if (!match) {
+      return res.status(401).json({ error: "Invalid email or password" });
     }
 
     const token = jwt.sign(
-      { sub: user.id, role: user.role },
+      {
+        sub: user.id,
+        role: user.role,
+        email: user.email,
+      },
       JWT_SECRET,
       { expiresIn: "8h" }
     );
 
-    const name = user.employee 
-      ? `${user.employee.firstName} ${user.employee.lastName}`
-      : user.email;
-
-    res.json({ 
-      token, 
-      user: { id: user.id, email: user.email, name, role: user.role } 
-    });
-  } catch (error: any) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: fromError(error).toString() });
-    }
-    console.error("Auth error", error);
-    res.status(500).json({ error: "Internal server error" });
+    return res.json({ token, role: user.role, email: user.email });
+  } catch (err) {
+    console.error("Error during login", err);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
