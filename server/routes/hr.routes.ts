@@ -1,6 +1,5 @@
 import { Router } from "express";
 import { prisma } from "../prisma";
-import { EmployeePayload } from "../types/hr";
 import { requireAuth } from "../middleware/auth";
 
 const router = Router();
@@ -35,36 +34,49 @@ router.get("/employees/:id", async (req, res) => {
 });
 
 router.post("/employees", async (req, res) => {
-  const body = req.body as Partial<EmployeePayload>;
-
-  if (!body.firstName || !body.lastName || !body.email || !body.role) {
-    return res.status(400).json({ error: "Missing required fields" });
-  }
-
   try {
-    const inserted = await prisma.employee.create({
+    const {
+      firstName,
+      lastName,
+      email,
+      phone,
+      role,
+      location,
+      startDate,
+      status,
+      notes,
+    } = req.body;
+
+    if (!firstName || !lastName || !email || !role) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const employee = await prisma.employee.create({
       data: {
-        firstName: body.firstName,
-        lastName: body.lastName,
-        email: body.email,
-        phone: body.phone ?? null,
-        role: body.role,
-        location: body.location ?? null,
-        startDate: body.startDate ? new Date(body.startDate) : null,
-        status: body.status ?? "onboarding",
-        notes: body.notes ?? null,
+        firstName,
+        lastName,
+        email,
+        phone: phone || null,
+        role,
+        location: location || null,
+        startDate: startDate ? new Date(startDate) : null,
+        status: status || "onboarding",
+        notes: notes || null,
       },
     });
 
-    return res.status(201).json(inserted);
-  } catch (err) {
+    return res.status(201).json(employee);
+  } catch (err: any) {
     console.error("Error creating employee", err);
+    if (err.code === "P2002") {
+      return res.status(409).json({ error: "Email already exists for another employee" });
+    }
     return res.status(500).json({ error: "Internal server error" });
   }
 });
 
 router.patch("/employees/:id", async (req, res) => {
-  const body = req.body as Partial<EmployeePayload>;
+  const body = req.body;
 
   try {
     const updated = await prisma.employee.update({
