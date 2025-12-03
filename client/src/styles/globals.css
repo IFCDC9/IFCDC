@@ -867,3 +867,22 @@ body {
   border-radius: 0.5rem;
   margin-bottom: 1rem;
 }
+
+.radio-section {
+  margin-top: 1.5rem;
+  background: #0b0b0b;
+  border-radius: 0.75rem;
+  border: 1px solid #262626;
+  padding: 1rem 1.25rem;
+}
+
+.radio-section h2 {
+  margin: 0 0 0.75rem 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.radio-player {
+  width: 100%;
+  border-radius: 0.5rem;
+}
