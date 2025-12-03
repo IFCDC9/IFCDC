@@ -11,48 +11,44 @@ export const myQueue = async (req: AuthRequest, res: Response) => {
         assignedToId: userId,
         status: { in: ["open", "in_review"] },
       },
-      orderBy: [
-        { flagged: "desc" },
-        { riskLevel: "desc" },
-        { createdAt: "asc" },
-      ],
+      orderBy: { createdAt: "desc" },
       include: {
-        form: { select: { id: true, slug: true, title: true } },
-        submittedBy: { select: { id: true, name: true, email: true } },
+        form: { select: { slug: true, title: true } },
+        submittedBy: { select: { id: true, name: true } },
       },
     });
 
     res.json(submissions);
   } catch (err) {
-    console.error("Error fetching my queue:", err);
+    console.error("Error fetching supervisor queue:", err);
     res.status(500).json({ message: "Error fetching queue" });
   }
 };
 
 export const highRiskQueue = async (_req: AuthRequest, res: Response) => {
   try {
+    const incidentForm = await prisma.form.findUnique({
+      where: { slug: "incident_report" },
+      select: { id: true },
+    });
+
+    if (!incidentForm) return res.json([]);
+
     const submissions = await prisma.formSubmission.findMany({
       where: {
-        OR: [
-          { riskLevel: "high" },
-          { flagged: true },
-        ],
+        formId: incidentForm.id,
+        riskLevel: "high",
         status: { in: ["open", "in_review"] },
       },
-      orderBy: [
-        { flagged: "desc" },
-        { createdAt: "asc" },
-      ],
+      orderBy: { createdAt: "desc" },
       include: {
-        form: { select: { id: true, slug: true, title: true } },
-        submittedBy: { select: { id: true, name: true, email: true } },
-        assignedTo: { select: { id: true, name: true, email: true } },
+        submittedBy: { select: { id: true, name: true } },
       },
     });
 
     res.json(submissions);
   } catch (err) {
     console.error("Error fetching high-risk queue:", err);
-    res.status(500).json({ message: "Error fetching high-risk queue" });
+    res.status(500).json({ message: "Error fetching high-risk items" });
   }
 };
