@@ -1,11 +1,26 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider } from './context/AuthContext';
-import ProtectedRoute from './components/ProtectedRoute';
+import { AuthProvider, useAuth } from './context/AuthContext';
+
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import ManualPage from './pages/ManualPage';
-import ProfilePage from './pages/ProfilePage';
+import FormsPage from './pages/FormsPage';
+import TrainingPage from './pages/TrainingPage';
+import CompliancePage from './pages/CompliancePage';
 import AdminUsersPage from './pages/AdminUsersPage';
+import ProfilePage from './pages/ProfilePage';
+import Layout from './components/Layout';
+
+function ProtectedRoute({ children, roles }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+
+  if (roles && !roles.includes(user.role)) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return children;
+}
 
 export default function App() {
   return (
@@ -13,45 +28,28 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          
+
           <Route
-            path="/dashboard"
+            path="/"
             element={
               <ProtectedRoute>
-                <DashboardPage />
+                <Layout />
               </ProtectedRoute>
             }
-          />
-          
-          <Route
-            path="/manual"
-            element={
-              <ProtectedRoute>
-                <ManualPage />
-              </ProtectedRoute>
-            }
-          />
-          
-          <Route
-            path="/profile"
-            element={
-              <ProtectedRoute>
-                <ProfilePage />
-              </ProtectedRoute>
-            }
-          />
-          
-          <Route
-            path="/admin/users"
-            element={
-              <ProtectedRoute requiredRole="admin">
+          >
+            <Route index element={<DashboardPage />} />
+            <Route path="dashboard" element={<DashboardPage />} />
+            <Route path="manual" element={<ManualPage />} />
+            <Route path="forms" element={<FormsPage />} />
+            <Route path="training" element={<TrainingPage />} />
+            <Route path="compliance" element={<CompliancePage />} />
+            <Route path="admin/users" element={
+              <ProtectedRoute roles={['admin']}>
                 <AdminUsersPage />
               </ProtectedRoute>
-            }
-          />
-          
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            } />
+            <Route path="profile" element={<ProfilePage />} />
+          </Route>
         </Routes>
       </BrowserRouter>
     </AuthProvider>

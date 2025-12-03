@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { login as apiLogin } from '../api/authApi';
+import { loginApi } from '../api/authApi';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -17,7 +17,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const { token, user } = await apiLogin(email, password);
+      const { token, user } = await loginApi(email, password);
       login(token, user);
       navigate('/dashboard');
     } catch (err) {

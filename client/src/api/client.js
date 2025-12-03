@@ -1,39 +1,49 @@
 const API_BASE = '/api';
 
-export async function apiClient(endpoint, options = {}) {
-  const token = localStorage.getItem('ifcdc_token');
-  
+export async function apiRequest(path, options = {}, token) {
   const headers = {
     'Content-Type': 'application/json',
-    ...options.headers,
+    ...(options.headers || {}),
   };
 
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
+  } else {
+    const storedToken = localStorage.getItem('ifcdc_token');
+    if (storedToken) {
+      headers['Authorization'] = `Bearer ${storedToken}`;
+    }
   }
 
-  const response = await fetch(`${API_BASE}${endpoint}`, {
+  const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers,
   });
 
-  if (response.status === 401) {
+  if (res.status === 401) {
     localStorage.removeItem('ifcdc_token');
     localStorage.removeItem('ifcdc_user');
     window.location.href = '/login';
     throw new Error('Unauthorized');
   }
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Request failed' }));
-    throw new Error(error.message);
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    let message = `Request failed with status ${res.status}`;
+    try {
+      const json = JSON.parse(text);
+      message = json.message || message;
+    } catch {
+      if (text) message = text;
+    }
+    throw new Error(message);
   }
 
-  if (response.status === 204) {
+  if (res.status === 204) {
     return null;
   }
 
-  return response.json();
+  return res.json();
 }
 
-export default apiClient;
+export default apiRequest;

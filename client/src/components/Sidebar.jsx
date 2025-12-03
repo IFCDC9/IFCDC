@@ -7,6 +7,9 @@ export default function Sidebar() {
   const navItems = [
     { to: '/dashboard', label: 'Dashboard', icon: '📊' },
     { to: '/manual', label: 'Policy Manual', icon: '📖' },
+    { to: '/forms', label: 'Forms', icon: '📝' },
+    { to: '/training', label: 'Training', icon: '🎓' },
+    { to: '/compliance', label: 'Compliance', icon: '✅' },
     { to: '/profile', label: 'Profile', icon: '👤' },
   ];
 

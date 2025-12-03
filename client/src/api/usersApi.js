@@ -1,9 +1,9 @@
-import apiClient from './client';
+import { apiRequest } from './client';
 
 export async function getUsers() {
-  return apiClient('/users');
+  return apiRequest('/users');
 }
 
 export async function getUser(id) {
-  return apiClient(`/users/${id}`);
+  return apiRequest(`/users/${id}`);
 }

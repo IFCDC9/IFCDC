@@ -1,22 +1,22 @@
-import apiClient from './client';
+import { apiRequest } from './client';
 
 export async function getChapters() {
-  return apiClient('/chapters');
+  return apiRequest('/chapters');
 }
 
 export async function getChapter(id) {
-  return apiClient(`/chapters/${id}`);
+  return apiRequest(`/chapters/${id}`);
 }
 
 export async function createChapter(data) {
-  return apiClient('/chapters', {
+  return apiRequest('/chapters', {
     method: 'POST',
     body: JSON.stringify(data),
   });
 }
 
 export async function updateChapter(id, data) {
-  return apiClient(`/chapters/${id}`, {
+  return apiRequest(`/chapters/${id}`, {
     method: 'PUT',
     body: JSON.stringify(data),
   });
