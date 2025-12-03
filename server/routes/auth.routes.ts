@@ -59,14 +59,16 @@ router.post("/register", requireAuth(["admin"]), async (req, res) => {
 });
 
 router.post("/login", async (req, res) => {
-  const { email, password } = req.body;
-
-  if (!email || !password) {
-    return res.status(400).json({ error: "Missing credentials" });
-  }
-
   try {
-    const user = await prisma.user.findUnique({ where: { email } });
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: "Missing credentials" });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+    });
 
     if (!user) {
       return res.status(401).json({ error: "Invalid email or password" });
@@ -87,7 +89,12 @@ router.post("/login", async (req, res) => {
       { expiresIn: "8h" }
     );
 
-    return res.json({ token, role: user.role, email: user.email });
+    return res.json({
+      token,
+      role: user.role,
+      email: user.email,
+      employeeId: user.employeeId ?? null,
+    });
   } catch (err) {
     console.error("Error during login", err);
     return res.status(500).json({ error: "Internal server error" });
