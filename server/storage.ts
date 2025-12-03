@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../generated/prisma/client";
-import type { User, Chapter, PolicyAcknowledgement } from "../generated/prisma/client";
+import type { User, Chapter, PolicyAcknowledgement, Form, FormSubmission } from "../generated/prisma/client";
 
 const adapter = new PrismaPg({
   connectionString: process.env.DATABASE_URL,
@@ -36,6 +36,21 @@ export type InsertAcknowledgement = {
   version: number;
 };
 
+export type InsertForm = {
+  slug: string;
+  title: string;
+  schema: any;
+  active?: boolean;
+};
+
+export type UpdateForm = Partial<InsertForm>;
+
+export type InsertFormSubmission = {
+  formId: number;
+  userId: number;
+  data: any;
+};
+
 export interface IStorage {
   getUser(id: number): Promise<User | null>;
   getUserByEmail(email: string): Promise<User | null>;
@@ -56,6 +71,18 @@ export interface IStorage {
   getChapterAcknowledgements(chapterId: number): Promise<PolicyAcknowledgement[]>;
   createAcknowledgement(ack: InsertAcknowledgement): Promise<PolicyAcknowledgement>;
   getAcknowledgementStats(): Promise<{ chapterId: number; count: number }[]>;
+  
+  getAllForms(): Promise<Form[]>;
+  getActiveForms(): Promise<Form[]>;
+  getForm(id: number): Promise<Form | null>;
+  getFormBySlug(slug: string): Promise<Form | null>;
+  createForm(form: InsertForm): Promise<Form>;
+  updateForm(id: number, form: UpdateForm): Promise<Form | null>;
+  deleteForm(id: number): Promise<boolean>;
+  
+  getFormSubmissions(formId: number): Promise<FormSubmission[]>;
+  getUserFormSubmissions(userId: number): Promise<FormSubmission[]>;
+  createFormSubmission(submission: InsertFormSubmission): Promise<FormSubmission>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -167,6 +194,67 @@ export class DatabaseStorage implements IStorage {
       _count: { userId: true },
     });
     return stats.map((s) => ({ chapterId: s.chapterId, count: s._count.userId }));
+  }
+
+  async getAllForms(): Promise<Form[]> {
+    return prisma.form.findMany({ orderBy: { createdAt: "desc" } });
+  }
+
+  async getActiveForms(): Promise<Form[]> {
+    return prisma.form.findMany({
+      where: { active: true },
+      orderBy: { title: "asc" },
+    });
+  }
+
+  async getForm(id: number): Promise<Form | null> {
+    return prisma.form.findUnique({ where: { id } });
+  }
+
+  async getFormBySlug(slug: string): Promise<Form | null> {
+    return prisma.form.findUnique({ where: { slug } });
+  }
+
+  async createForm(form: InsertForm): Promise<Form> {
+    return prisma.form.create({ data: form });
+  }
+
+  async updateForm(id: number, form: UpdateForm): Promise<Form | null> {
+    try {
+      return await prisma.form.update({
+        where: { id },
+        data: form,
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  async deleteForm(id: number): Promise<boolean> {
+    try {
+      await prisma.form.delete({ where: { id } });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async getFormSubmissions(formId: number): Promise<FormSubmission[]> {
+    return prisma.formSubmission.findMany({
+      where: { formId },
+      orderBy: { submittedAt: "desc" },
+    });
+  }
+
+  async getUserFormSubmissions(userId: number): Promise<FormSubmission[]> {
+    return prisma.formSubmission.findMany({
+      where: { userId },
+      orderBy: { submittedAt: "desc" },
+    });
+  }
+
+  async createFormSubmission(submission: InsertFormSubmission): Promise<FormSubmission> {
+    return prisma.formSubmission.create({ data: submission });
   }
 }
 

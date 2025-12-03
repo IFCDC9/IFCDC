@@ -17,6 +17,7 @@ model User {
   lastLogin    DateTime? @map("last_login")
 
   acknowledgements PolicyAcknowledgement[]
+  formSubmissions  FormSubmission[]
 
   @@map("users")
 }
@@ -50,4 +51,30 @@ model PolicyAcknowledgement {
 
   @@unique([userId, chapterId, version])
   @@map("policy_acknowledgements")
+}
+
+model Form {
+  id        Int      @id @default(autoincrement())
+  slug      String   @unique
+  title     String
+  schema    Json
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  submissions FormSubmission[]
+
+  @@map("forms")
+}
+
+model FormSubmission {
+  id          Int      @id @default(autoincrement())
+  formId      Int      @map("form_id")
+  userId      Int      @map("user_id")
+  data        Json
+  submittedAt DateTime @default(now()) @map("submitted_at")
+
+  form Form @relation(fields: [formId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("form_submissions")
 }
