@@ -170,3 +170,83 @@ export const getSubmissionById = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ message: 'Error fetching submission' });
   }
 };
+
+export const updateSubmissionStatus = async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { status } = req.body;
+
+    const validStatuses = ["open", "in_review", "resolved", "closed"];
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({ 
+        message: `Invalid status. Must be one of: ${validStatuses.join(", ")}` 
+      });
+    }
+
+    const submission = await prisma.formSubmission.findUnique({
+      where: { id },
+    });
+
+    if (!submission) {
+      return res.status(404).json({ message: "Submission not found" });
+    }
+
+    const updated = await prisma.formSubmission.update({
+      where: { id },
+      data: { status },
+    });
+
+    res.json({
+      message: "Status updated",
+      id: updated.id,
+      status: updated.status,
+    });
+  } catch (err) {
+    console.error("Error updating submission status:", err);
+    res.status(500).json({ message: "Error updating status" });
+  }
+};
+
+export const assignSubmission = async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { assignedToId } = req.body;
+
+    const submission = await prisma.formSubmission.findUnique({
+      where: { id },
+    });
+
+    if (!submission) {
+      return res.status(404).json({ message: "Submission not found" });
+    }
+
+    if (assignedToId !== null && assignedToId !== undefined) {
+      const user = await prisma.user.findUnique({
+        where: { id: assignedToId },
+      });
+
+      if (!user) {
+        return res.status(400).json({ message: "Assigned user not found" });
+      }
+    }
+
+    const updated = await prisma.formSubmission.update({
+      where: { id },
+      data: { assignedToId: assignedToId || null },
+      include: {
+        assignedTo: {
+          select: { id: true, name: true, email: true },
+        },
+      },
+    });
+
+    res.json({
+      message: assignedToId ? "Submission assigned" : "Assignment removed",
+      id: updated.id,
+      assignedTo: updated.assignedTo,
+    });
+  } catch (err) {
+    console.error("Error assigning submission:", err);
+    res.status(500).json({ message: "Error assigning submission" });
+  }
+};
