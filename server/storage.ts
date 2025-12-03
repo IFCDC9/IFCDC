@@ -1,45 +1,57 @@
-import { 
-  type User, 
-  type SafeUser,
-  type InsertUser,
-  type Chapter,
-  type InsertChapter,
-  type UpdateChapter,
-  type PolicyAcknowledgement,
-  type InsertAcknowledgement,
-  users,
-  chapters,
-  policyAcknowledgements
-} from "@shared/schema";
-import { drizzle } from "drizzle-orm/neon-serverless";
-import { Pool, neonConfig } from "@neondatabase/serverless";
-import { eq, desc, and, sql } from "drizzle-orm";
-import ws from "ws";
+import "dotenv/config";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient } from "../generated/prisma/client";
+import type { User, Chapter, PolicyAcknowledgement } from "../generated/prisma/client";
 
-neonConfig.webSocketConstructor = ws;
+const adapter = new PrismaPg({
+  connectionString: process.env.DATABASE_URL,
+});
+const prisma = new PrismaClient({ adapter });
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const db = drizzle({ client: pool });
+export type SafeUser = Omit<User, "passwordHash">;
+
+export type InsertUser = {
+  name: string;
+  email: string;
+  passwordHash: string;
+  role?: string;
+  isActive?: boolean;
+};
+
+export type InsertChapter = {
+  number: number;
+  title: string;
+  section: string;
+  slug: string;
+  body: string;
+  version?: number;
+  isActive?: boolean;
+};
+
+export type UpdateChapter = Partial<InsertChapter>;
+
+export type InsertAcknowledgement = {
+  userId: number;
+  chapterId: number;
+  version: number;
+};
 
 export interface IStorage {
-  // User methods
-  getUser(id: number): Promise<User | undefined>;
-  getUserByEmail(email: string): Promise<User | undefined>;
+  getUser(id: number): Promise<User | null>;
+  getUserByEmail(email: string): Promise<User | null>;
   createUser(user: InsertUser): Promise<User>;
   updateUserLastLogin(id: number): Promise<void>;
   getAllUsers(): Promise<SafeUser[]>;
   
-  // Chapter methods
   getAllChapters(): Promise<Chapter[]>;
   getActiveChapters(): Promise<Chapter[]>;
-  getChapter(id: number): Promise<Chapter | undefined>;
-  getChapterBySlug(slug: string): Promise<Chapter | undefined>;
+  getChapter(id: number): Promise<Chapter | null>;
+  getChapterBySlug(slug: string): Promise<Chapter | null>;
   createChapter(chapter: InsertChapter): Promise<Chapter>;
-  updateChapter(id: number, chapter: UpdateChapter): Promise<Chapter | undefined>;
+  updateChapter(id: number, chapter: UpdateChapter): Promise<Chapter | null>;
   deleteChapter(id: number): Promise<boolean>;
   
-  // Acknowledgement methods
-  getAcknowledgement(userId: number, chapterId: number): Promise<PolicyAcknowledgement | undefined>;
+  getAcknowledgement(userId: number, chapterId: number): Promise<PolicyAcknowledgement | null>;
   getUserAcknowledgements(userId: number): Promise<PolicyAcknowledgement[]>;
   getChapterAcknowledgements(chapterId: number): Promise<PolicyAcknowledgement[]>;
   createAcknowledgement(ack: InsertAcknowledgement): Promise<PolicyAcknowledgement>;
@@ -47,115 +59,114 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
-  // User methods
-  async getUser(id: number): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.id, id));
-    return user;
+  async getUser(id: number): Promise<User | null> {
+    return prisma.user.findUnique({ where: { id } });
   }
 
-  async getUserByEmail(email: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.email, email));
-    return user;
+  async getUserByEmail(email: string): Promise<User | null> {
+    return prisma.user.findUnique({ where: { email } });
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const [user] = await db.insert(users).values(insertUser).returning();
-    return user;
+    return prisma.user.create({ data: insertUser });
   }
 
   async updateUserLastLogin(id: number): Promise<void> {
-    await db.update(users).set({ lastLogin: new Date() }).where(eq(users.id, id));
+    await prisma.user.update({
+      where: { id },
+      data: { lastLogin: new Date() },
+    });
   }
 
   async getAllUsers(): Promise<SafeUser[]> {
-    const allUsers = await db.select({
-      id: users.id,
-      name: users.name,
-      email: users.email,
-      role: users.role,
-      isActive: users.isActive,
-      createdAt: users.createdAt,
-      lastLogin: users.lastLogin,
-    }).from(users).orderBy(desc(users.createdAt));
-    return allUsers as SafeUser[];
+    const allUsers = await prisma.user.findMany({
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        isActive: true,
+        lastLogin: true,
+      },
+      orderBy: { id: "desc" },
+    });
+    return allUsers;
   }
 
-  // Chapter methods
   async getAllChapters(): Promise<Chapter[]> {
-    return db.select().from(chapters).orderBy(chapters.number);
+    return prisma.chapter.findMany({ orderBy: { number: "asc" } });
   }
 
   async getActiveChapters(): Promise<Chapter[]> {
-    return db.select().from(chapters).where(eq(chapters.isActive, true)).orderBy(chapters.number);
+    return prisma.chapter.findMany({
+      where: { isActive: true },
+      orderBy: { number: "asc" },
+    });
   }
 
-  async getChapter(id: number): Promise<Chapter | undefined> {
-    const [chapter] = await db.select().from(chapters).where(eq(chapters.id, id));
-    return chapter;
+  async getChapter(id: number): Promise<Chapter | null> {
+    return prisma.chapter.findUnique({ where: { id } });
   }
 
-  async getChapterBySlug(slug: string): Promise<Chapter | undefined> {
-    const [chapter] = await db.select().from(chapters).where(eq(chapters.slug, slug));
-    return chapter;
+  async getChapterBySlug(slug: string): Promise<Chapter | null> {
+    return prisma.chapter.findUnique({ where: { slug } });
   }
 
   async createChapter(chapter: InsertChapter): Promise<Chapter> {
-    const [newChapter] = await db.insert(chapters).values(chapter).returning();
-    return newChapter;
+    return prisma.chapter.create({ data: chapter });
   }
 
-  async updateChapter(id: number, chapter: UpdateChapter): Promise<Chapter | undefined> {
-    const [updated] = await db
-      .update(chapters)
-      .set({ ...chapter, updatedAt: new Date() })
-      .where(eq(chapters.id, id))
-      .returning();
-    return updated;
+  async updateChapter(id: number, chapter: UpdateChapter): Promise<Chapter | null> {
+    try {
+      return await prisma.chapter.update({
+        where: { id },
+        data: chapter,
+      });
+    } catch {
+      return null;
+    }
   }
 
   async deleteChapter(id: number): Promise<boolean> {
-    const result = await db.delete(chapters).where(eq(chapters.id, id));
-    return result.rowCount !== null && result.rowCount > 0;
+    try {
+      await prisma.chapter.delete({ where: { id } });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
-  // Acknowledgement methods
-  async getAcknowledgement(userId: number, chapterId: number): Promise<PolicyAcknowledgement | undefined> {
-    const [ack] = await db.select().from(policyAcknowledgements)
-      .where(and(
-        eq(policyAcknowledgements.userId, userId),
-        eq(policyAcknowledgements.chapterId, chapterId)
-      ))
-      .orderBy(desc(policyAcknowledgements.acknowledgedAt))
-      .limit(1);
-    return ack;
+  async getAcknowledgement(userId: number, chapterId: number): Promise<PolicyAcknowledgement | null> {
+    return prisma.policyAcknowledgement.findFirst({
+      where: { userId, chapterId },
+      orderBy: { acknowledgedAt: "desc" },
+    });
   }
 
   async getUserAcknowledgements(userId: number): Promise<PolicyAcknowledgement[]> {
-    return db.select().from(policyAcknowledgements)
-      .where(eq(policyAcknowledgements.userId, userId))
-      .orderBy(desc(policyAcknowledgements.acknowledgedAt));
+    return prisma.policyAcknowledgement.findMany({
+      where: { userId },
+      orderBy: { acknowledgedAt: "desc" },
+    });
   }
 
   async getChapterAcknowledgements(chapterId: number): Promise<PolicyAcknowledgement[]> {
-    return db.select().from(policyAcknowledgements)
-      .where(eq(policyAcknowledgements.chapterId, chapterId))
-      .orderBy(desc(policyAcknowledgements.acknowledgedAt));
+    return prisma.policyAcknowledgement.findMany({
+      where: { chapterId },
+      orderBy: { acknowledgedAt: "desc" },
+    });
   }
 
   async createAcknowledgement(ack: InsertAcknowledgement): Promise<PolicyAcknowledgement> {
-    const [newAck] = await db.insert(policyAcknowledgements).values(ack).returning();
-    return newAck;
+    return prisma.policyAcknowledgement.create({ data: ack });
   }
 
   async getAcknowledgementStats(): Promise<{ chapterId: number; count: number }[]> {
-    const stats = await db
-      .select({
-        chapterId: policyAcknowledgements.chapterId,
-        count: sql<number>`count(distinct ${policyAcknowledgements.userId})::int`,
-      })
-      .from(policyAcknowledgements)
-      .groupBy(policyAcknowledgements.chapterId);
-    return stats;
+    const stats = await prisma.policyAcknowledgement.groupBy({
+      by: ["chapterId"],
+      _count: { userId: true },
+    });
+    return stats.map((s) => ({ chapterId: s.chapterId, count: s._count.userId }));
   }
 }
 
