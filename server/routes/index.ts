@@ -7,6 +7,7 @@ import acknowledgementsRoutes from "./acknowledgements.routes";
 import formsRoutes from "./forms.routes";
 import reportsRoutes from "./reports.routes";
 import queueRoutes from "./queue.routes";
+import barbershopRoutes from "./barbershop.routes";
 
 export function registerRoutes(app: Express): void {
   app.use("/api/health", healthRoutes);
@@ -17,4 +18,5 @@ export function registerRoutes(app: Express): void {
   app.use("/api/forms", formsRoutes);
   app.use("/api/reports", reportsRoutes);
   app.use("/api/queue", queueRoutes);
+  app.use("/api/barbershop", barbershopRoutes);
 }

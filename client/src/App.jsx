@@ -9,6 +9,7 @@ import TrainingPage from './pages/TrainingPage';
 import CompliancePage from './pages/CompliancePage';
 import AdminUsersPage from './pages/AdminUsersPage';
 import ProfilePage from './pages/ProfilePage';
+import BarbershopPage from './pages/BarbershopPage';
 import Layout from './components/Layout';
 
 function ProtectedRoute({ children, roles }) {
@@ -49,6 +50,7 @@ export default function App() {
               </ProtectedRoute>
             } />
             <Route path="profile" element={<ProfilePage />} />
+            <Route path="barbershop" element={<BarbershopPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

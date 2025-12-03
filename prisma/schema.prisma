@@ -89,3 +89,14 @@ model FormSubmission {
 
   @@map("form_submissions")
 }
+
+model BarbershopBooking {
+  id        Int      @id @default(autoincrement())
+  name      String
+  phone     String
+  datetime  DateTime
+  status    String   @default("pending")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("barbershop_bookings")
+}
