@@ -1,8 +1,11 @@
 import { Router } from "express";
 import prisma from "../db/client";
 import { EmployeePayload } from "../types/hr";
+import { requireAuth } from "../middleware/auth";
 
 const router = Router();
+
+router.use(requireAuth(["admin"]));
 
 router.get("/employees", async (req, res) => {
   try {
