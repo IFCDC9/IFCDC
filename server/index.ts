@@ -1,9 +1,11 @@
 import express, { type Request, Response, NextFunction } from "express";
 import cors from "cors";
+import { createServer } from "http";
 import { registerRoutes } from "./routes/index";
 import { config } from "./config/env";
 
 const app = express();
+const server = createServer(app);
 
 app.use(cors());
 app.use(express.json());
@@ -33,17 +35,19 @@ app.use((req, res, next) => {
 
   res.on("finish", () => {
     const duration = Date.now() - start;
-    let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-    if (capturedJsonResponse) {
-      logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+    if (path.startsWith("/api")) {
+      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
+      if (capturedJsonResponse) {
+        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+      }
+      log(logLine);
     }
-    log(logLine);
   });
 
   next();
 });
 
-app.get("/", (req, res) => {
+app.get("/api", (req, res) => {
   res.json({ status: "ok", service: "IFCDC Manual API" });
 });
 
@@ -57,6 +61,44 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error(err);
 });
 
-app.listen(config.port, "0.0.0.0", () => {
-  log(`IFCDC Manual API running on port ${config.port}`);
-});
+(async () => {
+  if (config.nodeEnv === "development") {
+    const { createServer: createViteServer } = await import("vite");
+    const path = await import("path");
+    
+    const vite = await createViteServer({
+      root: path.resolve(import.meta.dirname, "../client"),
+      server: {
+        middlewareMode: true,
+        hmr: { server },
+      },
+      appType: "spa",
+    });
+
+    app.use(vite.middlewares);
+
+    app.use("*", async (req, res, next) => {
+      if (req.originalUrl.startsWith("/api")) {
+        return next();
+      }
+
+      try {
+        const fs = await import("fs/promises");
+        const clientTemplate = path.resolve(
+          import.meta.dirname,
+          "../client/index.html"
+        );
+        let template = await fs.readFile(clientTemplate, "utf-8");
+        template = await vite.transformIndexHtml(req.originalUrl, template);
+        res.status(200).set({ "Content-Type": "text/html" }).end(template);
+      } catch (e) {
+        vite.ssrFixStacktrace(e as Error);
+        next(e);
+      }
+    });
+  }
+
+  server.listen(config.port, "0.0.0.0", () => {
+    log(`IFCDC Portal running on port ${config.port}`);
+  });
+})();
