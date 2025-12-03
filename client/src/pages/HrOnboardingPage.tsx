@@ -37,7 +37,12 @@ const HrOnboardingPage: React.FC = () => {
   };
 
   const fetchEmployees = async () => {
-    const res = await fetch("/api/hr/employees");
+    const token = localStorage.getItem("ifcdc_token");
+    const res = await fetch("/api/hr/employees", {
+      headers: {
+        Authorization: token ? `Bearer ${token}` : "",
+      },
+    });
     if (res.ok) {
       const data = await res.json();
       setEmployees(data);
@@ -51,9 +56,13 @@ const HrOnboardingPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    const token = localStorage.getItem("ifcdc_token");
     const res = await fetch("/api/hr/employees", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: token ? `Bearer ${token}` : "",
+      },
       body: JSON.stringify(form),
     });
 
