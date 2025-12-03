@@ -63,17 +63,42 @@ export const submitForm = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: 'Form not available' });
     }
 
+    let riskLevel = "low";
+    let flagged = false;
+
+    if (slug === "incident_report") {
+      const types = payload.incident_type || [];
+      const injuries = payload.injuries || "none";
+      const law = payload.law_enforcement_involved || "no";
+
+      const isWeapons = Array.isArray(types) && types.includes("weapons_related");
+      const isSeriousInjury = injuries === "serious";
+      const isSelfHarm = Array.isArray(types) && types.includes("self_harm_concern");
+
+      if (isWeapons || isSeriousInjury || isSelfHarm || law === "yes") {
+        riskLevel = "high";
+        flagged = true;
+      } else if (injuries === "minor" || law === "yes" || (Array.isArray(types) && types.includes("physical_altercation"))) {
+        riskLevel = "medium";
+      }
+    }
+
     const submission = await prisma.formSubmission.create({
       data: {
         formId: form.id,
         submittedById: user ? user.sub : null,
         data: payload,
+        riskLevel,
+        flagged,
+        status: "open",
       },
     });
 
     res.status(201).json({
       message: 'Form submitted successfully',
       submissionId: submission.id,
+      riskLevel,
+      flagged,
     });
   } catch (err) {
     console.error('Error submitting form:', err);
