@@ -504,3 +504,132 @@ body {
   color: #2e7d32;
   border-radius: 4px;
 }
+
+.forms-page {
+  display: flex;
+  gap: 25px;
+  height: calc(100vh - 120px);
+}
+
+.forms-sidebar {
+  width: 280px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.forms-sidebar h2 {
+  padding: 20px;
+  margin: 0;
+  border-bottom: 1px solid #eee;
+  font-size: 18px;
+  color: #1a1a2e;
+}
+
+.forms-sidebar ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.forms-sidebar li button {
+  width: 100%;
+  padding: 12px 20px;
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid #f0f0f0;
+  cursor: pointer;
+  font-size: 14px;
+  color: #444;
+  transition: background 0.2s;
+}
+
+.forms-sidebar li button:hover {
+  background: #f5f5f5;
+}
+
+.forms-sidebar li button.active-form {
+  background: #e8f4fd;
+  color: #1a73e8;
+  font-weight: 500;
+  border-left: 3px solid #1a73e8;
+}
+
+.forms-content {
+  flex: 1;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  padding: 30px;
+  overflow-y: auto;
+}
+
+.form-renderer h2 {
+  margin-bottom: 10px;
+  color: #1a1a2e;
+}
+
+.form-renderer > p {
+  color: #666;
+  margin-bottom: 25px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid #eee;
+}
+
+.form-field {
+  display: block;
+  margin-bottom: 20px;
+  font-weight: 500;
+  color: #333;
+}
+
+.form-field input,
+.form-field textarea,
+.form-field select {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  margin-top: 6px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.form-field textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+
+.form-field input:focus,
+.form-field textarea:focus,
+.form-field select:focus {
+  outline: none;
+  border-color: #4a90d9;
+}
+
+.form-renderer button[type="submit"] {
+  padding: 12px 24px;
+  background: #4a90d9;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.form-renderer button[type="submit"]:hover {
+  background: #3a7bc8;
+}
+
+.form-success {
+  margin-top: 15px;
+  padding: 12px;
+  background: #e8f5e9;
+  color: #2e7d32;
+  border-radius: 4px;
+}
