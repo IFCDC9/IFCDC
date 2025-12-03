@@ -5,6 +5,7 @@ import chaptersRoutes from "./chapters.routes";
 import usersRoutes from "./users.routes";
 import acknowledgementsRoutes from "./acknowledgements.routes";
 import formsRoutes from "./forms.routes";
+import reportsRoutes from "./reports.routes";
 
 export function registerRoutes(app: Express): void {
   app.use("/api/health", healthRoutes);
@@ -13,4 +14,5 @@ export function registerRoutes(app: Express): void {
   app.use("/api/users", usersRoutes);
   app.use("/api/acknowledgements", acknowledgementsRoutes);
   app.use("/api/forms", formsRoutes);
+  app.use("/api/reports", reportsRoutes);
 }
