@@ -1,14 +1,53 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int       @id @default(autoincrement())
+  name         String
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  role         String    @default("staff")
+  isActive     Boolean   @default(true) @map("is_active")
+  lastLogin    DateTime? @map("last_login")
+
+  acknowledgements PolicyAcknowledgement[]
+
+  @@map("users")
+}
+
+model Chapter {
+  id        Int      @id @default(autoincrement())
+  number    Int
+  title     String
+  section   String
+  slug      String   @unique
+  body      String
+  version   Int      @default(1)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  acknowledgements PolicyAcknowledgement[]
+
+  @@map("chapters")
+}
+
+model PolicyAcknowledgement {
+  id             Int      @id @default(autoincrement())
+  userId         Int      @map("user_id")
+  chapterId      Int      @map("chapter_id")
+  version        Int
+  acknowledgedAt DateTime @default(now()) @map("acknowledged_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chapter Chapter @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, chapterId, version])
+  @@map("policy_acknowledgements")
 }
