@@ -48,8 +48,8 @@ export const requireDirector = (req: AuthRequest, res: Response, next: NextFunct
 
 export const requireAdminOrSupervisor = (req: AuthRequest, res: Response, next: NextFunction) => {
   requireAuth(req, res, () => {
-    if (req.user?.role !== "admin" && req.user?.role !== "director") {
-      return res.status(403).json({ message: "Admin or supervisor access required" });
+    if (!["admin", "supervisor"].includes(req.user?.role || "")) {
+      return res.status(403).json({ message: "Admin or supervisor only" });
     }
     next();
   });
