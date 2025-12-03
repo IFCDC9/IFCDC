@@ -20,9 +20,14 @@ export function requireAuth(allowedRoles?: string[]) {
 
     try {
       const decoded = jwt.verify(token, JWT_SECRET) as any;
-      req.user = { id: decoded.sub, role: decoded.role, email: decoded.email };
+      const user = {
+        id: decoded.sub as string,
+        role: decoded.role as string,
+        email: decoded.email as string,
+      };
+      req.user = user;
 
-      if (allowedRoles && !allowedRoles.includes(decoded.role)) {
+      if (allowedRoles && !allowedRoles.includes(user.role)) {
         return res.status(403).json({ error: "Forbidden" });
       }
 
