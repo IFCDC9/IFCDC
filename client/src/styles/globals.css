@@ -739,3 +739,87 @@ body {
 .stat-danger  { border-color: #ef4444; }
 .stat-warning { border-color: #f59e0b; }
 .stat-secondary { border-color: #6b7280; }
+
+.panel {
+  background: #0b0b0b;
+  border-radius: 0.75rem;
+  border: 1px solid #262626;
+  padding: 1rem 1.25rem;
+}
+
+.panel-header {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0.5rem;
+}
+
+.panel-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.panel-subtitle {
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.chart-body {
+  margin-top: 0.5rem;
+}
+
+.queues-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.queue-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.queue-item {
+  padding: 0.6rem 0.4rem;
+  border-bottom: 1px solid #262626;
+}
+
+.queue-item:last-child {
+  border-bottom: none;
+}
+
+.queue-item-high {
+  border-left: 3px solid #ef4444;
+}
+
+.queue-main {
+  display: flex;
+  flex-direction: column;
+}
+
+.queue-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.queue-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
+.queue-foot {
+  margin-top: 0.2rem;
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
+.empty-state {
+  font-size: 0.85rem;
+  opacity: 0.7;
+  padding: 0.5rem 0;
+}
