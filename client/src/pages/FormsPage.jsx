@@ -1,9 +1,181 @@
 import { useState } from 'react';
 import FormRenderer from '../components/FormRenderer';
 
-const SAMPLE_FORMS = [
+const FORMS = [
   {
-    slug: 'time-off-request',
+    slug: "incident_report",
+    title: "Incident Report",
+    description: "Use this form to document any significant safety, behavioral, medical, or field incident involving a participant, visitor, or staff member.",
+    version: 1,
+    fields: [
+      {
+        name: "incident_date",
+        label: "Incident Date",
+        type: "date",
+        required: true
+      },
+      {
+        name: "incident_time",
+        label: "Incident Time",
+        type: "time",
+        required: true
+      },
+      {
+        name: "location",
+        label: "Location of Incident",
+        type: "text",
+        required: true,
+        placeholder: "Program site, street location, school, etc."
+      },
+      {
+        name: "program",
+        label: "Program Area",
+        type: "select",
+        required: true,
+        options: [
+          { value: "youth_development", label: "Youth Development" },
+          { value: "cvi", label: "Community Violence Intervention (CVI)" },
+          { value: "workforce", label: "Workforce Development" },
+          { value: "barbershop", label: "Barbershop Workforce Pipeline" },
+          { value: "family_services", label: "Family Services" },
+          { value: "radio_media", label: "IFCDC Radio & Media" },
+          { value: "other", label: "Other / General IFCDC" }
+        ]
+      },
+      {
+        name: "incident_type",
+        label: "Incident Type",
+        type: "multiselect",
+        required: true,
+        options: [
+          { value: "physical_altercation", label: "Physical altercation / fight" },
+          { value: "verbal_conflict", label: "Verbal conflict / escalation" },
+          { value: "threats", label: "Threats / intimidation" },
+          { value: "weapons_related", label: "Weapons related concern" },
+          { value: "self_harm_concern", label: "Self-harm concern" },
+          { value: "medical_emergency", label: "Medical emergency" },
+          { value: "property_damage", label: "Property damage" },
+          { value: "policy_violation", label: "Policy violation" },
+          { value: "safety_concern", label: "General safety concern" },
+          { value: "other", label: "Other" }
+        ]
+      },
+      {
+        name: "participants_involved",
+        label: "Names of Individuals Involved",
+        type: "textarea",
+        required: true,
+        placeholder: "List participants, staff, visitors, etc.",
+        maxLength: 500
+      },
+      {
+        name: "incident_summary",
+        label: "Incident Summary (Factual Narrative)",
+        type: "textarea",
+        required: true,
+        helpText: "Describe what happened in chronological, factual, non-judgmental language.",
+        maxLength: 2000
+      },
+      {
+        name: "immediate_actions_taken",
+        label: "Immediate Actions Taken by Staff",
+        type: "textarea",
+        required: true,
+        helpText: "De-escalation steps, first aid, separation, 911 call, etc.",
+        maxLength: 1500
+      },
+      {
+        name: "law_enforcement_involved",
+        label: "Was Law Enforcement Involved?",
+        type: "radio",
+        required: true,
+        options: [
+          { value: "yes", label: "Yes" },
+          { value: "no", label: "No" }
+        ]
+      },
+      {
+        name: "law_enforcement_details",
+        label: "If Yes, Describe Law Enforcement Involvement",
+        type: "textarea",
+        required: false,
+        maxLength: 1000
+      },
+      {
+        name: "injuries",
+        label: "Were There Any Injuries?",
+        type: "radio",
+        required: true,
+        options: [
+          { value: "none", label: "No injuries reported" },
+          { value: "minor", label: "Minor injuries" },
+          { value: "serious", label: "Serious injuries" }
+        ]
+      },
+      {
+        name: "injury_description",
+        label: "If Injuries Occurred, Describe",
+        type: "textarea",
+        required: false,
+        maxLength: 1000
+      },
+      {
+        name: "medical_followup",
+        label: "Medical Follow-Up",
+        type: "textarea",
+        required: false,
+        helpText: "EMS transport, hospital visit, first aid, etc.",
+        maxLength: 800
+      },
+      {
+        name: "notifications",
+        label: "Notifications Made",
+        type: "multiselect",
+        required: true,
+        options: [
+          { value: "supervisor", label: "Supervisor notified" },
+          { value: "program_director", label: "Program Director notified" },
+          { value: "parent_guardian", label: "Parent/guardian notified" },
+          { value: "partner_agency", label: "Partner agency notified" },
+          { value: "none", label: "No notifications made" }
+        ]
+      },
+      {
+        name: "followup_needed",
+        label: "Follow-Up Needed",
+        type: "textarea",
+        required: false,
+        helpText: "Safety planning, mediation, referral, case management, etc.",
+        maxLength: 1000
+      },
+      {
+        name: "staff_name",
+        label: "Reporting Staff Name",
+        type: "text",
+        required: true
+      },
+      {
+        name: "staff_role",
+        label: "Reporting Staff Role",
+        type: "text",
+        required: true
+      },
+      {
+        name: "supervisor_name",
+        label: "Supervisor Notified (Name)",
+        type: "text",
+        required: false
+      },
+      {
+        name: "submission_date",
+        label: "Date Report Completed",
+        type: "date",
+        required: true
+      }
+    ]
+  },
+  {
+    slug: 'time_off_request',
     title: 'Time Off Request',
     description: 'Submit a request for vacation, sick leave, or personal time.',
     version: 1,
@@ -27,32 +199,7 @@ const SAMPLE_FORMS = [
     ],
   },
   {
-    slug: 'incident-report',
-    title: 'Incident Report',
-    description: 'Report a workplace incident or safety concern.',
-    version: 2,
-    fields: [
-      { name: 'incidentDate', label: 'Date of Incident', type: 'date', required: true },
-      { name: 'incidentTime', label: 'Time of Incident', type: 'time', required: true },
-      { name: 'location', label: 'Location', type: 'text', required: true, placeholder: 'Building, room, or area' },
-      { 
-        name: 'severity', 
-        label: 'Severity Level', 
-        type: 'radio', 
-        required: true,
-        options: [
-          { value: 'low', label: 'Low - No injury, minor issue' },
-          { value: 'medium', label: 'Medium - Minor injury or potential hazard' },
-          { value: 'high', label: 'High - Serious injury or major safety concern' },
-        ]
-      },
-      { name: 'description', label: 'Description of Incident', type: 'textarea', required: true, maxLength: 1000 },
-      { name: 'witnesses', label: 'Witnesses', type: 'text', helpText: 'Names of any witnesses, separated by commas' },
-      { name: 'medicalAttention', label: 'Medical attention was required', type: 'checkbox' },
-    ],
-  },
-  {
-    slug: 'equipment-request',
+    slug: 'equipment_request',
     title: 'Equipment Request',
     description: 'Request new equipment or supplies for your department.',
     version: 1,
@@ -71,45 +218,8 @@ const SAMPLE_FORMS = [
           { value: 'critical', label: 'Critical - Immediate need' },
         ]
       },
-      { 
-        name: 'categories', 
-        label: 'Categories', 
-        type: 'multiselect',
-        helpText: 'Select all that apply',
-        options: [
-          { value: 'office', label: 'Office Supplies' },
-          { value: 'tech', label: 'Technology' },
-          { value: 'furniture', label: 'Furniture' },
-          { value: 'safety', label: 'Safety Equipment' },
-        ]
-      },
       { name: 'justification', label: 'Business Justification', type: 'textarea', required: true },
       { name: 'supervisorEmail', label: 'Supervisor Email', type: 'email', required: true },
-    ],
-  },
-  {
-    slug: 'training-feedback',
-    title: 'Training Feedback',
-    description: 'Provide feedback on a training session you attended.',
-    version: 1,
-    fields: [
-      { name: 'trainingName', label: 'Training Name', type: 'text', required: true },
-      { name: 'trainingDate', label: 'Date Attended', type: 'date', required: true },
-      { 
-        name: 'rating', 
-        label: 'Overall Rating', 
-        type: 'radio',
-        required: true,
-        options: [
-          { value: '5', label: 'Excellent' },
-          { value: '4', label: 'Good' },
-          { value: '3', label: 'Average' },
-          { value: '2', label: 'Below Average' },
-          { value: '1', label: 'Poor' },
-        ]
-      },
-      { name: 'feedback', label: 'Comments', type: 'textarea', placeholder: 'What did you like? What could be improved?' },
-      { name: 'recommendToOthers', label: 'I would recommend this training to others', type: 'checkbox' },
     ],
   },
 ];
@@ -129,7 +239,7 @@ export default function FormsPage() {
       <div className="forms-sidebar">
         <h2>Available Forms</h2>
         <ul>
-          {SAMPLE_FORMS.map(form => (
+          {FORMS.map(form => (
             <li key={form.slug}>
               <button
                 className={selectedForm?.slug === form.slug ? 'active-form' : ''}
