@@ -567,32 +567,59 @@ body {
   overflow-y: auto;
 }
 
+.form-placeholder {
+  color: #666;
+  padding: 40px;
+  text-align: center;
+}
+
 .form-renderer h2 {
   margin-bottom: 10px;
   color: #1a1a2e;
 }
 
-.form-renderer > p {
+.form-renderer .form-description {
   color: #666;
-  margin-bottom: 25px;
-  padding-bottom: 15px;
-  border-bottom: 1px solid #eee;
+  margin-bottom: 10px;
+}
+
+.form-renderer .form-version {
+  display: inline-block;
+  font-size: 12px;
+  color: #888;
+  background: #f0f0f0;
+  padding: 4px 8px;
+  border-radius: 4px;
+  margin-bottom: 20px;
 }
 
 .form-field {
-  display: block;
   margin-bottom: 20px;
-  font-weight: 500;
-  color: #333;
 }
 
-.form-field input,
+.form-field > label {
+  display: block;
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 6px;
+}
+
+.form-field .required {
+  color: #c00;
+  margin-left: 4px;
+}
+
+.form-field input[type="text"],
+.form-field input[type="email"],
+.form-field input[type="tel"],
+.form-field input[type="number"],
+.form-field input[type="date"],
+.form-field input[type="time"],
 .form-field textarea,
 .form-field select {
   display: block;
   width: 100%;
   padding: 12px;
-  margin-top: 6px;
   border: 1px solid #ddd;
   border-radius: 4px;
   font-size: 14px;
@@ -611,6 +638,48 @@ body {
   border-color: #4a90d9;
 }
 
+.form-field .help-text {
+  display: block;
+  font-size: 12px;
+  color: #888;
+  margin-top: 4px;
+}
+
+.radio-group,
+.multiselect-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.radio-option,
+.checkbox-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: normal;
+  cursor: pointer;
+}
+
+.radio-option input,
+.checkbox-option input {
+  width: auto;
+  margin: 0;
+}
+
+.checkbox-single {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: normal;
+  cursor: pointer;
+}
+
+.checkbox-single input {
+  width: auto;
+  margin: 0;
+}
+
 .form-renderer button[type="submit"] {
   padding: 12px 24px;
   background: #4a90d9;
@@ -620,6 +689,7 @@ body {
   font-size: 14px;
   cursor: pointer;
   transition: background 0.2s;
+  margin-top: 10px;
 }
 
 .form-renderer button[type="submit"]:hover {
