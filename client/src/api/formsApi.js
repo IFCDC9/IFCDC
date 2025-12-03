@@ -1,44 +1,24 @@
 import { apiRequest } from './client';
 
 export async function getForms(token) {
-  return apiRequest('/api/forms/active', {}, token);
-}
-
-export async function getFormById(id, token) {
-  return apiRequest(`/api/forms/${id}`, {}, token);
+  return apiRequest('/api/forms', {}, token);
 }
 
 export async function getFormBySlug(slug, token) {
-  return apiRequest(`/api/forms/slug/${slug}`, {}, token);
+  return apiRequest(`/api/forms/${slug}`, {}, token);
 }
 
-export async function createForm(formData, token) {
-  return apiRequest('/api/forms', {
+export async function submitForm(slug, values, token) {
+  return apiRequest(`/api/forms/${slug}/submit`, {
     method: 'POST',
-    body: JSON.stringify(formData),
+    body: JSON.stringify(values),
   }, token);
 }
 
-export async function updateForm(id, formData, token) {
-  return apiRequest(`/api/forms/${id}`, {
-    method: 'PATCH',
-    body: JSON.stringify(formData),
-  }, token);
+export async function getFormSubmissions(slug, token) {
+  return apiRequest(`/api/forms/${slug}/submissions`, {}, token);
 }
 
-export async function deleteForm(id, token) {
-  return apiRequest(`/api/forms/${id}`, {
-    method: 'DELETE',
-  }, token);
-}
-
-export async function submitForm(formId, submittedById, data, token) {
-  return apiRequest(`/api/forms/${formId}/submissions`, {
-    method: 'POST',
-    body: JSON.stringify({ submittedById, data }),
-  }, token);
-}
-
-export async function getFormSubmissions(formId, token) {
-  return apiRequest(`/api/forms/${formId}/submissions`, {}, token);
+export async function getSubmissionById(id, token) {
+  return apiRequest(`/api/forms/submission/${id}`, {}, token);
 }
