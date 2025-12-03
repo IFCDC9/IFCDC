@@ -6,7 +6,7 @@ const router = Router();
 
 router.use(requireAuth(["admin"]));
 
-router.get("/employees", async (req, res) => {
+router.get("/employees", async (_req, res) => {
   try {
     const employees = await prisma.employee.findMany({
       orderBy: { createdAt: "desc" },
