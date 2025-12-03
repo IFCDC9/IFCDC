@@ -4,12 +4,10 @@ import { requireAdmin } from "../middleware/auth";
 
 const router = Router();
 
-router.get("/", chaptersController.getAll);
-router.get("/active", chaptersController.getActive);
+router.get("/", chaptersController.list);
 router.get("/:id", chaptersController.getById);
 
 router.post("/", requireAdmin, chaptersController.create);
-router.patch("/:id", requireAdmin, chaptersController.update);
-router.delete("/:id", requireAdmin, chaptersController.remove);
+router.put("/:id", requireAdmin, chaptersController.update);
 
 export default router;
