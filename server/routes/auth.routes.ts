@@ -2,7 +2,7 @@ import { Router } from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { prisma } from "../prisma";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, AuthedRequest } from "../middleware/auth";
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
@@ -97,6 +97,44 @@ router.post("/login", async (req, res) => {
     });
   } catch (err) {
     console.error("Error during login", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/me", requireAuth(), async (req: AuthedRequest, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      include: {
+        employee: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    return res.json({
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      employee: user.employee
+        ? {
+            id: user.employee.id,
+            firstName: user.employee.firstName,
+            lastName: user.employee.lastName,
+            role: user.employee.role,
+            location: user.employee.location,
+            status: user.employee.status,
+          }
+        : null,
+    });
+  } catch (err) {
+    console.error("/api/auth/me error", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
