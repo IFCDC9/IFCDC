@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { getBookings, createBooking } from '../api/barbershopApi';
+import { getBookings } from '../api/barbershopApi';
 
 export default function BarbershopPage() {
   const { token } = useAuth();
@@ -10,8 +10,6 @@ export default function BarbershopPage() {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [success, setSuccess] = useState('');
-  const [error, setError] = useState('');
 
   useEffect(() => {
     if (token) {
@@ -33,21 +31,26 @@ export default function BarbershopPage() {
   async function handleSubmit(e) {
     e.preventDefault();
     setSubmitting(true);
-    setError('');
-    setSuccess('');
 
-    try {
-      await createBooking(token, { name, phone, datetime });
-      setSuccess('Appointment booked successfully!');
+    const res = await fetch("/api/barbershop", {
+      method: "POST",
+      headers: { 
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify({ name, phone, datetime }),
+    });
+
+    if (res.ok) {
+      alert("Booking received! We'll confirm shortly.");
       setName('');
       setPhone('');
       setDatetime('');
       loadBookings();
-    } catch (err) {
-      setError('Failed to book appointment. Please try again.');
-    } finally {
-      setSubmitting(false);
+    } else {
+      alert("There was an issue saving your booking.");
     }
+    setSubmitting(false);
   }
 
   return (
@@ -62,9 +65,6 @@ export default function BarbershopPage() {
       <div className="barbershop-content">
         <div className="booking-form-card">
           <h2>Book an Appointment</h2>
-          
-          {success && <div className="success-message">{success}</div>}
-          {error && <div className="error-message">{error}</div>}
 
           <form onSubmit={handleSubmit} className="booking-form">
             <div className="form-field">
