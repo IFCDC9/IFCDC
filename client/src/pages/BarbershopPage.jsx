@@ -32,7 +32,7 @@ export default function BarbershopPage() {
     e.preventDefault();
     setSubmitting(true);
 
-    const res = await fetch("/api/barbershop", {
+    const res = await fetch("/api/bookings", {
       method: "POST",
       headers: { 
         "Content-Type": "application/json",

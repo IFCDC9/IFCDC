@@ -16,26 +16,24 @@ router.get('/', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', async (req, res) => {
+  const { name, phone, datetime } = req.body;
+  if (!name || !phone || !datetime) {
+    return res.status(400).json({ error: "Missing fields" });
+  }
+
   try {
-    const { name, phone, datetime } = req.body;
-
-    if (!name || !phone || !datetime) {
-      return res.status(400).json({ error: 'Name, phone, and datetime are required' });
-    }
-
-    const booking = await prisma.barbershopBooking.create({
+    await prisma.barbershopBooking.create({
       data: {
         name,
         phone,
         datetime: new Date(datetime),
       },
     });
-
-    res.status(201).json(booking);
+    return res.json({ ok: true });
   } catch (error) {
     console.error('Error creating booking:', error);
-    res.status(500).json({ error: 'Failed to create booking' });
+    return res.status(500).json({ error: 'Failed to create booking' });
   }
 });
 

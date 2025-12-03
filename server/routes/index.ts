@@ -18,5 +18,5 @@ export function registerRoutes(app: Express): void {
   app.use("/api/forms", formsRoutes);
   app.use("/api/reports", reportsRoutes);
   app.use("/api/queue", queueRoutes);
-  app.use("/api/barbershop", barbershopRoutes);
+  app.use("/api/bookings", barbershopRoutes);
 }
