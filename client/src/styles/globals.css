@@ -131,28 +131,52 @@ body {
   margin-bottom: 30px;
 }
 
-.form-group {
+.error-banner {
+  background: #fee;
+  color: #c00;
+  padding: 12px;
+  border-radius: 4px;
   margin-bottom: 20px;
+  text-align: center;
 }
 
-.form-group label {
+.login-card form label {
   display: block;
-  margin-bottom: 6px;
+  margin-bottom: 20px;
   font-weight: 500;
   color: #333;
 }
 
-.form-group input {
+.login-card form input {
+  display: block;
   width: 100%;
   padding: 12px;
+  margin-top: 6px;
   border: 1px solid #ddd;
   border-radius: 4px;
   font-size: 14px;
 }
 
-.form-group input:focus {
+.login-card form input:focus {
   outline: none;
   border-color: #4a90d9;
+}
+
+.login-card form button {
+  width: 100%;
+  padding: 12px;
+  margin-top: 10px;
+  background: #4a90d9;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.login-card form button:hover {
+  background: #3a7bc8;
 }
 
 .btn-primary {

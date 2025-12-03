@@ -4,74 +4,41 @@ import { useAuth } from '../context/AuthContext';
 import { loginApi } from '../api/authApi';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [form, setForm] = useState({ email: '', password: '' });
+  const [error, setError] = useState('');
 
-  const handleSubmit = async (e) => {
+  const onChange = e => setForm({ ...form, [e.target.name]: e.target.value });
+
+  const onSubmit = async e => {
     e.preventDefault();
     setError('');
-    setLoading(true);
-
     try {
-      const { token, user } = await loginApi(email, password);
-      login(token, user);
+      const res = await loginApi(form.email, form.password);
+      login(res.token, res.user);
       navigate('/dashboard');
     } catch (err) {
-      setError(err.message || 'Login failed');
-    } finally {
-      setLoading(false);
+      setError('Invalid login. Please check your credentials.');
     }
   };
 
   return (
     <div className="login-page">
       <div className="login-card">
-        <h1>IFCDC Portal</h1>
-        <p>Policy Manual System</p>
-        
-        <form onSubmit={handleSubmit}>
-          {error && (
-            <div data-testid="login-error" className="error-message">
-              {error}
-            </div>
-          )}
-          
-          <div className="form-group">
-            <label htmlFor="email">Email</label>
-            <input
-              id="email"
-              data-testid="input-email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-          </div>
-          
-          <div className="form-group">
-            <label htmlFor="password">Password</label>
-            <input
-              id="password"
-              data-testid="input-password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </div>
-          
-          <button
-            data-testid="btn-login"
-            type="submit"
-            disabled={loading}
-            className="btn-primary"
-          >
-            {loading ? 'Logging in...' : 'Login'}
-          </button>
+        <h1>IFCDC Staff Portal</h1>
+        <p>Sign in to access the operations manual & tools.</p>
+        {error && <div className="error-banner">{error}</div>}
+        <form onSubmit={onSubmit}>
+          <label>
+            Email
+            <input name="email" type="email" value={form.email} onChange={onChange} />
+          </label>
+          <label>
+            Password
+            <input name="password" type="password" value={form.password} onChange={onChange} />
+          </label>
+          <button type="submit">Sign In</button>
         </form>
       </div>
     </div>
