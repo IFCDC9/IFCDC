@@ -66,7 +66,7 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold" data-testid="text-compliance">
-                {totalUsers > 0 && totalChapters > 0 
+                {totalUsers > 0 && activeChapters > 0 
                   ? Math.round((totalAcknowledgements / (totalUsers * activeChapters)) * 100) || 0
                   : 0}%
               </div>
