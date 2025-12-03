@@ -1,19 +1,19 @@
 import { 
   type User, 
+  type SafeUser,
   type InsertUser,
   type Chapter,
   type InsertChapter,
   type UpdateChapter,
-  type Form,
-  type InsertForm,
-  type UpdateForm,
+  type PolicyAcknowledgement,
+  type InsertAcknowledgement,
   users,
   chapters,
-  forms
+  policyAcknowledgements
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/neon-serverless";
 import { Pool, neonConfig } from "@neondatabase/serverless";
-import { eq, desc, sql } from "drizzle-orm";
+import { eq, desc, and, sql } from "drizzle-orm";
 import ws from "ws";
 
 neonConfig.webSocketConstructor = ws;
@@ -23,36 +23,38 @@ const db = drizzle({ client: pool });
 
 export interface IStorage {
   // User methods
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
+  getUser(id: number): Promise<User | undefined>;
+  getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  updateUserLastLogin(id: number): Promise<void>;
+  getAllUsers(): Promise<SafeUser[]>;
   
   // Chapter methods
   getAllChapters(): Promise<Chapter[]>;
-  getChapter(id: string): Promise<Chapter | undefined>;
+  getActiveChapters(): Promise<Chapter[]>;
+  getChapter(id: number): Promise<Chapter | undefined>;
+  getChapterBySlug(slug: string): Promise<Chapter | undefined>;
   createChapter(chapter: InsertChapter): Promise<Chapter>;
-  updateChapter(id: string, chapter: UpdateChapter): Promise<Chapter | undefined>;
-  deleteChapter(id: string): Promise<boolean>;
+  updateChapter(id: number, chapter: UpdateChapter): Promise<Chapter | undefined>;
+  deleteChapter(id: number): Promise<boolean>;
   
-  // Form methods
-  getAllForms(): Promise<Form[]>;
-  getFormsByChapter(chapterId: string): Promise<Form[]>;
-  getForm(id: string): Promise<Form | undefined>;
-  createForm(form: InsertForm): Promise<Form>;
-  updateForm(id: string, form: UpdateForm): Promise<Form | undefined>;
-  deleteForm(id: string): Promise<boolean>;
-  incrementFormSubmissions(id: string): Promise<Form | undefined>;
+  // Acknowledgement methods
+  getAcknowledgement(userId: number, chapterId: number): Promise<PolicyAcknowledgement | undefined>;
+  getUserAcknowledgements(userId: number): Promise<PolicyAcknowledgement[]>;
+  getChapterAcknowledgements(chapterId: number): Promise<PolicyAcknowledgement[]>;
+  createAcknowledgement(ack: InsertAcknowledgement): Promise<PolicyAcknowledgement>;
+  getAcknowledgementStats(): Promise<{ chapterId: number; count: number }[]>;
 }
 
 export class DatabaseStorage implements IStorage {
   // User methods
-  async getUser(id: string): Promise<User | undefined> {
+  async getUser(id: number): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
     return user;
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.username, username));
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.email, email));
     return user;
   }
 
@@ -61,13 +63,39 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
-  // Chapter methods
-  async getAllChapters(): Promise<Chapter[]> {
-    return db.select().from(chapters).orderBy(desc(chapters.updatedAt));
+  async updateUserLastLogin(id: number): Promise<void> {
+    await db.update(users).set({ lastLogin: new Date() }).where(eq(users.id, id));
   }
 
-  async getChapter(id: string): Promise<Chapter | undefined> {
+  async getAllUsers(): Promise<SafeUser[]> {
+    const allUsers = await db.select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      role: users.role,
+      isActive: users.isActive,
+      createdAt: users.createdAt,
+      lastLogin: users.lastLogin,
+    }).from(users).orderBy(desc(users.createdAt));
+    return allUsers as SafeUser[];
+  }
+
+  // Chapter methods
+  async getAllChapters(): Promise<Chapter[]> {
+    return db.select().from(chapters).orderBy(chapters.number);
+  }
+
+  async getActiveChapters(): Promise<Chapter[]> {
+    return db.select().from(chapters).where(eq(chapters.isActive, true)).orderBy(chapters.number);
+  }
+
+  async getChapter(id: number): Promise<Chapter | undefined> {
     const [chapter] = await db.select().from(chapters).where(eq(chapters.id, id));
+    return chapter;
+  }
+
+  async getChapterBySlug(slug: string): Promise<Chapter | undefined> {
+    const [chapter] = await db.select().from(chapters).where(eq(chapters.slug, slug));
     return chapter;
   }
 
@@ -76,7 +104,7 @@ export class DatabaseStorage implements IStorage {
     return newChapter;
   }
 
-  async updateChapter(id: string, chapter: UpdateChapter): Promise<Chapter | undefined> {
+  async updateChapter(id: number, chapter: UpdateChapter): Promise<Chapter | undefined> {
     const [updated] = await db
       .update(chapters)
       .set({ ...chapter, updatedAt: new Date() })
@@ -85,54 +113,49 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
-  async deleteChapter(id: string): Promise<boolean> {
+  async deleteChapter(id: number): Promise<boolean> {
     const result = await db.delete(chapters).where(eq(chapters.id, id));
     return result.rowCount !== null && result.rowCount > 0;
   }
 
-  // Form methods
-  async getAllForms(): Promise<Form[]> {
-    return db.select().from(forms).orderBy(desc(forms.createdAt));
+  // Acknowledgement methods
+  async getAcknowledgement(userId: number, chapterId: number): Promise<PolicyAcknowledgement | undefined> {
+    const [ack] = await db.select().from(policyAcknowledgements)
+      .where(and(
+        eq(policyAcknowledgements.userId, userId),
+        eq(policyAcknowledgements.chapterId, chapterId)
+      ))
+      .orderBy(desc(policyAcknowledgements.acknowledgedAt))
+      .limit(1);
+    return ack;
   }
 
-  async getFormsByChapter(chapterId: string): Promise<Form[]> {
-    return db.select().from(forms).where(eq(forms.chapterId, chapterId));
+  async getUserAcknowledgements(userId: number): Promise<PolicyAcknowledgement[]> {
+    return db.select().from(policyAcknowledgements)
+      .where(eq(policyAcknowledgements.userId, userId))
+      .orderBy(desc(policyAcknowledgements.acknowledgedAt));
   }
 
-  async getForm(id: string): Promise<Form | undefined> {
-    const [form] = await db.select().from(forms).where(eq(forms.id, id));
-    return form;
+  async getChapterAcknowledgements(chapterId: number): Promise<PolicyAcknowledgement[]> {
+    return db.select().from(policyAcknowledgements)
+      .where(eq(policyAcknowledgements.chapterId, chapterId))
+      .orderBy(desc(policyAcknowledgements.acknowledgedAt));
   }
 
-  async createForm(form: InsertForm): Promise<Form> {
-    const [newForm] = await db.insert(forms).values(form).returning();
-    return newForm;
+  async createAcknowledgement(ack: InsertAcknowledgement): Promise<PolicyAcknowledgement> {
+    const [newAck] = await db.insert(policyAcknowledgements).values(ack).returning();
+    return newAck;
   }
 
-  async updateForm(id: string, form: UpdateForm): Promise<Form | undefined> {
-    const [updated] = await db
-      .update(forms)
-      .set({ ...form, updatedAt: new Date() })
-      .where(eq(forms.id, id))
-      .returning();
-    return updated;
-  }
-
-  async deleteForm(id: string): Promise<boolean> {
-    const result = await db.delete(forms).where(eq(forms.id, id));
-    return result.rowCount !== null && result.rowCount > 0;
-  }
-
-  async incrementFormSubmissions(id: string): Promise<Form | undefined> {
-    const [updated] = await db
-      .update(forms)
-      .set({ 
-        submissions: sql`${forms.submissions} + 1`,
-        updatedAt: new Date()
+  async getAcknowledgementStats(): Promise<{ chapterId: number; count: number }[]> {
+    const stats = await db
+      .select({
+        chapterId: policyAcknowledgements.chapterId,
+        count: sql<number>`count(distinct ${policyAcknowledgements.userId})::int`,
       })
-      .where(eq(forms.id, id))
-      .returning();
-    return updated;
+      .from(policyAcknowledgements)
+      .groupBy(policyAcknowledgements.chapterId);
+    return stats;
   }
 }
 

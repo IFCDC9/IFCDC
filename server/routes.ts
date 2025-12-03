@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertUserSchema, insertChapterSchema, updateChapterSchema, insertFormSchema, updateFormSchema } from "@shared/schema";
+import { insertUserSchema, insertChapterSchema, updateChapterSchema, loginSchema, insertAcknowledgementSchema } from "@shared/schema";
 import { z } from "zod";
 import { fromError } from "zod-validation-error";
 import bcrypt from "bcryptjs";
@@ -17,23 +17,25 @@ export async function registerRoutes(
       const data = insertUserSchema.parse(req.body);
       
       // Check if user exists
-      const existingUser = await storage.getUserByUsername(data.username);
+      const existingUser = await storage.getUserByEmail(data.email);
       if (existingUser) {
-        return res.status(400).json({ message: "Username already exists" });
+        return res.status(400).json({ message: "Email already exists" });
       }
       
       // Hash password
-      const hashedPassword = await bcrypt.hash(data.password, 10);
+      const passwordHash = await bcrypt.hash(data.passwordHash, 10);
       
       // Create user
       const user = await storage.createUser({
-        username: data.username,
-        password: hashedPassword,
+        ...data,
+        passwordHash,
       });
       
       res.status(201).json({ 
         id: user.id, 
-        username: user.username 
+        name: user.name,
+        email: user.email,
+        role: user.role,
       });
     } catch (error: any) {
       if (error instanceof z.ZodError) {
@@ -45,21 +47,26 @@ export async function registerRoutes(
 
   app.post("/api/auth/login", async (req, res) => {
     try {
-      const data = insertUserSchema.parse(req.body);
+      const data = loginSchema.parse(req.body);
       
-      const user = await storage.getUserByUsername(data.username);
+      const user = await storage.getUserByEmail(data.email);
       if (!user) {
         return res.status(401).json({ message: "Invalid credentials" });
       }
       
-      const isValidPassword = await bcrypt.compare(data.password, user.password);
+      const isValidPassword = await bcrypt.compare(data.password, user.passwordHash);
       if (!isValidPassword) {
         return res.status(401).json({ message: "Invalid credentials" });
       }
+
+      // Update last login
+      await storage.updateUserLastLogin(user.id);
       
       res.json({ 
         id: user.id, 
-        username: user.username 
+        name: user.name,
+        email: user.email,
+        role: user.role,
       });
     } catch (error: any) {
       if (error instanceof z.ZodError) {
@@ -69,21 +76,30 @@ export async function registerRoutes(
     }
   });
 
+  // User routes
+  app.get("/api/users", async (req, res) => {
+    try {
+      const allUsers = await storage.getAllUsers();
+      res.json(allUsers);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch users" });
+    }
+  });
+
   // Chapter routes
   app.get("/api/chapters", async (req, res) => {
     try {
       const allChapters = await storage.getAllChapters();
+      const ackStats = await storage.getAcknowledgementStats();
       
-      // Get form counts for each chapter
-      const chaptersWithCounts = await Promise.all(
-        allChapters.map(async (chapter) => {
-          const chapterForms = await storage.getFormsByChapter(chapter.id);
-          return {
-            ...chapter,
-            formCount: chapterForms.length,
-          };
-        })
-      );
+      // Add acknowledgement counts to chapters
+      const chaptersWithCounts = allChapters.map((chapter) => {
+        const stat = ackStats.find(s => s.chapterId === chapter.id);
+        return {
+          ...chapter,
+          acknowledgementCount: stat?.count || 0,
+        };
+      });
       
       res.json(chaptersWithCounts);
     } catch (error) {
@@ -91,17 +107,31 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/chapters/active", async (req, res) => {
+    try {
+      const activeChapters = await storage.getActiveChapters();
+      res.json(activeChapters);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch active chapters" });
+    }
+  });
+
   app.get("/api/chapters/:id", async (req, res) => {
     try {
-      const chapter = await storage.getChapter(req.params.id);
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "Invalid chapter ID" });
+      }
+      
+      const chapter = await storage.getChapter(id);
       if (!chapter) {
         return res.status(404).json({ message: "Chapter not found" });
       }
       
-      const chapterForms = await storage.getFormsByChapter(chapter.id);
+      const acks = await storage.getChapterAcknowledgements(id);
       res.json({
         ...chapter,
-        formCount: chapterForms.length,
+        acknowledgementCount: acks.length,
       });
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch chapter" });
@@ -123,8 +153,13 @@ export async function registerRoutes(
 
   app.patch("/api/chapters/:id", async (req, res) => {
     try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "Invalid chapter ID" });
+      }
+      
       const data = updateChapterSchema.parse(req.body);
-      const chapter = await storage.updateChapter(req.params.id, data);
+      const chapter = await storage.updateChapter(id, data);
       if (!chapter) {
         return res.status(404).json({ message: "Chapter not found" });
       }
@@ -139,7 +174,12 @@ export async function registerRoutes(
 
   app.delete("/api/chapters/:id", async (req, res) => {
     try {
-      const success = await storage.deleteChapter(req.params.id);
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "Invalid chapter ID" });
+      }
+      
+      const success = await storage.deleteChapter(id);
       if (!success) {
         return res.status(404).json({ message: "Chapter not found" });
       }
@@ -149,78 +189,64 @@ export async function registerRoutes(
     }
   });
 
-  // Form routes
-  app.get("/api/forms", async (req, res) => {
+  // Acknowledgement routes
+  app.get("/api/acknowledgements", async (req, res) => {
     try {
-      const allForms = await storage.getAllForms();
-      res.json(allForms);
+      const stats = await storage.getAcknowledgementStats();
+      res.json(stats);
     } catch (error) {
-      res.status(500).json({ message: "Failed to fetch forms" });
+      res.status(500).json({ message: "Failed to fetch acknowledgements" });
     }
   });
 
-  app.get("/api/forms/:id", async (req, res) => {
+  app.get("/api/acknowledgements/user/:userId", async (req, res) => {
     try {
-      const form = await storage.getForm(req.params.id);
-      if (!form) {
-        return res.status(404).json({ message: "Form not found" });
+      const userId = parseInt(req.params.userId);
+      if (isNaN(userId)) {
+        return res.status(400).json({ message: "Invalid user ID" });
       }
-      res.json(form);
+      
+      const acks = await storage.getUserAcknowledgements(userId);
+      res.json(acks);
     } catch (error) {
-      res.status(500).json({ message: "Failed to fetch form" });
+      res.status(500).json({ message: "Failed to fetch user acknowledgements" });
     }
   });
 
-  app.post("/api/forms", async (req, res) => {
+  app.get("/api/acknowledgements/chapter/:chapterId", async (req, res) => {
     try {
-      const data = insertFormSchema.parse(req.body);
-      const form = await storage.createForm(data);
-      res.status(201).json(form);
+      const chapterId = parseInt(req.params.chapterId);
+      if (isNaN(chapterId)) {
+        return res.status(400).json({ message: "Invalid chapter ID" });
+      }
+      
+      const acks = await storage.getChapterAcknowledgements(chapterId);
+      res.json(acks);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch chapter acknowledgements" });
+    }
+  });
+
+  app.post("/api/acknowledgements", async (req, res) => {
+    try {
+      const data = insertAcknowledgementSchema.parse(req.body);
+      
+      // Verify the chapter exists and get its version
+      const chapter = await storage.getChapter(data.chapterId);
+      if (!chapter) {
+        return res.status(404).json({ message: "Chapter not found" });
+      }
+      
+      const ack = await storage.createAcknowledgement({
+        ...data,
+        version: chapter.version,
+      });
+      res.status(201).json(ack);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: fromError(error).toString() });
       }
-      res.status(500).json({ message: "Failed to create form" });
-    }
-  });
-
-  app.patch("/api/forms/:id", async (req, res) => {
-    try {
-      const data = updateFormSchema.parse(req.body);
-      const form = await storage.updateForm(req.params.id, data);
-      if (!form) {
-        return res.status(404).json({ message: "Form not found" });
-      }
-      res.json(form);
-    } catch (error: any) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: fromError(error).toString() });
-      }
-      res.status(500).json({ message: "Failed to update form" });
-    }
-  });
-
-  app.delete("/api/forms/:id", async (req, res) => {
-    try {
-      const success = await storage.deleteForm(req.params.id);
-      if (!success) {
-        return res.status(404).json({ message: "Form not found" });
-      }
-      res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ message: "Failed to delete form" });
-    }
-  });
-
-  app.post("/api/forms/:id/submit", async (req, res) => {
-    try {
-      const form = await storage.incrementFormSubmissions(req.params.id);
-      if (!form) {
-        return res.status(404).json({ message: "Form not found" });
-      }
-      res.json(form);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to submit form" });
+      res.status(500).json({ message: "Failed to create acknowledgement" });
     }
   });
 

@@ -1,14 +1,14 @@
-import { type Chapter, type Form, type InsertChapter, type UpdateChapter, type InsertForm, type UpdateForm } from "@shared/schema";
+import { type Chapter, type InsertChapter, type UpdateChapter, type SafeUser, type PolicyAcknowledgement } from "@shared/schema";
 
 const API_BASE = "/api";
 
 // Auth API
 export const authApi = {
-  login: async (username: string, password: string) => {
+  login: async (email: string, password: string) => {
     const res = await fetch(`${API_BASE}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ email, password }),
     });
     if (!res.ok) {
       const error = await res.json();
@@ -17,11 +17,11 @@ export const authApi = {
     return res.json();
   },
   
-  register: async (username: string, password: string) => {
+  register: async (name: string, email: string, password: string, role: string = "staff") => {
     const res = await fetch(`${API_BASE}/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ name, email, passwordHash: password, role }),
     });
     if (!res.ok) {
       const error = await res.json();
@@ -31,15 +31,32 @@ export const authApi = {
   },
 };
 
+// User API
+export const userApi = {
+  getAll: async (): Promise<SafeUser[]> => {
+    const res = await fetch(`${API_BASE}/users`);
+    if (!res.ok) throw new Error("Failed to fetch users");
+    return res.json();
+  },
+};
+
 // Chapter API
+export type ChapterWithCount = Chapter & { acknowledgementCount: number };
+
 export const chapterApi = {
-  getAll: async (): Promise<(Chapter & { formCount: number })[]> => {
+  getAll: async (): Promise<ChapterWithCount[]> => {
     const res = await fetch(`${API_BASE}/chapters`);
     if (!res.ok) throw new Error("Failed to fetch chapters");
     return res.json();
   },
   
-  getOne: async (id: string): Promise<Chapter & { formCount: number }> => {
+  getActive: async (): Promise<Chapter[]> => {
+    const res = await fetch(`${API_BASE}/chapters/active`);
+    if (!res.ok) throw new Error("Failed to fetch active chapters");
+    return res.json();
+  },
+  
+  getOne: async (id: number): Promise<ChapterWithCount> => {
     const res = await fetch(`${API_BASE}/chapters/${id}`);
     if (!res.ok) throw new Error("Failed to fetch chapter");
     return res.json();
@@ -58,7 +75,7 @@ export const chapterApi = {
     return res.json();
   },
   
-  update: async (id: string, data: UpdateChapter): Promise<Chapter> => {
+  update: async (id: number, data: UpdateChapter): Promise<Chapter> => {
     const res = await fetch(`${API_BASE}/chapters/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -71,7 +88,7 @@ export const chapterApi = {
     return res.json();
   },
   
-  delete: async (id: string): Promise<void> => {
+  delete: async (id: number): Promise<void> => {
     const res = await fetch(`${API_BASE}/chapters/${id}`, {
       method: "DELETE",
     });
@@ -79,58 +96,36 @@ export const chapterApi = {
   },
 };
 
-// Form API
-export const formApi = {
-  getAll: async (): Promise<Form[]> => {
-    const res = await fetch(`${API_BASE}/forms`);
-    if (!res.ok) throw new Error("Failed to fetch forms");
+// Acknowledgement API
+export const acknowledgementApi = {
+  getStats: async (): Promise<{ chapterId: number; count: number }[]> => {
+    const res = await fetch(`${API_BASE}/acknowledgements`);
+    if (!res.ok) throw new Error("Failed to fetch acknowledgement stats");
     return res.json();
   },
   
-  getOne: async (id: string): Promise<Form> => {
-    const res = await fetch(`${API_BASE}/forms/${id}`);
-    if (!res.ok) throw new Error("Failed to fetch form");
+  getByUser: async (userId: number): Promise<PolicyAcknowledgement[]> => {
+    const res = await fetch(`${API_BASE}/acknowledgements/user/${userId}`);
+    if (!res.ok) throw new Error("Failed to fetch user acknowledgements");
     return res.json();
   },
   
-  create: async (data: InsertForm): Promise<Form> => {
-    const res = await fetch(`${API_BASE}/forms`, {
+  getByChapter: async (chapterId: number): Promise<PolicyAcknowledgement[]> => {
+    const res = await fetch(`${API_BASE}/acknowledgements/chapter/${chapterId}`);
+    if (!res.ok) throw new Error("Failed to fetch chapter acknowledgements");
+    return res.json();
+  },
+  
+  create: async (userId: number, chapterId: number): Promise<PolicyAcknowledgement> => {
+    const res = await fetch(`${API_BASE}/acknowledgements`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
+      body: JSON.stringify({ userId, chapterId, version: 1 }),
     });
     if (!res.ok) {
       const error = await res.json();
-      throw new Error(error.message || "Failed to create form");
+      throw new Error(error.message || "Failed to create acknowledgement");
     }
-    return res.json();
-  },
-  
-  update: async (id: string, data: UpdateForm): Promise<Form> => {
-    const res = await fetch(`${API_BASE}/forms/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) {
-      const error = await res.json();
-      throw new Error(error.message || "Failed to update form");
-    }
-    return res.json();
-  },
-  
-  delete: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/forms/${id}`, {
-      method: "DELETE",
-    });
-    if (!res.ok) throw new Error("Failed to delete form");
-  },
-  
-  submit: async (id: string): Promise<Form> => {
-    const res = await fetch(`${API_BASE}/forms/${id}/submit`, {
-      method: "POST",
-    });
-    if (!res.ok) throw new Error("Failed to submit form");
     return res.json();
   },
 };

@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, BookOpen, FileText, Settings, LogOut, Menu } from "lucide-react";
+import { LayoutDashboard, BookOpen, Users, Settings, LogOut, Menu } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -11,7 +11,7 @@ export function Sidebar() {
   const links = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
     { href: "/chapters", label: "Chapters", icon: BookOpen },
-    { href: "/forms", label: "Forms", icon: FileText },
+    { href: "/users", label: "Users", icon: Users },
   ];
 
   return (
@@ -86,8 +86,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <main className="flex-1 overflow-auto">
         <header className="h-16 border-b border-border flex items-center justify-between px-6 md:px-10 bg-card/50 backdrop-blur-sm sticky top-0 z-10">
           <div className="flex items-center gap-2 text-muted-foreground text-sm">
-             {/* Breadcrumbs could go here */}
-             <span className="hidden md:inline">Workspace</span>
+             <span className="hidden md:inline">Policy Administration</span>
           </div>
           <div className="flex items-center gap-4">
              <Button variant="ghost" size="icon" className="text-muted-foreground">
@@ -95,7 +94,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
              </Button>
              <Avatar className="h-8 w-8 border border-border">
                 <AvatarImage src="https://github.com/shadcn.png" />
-                <AvatarFallback>CN</AvatarFallback>
+                <AvatarFallback>AD</AvatarFallback>
              </Avatar>
           </div>
         </header>
