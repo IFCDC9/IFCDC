@@ -1,46 +1,56 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-import { loginApi } from '../api/authApi';
+import React, { useState } from "react";
 
-export default function LoginPage() {
-  const { login } = useAuth();
-  const navigate = useNavigate();
-  const [form, setForm] = useState({ email: '', password: '' });
-  const [error, setError] = useState('');
+const LoginPage = () => {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const onChange = e => setForm({ ...form, [e.target.name]: e.target.value });
-
-  const onSubmit = async e => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
-    try {
-      const res = await loginApi(form.email, form.password);
-      login(res.token, res.user);
-      navigate('/dashboard');
-    } catch (err) {
-      setError('Invalid login. Please check your credentials.');
+    setLoading(true);
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    setLoading(false);
+
+    if (res.ok) {
+      const data = await res.json();
+      localStorage.setItem("ifcdc_token", data.token);
+      localStorage.setItem("ifcdc_role", data.role);
+      window.location.href = "/admin/hr";
+    } else {
+      alert("Invalid login.");
     }
   };
 
   return (
-    <div className="login-page">
-      <div className="login-card">
-        <h1>IFCDC Staff Portal</h1>
-        <p>Sign in to access the operations manual & tools.</p>
-        {error && <div className="error-banner">{error}</div>}
-        <form onSubmit={onSubmit}>
-          <label>
-            Email
-            <input name="email" type="email" value={form.email} onChange={onChange} />
-          </label>
-          <label>
-            Password
-            <input name="password" type="password" value={form.password} onChange={onChange} />
-          </label>
-          <button type="submit">Sign In</button>
-        </form>
-      </div>
+    <div style={{ padding: "1.5rem" }}>
+      <h1>IFCDC Admin Login</h1>
+      <form onSubmit={handleSubmit} style={{ maxWidth: 320, display: "grid", gap: "0.75rem", marginTop: "1rem" }}>
+        <input
+          type="email"
+          placeholder="Email"
+          value={email}
+          onChange={e => setEmail(e.target.value)}
+          required
+          data-testid="input-email"
+        />
+        <input
+          type="password"
+          placeholder="Password"
+          value={password}
+          onChange={e => setPassword(e.target.value)}
+          required
+          data-testid="input-password"
+        />
+        <button type="submit" disabled={loading} data-testid="button-submit">
+          {loading ? "Logging in..." : "Log In"}
+        </button>
+      </form>
     </div>
   );
-}
+};
+
+export default LoginPage;
