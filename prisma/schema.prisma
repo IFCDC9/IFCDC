@@ -16,8 +16,9 @@ model User {
   isActive     Boolean   @default(true) @map("is_active")
   lastLogin    DateTime? @map("last_login")
 
-  acknowledgements    PolicyAcknowledgement[]
-  formSubmissions     FormSubmission[]
+  acknowledgements       PolicyAcknowledgement[]
+  formSubmissions        FormSubmission[]
+  assignedSubmissions    FormSubmission[]         @relation("SupervisorAssigned")
 
   @@map("users")
 }
@@ -72,11 +73,19 @@ model FormSubmission {
   formId        Int      @map("form_id")
   submittedById Int?     @map("submitted_by_id")
   data          Json
+
+  status        String   @default("open")
+  riskLevel     String   @default("low") @map("risk_level")
+  flagged       Boolean  @default(false)
+
+  assignedToId  Int?     @map("assigned_to_id")
+
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
   form        Form  @relation(fields: [formId], references: [id], onDelete: Cascade)
   submittedBy User? @relation(fields: [submittedById], references: [id], onDelete: SetNull)
+  assignedTo  User? @relation("SupervisorAssigned", fields: [assignedToId], references: [id], onDelete: SetNull)
 
   @@map("form_submissions")
 }
