@@ -1,5 +1,5 @@
 import { Response } from "express";
-import prisma from "../db/client";
+import { prisma } from "../prisma";
 import { AuthedRequest } from "../middleware/auth";
 
 export const listForms = async (_req: AuthedRequest, res: Response) => {

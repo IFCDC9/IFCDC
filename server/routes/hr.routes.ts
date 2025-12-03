@@ -1,5 +1,5 @@
 import { Router } from "express";
-import prisma from "../db/client";
+import { prisma } from "../prisma";
 import { EmployeePayload } from "../types/hr";
 import { requireAuth } from "../middleware/auth";
 

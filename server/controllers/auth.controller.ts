@@ -3,7 +3,7 @@ import { z } from "zod";
 import { fromError } from "zod-validation-error";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import prisma from "../db/client";
+import { prisma } from "../prisma";
 import { config } from "../config/env";
 
 const JWT_SECRET = config.jwtSecret || "dev-secret";
