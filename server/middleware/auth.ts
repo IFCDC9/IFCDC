@@ -11,14 +11,13 @@ export interface AuthRequest extends Request {
   user?: TokenPayload;
 }
 
-export const authenticate = (req: AuthRequest, res: Response, next: NextFunction) => {
-  const authHeader = req.headers.authorization;
-  
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ message: "No token provided" });
-  }
+export const requireAuth = (req: AuthRequest, res: Response, next: NextFunction) => {
+  const header = req.headers.authorization || "";
+  const token = header.replace("Bearer ", "");
 
-  const token = authHeader.split(" ")[1];
+  if (!token) {
+    return res.status(401).json({ message: "Missing token" });
+  }
 
   try {
     const decoded = jwt.verify(token, config.jwtSecret || "fallback-secret") as unknown as TokenPayload;
@@ -30,47 +29,19 @@ export const authenticate = (req: AuthRequest, res: Response, next: NextFunction
 };
 
 export const requireAdmin = (req: AuthRequest, res: Response, next: NextFunction) => {
-  const authHeader = req.headers.authorization;
-  
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ message: "No token provided" });
-  }
-
-  const token = authHeader.split(" ")[1];
-
-  try {
-    const decoded = jwt.verify(token, config.jwtSecret || "fallback-secret") as unknown as TokenPayload;
-    
-    if (decoded.role !== "admin") {
-      return res.status(403).json({ message: "Admin access required" });
+  requireAuth(req, res, () => {
+    if (req.user?.role !== "admin") {
+      return res.status(403).json({ message: "Admin only" });
     }
-    
-    req.user = decoded;
     next();
-  } catch (err) {
-    return res.status(401).json({ message: "Invalid token" });
-  }
+  });
 };
 
 export const requireDirector = (req: AuthRequest, res: Response, next: NextFunction) => {
-  const authHeader = req.headers.authorization;
-  
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ message: "No token provided" });
-  }
-
-  const token = authHeader.split(" ")[1];
-
-  try {
-    const decoded = jwt.verify(token, config.jwtSecret || "fallback-secret") as unknown as TokenPayload;
-    
-    if (decoded.role !== "admin" && decoded.role !== "director") {
-      return res.status(403).json({ message: "Director or admin access required" });
+  requireAuth(req, res, () => {
+    if (req.user?.role !== "admin" && req.user?.role !== "director") {
+      return res.status(403).json({ message: "Director or admin only" });
     }
-    
-    req.user = decoded;
     next();
-  } catch (err) {
-    return res.status(401).json({ message: "Invalid token" });
-  }
+  });
 };
