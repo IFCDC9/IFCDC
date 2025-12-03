@@ -88,7 +88,7 @@ export default function DashboardPage() {
           <section className="radio-section">
             <h2>IFCDC Radio – Live Stream</h2>
             <audio controls className="radio-player">
-              <source src="YOUR_RADIO_STREAM_URL" type="audio/mpeg" />
+              <source src="https://streaming.live365.com/a64128" type="audio/mpeg" />
               Your browser does not support the audio element.
             </audio>
           </section>
