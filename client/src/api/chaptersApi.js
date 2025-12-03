@@ -1,23 +1,15 @@
 import { apiRequest } from './client';
 
-export async function getChapters() {
-  return apiRequest('/chapters');
+export function getChapters(token) {
+  return apiRequest('/chapters', {}, token);
 }
 
-export async function getChapter(id) {
-  return apiRequest(`/chapters/${id}`);
+export function getChapterById(id, token) {
+  return apiRequest(`/chapters/${id}`, {}, token);
 }
 
-export async function createChapter(data) {
-  return apiRequest('/chapters', {
+export function acknowledgeChapter(id, token) {
+  return apiRequest(`/chapters/${id}/acknowledge`, {
     method: 'POST',
-    body: JSON.stringify(data),
-  });
-}
-
-export async function updateChapter(id, data) {
-  return apiRequest(`/chapters/${id}`, {
-    method: 'PUT',
-    body: JSON.stringify(data),
-  });
+  }, token);
 }

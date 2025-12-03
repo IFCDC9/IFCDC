@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
+import { useAuth } from '../context/AuthContext';
 import { getChapters } from '../api/chaptersApi';
 
 export default function ChapterList({ onSelect }) {
+  const { token } = useAuth();
   const [chapters, setChapters] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -13,7 +15,7 @@ export default function ChapterList({ onSelect }) {
   const loadChapters = async () => {
     try {
       setLoading(true);
-      const data = await getChapters();
+      const data = await getChapters(token);
       setChapters(data);
     } catch (err) {
       setError(err.message);
@@ -28,7 +30,7 @@ export default function ChapterList({ onSelect }) {
   return (
     <div data-testid="chapter-list" className="chapter-list">
       {chapters.length === 0 ? (
-        <p>No chapters available.</p>
+        <p className="empty-state">No chapters available.</p>
       ) : (
         chapters.map((chapter) => (
           <div
