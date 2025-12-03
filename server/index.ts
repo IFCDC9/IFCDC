@@ -44,7 +44,7 @@ app.use((req, res, next) => {
 });
 
 app.get("/", (req, res) => {
-  res.json({ status: "IFCDC Manual API online" });
+  res.json({ status: "ok", service: "IFCDC Manual API" });
 });
 
 registerRoutes(app);
