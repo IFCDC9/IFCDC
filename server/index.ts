@@ -67,12 +67,11 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const path = await import("path");
     
     const vite = await createViteServer({
-      root: path.resolve(import.meta.dirname, "../client"),
+      configFile: path.resolve(import.meta.dirname, "../vite.config.ts"),
       server: {
         middlewareMode: true,
         hmr: { server },
       },
-      appType: "spa",
     });
 
     app.use(vite.middlewares);
