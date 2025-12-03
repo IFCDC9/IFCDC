@@ -1,11 +1,11 @@
-import { Response } from "express";
-import prisma from "../db/client";
-import { AuthRequest } from "../middleware/auth";
+const prisma = require('../db/client');
 
-export const overview = async (_req: AuthRequest, res: Response) => {
+// GET /reports/overview
+exports.overview = async (req, res) => {
   try {
+    // Incident-only stats
     const incidentForm = await prisma.form.findUnique({
-      where: { slug: "incident_report" },
+      where: { slug: 'incident_report' },
       select: { id: true },
     });
 
@@ -14,23 +14,24 @@ export const overview = async (_req: AuthRequest, res: Response) => {
     const totalIncidents = await prisma.formSubmission.count({ where: whereIncident });
 
     const highRiskIncidents = await prisma.formSubmission.count({
-      where: { ...whereIncident, riskLevel: "high" },
+      where: { ...whereIncident, riskLevel: 'high' },
     });
 
     const openIncidents = await prisma.formSubmission.count({
-      where: { ...whereIncident, status: "open" },
+      where: { ...whereIncident, status: 'open' },
     });
 
     const inReview = await prisma.formSubmission.count({
-      where: { ...whereIncident, status: "in_review" },
+      where: { ...whereIncident, status: 'in_review' },
     });
 
     const resolved = await prisma.formSubmission.count({
-      where: { ...whereIncident, status: "resolved" },
+      where: { ...whereIncident, status: 'resolved' },
     });
 
+    // Optionally: counts for intakes and case notes
     const intakeForm = await prisma.form.findUnique({
-      where: { slug: "participant_intake" },
+      where: { slug: 'participant_intake' },
       select: { id: true },
     });
 
@@ -39,7 +40,7 @@ export const overview = async (_req: AuthRequest, res: Response) => {
       : 0;
 
     const caseNoteForm = await prisma.form.findUnique({
-      where: { slug: "case_note" },
+      where: { slug: 'case_note' },
       select: { id: true },
     });
 
@@ -63,30 +64,31 @@ export const overview = async (_req: AuthRequest, res: Response) => {
       },
     });
   } catch (err) {
-    console.error("Error building overview report:", err);
-    res.status(500).json({ message: "Error building overview report" });
+    console.error('Error building overview report:', err);
+    res.status(500).json({ message: 'Error building overview report' });
   }
 };
 
-export const incidentsByProgram = async (_req: AuthRequest, res: Response) => {
+// GET /reports/incidents/by-program
+exports.incidentsByProgram = async (req, res) => {
   try {
     const incidentForm = await prisma.form.findUnique({
-      where: { slug: "incident_report" },
+      where: { slug: 'incident_report' },
       select: { id: true },
     });
 
     if (!incidentForm) return res.json({ series: [] });
 
+    // Pull incidents and aggregate by program from data.program
     const incidents = await prisma.formSubmission.findMany({
       where: { formId: incidentForm.id },
       select: { data: true },
     });
 
-    const counts: Record<string, number> = {};
+    const counts = {};
 
     incidents.forEach((sub) => {
-      const data = sub.data as Record<string, any>;
-      const program = data.program || "unknown";
+      const program = sub.data.program || 'unknown';
       counts[program] = (counts[program] || 0) + 1;
     });
 
@@ -97,19 +99,20 @@ export const incidentsByProgram = async (_req: AuthRequest, res: Response) => {
 
     res.json({ series });
   } catch (err) {
-    console.error("Error building incidents by program:", err);
-    res.status(500).json({ message: "Error building program report" });
+    console.error('Error building incidents by program:', err);
+    res.status(500).json({ message: 'Error building program report' });
   }
 };
 
-export const incidentsTimeSeries = async (req: AuthRequest, res: Response) => {
+// GET /reports/incidents/time-series?days=30
+exports.incidentsTimeSeries = async (req, res) => {
   try {
-    const days = parseInt((req.query.days as string) || "30", 10);
+    const days = parseInt(req.query.days || '30', 10);
     const since = new Date();
     since.setDate(since.getDate() - days);
 
     const incidentForm = await prisma.form.findUnique({
-      where: { slug: "incident_report" },
+      where: { slug: 'incident_report' },
       select: { id: true },
     });
 
@@ -123,12 +126,12 @@ export const incidentsTimeSeries = async (req: AuthRequest, res: Response) => {
       select: {
         createdAt: true,
       },
-      orderBy: { createdAt: "asc" },
+      orderBy: { createdAt: 'asc' },
     });
 
-    const byDay: Record<string, number> = {};
+    const byDay = {};
     incidents.forEach((sub) => {
-      const d = sub.createdAt.toISOString().slice(0, 10);
+      const d = sub.createdAt.toISOString().slice(0, 10); // YYYY-MM-DD
       byDay[d] = (byDay[d] || 0) + 1;
     });
 
@@ -136,7 +139,7 @@ export const incidentsTimeSeries = async (req: AuthRequest, res: Response) => {
 
     res.json({ since: since.toISOString(), points });
   } catch (err) {
-    console.error("Error building time-series report:", err);
-    res.status(500).json({ message: "Error building time-series report" });
+    console.error('Error building time-series report:', err);
+    res.status(500).json({ message: 'Error building time-series report' });
   }
 };
