@@ -16,4 +16,32 @@ router.get("/", requireAuth(["admin", "program_staff"]), async (_req, res) => {
   }
 });
 
+router.post("/", requireAuth(["admin"]), async (req, res) => {
+  try {
+    const { name, code, description, location, status } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: "Program name is required" });
+    }
+
+    const program = await prisma.program.create({
+      data: {
+        name,
+        code: code || null,
+        description: description || null,
+        location: location || null,
+        status: status || "active",
+      },
+    });
+
+    return res.status(201).json(program);
+  } catch (err: any) {
+    console.error("Error creating program", err);
+    if (err.code === "P2002") {
+      return res.status(409).json({ error: "Program code already in use" });
+    }
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;
