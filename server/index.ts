@@ -601,6 +601,54 @@ app.get(
 );
 
 app.post(
+  "/api/clients/:clientId/appointments/:apptId/remind",
+  authRequired,
+  requireRole(ROLES.EXEC, ROLES.CASE_MANAGER, ROLES.ADMIN),
+  async (req, res) => {
+    const { clientId, apptId } = req.params;
+
+    const client = await db.get<{ id: string; full_name: string; phone: string }>(
+      "SELECT id, full_name, phone FROM clients WHERE id = ?",
+      clientId
+    );
+    if (!client) {
+      return res.status(404).json({ error: "Client not found" });
+    }
+
+    const appt = await db.get<{ id: string; start_time: string; location: string; program: string }>(
+      `SELECT id, start_time, location, program FROM appointments WHERE id = ? AND client_id = ?`,
+      apptId, clientId
+    );
+    if (!appt) {
+      return res.status(404).json({ error: "Appointment not found" });
+    }
+
+    const to = client.phone;
+    if (!to) {
+      return res.status(400).json({ error: "No phone number on file for client" });
+    }
+
+    const when = new Date(appt.start_time).toLocaleString("en-US", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+
+    const body =
+      `Reminder: You have an upcoming IFCDC appointment on ${when}. ` +
+      `If you have questions, please contact us. Reply STOP to opt out.`;
+
+    try {
+      await sendReminderSms(to, body);
+      await logAudit(req, "APPOINTMENT", appt.id, "SEND_APPT_REMINDER", { clientId, phone: to });
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("Twilio error:", err);
+      res.status(500).json({ error: "Failed to send reminder" });
+    }
+  }
+);
+
+app.post(
   "/api/clients/:id/notify",
   authRequired,
   requireRole(ROLES.EXEC, ROLES.CASE_MANAGER, ROLES.ADMIN),
