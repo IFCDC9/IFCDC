@@ -198,6 +198,33 @@ async function initDb() {
     );
   `);
 
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS programs (
+      id TEXT PRIMARY KEY,
+      code TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      description TEXT
+    );
+  `);
+
+  // Seed basic IFCDC programs if table is empty
+  const progCount = await db.get<{ count: number }>("SELECT COUNT(*) as count FROM programs");
+  if (!progCount || progCount.count === 0) {
+    const seedPrograms = [
+      { code: "MENTAL_HEALTH", name: "Mental Health Services" },
+      { code: "HOUSING", name: "Transitional Housing" },
+      { code: "ANTI_GANG", name: "Anti-Gang Intervention" },
+      { code: "ECON_DEV", name: "Economic Development & Jobs" },
+    ];
+    for (const p of seedPrograms) {
+      await db.run(
+        `INSERT INTO programs (id, code, name, description) VALUES (?, ?, ?, ?)`,
+        cryptoRandomId(), p.code, p.name, ""
+      );
+    }
+    console.log("Seeded", seedPrograms.length, "IFCDC programs.");
+  }
+
   const execUser = await db.get<User>("SELECT * FROM users WHERE role = ? LIMIT 1", ROLES.EXEC);
 
   if (!execUser) {
