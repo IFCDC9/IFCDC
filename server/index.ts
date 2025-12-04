@@ -41,6 +41,11 @@ app.get("/contact", (req, res) => {
   res.sendFile(path.join(publicDir, "contact.html"));
 });
 
+// ROI Form (printable)
+app.get("/roi-form", (req, res) => {
+  res.sendFile(path.join(publicDir, "roi-form.html"));
+});
+
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",

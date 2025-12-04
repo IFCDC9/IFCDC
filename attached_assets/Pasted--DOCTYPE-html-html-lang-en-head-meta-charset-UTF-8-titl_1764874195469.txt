@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>IFCDC Release of Information (ROI)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="ifcdc-body">
+  <main class="ifcdc-main">
+    <section class="ifcdc-section">
+      <h1>Release of Information (ROI) Authorization</h1>
+      <p>
+        Use this form to authorize Imperial Foundation Community Development Center (IFCDC) to
+        release, receive, or exchange your information.
+      </p>
+
+      <p><strong>Client Name:</strong> ________________________________</p>
+      <p><strong>Date of Birth:</strong> ________________________________</p>
+      <p><strong>Address:</strong> ____________________________________________</p>
+
+      <p>
+        I authorize <strong>IFCDC – Imperial Foundation Community Development Center</strong> to:
+      </p>
+      <p>
+        ☐ Release Information &nbsp;&nbsp; ☐ Receive Information &nbsp;&nbsp; ☐ Exchange Information
+      </p>
+
+      <p><strong>To/From:</strong> ____________________________________________</p>
+      <p><strong>Purpose:</strong> ____________________________________________</p>
+
+      <p><strong>Information to be shared (check all that apply):</strong></p>
+      <p>☐ Mental health records</p>
+      <p>☐ Medical information</p>
+      <p>☐ Assessments / evaluations</p>
+      <p>☐ Progress notes summary</p>
+      <p>☐ Case management notes</p>
+      <p>☐ Other: _____________________________</p>
+
+      <p><strong>Expiration Date:</strong> ________________________________</p>
+
+      <p style="margin-top:1rem;">
+        I understand that I may revoke this authorization in writing at any time, except to the extent that
+        action has already been taken based on this authorization.
+      </p>
+
+      <p><strong>Client/Guardian Signature:</strong> ____________________ Date: __________</p>
+      <p><strong>Witness/Staff:</strong> ____________________ Date: __________</p>
+
+      <h2>Executive Director Approval</h2>
+      <p>
+        This authorization is not valid without approval from:
+        <strong>Mr. Fahreal Allah – Owner &amp; Executive Director</strong>.
+      </p>
+      <p><strong>Executive Director Signature:</strong> ____________________ Date: __________</p>
+
+      <p style="margin-top:1.5rem; font-size:0.9rem; opacity:0.9;">
+        To submit this form, please print, complete, and return it to IFCDC at 1215 Springwood Ave
+        Suite 28, Asbury Park, NJ 07712, or contact us at (732) 743-5048 / service@ifcdc.org.
+      </p>
+    </section>
+  </main>
+
+  <script>
+    // Users can use browser "Print" and save as PDF
+    window.onafterprint = () => {};
+  </script>
+</body>
+</html>
