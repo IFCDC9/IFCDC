@@ -558,6 +558,147 @@ app.get("/api/clients/:id/encounters", authRequired, requireRole(ROLES.EXEC, ROL
   })));
 });
 
+// ----- Goals (per client, per program) -----
+
+// List goals for a client
+app.get("/api/clients/:id/goals", authRequired, requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER), async (req, res) => {
+  const clientId = req.params.id;
+  const client = await db.get<{ id: string }>("SELECT id FROM clients WHERE id = ?", clientId);
+  if (!client) {
+    return res.status(404).json({ error: "Client not found" });
+  }
+  if (!(await hasClientAccess(req.user, client.id))) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
+  const rows = await db.all<any[]>(
+    `SELECT id, program, title, status, notes, target_date, created_by, created_at, completed_at
+     FROM goals WHERE client_id = ? ORDER BY status ASC, created_at DESC`,
+    clientId
+  );
+
+  await logAudit(req, "GOAL", null, "LIST_GOALS", { clientId, count: rows.length });
+
+  res.json(rows.map((g) => ({
+    id: g.id,
+    clientId,
+    program: g.program,
+    title: g.title,
+    status: g.status,
+    notes: g.notes,
+    targetDate: g.target_date,
+    createdBy: g.created_by,
+    createdAt: g.created_at,
+    completedAt: g.completed_at,
+  })));
+});
+
+// Create a goal for a client
+app.post("/api/clients/:id/goals", authRequired, requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER), async (req, res) => {
+  const clientId = req.params.id;
+  const { program, title, notes, targetDate } = req.body || {};
+
+  const client = await db.get<{ id: string }>("SELECT id FROM clients WHERE id = ?", clientId);
+  if (!client) {
+    return res.status(404).json({ error: "Client not found" });
+  }
+  if (!(await hasClientAccess(req.user, client.id))) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
+  if (!program || !title) {
+    return res.status(400).json({ error: "program and title are required" });
+  }
+
+  const id = cryptoRandomId();
+  const created_at = new Date().toISOString();
+
+  await db.run(
+    `INSERT INTO goals (id, client_id, program, title, status, notes, target_date, created_by, created_at, completed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+    id, clientId, program, title, "ACTIVE", notes || "", targetDate || null, req.user!.id, created_at
+  );
+
+  await logAudit(req, "GOAL", id, "CREATE_GOAL", { clientId, program });
+
+  res.status(201).json({
+    id,
+    clientId,
+    program,
+    title,
+    status: "ACTIVE",
+    notes: notes || "",
+    targetDate: targetDate || null,
+    createdBy: req.user!.id,
+    createdAt: created_at,
+    completedAt: null,
+  });
+});
+
+// Update goal status / notes
+app.patch("/api/clients/:clientId/goals/:goalId", authRequired, requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER), async (req, res) => {
+  const { clientId, goalId } = req.params;
+  const { status, title, notes, targetDate } = req.body || {};
+
+  const client = await db.get<{ id: string }>("SELECT id FROM clients WHERE id = ?", clientId);
+  if (!client) {
+    return res.status(404).json({ error: "Client not found" });
+  }
+  if (!(await hasClientAccess(req.user, client.id))) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
+  const goal = await db.get<{ id: string; status: string; completed_at: string | null }>(
+    "SELECT id, status, completed_at FROM goals WHERE id = ? AND client_id = ?",
+    goalId, clientId
+  );
+  if (!goal) {
+    return res.status(404).json({ error: "Goal not found" });
+  }
+
+  const newStatus = status || goal.status;
+  const allowedStatuses = ["ACTIVE", "COMPLETED", "ON_HOLD"];
+  if (status && !allowedStatuses.includes(status)) {
+    return res.status(400).json({ error: "Invalid status" });
+  }
+
+  const completed_at = newStatus === "COMPLETED" && goal.status !== "COMPLETED"
+    ? new Date().toISOString()
+    : goal.completed_at || null;
+
+  await db.run(
+    `UPDATE goals
+     SET status = COALESCE(?, status),
+         title = COALESCE(?, title),
+         notes = COALESCE(?, notes),
+         target_date = COALESCE(?, target_date),
+         completed_at = ?
+     WHERE id = ? AND client_id = ?`,
+    newStatus, title || null, notes || null, targetDate || null, completed_at, goalId, clientId
+  );
+
+  await logAudit(req, "GOAL", goalId, "UPDATE_GOAL", { clientId, status: newStatus });
+
+  const updated = await db.get<any>(
+    `SELECT id, program, title, status, notes, target_date, created_by, created_at, completed_at
+     FROM goals WHERE id = ?`,
+    goalId
+  );
+
+  res.json({
+    id: updated.id,
+    clientId,
+    program: updated.program,
+    title: updated.title,
+    status: updated.status,
+    notes: updated.notes,
+    targetDate: updated.target_date,
+    createdBy: updated.created_by,
+    createdAt: updated.created_at,
+    completedAt: updated.completed_at,
+  });
+});
+
 // ----- Assessments (structured intake / risk) -----
 app.post(
   "/api/clients/:id/assessments",
