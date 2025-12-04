@@ -400,23 +400,25 @@ const AdminTimeOverviewPage: React.FC = () => {
       <section style={{ marginBottom: "2rem" }}>
         <h2>Funding Source Summary – Hours & Cost by Grant</h2>
         {fundingSummaries.length === 0 ? (
-          <p>No funding-source-linked hours in this window.</p>
+          <p>No funding-linked hours in this window.</p>
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
                 <th align="left">Funding Source</th>
+                <th align="left">Code</th>
                 <th align="left">Total Hours</th>
                 <th align="left">Total Cost</th>
               </tr>
             </thead>
             <tbody>
-              {fundingSummaries.map(fs => (
-                <tr key={fs.fundingSourceId}>
-                  <td>{fs.name}</td>
-                  <td>{fs.totalHours.toFixed(2)}</td>
+              {fundingSummaries.map(f => (
+                <tr key={f.fundingSourceId}>
+                  <td>{f.name}</td>
+                  <td>{f.code || "-"}</td>
+                  <td>{f.totalHours.toFixed(2)}</td>
                   <td>
-                    ${fs.totalCost.toFixed(2)} {fs.currency}
+                    ${f.totalCost.toFixed(2)} {f.currency}
                   </td>
                 </tr>
               ))}
