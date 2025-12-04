@@ -2,6 +2,12 @@ import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
+type FundingSource = {
+  id: string;
+  name: string;
+  code?: string | null;
+};
+
 type Program = {
   id: string;
   name: string;
@@ -9,11 +15,14 @@ type Program = {
   description?: string | null;
   location?: string | null;
   status: string;
+  fundingSourceId?: string | null;
+  fundingSource?: FundingSource | null;
 };
 
 const ProgramsDashboard: React.FC = () => {
   const { user } = useAuth();
   const [programs, setPrograms] = useState<Program[]>([]);
+  const [fundingSources, setFundingSources] = useState<FundingSource[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [newProgram, setNewProgram] = useState({
@@ -41,8 +50,22 @@ const ProgramsDashboard: React.FC = () => {
     }
   };
 
+  const fetchFundingSources = async () => {
+    const res = await fetch("/api/funding-sources", {
+      headers: {
+        Authorization: token ? `Bearer ${token}` : "",
+      },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setFundingSources(data);
+    }
+  };
+
   useEffect(() => {
     fetchPrograms();
+    fetchFundingSources();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -68,6 +91,23 @@ const ProgramsDashboard: React.FC = () => {
       fetchPrograms();
     } else {
       alert("Error creating program");
+    }
+  };
+
+  const handleFundingSourceChange = async (programId: string, fundingSourceId: string | null) => {
+    const res = await fetch(`/api/programs/${programId}/funding-source`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: token ? `Bearer ${token}` : "",
+      },
+      body: JSON.stringify({ fundingSourceId }),
+    });
+
+    if (res.ok) {
+      fetchPrograms();
+    } else {
+      alert("Error updating funding source");
     }
   };
 
@@ -132,6 +172,23 @@ const ProgramsDashboard: React.FC = () => {
                 {p.location && <div>Location: {p.location}</div>}
                 {p.description && <div>{p.description}</div>}
                 <div>Status: {p.status}</div>
+                {isAdmin && (
+                  <div style={{ marginTop: "0.5rem" }}>
+                    <label>Funding Source: </label>
+                    <select
+                      value={p.fundingSourceId || ""}
+                      onChange={e => handleFundingSourceChange(p.id, e.target.value || null)}
+                      data-testid={`select-funding-${p.id}`}
+                    >
+                      <option value="">-- None --</option>
+                      {fundingSources.map(fs => (
+                        <option key={fs.id} value={fs.id}>
+                          {fs.name} {fs.code ? `(${fs.code})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <Link to={`/programs/${p.id}`} data-testid={`link-program-${p.id}`}>View Details</Link>
               </li>
             ))}
