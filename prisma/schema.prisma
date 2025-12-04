@@ -120,3 +120,63 @@ model Employee {
 
   @@map("employees")
 }
+
+model Program {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
+  code        String?  @unique
+  description String?
+  location    String?
+  status      String   @default("active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  sessions    ProgramSession[]
+  enrollments ProgramEnrollment[]
+
+  @@map("programs")
+}
+
+model Participant {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  firstName String   @map("first_name")
+  lastName  String   @map("last_name")
+  dob       DateTime? @db.Date
+  email     String?  @unique
+  phone     String?
+  address   String?
+  notes     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  enrollments ProgramEnrollment[]
+
+  @@map("participants")
+}
+
+model ProgramEnrollment {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  programId     String   @map("program_id") @db.Uuid
+  participantId String   @map("participant_id") @db.Uuid
+  startDate     DateTime? @map("start_date") @db.Date
+  endDate       DateTime? @map("end_date") @db.Date
+  status        String   @default("active")
+
+  program     Program     @relation(fields: [programId], references: [id], onDelete: Cascade)
+  participant Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@map("program_enrollments")
+}
+
+model ProgramSession {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  programId   String   @map("program_id") @db.Uuid
+  title       String
+  date        DateTime
+  durationMin Int?     @map("duration_min")
+  notes       String?
+
+  program Program @relation(fields: [programId], references: [id], onDelete: Cascade)
+
+  @@map("program_sessions")
+}
