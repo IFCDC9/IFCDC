@@ -1,24 +1,96 @@
 import React from "react";
-import { useAuth } from "../auth/AuthContext";
 
 const AdminDashboard: React.FC = () => {
-  const { user } = useAuth();
-
   return (
-    <div style={{ padding: "1.5rem" }}>
-      <h1>IFCDC Admin Dashboard</h1>
-      <p>Welcome, {user?.employee?.firstName || user?.email}</p>
+    <div data-testid="admin-dashboard">
+      <h1>Admin Overview</h1>
+      <p style={{ color: "#4B5563", marginBottom: "1rem" }}>
+        Central visibility into IFCDC HR, Programs, Payroll, and Grants.
+      </p>
 
-      <ul>
-        <li><a href="/admin/hr">HR – Staff Onboarding</a></li>
-        <li><a href="/admin/staff">View All Staff</a></li>
-        <li><a href="/admin/funding-sources">Funding Sources (Grants)</a></li>
-        <li><a href="/admin/grant-report">Grant Reports (Funding Sources)</a></li>
-        <li><a href="/admin/system">System Settings</a></li>
-        <li><a href="/programs">Programs</a></li>
-        <li><a href="/my-time">Log My Time</a></li>
-        <li><a href="/admin/time">Time Overview / Payroll</a></li>
-      </ul>
+      <div
+        style={{
+          display: "grid",
+          gap: "1rem",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+        }}
+      >
+        <a
+          href="/admin/hr"
+          style={{
+            background: "#FFFFFF",
+            borderRadius: "0.75rem",
+            padding: "1rem",
+            textDecoration: "none",
+            color: "#111827",
+            boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+          }}
+          data-testid="link-hr"
+        >
+          <h2 style={{ fontSize: "1rem", marginBottom: "0.25rem" }}>HR / Staff</h2>
+          <p style={{ fontSize: "0.85rem", color: "#6B7280" }}>
+            Onboard staff, manage roles, and maintain employee records.
+          </p>
+        </a>
+
+        <a
+          href="/programs"
+          style={{
+            background: "#FFFFFF",
+            borderRadius: "0.75rem",
+            padding: "1rem",
+            textDecoration: "none",
+            color: "#111827",
+            boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+          }}
+          data-testid="link-programs"
+        >
+          <h2 style={{ fontSize: "1rem", marginBottom: "0.25rem" }}>Programs</h2>
+          <p style={{ fontSize: "0.85rem", color: "#6B7280" }}>
+            Track enrollments, sessions, and impact across IFCDC programs.
+          </p>
+        </a>
+
+        <a
+          href="/admin/time"
+          style={{
+            background: "#FFFFFF",
+            borderRadius: "0.75rem",
+            padding: "1rem",
+            textDecoration: "none",
+            color: "#111827",
+            boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+          }}
+          data-testid="link-time-payroll"
+        >
+          <h2 style={{ fontSize: "1rem", marginBottom: "0.25rem" }}>
+            Time & Payroll
+          </h2>
+          <p style={{ fontSize: "0.85rem", color: "#6B7280" }}>
+            Review hours and costs by employee, program, and funding source.
+          </p>
+        </a>
+
+        <a
+          href="/admin/grant-report"
+          style={{
+            background: "#FFFFFF",
+            borderRadius: "0.75rem",
+            padding: "1rem",
+            textDecoration: "none",
+            color: "#111827",
+            boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+          }}
+          data-testid="link-grant-reports"
+        >
+          <h2 style={{ fontSize: "1rem", marginBottom: "0.25rem" }}>
+            Grant Reports
+          </h2>
+          <p style={{ fontSize: "0.85rem", color: "#6B7280" }}>
+            Generate agency-ready reports by funding source and reporting period.
+          </p>
+        </a>
+      </div>
     </div>
   );
 };
