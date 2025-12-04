@@ -16,6 +16,7 @@ import fundingSourcesRouter from "./fundingSources";
 import grantReportsRouter from "./grantReports";
 import barberRouter from "./barber";
 import radioRouter from "./radio";
+import healthSystemRouter from "./health-system.routes";
 
 export function registerRoutes(app: Express): void {
   app.use("/api/health", healthRoutes);
@@ -35,4 +36,5 @@ export function registerRoutes(app: Express): void {
   app.use("/api/reports", grantReportsRouter);
   app.use("/api/barber", barberRouter);
   app.use("/api/radio", radioRouter);
+  app.use("/api", healthSystemRouter);
 }

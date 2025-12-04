@@ -9,9 +9,11 @@ datasource db {
 
 model User {
   id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name         String?
   email        String    @unique
   passwordHash String    @map("password_hash")
   role         String
+  apiKey       String?   @unique @map("api_key")
   employeeId   String?   @unique @map("employee_id") @db.Uuid
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
@@ -20,6 +22,7 @@ model User {
   acknowledgements       PolicyAcknowledgement[]
   formSubmissions        FormSubmission[]
   assignedSubmissions    FormSubmission[]         @relation("SupervisorAssigned")
+  encounters             Encounter[]
 
   @@map("users")
 }
@@ -270,4 +273,50 @@ model TimeEntry {
   fundingSource FundingSource? @relation(fields: [fundingSourceId], references: [id], onDelete: SetNull)
 
   @@map("time_entries")
+}
+
+model Patient {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fullName    String   @map("full_name")
+  dateOfBirth DateTime? @map("date_of_birth") @db.Date
+  contactInfo Json?    @map("contact_info")
+  programs    String[] @default([])
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  encounters Encounter[]
+
+  @@map("patients")
+}
+
+model Encounter {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  patientId     String   @map("patient_id") @db.Uuid
+  program       String
+  type          String
+  summary       String?
+  note          String?
+  createdById   String   @map("created_by_id") @db.Uuid
+  createdByRole String   @map("created_by_role")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  createdBy User    @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@map("encounters")
+}
+
+model AuditLog {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  timestamp  DateTime @default(now())
+  userId     String?  @map("user_id") @db.Uuid
+  userRole   String?  @map("user_role")
+  method     String
+  path       String
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id")
+  action     String
+  extra      Json?
+
+  @@map("audit_logs")
 }

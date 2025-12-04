@@ -114,6 +114,19 @@ Preferred communication style: Simple, everyday language.
 - `GET /acknowledgements/chapter/:chapterId` - Get chapter's acknowledgements
 - `POST /acknowledgements` - Create acknowledgement
 
+#### Health System API (x-api-key auth)
+- `POST /api/users` - Create staff user with role (EXEC only)
+- `GET /api/users` - List all users (EXEC only)
+- `POST /api/patients` - Create patient/client (EXEC, CLINICIAN, CASE_MANAGER)
+- `GET /api/patients` - List all patients (EXEC, CLINICIAN, CASE_MANAGER)
+- `GET /api/patients/:id` - Get patient by ID (EXEC, CLINICIAN, CASE_MANAGER)
+- `POST /api/patients/:id/encounters` - Add encounter/visit (EXEC, CLINICIAN, CASE_MANAGER, CHW)
+- `GET /api/patients/:id/encounters` - Get patient encounters (EXEC, CLINICIAN, CASE_MANAGER)
+- `GET /api/audit-logs` - View audit logs (EXEC only)
+- `POST /api/generate-exec-key` - Generate API key for EXEC user (requires ADMIN_SECRET env var)
+
+**Staff Roles**: EXEC, CLINICIAN, CASE_MANAGER, CHW, ADMIN
+
 #### Bookings (Barbershop)
 - `GET /api/bookings` - List all barbershop bookings
 - `POST /api/bookings` - Create a new booking

@@ -1,0 +1,305 @@
+// server.js
+import express from "express";
+import path from "path";
+import { fileURLToPath } from "url";
+import crypto from "crypto";
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// --- File path setup (for Replit ES modules) ---
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// --- Core middleware ---
+app.use(express.json());
+app.use(express.static(path.join(__dirname, "public"))); // serves your HTML/CSS
+
+// --- Role model ---
+const ROLES = {
+  EXEC: "EXEC",
+  CLINICIAN: "CLINICIAN",
+  CASE_MANAGER: "CASE_MANAGER",
+  CHW: "CHW",
+  ADMIN: "ADMIN",
+};
+
+// --- In-memory stores (MVP; swap to DB later) ---
+const users = [];
+const clients = [];
+const encounters = [];
+const auditLogs = [];
+
+// --- Seed your Executive Director account ---
+const EXEC_API_KEY = crypto.randomBytes(24).toString("hex");
+
+users.push({
+  id: "u_exec_1",
+  name: "Mr. Fahreal Allah",
+  role: ROLES.EXEC,
+  apiKey: EXEC_API_KEY,
+});
+
+// Log the key once on boot so you can copy it from Replit console
+console.log("========================================");
+console.log("IFCDC EXEC API KEY (use in x-api-key):");
+console.log(EXEC_API_KEY);
+console.log("========================================");
+
+// --- Auth middleware using x-api-key ---
+function auth(req, res, next) {
+  const apiKey = req.header("x-api-key");
+  if (!apiKey) {
+    return res.status(401).json({ error: "Missing API key" });
+  }
+  const user = users.find((u) => u.apiKey === apiKey);
+  if (!user) {
+    return res.status(401).json({ error: "Invalid API key" });
+  }
+  req.user = user;
+  next();
+}
+
+// --- Role-based access middleware ---
+function requireRole(...allowedRoles) {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Unauthenticated" });
+    }
+    if (!allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    next();
+  };
+}
+
+// --- Audit log helper ---
+function logAudit(req, entityType, entityId, action, extra = {}) {
+  auditLogs.push({
+    id: crypto.randomUUID(),
+    timestamp: new Date().toISOString(),
+    userId: req.user?.id || null,
+    userRole: req.user?.role || null,
+    method: req.method,
+    path: req.originalUrl,
+    entityType,
+    entityId,
+    action,
+    extra,
+  });
+}
+
+// ---------- PUBLIC PAGES (FRONT-END) ----------
+
+// Home route -> public/index.html
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+// Mental Health page
+app.get("/mental-health", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "mental-health.html"));
+});
+
+// Records & Privacy page
+app.get("/records-policy", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "records-policy.html"));
+});
+
+// ROI form page (printable)
+app.get("/roi", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "roi.html"));
+});
+
+// ---------- API: USERS (EXEC ONLY) ----------
+
+// Create a new staff user with a role and an API key
+app.post("/api/users", auth, requireRole(ROLES.EXEC), (req, res) => {
+  const { name, role } = req.body;
+
+  if (!name || !role) {
+    return res.status(400).json({ error: "name and role are required" });
+  }
+  if (!Object.values(ROLES).includes(role)) {
+    return res.status(400).json({ error: "Invalid role" });
+  }
+
+  const apiKey = crypto.randomBytes(24).toString("hex");
+  const user = {
+    id: crypto.randomUUID(),
+    name,
+    role,
+    apiKey,
+  };
+  users.push(user);
+
+  logAudit(req, "USER", user.id, "CREATE_USER", { createdRole: role });
+
+  // Return API key once (you’ll store it securely per staff)
+  res.status(201).json({
+    id: user.id,
+    name: user.name,
+    role: user.role,
+    apiKey,
+  });
+});
+
+// List users (for oversight)
+app.get("/api/users", auth, requireRole(ROLES.EXEC), (req, res) => {
+  const sanitized = users.map((u) => ({
+    id: u.id,
+    name: u.name,
+    role: u.role,
+  }));
+  logAudit(req, "USER", null, "LIST_USERS");
+  res.json(sanitized);
+});
+
+// ---------- API: CLIENTS / PATIENTS ----------
+
+// Create a client/patient
+app.post(
+  "/api/clients",
+  auth,
+  requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
+  (req, res) => {
+    const { fullName, dateOfBirth, contactInfo, programs } = req.body;
+
+    if (!fullName) {
+      return res.status(400).json({ error: "fullName is required" });
+    }
+
+    const client = {
+      id: crypto.randomUUID(),
+      fullName,
+      dateOfBirth: dateOfBirth || null,
+      contactInfo: contactInfo || {},
+      programs: Array.isArray(programs) ? programs : [],
+      createdAt: new Date().toISOString(),
+    };
+
+    clients.push(client);
+    logAudit(req, "CLIENT", client.id, "CREATE_CLIENT");
+
+    res.status(201).json(client);
+  }
+);
+
+// Get client by id
+app.get(
+  "/api/clients/:id",
+  auth,
+  requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
+  (req, res) => {
+    const client = clients.find((c) => c.id === req.params.id);
+    if (!client) {
+      return res.status(404).json({ error: "Client not found" });
+    }
+    logAudit(req, "CLIENT", client.id, "VIEW_CLIENT");
+    res.json(client);
+  }
+);
+
+// List clients (lightweight directory)
+app.get(
+  "/api/clients",
+  auth,
+  requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
+  (req, res) => {
+    const list = clients.map((c) => ({
+      id: c.id,
+      fullName: c.fullName,
+      dateOfBirth: c.dateOfBirth,
+      programs: c.programs,
+      createdAt: c.createdAt,
+    }));
+    logAudit(req, "CLIENT", null, "LIST_CLIENTS");
+    res.json(list);
+  }
+);
+
+// ---------- API: ENCOUNTERS / VISITS ----------
+
+// Add an encounter/visit for a client
+app.post(
+  "/api/clients/:id/encounters",
+  auth,
+  requireRole(
+    ROLES.EXEC,
+    ROLES.CLINICIAN,
+    ROLES.CASE_MANAGER,
+    ROLES.CHW
+  ),
+  (req, res) => {
+    const client = clients.find((c) => c.id === req.params.id);
+    if (!client) {
+      return res.status(404).json({ error: "Client not found" });
+    }
+
+    const { program, type, summary, note } = req.body;
+
+    if (!program || !type) {
+      return res
+        .status(400)
+        .json({ error: "program and type are required (e.g. 'MentalHealth', 'Screening')" });
+    }
+
+    const encounter = {
+      id: crypto.randomUUID(),
+      clientId: client.id,
+      program,
+      type,
+      summary: summary || "",
+      note: note || "",
+      createdBy: req.user.id,
+      createdByRole: req.user.role,
+      createdAt: new Date().toISOString(),
+    };
+
+    encounters.push(encounter);
+    logAudit(req, "ENCOUNTER", encounter.id, "CREATE_ENCOUNTER", {
+      clientId: client.id,
+      program,
+      type,
+    });
+
+    res.status(201).json(encounter);
+  }
+);
+
+// Get all encounters for a client
+app.get(
+  "/api/clients/:id/encounters",
+  auth,
+  requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
+  (req, res) => {
+    const client = clients.find((c) => c.id === req.params.id);
+    if (!client) {
+      return res.status(404).json({ error: "Client not found" });
+    }
+
+    const clientEncounters = encounters.filter(
+      (e) => e.clientId === client.id
+    );
+
+    logAudit(req, "ENCOUNTER", null, "LIST_ENCOUNTERS", {
+      clientId: client.id,
+      count: clientEncounters.length,
+    });
+
+    res.json(clientEncounters);
+  }
+);
+
+// ---------- API: AUDIT LOGS (EXEC ONLY) ----------
+
+app.get("/api/audit-logs", auth, requireRole(ROLES.EXEC), (req, res) => {
+  // You can add filters (by user, client, date) later
+  res.json(auditLogs.slice(-500)); // last 500 entries as a safety cap
+});
+
+// ---------- Start server ----------
+
+app.listen(PORT, () => {
+  console.log(`IFCDC Health System API live on port ${PORT}`);
+});
