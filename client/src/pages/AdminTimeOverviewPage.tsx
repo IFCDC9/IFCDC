@@ -49,9 +49,10 @@ type ProgramSummary = {
   currency: string;
 };
 
-type FundingSourceSummary = {
+type FundingSummary = {
   fundingSourceId: string;
   name: string;
+  code?: string | null;
   totalHours: number;
   totalCost: number;
   currency: string;
@@ -206,26 +207,32 @@ const AdminTimeOverviewPage: React.FC = () => {
     );
   }, [filteredEntries]);
 
-  const fundingSourceSummaries: FundingSourceSummary[] = useMemo(() => {
-    const map = new Map<string, FundingSourceSummary>();
+  const fundingSummaries = useMemo(() => {
+    const map = new Map<
+      string,
+      { fundingSourceId: string; name: string; code?: string | null; totalHours: number; totalCost: number; currency: string }
+    >();
 
     for (const e of filteredEntries) {
-      if (!e.fundingSource) continue;
+      const fs = e.fundingSource;
+      if (!fs) continue;
+
       const emp = e.employee;
       const payRate = emp.payRate ?? null;
-      const fundingSourceId = e.fundingSource.id;
+      const id = fs.id;
 
-      if (!map.has(fundingSourceId)) {
-        map.set(fundingSourceId, {
-          fundingSourceId,
-          name: e.fundingSource.name,
+      if (!map.has(id)) {
+        map.set(id, {
+          fundingSourceId: id,
+          name: fs.name,
+          code: fs.code ?? null,
           totalHours: 0,
           totalCost: 0,
           currency: emp.payCurrency ?? "USD",
         });
       }
 
-      const current = map.get(fundingSourceId)!;
+      const current = map.get(id)!;
       current.totalHours += e.hours;
 
       if (typeof payRate === "number") {
@@ -392,7 +399,7 @@ const AdminTimeOverviewPage: React.FC = () => {
 
       <section style={{ marginBottom: "2rem" }}>
         <h2>Funding Source Summary – Hours & Cost by Grant</h2>
-        {fundingSourceSummaries.length === 0 ? (
+        {fundingSummaries.length === 0 ? (
           <p>No funding-source-linked hours in this window.</p>
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -404,7 +411,7 @@ const AdminTimeOverviewPage: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {fundingSourceSummaries.map(fs => (
+              {fundingSummaries.map(fs => (
                 <tr key={fs.fundingSourceId}>
                   <td>{fs.name}</td>
                   <td>{fs.totalHours.toFixed(2)}</td>
