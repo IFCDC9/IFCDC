@@ -45,6 +45,9 @@ router.post("/employees", async (req, res) => {
       startDate,
       status,
       notes,
+      payRate,
+      payCurrency,
+      payType,
     } = req.body;
 
     if (!firstName || !lastName || !email || !role) {
@@ -62,6 +65,9 @@ router.post("/employees", async (req, res) => {
         startDate: startDate ? new Date(startDate) : null,
         status: status || "onboarding",
         notes: notes || null,
+        payRate: payRate ? Number(payRate) : null,
+        payCurrency: payCurrency || "USD",
+        payType: payType || "hourly",
       },
     });
 
@@ -91,6 +97,9 @@ router.patch("/employees/:id", async (req, res) => {
         ...(body.startDate !== undefined && { startDate: body.startDate ? new Date(body.startDate) : null }),
         ...(body.status && { status: body.status }),
         ...(body.notes !== undefined && { notes: body.notes }),
+        ...(body.payRate !== undefined && { payRate: body.payRate ? Number(body.payRate) : null }),
+        ...(body.payCurrency !== undefined && { payCurrency: body.payCurrency }),
+        ...(body.payType !== undefined && { payType: body.payType }),
       },
     });
 
