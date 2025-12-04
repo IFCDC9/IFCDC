@@ -109,4 +109,32 @@ router.get("/:programId/participants", requireAuth(["admin", "program_staff"]), 
   }
 });
 
+router.get("/:programId", requireAuth(["admin", "program_staff"]), async (req, res) => {
+  try {
+    const { programId } = req.params;
+
+    const program = await prisma.program.findUnique({
+      where: { id: programId },
+      include: {
+        enrollments: {
+          where: { status: "active" },
+          include: { participant: true },
+        },
+        sessions: {
+          orderBy: { date: "desc" },
+        },
+      },
+    });
+
+    if (!program) {
+      return res.status(404).json({ error: "Program not found" });
+    }
+
+    return res.json(program);
+  } catch (err) {
+    console.error("Error fetching program detail", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;
