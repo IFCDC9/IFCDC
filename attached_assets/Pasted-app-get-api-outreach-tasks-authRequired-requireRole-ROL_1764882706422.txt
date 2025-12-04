@@ -1,0 +1,69 @@
+app.get(
+  "/api/outreach-tasks",
+  authRequired,
+  requireRole(ROLES.EXEC, ROLES.CASE_MANAGER, ROLES.CHW, ROLES.ADMIN),
+  async (req, res) => {
+    const status = req.query.status || "OPEN";
+    try {
+      let rows;
+      if (req.user.role === ROLES.EXEC || req.user.role === ROLES.ADMIN || req.user.role === ROLES.CHW) {
+        // Full view
+        rows = await db.all(
+          `
+          SELECT ot.id, ot.client_id, ot.phone, ot.channel, ot.reason,
+                 ot.status, ot.created_at, ot.completed_at,
+                 c.full_name as client_name
+          FROM outreach_tasks ot
+          LEFT JOIN clients c ON ot.client_id = c.id
+          WHERE ot.status = ?
+          ORDER BY ot.created_at DESC
+        `,
+          status
+        );
+      } else {
+        // CASE_MANAGER: only tasks for assigned clients or unknown client (client_id IS NULL)
+        rows = await db.all(
+          `
+          SELECT ot.id, ot.client_id, ot.phone, ot.channel, ot.reason,
+                 ot.status, ot.created_at, ot.completed_at,
+                 c.full_name as client_name
+          FROM outreach_tasks ot
+          LEFT JOIN clients c ON ot.client_id = c.id
+          WHERE ot.status = ?
+            AND (
+              ot.client_id IS NULL OR
+              ot.client_id IN (
+                SELECT client_id FROM client_assignments WHERE user_id = ?
+              )
+            )
+          ORDER BY ot.created_at DESC
+        `,
+          status,
+          req.user.id
+        );
+      }
+
+      await logAudit(req, "OUTREACH_TASK", null, "LIST_OUTREACH_TASKS", {
+        status,
+        count: rows.length,
+      });
+
+      const list = rows.map((t) => ({
+        id: t.id,
+        clientId: t.client_id,
+        clientName: t.client_name,
+        phone: t.phone,
+        channel: t.channel,
+        reason: t.reason,
+        status: t.status,
+        createdAt: t.created_at,
+        completedAt: t.completed_at,
+      }));
+
+      res.json(list);
+    } catch (err) {
+      console.error("Error listing outreach tasks:", err);
+      res.status(500).json({ error: "Failed to load outreach tasks" });
+    }
+  }
+);

@@ -884,16 +884,36 @@ app.get(
   async (req, res) => {
     const status = (req.query.status as string) || "OPEN";
     try {
-      const rows = await db.all<any[]>(
-        `SELECT ot.id, ot.client_id, ot.phone, ot.channel, ot.reason,
-                ot.status, ot.created_at, ot.completed_at,
-                c.full_name as client_name
-         FROM outreach_tasks ot
-         LEFT JOIN clients c ON ot.client_id = c.id
-         WHERE ot.status = ?
-         ORDER BY ot.created_at DESC`,
-        status
-      );
+      let rows;
+      if (req.user!.role === ROLES.EXEC || req.user!.role === ROLES.ADMIN || req.user!.role === ROLES.CHW) {
+        rows = await db.all<any[]>(
+          `SELECT ot.id, ot.client_id, ot.phone, ot.channel, ot.reason,
+                  ot.status, ot.created_at, ot.completed_at,
+                  c.full_name as client_name
+           FROM outreach_tasks ot
+           LEFT JOIN clients c ON ot.client_id = c.id
+           WHERE ot.status = ?
+           ORDER BY ot.created_at DESC`,
+          status
+        );
+      } else {
+        rows = await db.all<any[]>(
+          `SELECT ot.id, ot.client_id, ot.phone, ot.channel, ot.reason,
+                  ot.status, ot.created_at, ot.completed_at,
+                  c.full_name as client_name
+           FROM outreach_tasks ot
+           LEFT JOIN clients c ON ot.client_id = c.id
+           WHERE ot.status = ?
+             AND (
+               ot.client_id IS NULL OR
+               ot.client_id IN (
+                 SELECT client_id FROM client_assignments WHERE user_id = ?
+               )
+             )
+           ORDER BY ot.created_at DESC`,
+          status, req.user!.id
+        );
+      }
 
       await logAudit(req, "OUTREACH_TASK", null, "LIST_OUTREACH_TASKS", { status, count: rows.length });
 
