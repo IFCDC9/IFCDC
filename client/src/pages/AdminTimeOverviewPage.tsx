@@ -170,7 +170,6 @@ const AdminTimeOverviewPage: React.FC = () => {
               type="date"
               value={filterFrom}
               onChange={e => setFilterFrom(e.target.value)}
-              data-testid="input-filter-from"
             />
           </div>
           <div>
@@ -180,7 +179,6 @@ const AdminTimeOverviewPage: React.FC = () => {
               type="date"
               value={filterTo}
               onChange={e => setFilterTo(e.target.value)}
-              data-testid="input-filter-to"
             />
           </div>
           <div>
@@ -189,7 +187,6 @@ const AdminTimeOverviewPage: React.FC = () => {
             <select
               value={filterProgramId}
               onChange={e => setFilterProgramId(e.target.value)}
-              data-testid="select-filter-program"
             >
               <option value="">All Programs</option>
               {programs.map(p => (
@@ -199,15 +196,12 @@ const AdminTimeOverviewPage: React.FC = () => {
               ))}
             </select>
           </div>
-          <div style={{ display: "flex", alignItems: "flex-end" }}>
-            <button
-              onClick={handleDownloadCsv}
-              data-testid="button-download-csv"
-              style={{ padding: "0.5rem 1rem" }}
-            >
-              Download CSV
-            </button>
-          </div>
+        </div>
+
+        <div style={{ marginTop: "0.75rem" }}>
+          <button type="button" onClick={handleDownloadCsv}>
+            Download CSV for Accountant / Agency
+          </button>
         </div>
       </section>
 
