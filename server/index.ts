@@ -508,6 +508,42 @@ app.delete("/api/clients/:id/assignments/:assignmentId", authRequired, requireRo
   res.json({ message: "Assignment removed" });
 });
 
+app.post(
+  "/api/clients/:id/notify",
+  authRequired,
+  requireRole(ROLES.EXEC, ROLES.CASE_MANAGER, ROLES.ADMIN),
+  async (req, res) => {
+    const clientId = req.params.id;
+    const { message, phoneOverride } = req.body || {};
+
+    const client = await db.get<{ id: string; full_name: string; phone: string }>(
+      "SELECT id, full_name, phone FROM clients WHERE id = ?",
+      clientId
+    );
+    if (!client) {
+      return res.status(404).json({ error: "Client not found" });
+    }
+
+    const to = phoneOverride || client.phone;
+    if (!to) {
+      return res.status(400).json({ error: "No phone number available" });
+    }
+
+    const safeBody =
+      message ||
+      "You have an upcoming IFCDC appointment. If you have any questions, please call us. Reply STOP to opt out.";
+
+    try {
+      await sendReminderSms(to, safeBody);
+      await logAudit(req, "NOTIFICATION", clientId, "SEND_SMS", { to });
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("Twilio error:", err);
+      res.status(500).json({ error: "Failed to send SMS" });
+    }
+  }
+);
+
 app.get("/api/audit-logs", authRequired, requireRole(ROLES.EXEC), async (req, res) => {
   const logs = await db.all<any[]>("SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 500");
   res.json(logs.map((log) => ({
