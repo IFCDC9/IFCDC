@@ -10,12 +10,11 @@ router.post(
   requireAuth(["admin", "barber", "radio_host", "program_staff"]),
   async (req: AuthedRequest, res) => {
     try {
-      const { date, hours, programId, fundingSourceId, notes } = req.body;
+      const { date, hours, programId, notes, fundingSourceId } = req.body;
 
       if (!req.user) {
         return res.status(401).json({ error: "Not authenticated" });
       }
-
       if (!date || !hours) {
         return res.status(400).json({ error: "Date and hours are required" });
       }
@@ -31,11 +30,30 @@ router.post(
           .json({ error: "User is not linked to an employee record" });
       }
 
+      let resolvedFundingSourceId: string | null = null;
+
+      if (fundingSourceId) {
+        const fs = await prisma.fundingSource.findUnique({
+          where: { id: fundingSourceId },
+        });
+        if (!fs) {
+          return res.status(400).json({ error: "Invalid fundingSourceId" });
+        }
+        resolvedFundingSourceId = fs.id;
+      } else if (programId) {
+        const program = await prisma.program.findUnique({
+          where: { id: programId },
+        });
+        if (program?.fundingSourceId) {
+          resolvedFundingSourceId = program.fundingSourceId;
+        }
+      }
+
       const entry = await prisma.timeEntry.create({
         data: {
           employeeId: user.employee.id,
           programId: programId || null,
-          fundingSourceId: fundingSourceId || null,
+          fundingSourceId: resolvedFundingSourceId,
           date: new Date(date),
           hours: parseFloat(hours),
           notes: notes || null,

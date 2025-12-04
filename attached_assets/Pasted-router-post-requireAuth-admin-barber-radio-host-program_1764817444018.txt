@@ -1,0 +1,69 @@
+router.post(
+  "/",
+  requireAuth(["admin", "barber", "radio_host", "program_staff"]),
+  async (req: AuthedRequest, res) => {
+    try {
+      const { date, hours, programId, notes, fundingSourceId } = req.body;
+
+      if (!req.user) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+      if (!date || !hours) {
+        return res.status(400).json({ error: "Date and hours are required" });
+      }
+
+      // Who is logging?
+      const user = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        include: { employee: true },
+      });
+
+      if (!user || !user.employee) {
+        return res
+          .status(400)
+          .json({ error: "User is not linked to an employee record" });
+      }
+
+      let resolvedFundingSourceId: string | null = null;
+
+      if (fundingSourceId) {
+        // Explicit funding source passed in
+        const fs = await prisma.fundingSource.findUnique({
+          where: { id: fundingSourceId },
+        });
+        if (!fs) {
+          return res.status(400).json({ error: "Invalid fundingSourceId" });
+        }
+        resolvedFundingSourceId = fs.id;
+      } else if (programId) {
+        // Use program's default funding source if any
+        const program = await prisma.program.findUnique({
+          where: { id: programId },
+        });
+        if (program?.fundingSourceId) {
+          resolvedFundingSourceId = program.fundingSourceId;
+        }
+      }
+
+      const entry = await prisma.timeEntry.create({
+        data: {
+          employeeId: user.employee.id,
+          programId: programId || null,
+          fundingSourceId: resolvedFundingSourceId,
+          date: new Date(date),
+          hours: parseFloat(hours),
+          notes: notes || null,
+        },
+        include: {
+          program: true,
+          fundingSource: true,
+        },
+      });
+
+      return res.status(201).json(entry);
+    } catch (err) {
+      console.error("Error creating time entry", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
