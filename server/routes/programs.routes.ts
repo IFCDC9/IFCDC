@@ -91,4 +91,22 @@ router.post("/:programId/enroll", requireAuth(["admin", "program_staff"]), async
   }
 });
 
+router.get("/:programId/participants", requireAuth(["admin", "program_staff"]), async (req, res) => {
+  try {
+    const { programId } = req.params;
+
+    const enrollments = await prisma.programEnrollment.findMany({
+      where: { programId, status: "active" },
+      include: { participant: true },
+      orderBy: { startDate: "desc" },
+    });
+
+    const participants = enrollments.map(e => e.participant);
+    return res.json(participants);
+  } catch (err) {
+    console.error("Error fetching program participants", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;
