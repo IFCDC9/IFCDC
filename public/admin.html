@@ -526,21 +526,60 @@
         }
         listEl.innerHTML = "";
         if (!data.length) {
-          listEl.textContent = "No appointments yet.";
+          listEl.textContent = "No appointments scheduled.";
           return;
         }
         data.forEach((a) => {
           const div = document.createElement("div");
           div.className = "admin-list-item";
-          const startDate = new Date(a.startTime).toLocaleString();
+
+          const when = new Date(a.startTime).toLocaleString();
           div.innerHTML =
-            "<strong>" + a.program + "</strong><br/>" +
-            "<span style='opacity:0.85;'>" + startDate + "</span>" +
-            (a.location ? "<br/><span style='opacity:0.7;'>" + a.location + "</span>" : "") +
-            "<br/><button class='ifcdc-btn ifcdc-btn-outline' style='font-size:0.7rem; padding:0.2rem 0.4rem; margin-top:0.3rem;' onclick='sendApptReminder(\"" + a.id + "\")'>Send Reminder</button>";
+            "<strong>" +
+            a.program +
+            "</strong><br/>" +
+            "<span style='opacity:0.8;'>Starts: " +
+            when +
+            "</span><br/>" +
+            "<span style='opacity:0.7; font-size:0.78rem;'>Location: " +
+            (a.location || "N/A") +
+            "</span>";
+
+          const btn = document.createElement("button");
+          btn.textContent = "Send Reminder SMS";
+          btn.className = "ifcdc-btn ifcdc-btn-outline";
+          btn.style.marginTop = "0.25rem";
+          btn.onclick = async (ev) => {
+            ev.stopPropagation();
+            try {
+              const res2 = await fetch(
+                "/api/clients/" +
+                  a.clientId +
+                  "/appointments/" +
+                  a.id +
+                  "/remind",
+                {
+                  method: "POST",
+                  headers: getAuthHeaders(),
+                  body: JSON.stringify({}),
+                }
+              );
+              const d2 = await res2.json();
+              if (!res2.ok) {
+                alert(d2.error || "Failed to send reminder.");
+                return;
+              }
+              alert("Reminder sent.");
+            } catch (err) {
+              alert("Error sending reminder.");
+            }
+          };
+
+          div.appendChild(document.createElement("br"));
+          div.appendChild(btn);
           listEl.appendChild(div);
         });
-      } catch (e) {
+      } catch (err) {
         listEl.textContent = "Error loading appointments.";
       }
     }
@@ -551,18 +590,21 @@
         return;
       }
       const program = document.getElementById("appt-program").value.trim();
-      const startTime = document.getElementById("appt-start").value;
-      const endTime = document.getElementById("appt-end").value || null;
+      const start = document.getElementById("appt-start").value;
+      const end = document.getElementById("appt-end").value;
       const location = document.getElementById("appt-location").value.trim();
       const notes = document.getElementById("appt-notes").value.trim();
 
-      if (!program || !startTime) {
-        setStatus("appt-status", "Program and Start Time are required", true);
+      if (!program || !start) {
+        setStatus("appt-status", "Program and start time are required", true);
         return;
       }
 
       setStatus("appt-status", "Creating appointment...");
       try {
+        const startTime = new Date(start).toISOString();
+        const endTime = end ? new Date(end).toISOString() : null;
+
         const res = await fetch(
           "/api/clients/" + state.selectedClientId + "/appointments",
           {
@@ -570,8 +612,8 @@
             headers: getAuthHeaders(),
             body: JSON.stringify({
               program,
-              startTime: new Date(startTime).toISOString(),
-              endTime: endTime ? new Date(endTime).toISOString() : null,
+              startTime,
+              endTime,
               location,
               notes,
             }),
@@ -584,31 +626,10 @@
         }
         setStatus("appt-status", "Appointment created");
         loadAppointmentsForClient();
-      } catch (e) {
+      } catch (err) {
         setStatus("appt-status", "Error creating appointment", true);
       }
     };
-
-    async function sendApptReminder(apptId) {
-      if (!state.selectedClientId) return;
-      try {
-        const res = await fetch(
-          "/api/clients/" + state.selectedClientId + "/appointments/" + apptId + "/remind",
-          {
-            method: "POST",
-            headers: getAuthHeaders(),
-          }
-        );
-        const data = await res.json();
-        if (!res.ok) {
-          alert(data.error || "Failed to send reminder");
-          return;
-        }
-        alert("Reminder sent!");
-      } catch (e) {
-        alert("Error sending reminder");
-      }
-    }
 
     // Encounters
     async function loadEncountersForClient() {

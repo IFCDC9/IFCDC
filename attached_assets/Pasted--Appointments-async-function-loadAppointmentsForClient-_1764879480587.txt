@@ -1,0 +1,125 @@
+    // Appointments
+    async function loadAppointmentsForClient() {
+      const listEl = document.getElementById("appt-list");
+      if (!state.selectedClientId) {
+        listEl.textContent = "No client selected.";
+        return;
+      }
+      listEl.textContent = "Loading appointments...";
+      try {
+        const res = await fetch(
+          "/api/clients/" + state.selectedClientId + "/appointments",
+          { headers: getAuthHeaders() }
+        );
+        const data = await res.json();
+        if (!res.ok) {
+          listEl.textContent = data.error || "Failed to load appointments.";
+          return;
+        }
+        listEl.innerHTML = "";
+        if (!data.length) {
+          listEl.textContent = "No appointments scheduled.";
+          return;
+        }
+        data.forEach((a) => {
+          const div = document.createElement("div");
+          div.className = "admin-list-item";
+
+          const when = new Date(a.startTime).toLocaleString();
+          div.innerHTML =
+            "<strong>" +
+            a.program +
+            "</strong><br/>" +
+            "<span style='opacity:0.8;'>Starts: " +
+            when +
+            "</span><br/>" +
+            "<span style='opacity:0.7; font-size:0.78rem;'>Location: " +
+            (a.location || "N/A") +
+            "</span>";
+
+          const btn = document.createElement("button");
+          btn.textContent = "Send Reminder SMS";
+          btn.className = "ifcdc-btn ifcdc-btn-outline";
+          btn.style.marginTop = "0.25rem";
+          btn.onclick = async (ev) => {
+            ev.stopPropagation();
+            try {
+              const res2 = await fetch(
+                "/api/clients/" +
+                  a.clientId +
+                  "/appointments/" +
+                  a.id +
+                  "/remind",
+                {
+                  method: "POST",
+                  headers: getAuthHeaders(),
+                  body: JSON.stringify({}),
+                }
+              );
+              const d2 = await res2.json();
+              if (!res2.ok) {
+                alert(d2.error || "Failed to send reminder.");
+                return;
+              }
+              alert("Reminder sent.");
+            } catch (err) {
+              alert("Error sending reminder.");
+            }
+          };
+
+          div.appendChild(document.createElement("br"));
+          div.appendChild(btn);
+          listEl.appendChild(div);
+        });
+      } catch (err) {
+        listEl.textContent = "Error loading appointments.";
+      }
+    }
+
+    document.getElementById("appt-create").onclick = async () => {
+      if (!state.selectedClientId) {
+        setStatus("appt-status", "Select a client first", true);
+        return;
+      }
+      const program = document.getElementById("appt-program").value.trim();
+      const start = document.getElementById("appt-start").value;
+      const end = document.getElementById("appt-end").value;
+      const location = document.getElementById("appt-location").value.trim();
+      const notes = document.getElementById("appt-notes").value.trim();
+
+      if (!program || !start) {
+        setStatus("appt-status", "Program and start time are required", true);
+        return;
+      }
+
+      setStatus("appt-status", "Creating appointment...");
+      try {
+        // Convert local datetime to ISO string
+        const startTime = new Date(start).toISOString();
+        const endTime = end ? new Date(end).toISOString() : null;
+
+        const res = await fetch(
+          "/api/clients/" + state.selectedClientId + "/appointments",
+          {
+            method: "POST",
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+              program,
+              startTime,
+              endTime,
+              location,
+              notes,
+            }),
+          }
+        );
+        const data = await res.json();
+        if (!res.ok) {
+          setStatus("appt-status", data.error || "Failed to create appointment", true);
+          return;
+        }
+        setStatus("appt-status", "Appointment created");
+        loadAppointmentsForClient();
+      } catch (err) {
+        setStatus("appt-status", "Error creating appointment", true);
+      }
+    };
