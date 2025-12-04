@@ -20,6 +20,10 @@ app.get("/mental-health", (req, res) => {
   res.sendFile("mental-health.html", { root: path.resolve(import.meta.dirname, "../public") });
 });
 
+app.get("/records-policy", (req, res) => {
+  res.sendFile("records-policy.html", { root: path.resolve(import.meta.dirname, "../public") });
+});
+
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",
