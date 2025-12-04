@@ -135,6 +135,19 @@ const AdminTimeOverviewPage: React.FC = () => {
     );
   }, [filteredEntries]);
 
+  const buildExportUrl = () => {
+    const params = new URLSearchParams();
+    if (filterFrom) params.append("from", filterFrom);
+    if (filterTo) params.append("to", filterTo);
+    if (filterProgramId) params.append("programId", filterProgramId);
+    return `/api/time-entries/export?${params.toString()}`;
+  };
+
+  const handleDownloadCsv = () => {
+    const url = buildExportUrl();
+    window.location.href = url;
+  };
+
   return (
     <div style={{ padding: "1.5rem" }}>
       <h1>Admin – Time Overview (Payroll & Programs)</h1>
@@ -185,6 +198,15 @@ const AdminTimeOverviewPage: React.FC = () => {
                 </option>
               ))}
             </select>
+          </div>
+          <div style={{ display: "flex", alignItems: "flex-end" }}>
+            <button
+              onClick={handleDownloadCsv}
+              data-testid="button-download-csv"
+              style={{ padding: "0.5rem 1rem" }}
+            >
+              Download CSV
+            </button>
           </div>
         </div>
       </section>
