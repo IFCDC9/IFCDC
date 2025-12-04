@@ -796,6 +796,77 @@ app.post(
   }
 );
 
+// ----- Outreach Tasks CRUD -----
+app.get(
+  "/api/outreach-tasks",
+  authRequired,
+  requireRole(ROLES.EXEC, ROLES.CASE_MANAGER, ROLES.CHW, ROLES.ADMIN),
+  async (req, res) => {
+    const status = (req.query.status as string) || "OPEN";
+    try {
+      const rows = await db.all<any[]>(
+        `SELECT ot.id, ot.client_id, ot.phone, ot.channel, ot.reason,
+                ot.status, ot.created_at, ot.completed_at,
+                c.full_name as client_name
+         FROM outreach_tasks ot
+         LEFT JOIN clients c ON ot.client_id = c.id
+         WHERE ot.status = ?
+         ORDER BY ot.created_at DESC`,
+        status
+      );
+
+      await logAudit(req, "OUTREACH_TASK", null, "LIST_OUTREACH_TASKS", { status, count: rows.length });
+
+      const list = rows.map((t) => ({
+        id: t.id,
+        clientId: t.client_id,
+        clientName: t.client_name,
+        phone: t.phone,
+        channel: t.channel,
+        reason: t.reason,
+        status: t.status,
+        createdAt: t.created_at,
+        completedAt: t.completed_at,
+      }));
+
+      res.json(list);
+    } catch (err) {
+      console.error("Error listing outreach tasks:", err);
+      res.status(500).json({ error: "Failed to load outreach tasks" });
+    }
+  }
+);
+
+app.post(
+  "/api/outreach-tasks/:id/complete",
+  authRequired,
+  requireRole(ROLES.EXEC, ROLES.CASE_MANAGER, ROLES.CHW, ROLES.ADMIN),
+  async (req, res) => {
+    const id = req.params.id;
+    const now = new Date().toISOString();
+
+    const task = await db.get<{ id: string; status: string }>(
+      "SELECT id, status FROM outreach_tasks WHERE id = ?",
+      id
+    );
+    if (!task) {
+      return res.status(404).json({ error: "Task not found" });
+    }
+    if (task.status === "DONE") {
+      return res.status(400).json({ error: "Task already completed" });
+    }
+
+    await db.run(
+      `UPDATE outreach_tasks SET status = 'DONE', completed_at = ? WHERE id = ?`,
+      now, id
+    );
+
+    await logAudit(req, "OUTREACH_TASK", id, "COMPLETE_OUTREACH_TASK", {});
+
+    res.json({ ok: true });
+  }
+);
+
 initDb().then(() => {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`IFCDC Health System API live on port ${PORT}`);
