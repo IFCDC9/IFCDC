@@ -88,7 +88,7 @@ const App: React.FC = () => {
           }
         />
         <Route
-          path="/time"
+          path="/my-time"
           element={
             <ProtectedRoute allowedRoles={["admin", "barber", "radio_host", "program_staff"]}>
               <MyTimeEntriesPage />
