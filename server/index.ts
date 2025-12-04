@@ -758,6 +758,44 @@ app.get("/api/audit-logs", authRequired, requireRole(ROLES.EXEC), async (req, re
   })));
 });
 
+// ----- Twilio Voice Status Webhook -> Outreach tasks (NO AUTH) -----
+app.post(
+  "/twilio/voice-status",
+  express.urlencoded({ extended: false }),
+  async (req, res) => {
+    try {
+      const callStatus = req.body.CallStatus;
+      const from = req.body.From;
+      const to = req.body.To;
+
+      const missedStatuses = ["no-answer", "busy", "failed", "canceled"];
+      if (!missedStatuses.includes((callStatus || "").toLowerCase())) {
+        return res.type("text/xml").send("<Response></Response>");
+      }
+
+      const phone = from;
+      const client = await db.get<{ id: string }>(
+        "SELECT id FROM clients WHERE phone = ? LIMIT 1",
+        phone
+      );
+
+      const id = cryptoRandomId();
+      const created_at = new Date().toISOString();
+
+      await db.run(
+        `INSERT INTO outreach_tasks (id, client_id, phone, channel, reason, status, created_at, completed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, client ? client.id : null, phone, "VOICE", "MISSED_CALL", "OPEN", created_at, null
+      );
+
+      res.type("text/xml").send("<Response></Response>");
+    } catch (err) {
+      console.error("Error in /twilio/voice-status:", err);
+      res.type("text/xml").send("<Response></Response>");
+    }
+  }
+);
+
 initDb().then(() => {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`IFCDC Health System API live on port ${PORT}`);
