@@ -1246,17 +1246,14 @@ async function buildRiskMixReportForUser(user: { id: string; role: string }) {
   };
 }
 
-// ----- Reports: Volume -----
+// ----- Reports: Volume (JSON) -----
 app.get(
   "/api/reports/volume",
   authRequired,
   requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
   async (req, res) => {
     try {
-      const programFilter = (req.query.program as string) || null;
-
-      let from = req.query.from as string | undefined;
-      let to = req.query.to as string | undefined;
+      let { from, to, program } = req.query as { from?: string; to?: string; program?: string };
       const now = new Date();
 
       if (!from || !to) {
@@ -1267,15 +1264,20 @@ app.get(
         to = to || end.toISOString();
       }
 
-      const result = await buildVolumeReportForUser(req.user!, from, to, programFilter);
-
-      await logAudit(req, "REPORT", null, "REPORT_VOLUME", {
+      const report = await buildVolumeReportForUser(
+        req.user!,
         from,
         to,
-        programFilter,
+        program || null
+      );
+
+      await logAudit(req, "REPORT", null, "REPORT_VOLUME_JSON", {
+        from,
+        to,
+        program,
       });
 
-      res.json(result);
+      res.json(report);
     } catch (err) {
       console.error("Error in /api/reports/volume:", err);
       res.status(500).json({ error: "Failed to build volume report" });
