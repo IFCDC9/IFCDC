@@ -255,6 +255,16 @@ function requireRole(...allowedRoles: string[]) {
   };
 }
 
+async function hasClientAccess(user: { id: string; role: string } | undefined, clientId: string): Promise<boolean> {
+  if (!user) return false;
+  if (user.role === ROLES.EXEC) return true;
+  const assignment = await db.get(
+    "SELECT 1 FROM client_assignments WHERE client_id = ? AND user_id = ?",
+    clientId, user.id
+  );
+  return !!assignment;
+}
+
 app.get("/", (req, res) => res.sendFile(path.join(publicDir, "index.html")));
 app.get("/mental-health", (req, res) => res.sendFile(path.join(publicDir, "mental-health.html")));
 app.get("/records-policy", (req, res) => res.sendFile(path.join(publicDir, "records-policy.html")));
@@ -393,6 +403,10 @@ app.get("/api/clients/:id", authRequired, requireRole(ROLES.EXEC, ROLES.CLINICIA
   const c = await db.get<any>("SELECT id, full_name, date_of_birth, phone, email, programs, created_at FROM clients WHERE id = ?", req.params.id);
   if (!c) {
     return res.status(404).json({ error: "Client not found" });
+  }
+
+  if (!(await hasClientAccess(req.user, c.id))) {
+    return res.status(403).json({ error: "Forbidden" });
   }
 
   await logAudit(req, "CLIENT", c.id, "VIEW_CLIENT");
