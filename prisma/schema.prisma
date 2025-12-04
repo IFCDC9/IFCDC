@@ -116,7 +116,8 @@ model Employee {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  user      User?
+  user        User?
+  timeEntries TimeEntry[]
 
   @@map("employees")
 }
@@ -133,6 +134,7 @@ model Program {
 
   sessions    ProgramSession[]
   enrollments ProgramEnrollment[]
+  timeEntries TimeEntry[]
 
   @@map("programs")
 }
@@ -179,4 +181,19 @@ model ProgramSession {
   program Program @relation(fields: [programId], references: [id], onDelete: Cascade)
 
   @@map("program_sessions")
+}
+
+model TimeEntry {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId String   @map("employee_id") @db.Uuid
+  programId  String?  @map("program_id") @db.Uuid
+  date       DateTime @db.Date
+  hours      Float
+  notes      String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  program  Program? @relation(fields: [programId], references: [id], onDelete: SetNull)
+
+  @@map("time_entries")
 }
