@@ -16,12 +16,22 @@ app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.resolve(import.meta.dirname, "../public")));
 
 // Clean URL routes for public pages
+const publicRoot = path.resolve(import.meta.dirname, "../public");
+
 app.get("/mental-health", (req, res) => {
-  res.sendFile("mental-health.html", { root: path.resolve(import.meta.dirname, "../public") });
+  res.sendFile("mental-health.html", { root: publicRoot });
 });
 
 app.get("/records-policy", (req, res) => {
-  res.sendFile("records-policy.html", { root: path.resolve(import.meta.dirname, "../public") });
+  res.sendFile("records-policy.html", { root: publicRoot });
+});
+
+app.get("/programs", (req, res) => {
+  res.sendFile("programs.html", { root: publicRoot });
+});
+
+app.get("/contact", (req, res) => {
+  res.sendFile("contact.html", { root: publicRoot });
 });
 
 export function log(message: string, source = "express") {

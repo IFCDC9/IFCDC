@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Contact | IFCDC</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta
+    name="description"
+    content="Contact IFCDC – Reach the Imperial Foundation Community Development Center in Asbury Park, NJ."
+  />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="ifcdc-body">
+  <header class="ifcdc-header">
+    <div class="ifcdc-header-inner">
+      <div class="ifcdc-brand">
+        <span class="ifcdc-logo-text">IFCDC</span>
+        <span class="ifcdc-subbrand">Contact</span>
+      </div>
+      <nav class="ifcdc-nav">
+        <a href="/">Home</a>
+        <a href="/programs">Programs</a>
+        <a href="/mental-health">Mental Health</a>
+        <a href="/records-policy">Records & Privacy</a>
+        <a href="/contact" class="active">Contact</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="ifcdc-main">
+    <section class="ifcdc-hero">
+      <div class="ifcdc-hero-content">
+        <h1>Contact IFCDC</h1>
+        <p>
+          We're here to help. Reach out to connect with our team, learn about programs, 
+          or request support.
+        </p>
+      </div>
+    </section>
+
+    <section class="ifcdc-section">
+      <div class="ifcdc-grid">
+        <article class="ifcdc-card">
+          <h3>Main Office</h3>
+          <p>
+            <strong>Phone:</strong> (732) 743-5048<br>
+            <strong>Email:</strong> service@ifcdc.org
+          </p>
+          <p>
+            <strong>Address:</strong><br>
+            1215 Springwood Ave Suite 28<br>
+            Asbury Park, NJ 07712
+          </p>
+        </article>
+
+        <article class="ifcdc-card">
+          <h3>IFCDC Barbershop</h3>
+          <p>
+            <strong>Phone:</strong> (331) 316-8167<br>
+            Call to book an appointment or stop by.
+          </p>
+        </article>
+
+        <article class="ifcdc-card">
+          <h3>IFCDC Radio</h3>
+          <p>
+            <strong>Shoutout Line:</strong> (858) 758-8791<br>
+            Leave a voicemail for on-air shoutouts and dedications.
+          </p>
+        </article>
+
+        <article class="ifcdc-card">
+          <h3>Mental Health Support</h3>
+          <p>
+            For mental health inquiries or to request support, call the main line or visit our 
+            <a href="/mental-health">Mental Health & Wellness</a> page.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section class="ifcdc-section">
+      <h2>Hours of Operation</h2>
+      <div class="ifcdc-card" style="max-width: 400px;">
+        <p>
+          <strong>Monday – Friday:</strong> 9:00 AM – 5:00 PM<br>
+          <strong>Saturday:</strong> By appointment<br>
+          <strong>Sunday:</strong> Closed
+        </p>
+        <p style="opacity: 0.8; font-size: 0.9rem;">
+          Crisis support and referrals available during business hours. For emergencies, please call 911.
+        </p>
+      </div>
+    </section>
+
+    <section class="ifcdc-section ifcdc-cta">
+      <h2>Send Us a Message</h2>
+      <p>
+        Use the form below to reach our team. We typically respond within 1–2 business days.
+      </p>
+      <div style="max-width: 500px;">
+        <form class="ifcdc-form">
+          <label>
+            Name<br>
+            <input type="text" name="name" placeholder="Your full name" required />
+          </label>
+          <label>
+            Email<br>
+            <input type="email" name="email" placeholder="your@email.com" required />
+          </label>
+          <label>
+            Phone (optional)<br>
+            <input type="tel" name="phone" placeholder="(555) 555-5555" />
+          </label>
+          <label>
+            Subject<br>
+            <select name="subject" required>
+              <option value="">Select a topic</option>
+              <option value="general">General Inquiry</option>
+              <option value="programs">Programs & Services</option>
+              <option value="mental-health">Mental Health Support</option>
+              <option value="barbershop">Barbershop</option>
+              <option value="radio">Radio</option>
+              <option value="partnership">Partnership / Collaboration</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label>
+            Message<br>
+            <textarea name="message" rows="5" placeholder="How can we help?" required></textarea>
+          </label>
+          <button type="submit" class="ifcdc-btn ifcdc-btn-primary" disabled>
+            Submit (Coming Soon)
+          </button>
+          <p class="ifcdc-helper">
+            Online form submissions will be activated soon. In the meantime, please call or email directly.
+          </p>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <footer class="ifcdc-footer">
+    <p>&copy; <span id="year"></span> Imperial Foundation Community Development Center. All rights reserved.</p>
+  </footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>

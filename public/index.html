@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>IFCDC | Imperial Foundation Community Development Center</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta
+    name="description"
+    content="Imperial Foundation Community Development Center – Community programs, mental health services, barbershop, radio, and more in Asbury Park, NJ."
+  />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="ifcdc-body">
+  <header class="ifcdc-header">
+    <div class="ifcdc-header-inner">
+      <div class="ifcdc-brand">
+        <span class="ifcdc-logo-text">IFCDC</span>
+        <span class="ifcdc-subbrand">Community Development Center</span>
+      </div>
+      <nav class="ifcdc-nav">
+        <a href="/" class="active">Home</a>
+        <a href="/programs">Programs</a>
+        <a href="/mental-health">Mental Health</a>
+        <a href="/records-policy">Records & Privacy</a>
+        <a href="/contact">Contact</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="ifcdc-main">
+    <!-- HERO -->
+    <section class="ifcdc-hero">
+      <div class="ifcdc-hero-content">
+        <h1>Imperial Foundation Community Development Center</h1>
+        <p>
+          Empowering our community through comprehensive programs in mental health, 
+          youth development, workforce readiness, and neighborhood revitalization.
+        </p>
+        <div class="ifcdc-hero-actions">
+          <a href="/mental-health" class="ifcdc-btn ifcdc-btn-primary">Mental Health Services</a>
+          <a href="#services" class="ifcdc-btn ifcdc-btn-outline">Our Services</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- SERVICES OVERVIEW -->
+    <section id="services" class="ifcdc-section">
+      <h2>Our Services</h2>
+      <div class="ifcdc-grid">
+        <article class="ifcdc-card">
+          <h3>Mental Health & Wellness</h3>
+          <p>
+            Full-spectrum behavioral health support for all ages – from children to seniors.
+            Counseling, crisis support, and community healing programs.
+          </p>
+          <a href="/mental-health" class="ifcdc-btn ifcdc-btn-outline">Learn More</a>
+        </article>
+
+        <article class="ifcdc-card">
+          <h3>IFCDC Barbershop</h3>
+          <p>
+            More than haircuts – a safe space for mentorship, community connection, 
+            and youth engagement in the heart of Asbury Park.
+          </p>
+          <a href="tel:+13313168167" class="ifcdc-btn ifcdc-btn-outline">Call to Book</a>
+        </article>
+
+        <article class="ifcdc-card">
+          <h3>IFCDC Radio</h3>
+          <p>
+            Community voices, local stories, and programming that reflects and uplifts 
+            our neighborhood. Tune in for shows, shoutouts, and more.
+          </p>
+          <a href="tel:+18587588791" class="ifcdc-btn ifcdc-btn-outline">Request a Shoutout</a>
+        </article>
+
+        <article class="ifcdc-card">
+          <h3>Youth Programs</h3>
+          <p>
+            After-school support, mentorship, scholarships, and gang prevention programs 
+            designed to help young people thrive.
+          </p>
+          <a href="/programs" class="ifcdc-btn ifcdc-btn-outline">View Programs</a>
+        </article>
+
+        <article class="ifcdc-card">
+          <h3>Workforce Development</h3>
+          <p>
+            Job readiness training, resume support, and connections to employment 
+            opportunities for adults seeking stability.
+          </p>
+          <a href="/programs" class="ifcdc-btn ifcdc-btn-outline">View Programs</a>
+        </article>
+
+        <article class="ifcdc-card">
+          <h3>Transitional Housing</h3>
+          <p>
+            Support for individuals and families navigating housing instability, 
+            with wraparound services for long-term success.
+          </p>
+          <a href="/programs" class="ifcdc-btn ifcdc-btn-outline">View Programs</a>
+        </article>
+      </div>
+    </section>
+
+    <!-- ABOUT -->
+    <section class="ifcdc-section">
+      <h2>About IFCDC</h2>
+      <p>
+        The Imperial Foundation Community Development Center (IFCDC) is a nonprofit organization 
+        dedicated to strengthening the Asbury Park community and surrounding areas. Under the 
+        leadership of <strong>Mr. Fahreal Allah, Owner & Executive Director</strong>, IFCDC 
+        delivers integrated programs that address the full spectrum of community needs.
+      </p>
+      <p>
+        From mental health and wellness to youth development, workforce readiness, and 
+        neighborhood revitalization, IFCDC serves as a central hub for resources, support, 
+        and community connection.
+      </p>
+    </section>
+
+    <!-- CONTACT CTA -->
+    <section class="ifcdc-section ifcdc-cta">
+      <h2>Get In Touch</h2>
+      <p>
+        Ready to connect with IFCDC? Reach out to learn more about our programs or request support.
+      </p>
+      <div class="ifcdc-cta-grid">
+        <div>
+          <h3>Contact Center</h3>
+          <p>
+            <strong>Phone:</strong> (732) 743-5048<br>
+            <strong>Email:</strong> service@ifcdc.org
+          </p>
+          <p>
+            <strong>Address:</strong><br>
+            1215 Springwood Ave Suite 28<br>
+            Asbury Park, NJ 07712
+          </p>
+        </div>
+        <div>
+          <h3>Quick Links</h3>
+          <p>
+            <strong>Barbershop Line:</strong> (331) 316-8167<br>
+            <strong>Radio Shoutouts:</strong> (858) 758-8791
+          </p>
+          <div class="ifcdc-hero-actions" style="margin-top: 1rem;">
+            <a href="/mental-health" class="ifcdc-btn ifcdc-btn-primary">Mental Health Support</a>
+            <a href="/records-policy" class="ifcdc-btn ifcdc-btn-outline">Records & Privacy</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="ifcdc-footer">
+    <p>&copy; <span id="year"></span> Imperial Foundation Community Development Center. All rights reserved.</p>
+  </footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>
