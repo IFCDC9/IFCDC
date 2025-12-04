@@ -103,52 +103,66 @@ router.get("/", requireAuth(["admin"]), async (_req, res) => {
   }
 });
 
-router.get("/export", requireAuth(["admin"]), async (req, res) => {
-  try {
-    const { from, to, programId } = req.query;
+router.get(
+  "/export",
+  requireAuth(["admin"]),
+  async (req: AuthedRequest, res) => {
+    try {
+      const { from, to, programId } = req.query as {
+        from?: string;
+        to?: string;
+        programId?: string;
+      };
 
-    const where: Record<string, unknown> = {};
+      const where: any = {};
 
-    if (from || to) {
-      where.date = {};
-      if (from) (where.date as Record<string, Date>).gte = new Date(from as string);
-      if (to) (where.date as Record<string, Date>).lte = new Date(to as string);
+      if (from) {
+        where.date = { ...(where.date || {}), gte: new Date(from) };
+      }
+      if (to) {
+        where.date = { ...(where.date || {}), lte: new Date(to) };
+      }
+      if (programId) {
+        where.programId = programId;
+      }
+
+      const entries = await prisma.timeEntry.findMany({
+        where,
+        include: {
+          employee: true,
+          program: true,
+        },
+        orderBy: { date: "asc" },
+      });
+
+      const records = entries.map(e => ({
+        Date: e.date.toISOString(),
+        "Employee Name": `${e.employee.firstName} ${e.employee.lastName}`,
+        "Employee Role": e.employee.role,
+        Hours: e.hours,
+        Program: e.program?.name ?? "",
+        "Program ID": e.program?.id ?? "",
+        Notes: e.notes ?? "",
+      }));
+
+      const csv = stringify(records, {
+        header: true,
+      });
+
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="ifcdc_time_entries_${new Date()
+          .toISOString()
+          .slice(0, 10)}.csv"`
+      );
+
+      return res.send(csv);
+    } catch (err) {
+      console.error("Error exporting time entries CSV", err);
+      return res.status(500).json({ error: "Internal server error" });
     }
-
-    if (programId) {
-      where.programId = programId as string;
-    }
-
-    const entries = await prisma.timeEntry.findMany({
-      where,
-      include: {
-        employee: true,
-        program: true,
-      },
-      orderBy: { date: "desc" },
-    });
-
-    const rows = entries.map((e) => ({
-      Date: e.date.toISOString().split("T")[0],
-      Employee: `${e.employee.firstName} ${e.employee.lastName}`,
-      Role: e.employee.role,
-      Hours: e.hours,
-      Program: e.program?.name || "",
-      Notes: e.notes || "",
-    }));
-
-    const csv = stringify(rows, { header: true });
-
-    res.setHeader("Content-Type", "text/csv");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="time-entries-${new Date().toISOString().split("T")[0]}.csv"`
-    );
-    return res.send(csv);
-  } catch (err) {
-    console.error("Error exporting time entries", err);
-    return res.status(500).json({ error: "Internal server error" });
   }
-});
+);
 
 export default router;
