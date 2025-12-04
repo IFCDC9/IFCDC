@@ -1028,6 +1028,185 @@ app.get("/api/stats/overview", authRequired, async (req, res) => {
   }
 });
 
+// ----- Reports: Volume -----
+app.get(
+  "/api/reports/volume",
+  authRequired,
+  requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
+  async (req, res) => {
+    try {
+      const isExec = req.user!.role === ROLES.EXEC;
+      const userId = req.user!.id;
+      const programFilter = (req.query.program as string) || null;
+
+      // Date range: default last 30 days
+      let from = req.query.from as string | undefined;
+      let to = req.query.to as string | undefined;
+      const now = new Date();
+
+      if (!from || !to) {
+        const end = now;
+        const start = new Date(now);
+        start.setDate(start.getDate() - 30);
+        from = from || start.toISOString();
+        to = to || end.toISOString();
+      }
+
+      // ---- Clients served ----
+      let clientsServedRow;
+      if (isExec) {
+        const params: any[] = [from, to, from, to];
+        const whereProgramClauseAppt = programFilter ? " AND a.program = ?" : "";
+        const whereProgramClauseEnc = programFilter ? " AND e.program = ?" : "";
+
+        const clientsQuery = `
+          SELECT COUNT(DISTINCT client_id) as count FROM (
+            SELECT a.client_id
+            FROM appointments a
+            WHERE a.start_time >= ? AND a.start_time < ?${whereProgramClauseAppt}
+            UNION ALL
+            SELECT e.client_id
+            FROM encounters e
+            WHERE e.created_at >= ? AND e.created_at < ?${whereProgramClauseEnc}
+          )
+        `;
+
+        if (programFilter) {
+          params.push(programFilter, programFilter);
+        }
+
+        clientsServedRow = await db.get<{ count: number }>(clientsQuery, ...params);
+      } else {
+        // Scoped to assigned clients
+        const params: any[] = [userId, from, to, userId, from, to];
+        const whereProgramClauseAppt = programFilter ? " AND a.program = ?" : "";
+        const whereProgramClauseEnc = programFilter ? " AND e.program = ?" : "";
+        if (programFilter) {
+          params.push(programFilter, programFilter);
+        }
+
+        const clientsQuery = `
+          SELECT COUNT(DISTINCT client_id) as count FROM (
+            SELECT a.client_id
+            FROM appointments a
+            JOIN client_assignments ca ON ca.client_id = a.client_id
+            WHERE ca.user_id = ?
+              AND a.start_time >= ? AND a.start_time < ?${whereProgramClauseAppt}
+            UNION ALL
+            SELECT e.client_id
+            FROM encounters e
+            JOIN client_assignments ca2 ON ca2.client_id = e.client_id
+            WHERE ca2.user_id = ?
+              AND e.created_at >= ? AND e.created_at < ?${whereProgramClauseEnc}
+          )
+        `;
+        clientsServedRow = await db.get<{ count: number }>(clientsQuery, ...params);
+      }
+      const totalClientsServed = clientsServedRow?.count || 0;
+
+      // ---- Appointments ----
+      let totalAppointmentsRow;
+      let apptsByProgramRows;
+
+      if (isExec) {
+        const baseParams: any[] = [from, to];
+        const whereProgram = programFilter ? " AND program = ?" : "";
+        const params = programFilter ? [...baseParams, programFilter] : baseParams;
+
+        totalAppointmentsRow = await db.get<{ count: number }>(
+          `SELECT COUNT(*) as count FROM appointments WHERE start_time >= ? AND start_time < ?${whereProgram}`,
+          ...params
+        );
+
+        apptsByProgramRows = await db.all<{ program: string; count: number }[]>(
+          `SELECT program, COUNT(*) as count FROM appointments WHERE start_time >= ? AND start_time < ?${whereProgram} GROUP BY program`,
+          ...params
+        );
+      } else {
+        const baseParams: any[] = [userId, from, to];
+        const whereProgram = programFilter ? " AND a.program = ?" : "";
+        const params = programFilter ? [...baseParams, programFilter] : baseParams;
+
+        totalAppointmentsRow = await db.get<{ count: number }>(
+          `SELECT COUNT(*) as count FROM appointments a JOIN client_assignments ca ON ca.client_id = a.client_id WHERE ca.user_id = ? AND a.start_time >= ? AND a.start_time < ?${whereProgram}`,
+          ...params
+        );
+
+        apptsByProgramRows = await db.all<{ program: string; count: number }[]>(
+          `SELECT a.program, COUNT(*) as count FROM appointments a JOIN client_assignments ca ON ca.client_id = a.client_id WHERE ca.user_id = ? AND a.start_time >= ? AND a.start_time < ?${whereProgram} GROUP BY a.program`,
+          ...params
+        );
+      }
+
+      const totalAppointments = totalAppointmentsRow?.count || 0;
+      const appointmentsByProgram = (apptsByProgramRows || []).map((r) => ({
+        program: r.program,
+        count: r.count,
+      }));
+
+      // ---- Encounters ----
+      let totalEncountersRow;
+      let encountersByTypeRows;
+
+      if (isExec) {
+        const baseParams: any[] = [from, to];
+        const whereProgram = programFilter ? " AND program = ?" : "";
+        const params = programFilter ? [...baseParams, programFilter] : baseParams;
+
+        totalEncountersRow = await db.get<{ count: number }>(
+          `SELECT COUNT(*) as count FROM encounters WHERE created_at >= ? AND created_at < ?${whereProgram}`,
+          ...params
+        );
+
+        encountersByTypeRows = await db.all<{ type: string; count: number }[]>(
+          `SELECT type, COUNT(*) as count FROM encounters WHERE created_at >= ? AND created_at < ?${whereProgram} GROUP BY type`,
+          ...params
+        );
+      } else {
+        const baseParams: any[] = [userId, from, to];
+        const whereProgram = programFilter ? " AND e.program = ?" : "";
+        const params = programFilter ? [...baseParams, programFilter] : baseParams;
+
+        totalEncountersRow = await db.get<{ count: number }>(
+          `SELECT COUNT(*) as count FROM encounters e JOIN client_assignments ca ON ca.client_id = e.client_id WHERE ca.user_id = ? AND e.created_at >= ? AND e.created_at < ?${whereProgram}`,
+          ...params
+        );
+
+        encountersByTypeRows = await db.all<{ type: string; count: number }[]>(
+          `SELECT e.type, COUNT(*) as count FROM encounters e JOIN client_assignments ca ON ca.client_id = e.client_id WHERE ca.user_id = ? AND e.created_at >= ? AND e.created_at < ?${whereProgram} GROUP BY e.type`,
+          ...params
+        );
+      }
+
+      const totalEncounters = totalEncountersRow?.count || 0;
+      const encountersByType = (encountersByTypeRows || []).map((r) => ({
+        type: r.type,
+        count: r.count,
+      }));
+
+      await logAudit(req, "REPORT", null, "REPORT_VOLUME", {
+        from,
+        to,
+        programFilter,
+      });
+
+      res.json({
+        from,
+        to,
+        program: programFilter,
+        totalClientsServed,
+        totalAppointments,
+        totalEncounters,
+        appointmentsByProgram,
+        encountersByType,
+      });
+    } catch (err) {
+      console.error("Error in /api/reports/volume:", err);
+      res.status(500).json({ error: "Failed to build volume report" });
+    }
+  }
+);
+
 // ----- Twilio Voice Status Webhook -> Outreach tasks (NO AUTH) -----
 app.post(
   "/twilio/voice-status",
