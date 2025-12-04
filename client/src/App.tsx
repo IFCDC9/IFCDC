@@ -56,7 +56,7 @@ const App: React.FC = () => {
           }
         />
         <Route
-          path="/admin/time-overview"
+          path="/admin/time"
           element={
             <ProtectedRoute allowedRoles={["admin"]}>
               <AdminTimeOverviewPage />
