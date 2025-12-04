@@ -126,19 +126,37 @@ model Employee {
   @@map("employees")
 }
 
-model Program {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name        String
-  code        String?  @unique
-  description String?
-  location    String?
-  status      String   @default("active")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+model FundingSource {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String
+  code      String?  @unique
+  type      String?
+  agency    String?
+  notes     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  sessions    ProgramSession[]
-  enrollments ProgramEnrollment[]
+  programs    Program[]
   timeEntries TimeEntry[]
+
+  @@map("funding_sources")
+}
+
+model Program {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name            String
+  code            String?  @unique
+  description     String?
+  location        String?
+  status          String   @default("active")
+  fundingSourceId String?  @map("funding_source_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  fundingSource FundingSource? @relation(fields: [fundingSourceId], references: [id], onDelete: SetNull)
+  sessions      ProgramSession[]
+  enrollments   ProgramEnrollment[]
+  timeEntries   TimeEntry[]
 
   @@map("programs")
 }
@@ -188,16 +206,18 @@ model ProgramSession {
 }
 
 model TimeEntry {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  employeeId String   @map("employee_id") @db.Uuid
-  programId  String?  @map("program_id") @db.Uuid
-  date       DateTime @db.Date
-  hours      Float
-  notes      String?
-  createdAt  DateTime @default(now()) @map("created_at")
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId      String   @map("employee_id") @db.Uuid
+  programId       String?  @map("program_id") @db.Uuid
+  fundingSourceId String?  @map("funding_source_id") @db.Uuid
+  date            DateTime @db.Date
+  hours           Float
+  notes           String?
+  createdAt       DateTime @default(now()) @map("created_at")
 
-  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  program  Program? @relation(fields: [programId], references: [id], onDelete: SetNull)
+  employee      Employee       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  program       Program?       @relation(fields: [programId], references: [id], onDelete: SetNull)
+  fundingSource FundingSource? @relation(fields: [fundingSourceId], references: [id], onDelete: SetNull)
 
   @@map("time_entries")
 }
