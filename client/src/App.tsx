@@ -7,6 +7,7 @@ import BarberDashboard from "./dashboards/BarberDashboard";
 import RadioDashboard from "./dashboards/RadioDashboard";
 import HrOnboardingPage from "./pages/HrOnboardingPage";
 import ProgramsDashboard from "./pages/ProgramsDashboard";
+import ProgramDetailPage from "./pages/ProgramDetailPage";
 import LoginPage from "./pages/LoginPage";
 
 const RoleRouter: React.FC = () => {
@@ -74,6 +75,14 @@ const App: React.FC = () => {
           element={
             <ProtectedRoute allowedRoles={["admin", "program_staff"]}>
               <ProgramsDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/programs/:programId"
+          element={
+            <ProtectedRoute allowedRoles={["admin", "program_staff"]}>
+              <ProgramDetailPage />
             </ProtectedRoute>
           }
         />
