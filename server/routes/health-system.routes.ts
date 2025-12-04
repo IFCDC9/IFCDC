@@ -146,7 +146,7 @@ router.get(
 );
 
 router.post(
-  "/patients",
+  "/clients",
   auth,
   requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
   async (req: Request, res: Response) => {
@@ -156,7 +156,7 @@ router.post(
       return res.status(400).json({ error: "fullName is required" });
     }
 
-    const patient = await prisma.patient.create({
+    const client = await prisma.patient.create({
       data: {
         fullName,
         dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
@@ -165,35 +165,35 @@ router.post(
       },
     });
 
-    await logAudit(req, "PATIENT", patient.id, "CREATE_PATIENT");
-    res.status(201).json(patient);
+    await logAudit(req, "CLIENT", client.id, "CREATE_CLIENT");
+    res.status(201).json(client);
   }
 );
 
 router.get(
-  "/patients/:id",
+  "/clients/:id",
   auth,
   requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
   async (req: Request, res: Response) => {
-    const patient = await prisma.patient.findUnique({
+    const client = await prisma.patient.findUnique({
       where: { id: req.params.id },
     });
 
-    if (!patient) {
-      return res.status(404).json({ error: "Patient not found" });
+    if (!client) {
+      return res.status(404).json({ error: "Client not found" });
     }
 
-    await logAudit(req, "PATIENT", patient.id, "VIEW_PATIENT");
-    res.json(patient);
+    await logAudit(req, "CLIENT", client.id, "VIEW_CLIENT");
+    res.json(client);
   }
 );
 
 router.get(
-  "/patients",
+  "/clients",
   auth,
   requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
   async (req: Request, res: Response) => {
-    const patients = await prisma.patient.findMany({
+    const clients = await prisma.patient.findMany({
       select: {
         id: true,
         fullName: true,
@@ -203,22 +203,22 @@ router.get(
       },
     });
 
-    await logAudit(req, "PATIENT", null, "LIST_PATIENTS");
-    res.json(patients);
+    await logAudit(req, "CLIENT", null, "LIST_CLIENTS");
+    res.json(clients);
   }
 );
 
 router.post(
-  "/patients/:id/encounters",
+  "/clients/:id/encounters",
   auth,
   requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER, ROLES.CHW),
   async (req: Request, res: Response) => {
-    const patient = await prisma.patient.findUnique({
+    const client = await prisma.patient.findUnique({
       where: { id: req.params.id },
     });
 
-    if (!patient) {
-      return res.status(404).json({ error: "Patient not found" });
+    if (!client) {
+      return res.status(404).json({ error: "Client not found" });
     }
 
     const { program, type, summary, note } = req.body;
@@ -231,7 +231,7 @@ router.post(
 
     const encounter = await prisma.encounter.create({
       data: {
-        patientId: patient.id,
+        patientId: client.id,
         program,
         type,
         summary: summary || "",
@@ -242,7 +242,7 @@ router.post(
     });
 
     await logAudit(req, "ENCOUNTER", encounter.id, "CREATE_ENCOUNTER", {
-      patientId: patient.id,
+      clientId: client.id,
       program,
       type,
     });
@@ -252,25 +252,25 @@ router.post(
 );
 
 router.get(
-  "/patients/:id/encounters",
+  "/clients/:id/encounters",
   auth,
   requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
   async (req: Request, res: Response) => {
-    const patient = await prisma.patient.findUnique({
+    const client = await prisma.patient.findUnique({
       where: { id: req.params.id },
     });
 
-    if (!patient) {
-      return res.status(404).json({ error: "Patient not found" });
+    if (!client) {
+      return res.status(404).json({ error: "Client not found" });
     }
 
     const encounters = await prisma.encounter.findMany({
-      where: { patientId: patient.id },
+      where: { patientId: client.id },
       orderBy: { createdAt: "desc" },
     });
 
     await logAudit(req, "ENCOUNTER", null, "LIST_ENCOUNTERS", {
-      patientId: patient.id,
+      clientId: client.id,
       count: encounters.length,
     });
 
