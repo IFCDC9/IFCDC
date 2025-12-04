@@ -525,6 +525,48 @@ app.delete("/api/clients/:id/assignments/:assignmentId", authRequired, requireRo
 });
 
 app.post(
+  "/api/clients/:id/appointments",
+  authRequired,
+  requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
+  async (req, res) => {
+    const clientId = req.params.id;
+    const { program, startTime, endTime, location, notes } = req.body || {};
+
+    const client = await db.get("SELECT id FROM clients WHERE id = ?", clientId);
+    if (!client) {
+      return res.status(404).json({ error: "Client not found" });
+    }
+
+    if (!program || !startTime) {
+      return res.status(400).json({ error: "program and startTime are required" });
+    }
+
+    const id = cryptoRandomId();
+    const created_at = new Date().toISOString();
+
+    await db.run(
+      `INSERT INTO appointments (id, client_id, program, start_time, end_time, location, notes, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id, clientId, program, startTime, endTime || null, location || null, notes || "", req.user!.id, created_at
+    );
+
+    await logAudit(req, "APPOINTMENT", id, "CREATE_APPOINTMENT", { clientId, program, startTime });
+
+    res.status(201).json({
+      id,
+      clientId,
+      program,
+      startTime,
+      endTime: endTime || null,
+      location: location || null,
+      notes: notes || "",
+      createdBy: req.user!.id,
+      createdAt: created_at,
+    });
+  }
+);
+
+app.post(
   "/api/clients/:id/notify",
   authRequired,
   requireRole(ROLES.EXEC, ROLES.CASE_MANAGER, ROLES.ADMIN),
