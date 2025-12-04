@@ -1,0 +1,89 @@
+    async function loadGoalsForClient() {
+      const listEl = document.getElementById("goal-list");
+      if (!listEl) return;
+
+      if (!state.selectedClientId) {
+        listEl.textContent = "No client selected.";
+        return;
+      }
+
+      listEl.textContent = "Loading goals...";
+      try {
+        const res = await fetch(
+          "/api/clients/" + state.selectedClientId + "/goals",
+          { headers: getAuthHeaders() }
+        );
+        const data = await res.json();
+        if (!res.ok) {
+          listEl.textContent = data.error || "Failed to load goals.";
+          return;
+        }
+
+        if (!data.length) {
+          listEl.textContent = "No goals recorded.";
+          return;
+        }
+
+        listEl.innerHTML = "";
+        data.forEach((g) => {
+          const div = document.createElement("div");
+          div.className = "admin-list-item";
+
+          const created = new Date(g.createdAt).toLocaleDateString();
+          const target = g.targetDate
+            ? new Date(g.targetDate).toLocaleDateString()
+            : "N/A";
+
+          const statusBadge =
+            "<span class='badge' style='margin-left:0.25rem;'>" +
+            g.status +
+            "</span>";
+
+          div.innerHTML =
+            "<strong>" +
+            (g.title || "") +
+            "</strong> " +
+            statusBadge +
+            "<br/><span style='opacity:0.8; font-size:0.8rem;'>Program: " +
+            (g.program || "") +
+            "</span><br/><span style='opacity:0.8; font-size:0.8rem;'>Created: " +
+            created +
+            " | Target: " +
+            target +
+            "</span><br/><span style='opacity:0.8; font-size:0.8rem;'>" +
+            (g.notes || "") +
+            "</span>";
+
+          // Inline controls: mark completed / on hold
+          const btnRow = document.createElement("div");
+          btnRow.style.marginTop = "0.25rem";
+
+          const completeBtn = document.createElement("button");
+          completeBtn.textContent = "Mark Completed";
+          completeBtn.className = "ifcdc-btn ifcdc-btn-outline";
+          completeBtn.style.fontSize = "0.75rem";
+          completeBtn.style.marginRight = "0.3rem";
+          completeBtn.onclick = async (ev) => {
+            ev.stopPropagation();
+            await updateGoalStatus(g.id, "COMPLETED");
+          };
+
+          const holdBtn = document.createElement("button");
+          holdBtn.textContent = "Set On Hold";
+          holdBtn.className = "ifcdc-btn ifcdc-btn-outline";
+          holdBtn.style.fontSize = "0.75rem";
+          holdBtn.onclick = async (ev) => {
+            ev.stopPropagation();
+            await updateGoalStatus(g.id, "ON_HOLD");
+          };
+
+          btnRow.appendChild(completeBtn);
+          btnRow.appendChild(holdBtn);
+          div.appendChild(btnRow);
+
+          listEl.appendChild(div);
+        });
+      } catch (err) {
+        listEl.textContent = "Error loading goals.";
+      }
+    }

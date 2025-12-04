@@ -1295,8 +1295,8 @@
         listEl.textContent = "No client selected.";
         return;
       }
-      listEl.textContent = "Loading goals...";
 
+      listEl.textContent = "Loading goals...";
       try {
         const res = await fetch(
           "/api/clients/" + state.selectedClientId + "/goals",
@@ -1318,54 +1318,56 @@
           const div = document.createElement("div");
           div.className = "admin-list-item";
 
-          const when = new Date(g.createdAt).toLocaleString();
-          const target = g.targetDate ? "Target: " + g.targetDate : "";
-          const statusColor = g.status === "COMPLETED" ? "#4ade80" : g.status === "ON_HOLD" ? "#facc15" : "#60a5fa";
+          const created = new Date(g.createdAt).toLocaleDateString();
+          const target = g.targetDate
+            ? new Date(g.targetDate).toLocaleDateString()
+            : "N/A";
 
-          div.innerHTML =
-            "<strong>" + escapeHtml(g.title) + "</strong>" +
-            " <span style='background:" + statusColor + "; color:#000; padding:0.1rem 0.3rem; border-radius:3px; font-size:0.7rem;'>" + g.status + "</span>" +
-            "<br/><span style='opacity:0.7; font-size:0.78rem;'>" +
-            g.program + " | " + when + (target ? " | " + target : "") +
+          const statusBadge =
+            "<span class='badge' style='margin-left:0.25rem;'>" +
+            g.status +
             "</span>";
 
-          if (g.notes) {
-            div.innerHTML += "<br/><span style='opacity:0.8; font-size:0.78rem;'>" + escapeHtml(g.notes) + "</span>";
-          }
+          div.innerHTML =
+            "<strong>" +
+            (g.title || "") +
+            "</strong> " +
+            statusBadge +
+            "<br/><span style='opacity:0.8; font-size:0.8rem;'>Program: " +
+            (g.program || "") +
+            "</span><br/><span style='opacity:0.8; font-size:0.8rem;'>Created: " +
+            created +
+            " | Target: " +
+            target +
+            "</span><br/><span style='opacity:0.8; font-size:0.8rem;'>" +
+            (g.notes || "") +
+            "</span>";
 
-          // Status buttons
-          if (g.status !== "COMPLETED") {
-            const btnComplete = document.createElement("button");
-            btnComplete.textContent = "Complete";
-            btnComplete.className = "ifcdc-btn ifcdc-btn-outline";
-            btnComplete.style.cssText = "margin-top:0.3rem; margin-right:0.3rem; font-size:0.7rem; padding:0.2rem 0.4rem;";
-            btnComplete.onclick = async () => {
-              await updateGoalStatus(g.id, "COMPLETED");
-            };
-            div.appendChild(btnComplete);
-          }
+          const btnRow = document.createElement("div");
+          btnRow.style.marginTop = "0.25rem";
 
-          if (g.status === "ACTIVE") {
-            const btnHold = document.createElement("button");
-            btnHold.textContent = "On Hold";
-            btnHold.className = "ifcdc-btn ifcdc-btn-outline";
-            btnHold.style.cssText = "margin-top:0.3rem; margin-right:0.3rem; font-size:0.7rem; padding:0.2rem 0.4rem;";
-            btnHold.onclick = async () => {
-              await updateGoalStatus(g.id, "ON_HOLD");
-            };
-            div.appendChild(btnHold);
-          }
+          const completeBtn = document.createElement("button");
+          completeBtn.textContent = "Mark Completed";
+          completeBtn.className = "ifcdc-btn ifcdc-btn-outline";
+          completeBtn.style.fontSize = "0.75rem";
+          completeBtn.style.marginRight = "0.3rem";
+          completeBtn.onclick = async (ev) => {
+            ev.stopPropagation();
+            await updateGoalStatus(g.id, "COMPLETED");
+          };
 
-          if (g.status === "ON_HOLD") {
-            const btnActive = document.createElement("button");
-            btnActive.textContent = "Reactivate";
-            btnActive.className = "ifcdc-btn ifcdc-btn-outline";
-            btnActive.style.cssText = "margin-top:0.3rem; margin-right:0.3rem; font-size:0.7rem; padding:0.2rem 0.4rem;";
-            btnActive.onclick = async () => {
-              await updateGoalStatus(g.id, "ACTIVE");
-            };
-            div.appendChild(btnActive);
-          }
+          const holdBtn = document.createElement("button");
+          holdBtn.textContent = "Set On Hold";
+          holdBtn.className = "ifcdc-btn ifcdc-btn-outline";
+          holdBtn.style.fontSize = "0.75rem";
+          holdBtn.onclick = async (ev) => {
+            ev.stopPropagation();
+            await updateGoalStatus(g.id, "ON_HOLD");
+          };
+
+          btnRow.appendChild(completeBtn);
+          btnRow.appendChild(holdBtn);
+          div.appendChild(btnRow);
 
           listEl.appendChild(div);
         });
