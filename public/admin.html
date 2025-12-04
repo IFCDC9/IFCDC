@@ -123,7 +123,7 @@
         Use this internal console to manage staff, clients, assignments, appointments and outreach.
       </p>
 
-      <div class="admin-card" id="snapshot-card" style="margin-top:1rem; display:none;">
+      <div class="admin-card" id="snapshot-card" style="margin-top:1rem;">
         <h2>IFCDC Health Snapshot</h2>
         <p id="snapshot-status" style="font-size:0.8rem; margin-bottom:0.6rem;"></p>
         <div id="snapshot-metrics" style="display:flex; gap:1.5rem; flex-wrap:wrap; font-size:0.9rem;"></div>
@@ -349,7 +349,6 @@
         }
         state.token = data.token;
         setStatus("login-status", "Logged in as " + data.user.name + " (" + data.user.role + ")");
-        loadSnapshot();
       } catch (e) {
         setStatus("login-status", "Error logging in", true);
       }
@@ -357,12 +356,10 @@
 
     // Stats overview (Snapshot)
     async function loadSnapshot() {
-      const card = document.getElementById("snapshot-card");
       const statusEl = document.getElementById("snapshot-status");
       const metricsEl = document.getElementById("snapshot-metrics");
       if (!statusEl || !metricsEl) return;
 
-      card.style.display = "block";
       statusEl.textContent = "Loading snapshot...";
       try {
         const res = await fetch("/api/stats/overview", {
