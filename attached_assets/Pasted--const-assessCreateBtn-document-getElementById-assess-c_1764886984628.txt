@@ -1,0 +1,76 @@
+    const assessCreateBtn = document.getElementById("assess-create");
+    if (assessCreateBtn) {
+      assessCreateBtn.onclick = async () => {
+        if (!state.selectedClientId) {
+          setStatus("assess-status", "Select a client first", true);
+          return;
+        }
+        const type = (document.getElementById("assess-type") || {}).value || "INTAKE";
+
+        let data = {};
+        if (type === "INTAKE") {
+          data = {
+            presentingConcerns: document
+              .getElementById("assess-presenting")
+              .value.trim(),
+            housingStatus: document
+              .getElementById("assess-housing")
+              .value.trim(),
+            employmentStatus: document
+              .getElementById("assess-employment")
+              .value.trim(),
+            educationStatus: document
+              .getElementById("assess-education")
+              .value.trim(),
+            supports: document
+              .getElementById("assess-supports")
+              .value.trim(),
+            legalInvolvement: document
+              .getElementById("assess-legal")
+              .value.trim(),
+          };
+        } else if (type === "RISK") {
+          data = {
+            suicideRisk: document
+              .getElementById("assess-suicide")
+              .value,
+            violenceRisk: document
+              .getElementById("assess-violence")
+              .value,
+            substanceUse: document
+              .getElementById("assess-substance")
+              .value.trim(),
+            protectiveFactors: document
+              .getElementById("assess-protective")
+              .value.trim(),
+            safetyPlanNeeded: document.getElementById("assess-safety-needed")
+              .checked,
+          };
+        }
+
+        setStatus("assess-status", "Saving assessment...");
+        try {
+          const res = await fetch(
+            "/api/clients/" + state.selectedClientId + "/assessments",
+            {
+              method: "POST",
+              headers: getAuthHeaders(),
+              body: JSON.stringify({ type, data }),
+            }
+          );
+          const result = await res.json();
+          if (!res.ok) {
+            setStatus(
+              "assess-status",
+              result.error || "Failed to save assessment",
+              true
+            );
+            return;
+          }
+          setStatus("assess-status", "Assessment saved");
+          loadAssessmentsForClient();
+        } catch (err) {
+          setStatus("assess-status", "Error saving assessment", true);
+        }
+      };
+    }
