@@ -189,10 +189,33 @@
         </div>
 
         <div class="admin-card">
-          <h2>Encounters (Visits)</h2>
+          <h2>Appointments &amp; Encounters</h2>
           <p style="font-size:0.8rem;">
-            You can log encounters for the selected client.
+            Use this section to schedule appointments and log encounters for the selected client.
           </p>
+
+          <h3 style="font-size:1rem; margin-top:0.5rem;">Create Appointment</h3>
+          <label class="admin-label">Program</label>
+          <input id="appt-program" class="admin-input" placeholder="e.g. MentalHealth" />
+          <label class="admin-label">Start Time</label>
+          <input id="appt-start" type="datetime-local" class="admin-input" />
+          <label class="admin-label">End Time (optional)</label>
+          <input id="appt-end" type="datetime-local" class="admin-input" />
+          <label class="admin-label">Location (optional)</label>
+          <input id="appt-location" class="admin-input" placeholder="e.g. IFCDC Office" />
+          <label class="admin-label">Notes (internal)</label>
+          <textarea id="appt-notes" class="admin-input" rows="2"></textarea>
+          <button id="appt-create" class="ifcdc-btn ifcdc-btn-primary" style="margin-top:0.4rem;">
+            Create Appointment
+          </button>
+          <p id="appt-status" style="font-size:0.8rem; margin-top:0.4rem;"></p>
+
+          <h3 style="margin-top:0.75rem; font-size:1rem;">Client Appointments</h3>
+          <div id="appt-list" class="admin-list" style="margin-bottom:0.75rem;"></div>
+
+          <hr style="border:none; border-top:1px solid rgba(255,255,255,0.08); margin:0.75rem 0;" />
+
+          <h3 style="font-size:1rem;">Encounters (Visits)</h3>
           <label class="admin-label">Program</label>
           <input id="enc-program" class="admin-input" placeholder="e.g. MentalHealth" />
           <label class="admin-label">Type</label>
@@ -378,6 +401,7 @@
         "<br/>Programs: " +
         (c.programs && c.programs.length ? c.programs.join(", ") : "None");
       loadAssignmentsForClient();
+      loadAppointmentsForClient();
       loadEncountersForClient();
     }
 
@@ -481,6 +505,110 @@
         setStatus("assignment-status", "Error assigning", true);
       }
     };
+
+    // Appointments
+    async function loadAppointmentsForClient() {
+      const listEl = document.getElementById("appt-list");
+      if (!state.selectedClientId) {
+        listEl.textContent = "No client selected.";
+        return;
+      }
+      listEl.textContent = "Loading appointments...";
+      try {
+        const res = await fetch(
+          "/api/clients/" + state.selectedClientId + "/appointments",
+          { headers: getAuthHeaders() }
+        );
+        const data = await res.json();
+        if (!res.ok) {
+          listEl.textContent = data.error || "Failed to load appointments.";
+          return;
+        }
+        listEl.innerHTML = "";
+        if (!data.length) {
+          listEl.textContent = "No appointments yet.";
+          return;
+        }
+        data.forEach((a) => {
+          const div = document.createElement("div");
+          div.className = "admin-list-item";
+          const startDate = new Date(a.startTime).toLocaleString();
+          div.innerHTML =
+            "<strong>" + a.program + "</strong><br/>" +
+            "<span style='opacity:0.85;'>" + startDate + "</span>" +
+            (a.location ? "<br/><span style='opacity:0.7;'>" + a.location + "</span>" : "") +
+            "<br/><button class='ifcdc-btn ifcdc-btn-outline' style='font-size:0.7rem; padding:0.2rem 0.4rem; margin-top:0.3rem;' onclick='sendApptReminder(\"" + a.id + "\")'>Send Reminder</button>";
+          listEl.appendChild(div);
+        });
+      } catch (e) {
+        listEl.textContent = "Error loading appointments.";
+      }
+    }
+
+    document.getElementById("appt-create").onclick = async () => {
+      if (!state.selectedClientId) {
+        setStatus("appt-status", "Select a client first", true);
+        return;
+      }
+      const program = document.getElementById("appt-program").value.trim();
+      const startTime = document.getElementById("appt-start").value;
+      const endTime = document.getElementById("appt-end").value || null;
+      const location = document.getElementById("appt-location").value.trim();
+      const notes = document.getElementById("appt-notes").value.trim();
+
+      if (!program || !startTime) {
+        setStatus("appt-status", "Program and Start Time are required", true);
+        return;
+      }
+
+      setStatus("appt-status", "Creating appointment...");
+      try {
+        const res = await fetch(
+          "/api/clients/" + state.selectedClientId + "/appointments",
+          {
+            method: "POST",
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+              program,
+              startTime: new Date(startTime).toISOString(),
+              endTime: endTime ? new Date(endTime).toISOString() : null,
+              location,
+              notes,
+            }),
+          }
+        );
+        const data = await res.json();
+        if (!res.ok) {
+          setStatus("appt-status", data.error || "Failed to create appointment", true);
+          return;
+        }
+        setStatus("appt-status", "Appointment created");
+        loadAppointmentsForClient();
+      } catch (e) {
+        setStatus("appt-status", "Error creating appointment", true);
+      }
+    };
+
+    async function sendApptReminder(apptId) {
+      if (!state.selectedClientId) return;
+      try {
+        const res = await fetch(
+          "/api/clients/" + state.selectedClientId + "/appointments/" + apptId + "/remind",
+          {
+            method: "POST",
+            headers: getAuthHeaders(),
+          }
+        );
+        const data = await res.json();
+        if (!res.ok) {
+          alert(data.error || "Failed to send reminder");
+          return;
+        }
+        alert("Reminder sent!");
+      } catch (e) {
+        alert("Error sending reminder");
+      }
+    }
 
     // Encounters
     async function loadEncountersForClient() {
