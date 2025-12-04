@@ -668,38 +668,44 @@
       reportsRunBtn.onclick = runReports;
     }
 
-    const downloadVolumeBtn = document.getElementById("reports-download-volume");
-    if (downloadVolumeBtn) {
-      downloadVolumeBtn.onclick = () => {
-        const fromEl = document.getElementById("reports-from");
-        const toEl = document.getElementById("reports-to");
-        const progEl = document.getElementById("reports-program");
+    function buildReportsQueryParams() {
+      const fromEl = document.getElementById("reports-from");
+      const toEl = document.getElementById("reports-to");
+      const progEl = document.getElementById("reports-program");
 
-        const fromDate = fromEl?.value;
-        const toDate = toEl?.value;
-        const program = progEl?.value.trim();
+      const fromDate = fromEl?.value;
+      const toDate = toEl?.value;
+      const program = progEl?.value.trim();
 
-        if (!fromDate || !toDate) {
-          alert("Select a date range first.");
-          return;
-        }
+      const params = new URLSearchParams();
+      if (fromDate) {
+        params.set("from", new Date(fromDate + "T00:00:00").toISOString());
+      }
+      if (toDate) {
+        params.set("to", new Date(toDate + "T23:59:59").toISOString());
+      }
+      if (program) {
+        params.set("program", program);
+      }
+      if (state.token) {
+        params.set("token", state.token);
+      }
+      return params.toString();
+    }
 
-        const fromIso = new Date(fromDate + "T00:00:00").toISOString();
-        const toIso = new Date(toDate + "T23:59:59").toISOString();
-
-        const params = new URLSearchParams();
-        params.set("from", fromIso);
-        params.set("to", toIso);
-        if (program) params.set("program", program);
-
-        window.open("/api/reports/volume.csv?" + params.toString() + "&token=" + encodeURIComponent(state.token || ""), "_blank");
+    const dlVolBtn = document.getElementById("reports-download-volume");
+    if (dlVolBtn) {
+      dlVolBtn.onclick = () => {
+        const qs = buildReportsQueryParams();
+        window.location.href = "/api/reports/volume.csv" + (qs ? "?" + qs : "");
       };
     }
 
-    const downloadRiskBtn = document.getElementById("reports-download-risk");
-    if (downloadRiskBtn) {
-      downloadRiskBtn.onclick = () => {
-        window.open("/api/reports/risk-mix.csv?token=" + encodeURIComponent(state.token || ""), "_blank");
+    const dlRiskBtn = document.getElementById("reports-download-risk");
+    if (dlRiskBtn) {
+      dlRiskBtn.onclick = () => {
+        const qs = state.token ? "?token=" + encodeURIComponent(state.token) : "";
+        window.location.href = "/api/reports/risk-mix.csv" + qs;
       };
     }
 
