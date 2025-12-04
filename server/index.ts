@@ -838,6 +838,98 @@ app.get("/api/audit-logs", authRequired, requireRole(ROLES.EXEC), async (req, re
   })));
 });
 
+// ----- Stats Overview -----
+app.get("/api/stats/overview", authRequired, async (req, res) => {
+  try {
+    const isExec = req.user!.role === ROLES.EXEC;
+    const userId = req.user!.id;
+
+    // Total clients (global vs assigned)
+    let totalClientsRow;
+    if (isExec) {
+      totalClientsRow = await db.get<{ count: number }>("SELECT COUNT(*) as count FROM clients");
+    } else {
+      totalClientsRow = await db.get<{ count: number }>(
+        `SELECT COUNT(DISTINCT client_id) as count FROM client_assignments WHERE user_id = ?`,
+        userId
+      );
+    }
+    const totalClients = totalClientsRow?.count || 0;
+
+    // Appointments this week
+    const now = new Date();
+    const day = now.getUTCDay(); // 0=Sun,...6=Sat
+    const diffToMonday = (day + 6) % 7; // days since Monday
+    const weekStart = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - diffToMonday, 0, 0, 0)
+    );
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 7);
+
+    const weekStartIso = weekStart.toISOString();
+    const weekEndIso = weekEnd.toISOString();
+
+    let apptRow;
+    if (isExec) {
+      apptRow = await db.get<{ count: number }>(
+        `SELECT COUNT(*) as count FROM appointments WHERE start_time >= ? AND start_time < ?`,
+        weekStartIso, weekEndIso
+      );
+    } else {
+      apptRow = await db.get<{ count: number }>(
+        `SELECT COUNT(DISTINCT a.id) as count
+         FROM appointments a
+         JOIN client_assignments ca ON ca.client_id = a.client_id
+         WHERE ca.user_id = ? AND a.start_time >= ? AND a.start_time < ?`,
+        userId, weekStartIso, weekEndIso
+      );
+    }
+    const appointmentsThisWeek = apptRow?.count || 0;
+
+    // Open outreach tasks
+    let outreachRow;
+    if (isExec || req.user!.role === ROLES.ADMIN || req.user!.role === ROLES.CHW) {
+      outreachRow = await db.get<{ count: number }>(
+        "SELECT COUNT(*) as count FROM outreach_tasks WHERE status = 'OPEN'"
+      );
+    } else if (req.user!.role === ROLES.CASE_MANAGER) {
+      outreachRow = await db.get<{ count: number }>(
+        `SELECT COUNT(*) as count FROM outreach_tasks
+         WHERE status = 'OPEN'
+           AND (client_id IS NULL OR client_id IN (
+             SELECT client_id FROM client_assignments WHERE user_id = ?
+           ))`,
+        userId
+      );
+    } else {
+      outreachRow = await db.get<{ count: number }>(
+        `SELECT COUNT(*) as count FROM outreach_tasks
+         WHERE status = 'OPEN'
+           AND client_id IN (SELECT client_id FROM client_assignments WHERE user_id = ?)`,
+        userId
+      );
+    }
+    const openOutreachTasks = outreachRow?.count || 0;
+
+    await logAudit(req, "STATS", null, "VIEW_STATS_OVERVIEW", {
+      totalClients,
+      appointmentsThisWeek,
+      openOutreachTasks,
+    });
+
+    res.json({
+      totalClients,
+      appointmentsThisWeek,
+      openOutreachTasks,
+      weekStart: weekStartIso,
+      weekEnd: weekEndIso,
+    });
+  } catch (err) {
+    console.error("Error building stats overview:", err);
+    res.status(500).json({ error: "Failed to load stats overview" });
+  }
+});
+
 // ----- Twilio Voice Status Webhook -> Outreach tasks (NO AUTH) -----
 app.post(
   "/twilio/voice-status",
