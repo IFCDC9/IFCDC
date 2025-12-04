@@ -14,9 +14,9 @@ Preferred communication style: Simple, everyday language.
 
 **Framework**: Express.js with TypeScript, running on Node.js.
 
-**Database**: SQLite via better-sqlite3 (file: `data/ifcdc.db`)
+**Database**: SQLite via sqlite/sqlite3 (file: `data/ifcdc.db`)
 
-**Authentication**: API key-based authentication via `x-api-key` header
+**Authentication**: JWT-based authentication via `Authorization: Bearer <token>` header
 
 **Project Structure**:
 ```
