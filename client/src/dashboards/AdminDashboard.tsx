@@ -16,7 +16,7 @@ const AdminDashboard: React.FC = () => {
         <li><a href="/admin/system">System Settings</a></li>
         <li><a href="/programs">Programs</a></li>
         <li><a href="/my-time">Log My Time</a></li>
-        <li><a href="/admin/time">Payroll / Time Overview</a></li>
+        <li><a href="/admin/time">Time Overview / Payroll</a></li>
       </ul>
     </div>
   );
