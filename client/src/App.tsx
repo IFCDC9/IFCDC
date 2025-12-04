@@ -9,6 +9,7 @@ import HrOnboardingPage from "./pages/HrOnboardingPage";
 import ProgramsDashboard from "./pages/ProgramsDashboard";
 import ProgramDetailPage from "./pages/ProgramDetailPage";
 import MyTimeEntriesPage from "./pages/MyTimeEntriesPage";
+import AdminTimeOverviewPage from "./pages/AdminTimeOverviewPage";
 import LoginPage from "./pages/LoginPage";
 
 const RoleRouter: React.FC = () => {
@@ -51,6 +52,14 @@ const App: React.FC = () => {
           element={
             <ProtectedRoute allowedRoles={["admin"]}>
               <HrOnboardingPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/time-overview"
+          element={
+            <ProtectedRoute allowedRoles={["admin"]}>
+              <AdminTimeOverviewPage />
             </ProtectedRoute>
           }
         />
