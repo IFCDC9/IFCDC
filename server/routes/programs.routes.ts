@@ -170,4 +170,44 @@ router.post("/:programId/sessions", requireAuth(["admin", "program_staff"]), asy
   }
 });
 
+// Set or clear default funding source for a program
+router.patch(
+  "/:programId/funding-source",
+  requireAuth(["admin"]),
+  async (req, res) => {
+    try {
+      const { programId } = req.params;
+      const { fundingSourceId } = req.body as { fundingSourceId?: string | null };
+
+      let data: any = { fundingSourceId: null };
+
+      if (fundingSourceId) {
+        const fs = await prisma.fundingSource.findUnique({
+          where: { id: fundingSourceId },
+        });
+        if (!fs) {
+          return res.status(400).json({ error: "Invalid fundingSourceId" });
+        }
+        data.fundingSourceId = fundingSourceId;
+      }
+
+      const program = await prisma.program.update({
+        where: { id: programId },
+        data,
+        include: {
+          fundingSource: true,
+        },
+      });
+
+      return res.json(program);
+    } catch (err: any) {
+      console.error("Error updating program funding source", err);
+      if (err.code === "P2025") {
+        return res.status(404).json({ error: "Program not found" });
+      }
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
+
 export default router;
