@@ -1,0 +1,205 @@
+import React, { useEffect, useState } from "react";
+
+type FundingSource = {
+  id: string;
+  name: string;
+  code?: string | null;
+  type?: string | null;
+  agency?: string | null;
+  notes?: string | null;
+};
+
+const FundingSourcesAdminPage: React.FC = () => {
+  const [sources, setSources] = useState<FundingSource[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    name: "",
+    code: "",
+    type: "",
+    agency: "",
+    notes: "",
+  });
+
+  const token = localStorage.getItem("ifcdc_token");
+
+  const fetchSources = async () => {
+    setLoading(true);
+    const res = await fetch("/api/funding-sources", {
+      headers: {
+        Authorization: token ? `Bearer ${token}` : "",
+      },
+    });
+    setLoading(false);
+    if (res.ok) {
+      const data = await res.json();
+      setSources(data);
+    } else {
+      alert("Error loading funding sources.");
+    }
+  };
+
+  useEffect(() => {
+    fetchSources();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
+  ) => {
+    const { name, value } = e.target;
+    setForm(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.name) return;
+    setSaving(true);
+
+    const res = await fetch("/api/funding-sources", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: token ? `Bearer ${token}` : "",
+      },
+      body: JSON.stringify(form),
+    });
+
+    setSaving(false);
+
+    if (res.ok) {
+      setForm({ name: "", code: "", type: "", agency: "", notes: "" });
+      fetchSources();
+    } else if (res.status === 409) {
+      alert("Funding source code already in use.");
+    } else {
+      alert("Error creating funding source.");
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm("Are you sure you want to delete this funding source?")) return;
+    const res = await fetch(`/api/funding-sources/${id}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: token ? `Bearer ${token}` : "",
+      },
+    });
+    if (res.ok) {
+      fetchSources();
+    } else {
+      const body = await res.json().catch(() => null);
+      alert(body?.error || "Error deleting funding source.");
+    }
+  };
+
+  return (
+    <div style={{ padding: "1.5rem" }}>
+      <h1>Funding Sources – Admin</h1>
+
+      {/* Create Form */}
+      <section style={{ marginTop: "1rem", marginBottom: "2rem" }}>
+        <h2>Add New Funding Source</h2>
+        <form
+          onSubmit={handleSubmit}
+          style={{ maxWidth: 520, display: "grid", gap: "0.75rem" }}
+        >
+          <div>
+            <label>Name *</label>
+            <input
+              name="name"
+              value={form.name}
+              onChange={handleChange}
+              placeholder='e.g. "OJJDP Youth Violence Grant 2025"'
+              required
+            />
+          </div>
+          <div>
+            <label>Code (internal short name)</label>
+            <input
+              name="code"
+              value={form.code}
+              onChange={handleChange}
+              placeholder='e.g. "OJJDP-2025-YV"'
+            />
+          </div>
+          <div>
+            <label>Type</label>
+            <select name="type" value={form.type} onChange={handleChange}>
+              <option value="">Select</option>
+              <option value="federal">Federal</option>
+              <option value="state">State</option>
+              <option value="foundation">Foundation</option>
+              <option value="corporate">Corporate</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div>
+            <label>Agency / Funder</label>
+            <input
+              name="agency"
+              value={form.agency}
+              onChange={handleChange}
+              placeholder='e.g. "DOJ - OJJDP" or "NJDCA"'
+            />
+          </div>
+          <div>
+            <label>Notes</label>
+            <textarea
+              name="notes"
+              rows={3}
+              value={form.notes}
+              onChange={handleChange}
+              placeholder="Internal notes, grant period, CFDA number, etc."
+            />
+          </div>
+          <button type="submit" disabled={saving}>
+            {saving ? "Saving…" : "Create Funding Source"}
+          </button>
+        </form>
+      </section>
+
+      {/* List */}
+      <section>
+        <h2>Existing Funding Sources</h2>
+        {loading ? (
+          <p>Loading…</p>
+        ) : sources.length === 0 ? (
+          <p>No funding sources yet.</p>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                <th align="left">Name</th>
+                <th align="left">Code</th>
+                <th align="left">Type</th>
+                <th align="left">Agency</th>
+                <th align="left">Notes</th>
+                <th align="left">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sources.map(s => (
+                <tr key={s.id}>
+                  <td>{s.name}</td>
+                  <td>{s.code || "-"}</td>
+                  <td>{s.type || "-"}</td>
+                  <td>{s.agency || "-"}</td>
+                  <td>{s.notes || "-"}</td>
+                  <td>
+                    {/* Basic delete for now; editing can be added if needed */}
+                    <button type="button" onClick={() => handleDelete(s.id)}>
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+    </div>
+  );
+};
+
+export default FundingSourcesAdminPage;
