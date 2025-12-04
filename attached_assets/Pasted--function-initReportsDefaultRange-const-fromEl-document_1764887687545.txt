@@ -1,0 +1,175 @@
+    function initReportsDefaultRange() {
+      const fromEl = document.getElementById("reports-from");
+      const toEl = document.getElementById("reports-to");
+      if (!fromEl || !toEl) return;
+
+      const now = new Date();
+      const endDateStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
+
+      const start = new Date(now);
+      start.setDate(start.getDate() - 7);
+      const startDateStr = start.toISOString().slice(0, 10);
+
+      if (!fromEl.value) fromEl.value = startDateStr;
+      if (!toEl.value) toEl.value = endDateStr;
+    }
+
+    async function runReports() {
+      const statusEl = document.getElementById("reports-status");
+      const volEl = document.getElementById("reports-volume");
+      const riskEl = document.getElementById("reports-risk");
+      const fromEl = document.getElementById("reports-from");
+      const toEl = document.getElementById("reports-to");
+      const progEl = document.getElementById("reports-program");
+
+      if (!statusEl || !volEl || !riskEl) return;
+
+      const fromDate = fromEl?.value;
+      const toDate = toEl?.value;
+      const program = progEl?.value.trim();
+
+      if (!fromDate || !toDate) {
+        statusEl.textContent = "Select a From and To date.";
+        statusEl.style.color = "#ff8a80";
+        return;
+      }
+
+      statusEl.textContent = "Running reports...";
+      statusEl.style.color = "#c5e1a5";
+      volEl.innerHTML = "";
+      riskEl.innerHTML = "";
+
+      // Build ISO range
+      const fromIso = new Date(fromDate + "T00:00:00").toISOString();
+      const toIso = new Date(toDate + "T23:59:59").toISOString();
+
+      // Query string
+      const params = new URLSearchParams();
+      params.set("from", fromIso);
+      params.set("to", toIso);
+      if (program) params.set("program", program);
+
+      try {
+        // Volume
+        const volRes = await fetch("/api/reports/volume?" + params.toString(), {
+          headers: getAuthHeaders(),
+        });
+        const volData = await volRes.json();
+        if (!volRes.ok) {
+          statusEl.textContent = volData.error || "Failed to load volume report.";
+          statusEl.style.color = "#ff8a80";
+          return;
+        }
+
+        // Risk
+        const riskRes = await fetch("/api/reports/risk-mix", {
+          headers: getAuthHeaders(),
+        });
+        const riskData = await riskRes.json();
+        if (!riskRes.ok) {
+          statusEl.textContent = riskData.error || "Failed to load risk report.";
+          statusEl.style.color = "#ff8a80";
+          return;
+        }
+
+        statusEl.textContent = "Reports loaded (scoped to your access level).";
+        statusEl.style.color = "#c5e1a5";
+
+        // Render volume
+        volEl.innerHTML = `
+          <h3 style="font-size:1rem; margin-bottom:0.3rem;">Volume</h3>
+          <div style="display:flex; flex-wrap:wrap; gap:1.5rem;">
+            <div>
+              <div style="font-size:0.8rem; opacity:0.8;">Clients Served</div>
+              <div style="font-size:1.2rem; font-weight:600;">${volData.totalClientsServed}</div>
+            </div>
+            <div>
+              <div style="font-size:0.8rem; opacity:0.8;">Appointments</div>
+              <div style="font-size:1.2rem; font-weight:600;">${volData.totalAppointments}</div>
+            </div>
+            <div>
+              <div style="font-size:0.8rem; opacity:0.8;">Encounters</div>
+              <div style="font-size:1.2rem; font-weight:600;">${volData.totalEncounters}</div>
+            </div>
+          </div>
+          <div style="margin-top:0.6rem;">
+            <div style="font-size:0.85rem; opacity:0.8;">Appointments by Program</div>
+            ${
+              volData.appointmentsByProgram && volData.appointmentsByProgram.length
+                ? "<ul style='padding-left:1.1rem; margin-top:0.2rem;'>" +
+                  volData.appointmentsByProgram
+                    .map(
+                      (p) =>
+                        "<li>" +
+                        (p.program || "Unspecified") +
+                        ": " +
+                        p.count +
+                        "</li>"
+                    )
+                    .join("") +
+                  "</ul>"
+                : "<div style='font-size:0.82rem; opacity:0.7;'>None in this range.</div>"
+            }
+          </div>
+          <div style="margin-top:0.4rem;">
+            <div style="font-size:0.85rem; opacity:0.8;">Encounters by Type</div>
+            ${
+              volData.encountersByType && volData.encountersByType.length
+                ? "<ul style='padding-left:1.1rem; margin-top:0.2rem;'>" +
+                  volData.encountersByType
+                    .map(
+                      (e) =>
+                        "<li>" +
+                        (e.type || "Unspecified") +
+                        ": " +
+                        e.count +
+                        "</li>"
+                    )
+                    .join("") +
+                  "</ul>"
+                : "<div style='font-size:0.82rem; opacity:0.7;'>None in this range.</div>"
+            }
+          </div>
+        `;
+
+        // Render risk
+        const s = riskData.suicideRisk || {};
+        const v = riskData.violenceRisk || {};
+        riskEl.innerHTML = `
+          <h3 style="font-size:1rem; margin-bottom:0.3rem;">Risk Mix</h3>
+          <div style="font-size:0.86rem; margin-bottom:0.3rem;">
+            Clients with a recorded risk assessment: <strong>${
+              riskData.totalWithRisk || 0
+            }</strong>
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:1.5rem;">
+            <div>
+              <div style="font-size:0.8rem; opacity:0.8;">Suicide Risk</div>
+              <ul style="padding-left:1.1rem; margin-top:0.2rem; font-size:0.86rem;">
+                <li>LOW: ${s.LOW || 0}</li>
+                <li>MODERATE: ${s.MODERATE || 0}</li>
+                <li>HIGH: ${s.HIGH || 0}</li>
+                <li>UNKNOWN: ${s.UNKNOWN || 0}</li>
+              </ul>
+            </div>
+            <div>
+              <div style="font-size:0.8rem; opacity:0.8;">Violence Risk</div>
+              <ul style="padding-left:1.1rem; margin-top:0.2rem; font-size:0.86rem;">
+                <li>LOW: ${v.LOW || 0}</li>
+                <li>MODERATE: ${v.MODERATE || 0}</li>
+                <li>HIGH: ${v.HIGH || 0}</li>
+                <li>UNKNOWN: ${v.UNKNOWN || 0}</li>
+              </ul>
+            </div>
+          </div>
+        `;
+      } catch (err) {
+        statusEl.textContent = "Error running reports.";
+        statusEl.style.color = "#ff8a80";
+      }
+    }
+
+    const reportsRunBtn = document.getElementById("reports-run");
+    if (reportsRunBtn) {
+      reportsRunBtn.onclick = runReports;
+    }
