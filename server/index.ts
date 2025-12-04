@@ -12,26 +12,33 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// Serve static public pages (IFCDC website)
-app.use(express.static(path.resolve(import.meta.dirname, "../public")));
+// Static assets (HTML/CSS/JS) from /public
+const publicDir = path.join(import.meta.dirname, "..", "public");
+app.use(express.static(publicDir));
 
-// Clean URL routes for public pages
-const publicRoot = path.resolve(import.meta.dirname, "../public");
+// Home route
+app.get("/", (req, res) => {
+  res.sendFile(path.join(publicDir, "index.html"));
+});
 
+// Mental Health Program page
 app.get("/mental-health", (req, res) => {
-  res.sendFile("mental-health.html", { root: publicRoot });
+  res.sendFile(path.join(publicDir, "mental-health.html"));
 });
 
+// Records & Privacy policy page
 app.get("/records-policy", (req, res) => {
-  res.sendFile("records-policy.html", { root: publicRoot });
+  res.sendFile(path.join(publicDir, "records-policy.html"));
 });
 
+// Programs page
 app.get("/programs", (req, res) => {
-  res.sendFile("programs.html", { root: publicRoot });
+  res.sendFile(path.join(publicDir, "programs.html"));
 });
 
+// Contact page
 app.get("/contact", (req, res) => {
-  res.sendFile("contact.html", { root: publicRoot });
+  res.sendFile(path.join(publicDir, "contact.html"));
 });
 
 export function log(message: string, source = "express") {
