@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
 type Program = {
@@ -131,7 +132,7 @@ const ProgramsDashboard: React.FC = () => {
                 {p.location && <div>Location: {p.location}</div>}
                 {p.description && <div>{p.description}</div>}
                 <div>Status: {p.status}</div>
-                <a href={`/programs/${p.id}`} data-testid={`link-program-${p.id}`}>View Details</a>
+                <Link to={`/programs/${p.id}`} data-testid={`link-program-${p.id}`}>View Details</Link>
               </li>
             ))}
           </ul>
