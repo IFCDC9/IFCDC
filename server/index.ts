@@ -156,6 +156,22 @@ async function initDb() {
     );
   `);
 
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS appointments (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL,
+      program TEXT NOT NULL,
+      start_time TEXT NOT NULL,
+      end_time TEXT,
+      location TEXT,
+      notes TEXT,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (client_id) REFERENCES clients(id),
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+  `);
+
   const execUser = await db.get<User>("SELECT * FROM users WHERE role = ? LIMIT 1", ROLES.EXEC);
 
   if (!execUser) {
