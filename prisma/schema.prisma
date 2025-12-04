@@ -156,8 +156,27 @@ model Employee {
   user         User?
   timeEntries  TimeEntry[]
   appointments Appointment[]
+  radioShows   RadioShow[]
 
   @@map("employees")
+}
+
+model RadioShow {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title       String
+  description String?
+  hostId      String   @map("host_id") @db.Uuid
+  dayOfWeek   Int      @map("day_of_week")
+  startTime   String   @map("start_time")
+  endTime     String   @map("end_time")
+  isLive      Boolean  @default(true) @map("is_live")
+  status      String   @default("active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  host Employee @relation(fields: [hostId], references: [id], onDelete: Cascade)
+
+  @@map("radio_shows")
 }
 
 model FundingSource {
