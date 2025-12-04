@@ -1207,6 +1207,91 @@ app.get(
   }
 );
 
+// ----- Reports: Risk Mix -----
+app.get(
+  "/api/reports/risk-mix",
+  authRequired,
+  requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
+  async (req, res) => {
+    try {
+      const isExec = req.user!.role === ROLES.EXEC;
+      const userId = req.user!.id;
+
+      let rows;
+      if (isExec) {
+        rows = await db.all<{ client_id: string; data: string }[]>(`
+          SELECT a.client_id, a.data
+          FROM assessments a
+          JOIN (
+            SELECT client_id, MAX(created_at) AS max_created_at
+            FROM assessments
+            WHERE type = 'RISK'
+            GROUP BY client_id
+          ) latest
+            ON a.client_id = latest.client_id
+           AND a.created_at = latest.max_created_at
+          WHERE a.type = 'RISK'
+        `);
+      } else {
+        rows = await db.all<{ client_id: string; data: string }[]>(
+          `
+          SELECT a.client_id, a.data
+          FROM assessments a
+          JOIN (
+            SELECT client_id, MAX(created_at) AS max_created_at
+            FROM assessments
+            WHERE type = 'RISK'
+            GROUP BY client_id
+          ) latest
+            ON a.client_id = latest.client_id
+           AND a.created_at = latest.max_created_at
+          JOIN client_assignments ca ON ca.client_id = a.client_id
+          WHERE a.type = 'RISK'
+            AND ca.user_id = ?
+        `,
+          userId
+        );
+      }
+
+      const suicideCounts: Record<string, number> = { LOW: 0, MODERATE: 0, HIGH: 0, UNKNOWN: 0 };
+      const violenceCounts: Record<string, number> = { LOW: 0, MODERATE: 0, HIGH: 0, UNKNOWN: 0 };
+
+      let totalWithRisk = 0;
+
+      for (const row of rows || []) {
+        try {
+          const data = JSON.parse(row.data || "{}");
+
+          let s = (data.suicideRisk || "UNKNOWN").toString().toUpperCase();
+          let v = (data.violenceRisk || "UNKNOWN").toString().toUpperCase();
+
+          if (!["LOW", "MODERATE", "HIGH"].includes(s)) s = "UNKNOWN";
+          if (!["LOW", "MODERATE", "HIGH"].includes(v)) v = "UNKNOWN";
+
+          suicideCounts[s] = (suicideCounts[s] || 0) + 1;
+          violenceCounts[v] = (violenceCounts[v] || 0) + 1;
+          totalWithRisk++;
+        } catch (_) {
+          // ignore bad JSON rows
+        }
+      }
+
+      await logAudit(req, "REPORT", null, "REPORT_RISK_MIX", {
+        totalWithRisk,
+      });
+
+      res.json({
+        totalWithRisk,
+        suicideRisk: suicideCounts,
+        violenceRisk: violenceCounts,
+      });
+    } catch (err) {
+      console.error("Error in /api/reports/risk-mix:", err);
+      res.status(500).json({ error: "Failed to build risk-mix report" });
+    }
+  }
+);
+
 // ----- Twilio Voice Status Webhook -> Outreach tasks (NO AUTH) -----
 app.post(
   "/twilio/voice-status",
