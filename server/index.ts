@@ -500,6 +500,50 @@ app.get("/api/clients/:id/encounters", authRequired, requireRole(ROLES.EXEC, ROL
   })));
 });
 
+// ----- Assessments (structured intake / risk) -----
+app.post(
+  "/api/clients/:id/assessments",
+  authRequired,
+  requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
+  async (req, res) => {
+    const clientId = req.params.id;
+    const { type, data } = req.body || {};
+
+    const client = await db.get<{ id: string }>("SELECT id FROM clients WHERE id = ?", clientId);
+    if (!client) {
+      return res.status(404).json({ error: "Client not found" });
+    }
+
+    if (!(await hasClientAccess(req.user, client.id))) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    if (!type || !data) {
+      return res.status(400).json({ error: "type and data are required" });
+    }
+
+    const id = cryptoRandomId();
+    const created_at = new Date().toISOString();
+
+    await db.run(
+      `INSERT INTO assessments (id, client_id, type, data, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      id, clientId, type, JSON.stringify(data), req.user!.id, created_at
+    );
+
+    await logAudit(req, "ASSESSMENT", id, "CREATE_ASSESSMENT", { type });
+
+    res.status(201).json({
+      id,
+      clientId,
+      type,
+      data,
+      createdBy: req.user!.id,
+      createdAt: created_at,
+    });
+  }
+);
+
 app.post("/api/clients/:id/assignments", authRequired, requireRole(ROLES.EXEC), async (req, res) => {
   const clientId = req.params.id;
   const { userId, role } = req.body || {};
