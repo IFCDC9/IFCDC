@@ -160,6 +160,16 @@
 
         <div id="reports-volume" style="margin-top:0.6rem; font-size:0.9rem;"></div>
         <div id="reports-risk" style="margin-top:0.6rem; font-size:0.9rem;"></div>
+
+        <div style="margin-top:0.8rem; font-size:0.85rem;">
+          <span style="opacity:0.8;">Exports:</span>
+          <button id="reports-download-volume" class="ifcdc-btn ifcdc-btn-outline" style="margin-left:0.5rem; margin-right:0.3rem;">
+            Download Volume CSV
+          </button>
+          <button id="reports-download-risk" class="ifcdc-btn ifcdc-btn-outline">
+            Download Risk CSV
+          </button>
+        </div>
       </div>
     </section>
 
@@ -656,6 +666,41 @@
     const reportsRunBtn = document.getElementById("reports-run");
     if (reportsRunBtn) {
       reportsRunBtn.onclick = runReports;
+    }
+
+    const downloadVolumeBtn = document.getElementById("reports-download-volume");
+    if (downloadVolumeBtn) {
+      downloadVolumeBtn.onclick = () => {
+        const fromEl = document.getElementById("reports-from");
+        const toEl = document.getElementById("reports-to");
+        const progEl = document.getElementById("reports-program");
+
+        const fromDate = fromEl?.value;
+        const toDate = toEl?.value;
+        const program = progEl?.value.trim();
+
+        if (!fromDate || !toDate) {
+          alert("Select a date range first.");
+          return;
+        }
+
+        const fromIso = new Date(fromDate + "T00:00:00").toISOString();
+        const toIso = new Date(toDate + "T23:59:59").toISOString();
+
+        const params = new URLSearchParams();
+        params.set("from", fromIso);
+        params.set("to", toIso);
+        if (program) params.set("program", program);
+
+        window.open("/api/reports/volume.csv?" + params.toString() + "&token=" + encodeURIComponent(state.token || ""), "_blank");
+      };
+    }
+
+    const downloadRiskBtn = document.getElementById("reports-download-risk");
+    if (downloadRiskBtn) {
+      downloadRiskBtn.onclick = () => {
+        window.open("/api/reports/risk-mix.csv?token=" + encodeURIComponent(state.token || ""), "_blank");
+      };
     }
 
     // Staff list

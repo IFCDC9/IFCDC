@@ -237,7 +237,12 @@ async function logAudit(req: express.Request, entityType: string, entityId: stri
 
 async function authRequired(req: express.Request, res: express.Response, next: express.NextFunction) {
   const authHeader = req.header("Authorization") || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.replace("Bearer ", "") : null;
+  let token = authHeader.startsWith("Bearer ") ? authHeader.replace("Bearer ", "") : null;
+
+  // Also support token via query string (for CSV downloads)
+  if (!token && req.query.token) {
+    token = req.query.token as string;
+  }
 
   if (!token) {
     return res.status(401).json({ error: "Missing or invalid Authorization header" });
