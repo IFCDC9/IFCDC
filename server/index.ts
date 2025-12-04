@@ -172,6 +172,19 @@ async function initDb() {
     );
   `);
 
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS outreach_tasks (
+      id TEXT PRIMARY KEY,
+      client_id TEXT,
+      phone TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+  `);
+
   const execUser = await db.get<User>("SELECT * FROM users WHERE role = ? LIMIT 1", ROLES.EXEC);
 
   if (!execUser) {
