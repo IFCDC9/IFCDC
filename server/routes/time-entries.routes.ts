@@ -10,7 +10,7 @@ router.post(
   requireAuth(["admin", "barber", "radio_host", "program_staff"]),
   async (req: AuthedRequest, res) => {
     try {
-      const { date, hours, programId, notes } = req.body;
+      const { date, hours, fundingSourceId, notes } = req.body;
 
       if (!req.user) {
         return res.status(401).json({ error: "Not authenticated" });
@@ -34,13 +34,13 @@ router.post(
       const entry = await prisma.timeEntry.create({
         data: {
           employeeId: user.employee.id,
-          programId: programId || null,
+          fundingSourceId: fundingSourceId || null,
           date: new Date(date),
           hours: parseFloat(hours),
           notes: notes || null,
         },
         include: {
-          program: true,
+          fundingSource: true,
         },
       });
 
@@ -74,7 +74,7 @@ router.get(
 
       const entries = await prisma.timeEntry.findMany({
         where: { employeeId: user.employee.id },
-        include: { program: true },
+        include: { fundingSource: true },
         orderBy: { date: "desc" },
       });
 
@@ -91,7 +91,7 @@ router.get("/", requireAuth(["admin"]), async (_req, res) => {
     const entries = await prisma.timeEntry.findMany({
       include: {
         employee: true,
-        program: true,
+        fundingSource: true,
       },
       orderBy: { date: "desc" },
     });
@@ -108,10 +108,10 @@ router.get(
   requireAuth(["admin"]),
   async (req: AuthedRequest, res) => {
     try {
-      const { from, to, programId } = req.query as {
+      const { from, to, fundingSourceId } = req.query as {
         from?: string;
         to?: string;
-        programId?: string;
+        fundingSourceId?: string;
       };
 
       const where: any = {};
@@ -122,15 +122,15 @@ router.get(
       if (to) {
         where.date = { ...(where.date || {}), lte: new Date(to) };
       }
-      if (programId) {
-        where.programId = programId;
+      if (fundingSourceId) {
+        where.fundingSourceId = fundingSourceId;
       }
 
       const entries = await prisma.timeEntry.findMany({
         where,
         include: {
           employee: true,
-          program: true,
+          fundingSource: true,
         },
         orderBy: { date: "asc" },
       });
@@ -143,8 +143,8 @@ router.get(
         "Pay Rate": e.employee.payRate ?? "",
         "Pay Currency": e.employee.payCurrency ?? "USD",
         "Cost": e.employee.payRate ? e.hours * e.employee.payRate : "",
-        Program: e.program?.name ?? "",
-        "Program ID": e.program?.id ?? "",
+        "Funding Source": e.fundingSource?.name ?? "",
+        "Funding Source ID": e.fundingSource?.id ?? "",
         Notes: e.notes ?? "",
       }));
 
