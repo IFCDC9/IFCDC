@@ -133,16 +133,33 @@ const AdminTimeOverviewPage: React.FC = () => {
   }, [filteredEntries]);
 
   const programSummaries = useMemo(() => {
-    const map = new Map<string, { programId: string; name: string; totalHours: number }>();
+    const map = new Map<
+      string,
+      { programId: string; name: string; totalHours: number; totalCost: number; currency: string }
+    >();
 
     for (const e of filteredEntries) {
       if (!e.program) continue;
-      const id = e.program.id;
-      if (!map.has(id)) {
-        map.set(id, { programId: id, name: e.program.name, totalHours: 0 });
+      const emp = e.employee;
+      const payRate = emp.payRate ?? null;
+      const programId = e.program.id;
+
+      if (!map.has(programId)) {
+        map.set(programId, {
+          programId,
+          name: e.program.name,
+          totalHours: 0,
+          totalCost: 0,
+          currency: emp.payCurrency ?? "USD",
+        });
       }
-      const current = map.get(id)!;
+
+      const current = map.get(programId)!;
       current.totalHours += e.hours;
+
+      if (typeof payRate === "number") {
+        current.totalCost += e.hours * payRate;
+      }
     }
 
     return Array.from(map.values()).sort((a, b) =>
@@ -260,6 +277,7 @@ const AdminTimeOverviewPage: React.FC = () => {
               <tr>
                 <th align="left">Program</th>
                 <th align="left">Total Hours</th>
+                <th align="left">Total Cost</th>
               </tr>
             </thead>
             <tbody>
@@ -267,6 +285,7 @@ const AdminTimeOverviewPage: React.FC = () => {
                 <tr key={p.programId} data-testid={`row-program-${p.programId}`}>
                   <td>{p.name}</td>
                   <td>{p.totalHours.toFixed(2)}</td>
+                  <td>{p.totalCost > 0 ? `${p.currency} ${p.totalCost.toFixed(2)}` : "-"}</td>
                 </tr>
               ))}
             </tbody>
