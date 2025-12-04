@@ -11,6 +11,7 @@ import ProgramDetailPage from "./pages/ProgramDetailPage";
 import MyTimeEntriesPage from "./pages/MyTimeEntriesPage";
 import AdminTimeOverviewPage from "./pages/AdminTimeOverviewPage";
 import FundingSourcesAdminPage from "./pages/FundingSourcesAdminPage";
+import GrantReportPage from "./pages/GrantReportPage";
 import LoginPage from "./pages/LoginPage";
 
 const RoleRouter: React.FC = () => {
@@ -69,6 +70,14 @@ const App: React.FC = () => {
           element={
             <ProtectedRoute allowedRoles={["admin"]}>
               <FundingSourcesAdminPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/grant-report"
+          element={
+            <ProtectedRoute allowedRoles={["admin"]}>
+              <GrantReportPage />
             </ProtectedRoute>
           }
         />

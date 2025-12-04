@@ -1,0 +1,346 @@
+import React, { useEffect, useMemo, useState } from "react";
+
+type FundingSource = {
+  id: string;
+  name: string;
+  code?: string | null;
+  type?: string | null;
+  agency?: string | null;
+};
+
+type EmployeeAgg = {
+  employeeId: string;
+  name: string;
+  role: string;
+  payRate: number | null;
+  currency: string;
+  hours: number;
+  cost: number;
+};
+
+type ProgramAgg = {
+  programId: string;
+  name: string;
+  hours: number;
+  cost: number;
+  currency: string;
+};
+
+type Entry = {
+  id: string;
+  date: string;
+  hours: number;
+  notes?: string | null;
+  employee: {
+    id: string;
+    name: string;
+    role: string;
+  };
+  program?: {
+    id: string;
+    name: string;
+  } | null;
+};
+
+type ReportResponse = {
+  fundingSource: {
+    id: string;
+    name: string;
+    code?: string | null;
+    type?: string | null;
+    agency?: string | null;
+  };
+  period: {
+    from: string | null;
+    to: string | null;
+  };
+  totals: {
+    hours: number;
+    cost: number;
+    currency: string;
+  };
+  byEmployee: EmployeeAgg[];
+  byProgram: ProgramAgg[];
+  entries: Entry[];
+};
+
+const GrantReportPage: React.FC = () => {
+  const [fundingSources, setFundingSources] = useState<FundingSource[]>([]);
+  const [selectedFundingId, setSelectedFundingId] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [report, setReport] = useState<ReportResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const token = localStorage.getItem("ifcdc_token");
+
+  const fetchFundingSources = async () => {
+    const res = await fetch("/api/funding-sources", {
+      headers: {
+        Authorization: token ? `Bearer ${token}` : "",
+      },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setFundingSources(data);
+    } else {
+      alert("Error loading funding sources.");
+    }
+  };
+
+  useEffect(() => {
+    fetchFundingSources();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleRunReport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedFundingId) {
+      alert("Select a funding source.");
+      return;
+    }
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (from) params.append("from", from);
+    if (to) params.append("to", to);
+
+    const res = await fetch(
+      `/api/reports/funding/${selectedFundingId}?${params.toString()}`,
+      {
+        headers: {
+          Authorization: token ? `Bearer ${token}` : "",
+        },
+      }
+    );
+    setLoading(false);
+
+    if (res.ok) {
+      const data = await res.json();
+      setReport(data);
+    } else {
+      const body = await res.json().catch(() => null);
+      alert(body?.error || "Error running report.");
+    }
+  };
+
+  const handleDownloadCsv = () => {
+    if (!selectedFundingId) {
+      alert("Select a funding source first.");
+      return;
+    }
+    const params = new URLSearchParams();
+    if (from) params.append("from", from);
+    if (to) params.append("to", to);
+    const url = `/api/reports/funding/${selectedFundingId}/export?${params.toString()}`;
+    window.location.href = url;
+  };
+
+  const fundingLabel = useMemo(() => {
+    if (!report) return "";
+    const fs = report.fundingSource;
+    return `${fs.name}${fs.code ? " (" + fs.code + ")" : ""}`;
+  }, [report]);
+
+  return (
+    <div style={{ padding: "1.5rem" }}>
+      <h1>Grant Report – Funding Source</h1>
+
+      {/* Controls */}
+      <section
+        style={{
+          marginTop: "1rem",
+          marginBottom: "1.5rem",
+          display: "grid",
+          gap: "0.75rem",
+          maxWidth: 640,
+        }}
+      >
+        <h2>Filters</h2>
+        <form onSubmit={handleRunReport}>
+          <div style={{ marginBottom: "0.75rem" }}>
+            <label>Funding Source</label>
+            <br />
+            <select
+              value={selectedFundingId}
+              onChange={e => setSelectedFundingId(e.target.value)}
+            >
+              <option value="">Select Funding Source</option>
+              {fundingSources.map(fs => (
+                <option key={fs.id} value={fs.id}>
+                  {fs.name}
+                  {fs.code ? ` (${fs.code})` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+            <div>
+              <label>From</label>
+              <br />
+              <input
+                type="date"
+                value={from}
+                onChange={e => setFrom(e.target.value)}
+              />
+            </div>
+            <div>
+              <label>To</label>
+              <br />
+              <input
+                type="date"
+                value={to}
+                onChange={e => setTo(e.target.value)}
+              />
+            </div>
+          </div>
+          <div style={{ marginTop: "0.75rem" }}>
+            <button type="submit" disabled={loading}>
+              {loading ? "Running…" : "Run Report"}
+            </button>{" "}
+            {report && (
+              <button type="button" onClick={handleDownloadCsv}>
+                Download CSV for Agency / Accountant
+              </button>
+            )}
+          </div>
+        </form>
+      </section>
+
+      {/* Report Output */}
+      {report && (
+        <>
+          {/* Summary */}
+          <section style={{ marginBottom: "1.5rem" }}>
+            <h2>Summary</h2>
+            <p>
+              <strong>Funding Source:</strong> {fundingLabel}
+              <br />
+              {report.fundingSource.agency && (
+                <>
+                  <strong>Agency:</strong> {report.fundingSource.agency}
+                  <br />
+                </>
+              )}
+              {report.fundingSource.type && (
+                <>
+                  <strong>Type:</strong> {report.fundingSource.type}
+                  <br />
+                </>
+              )}
+              <strong>Period:</strong>{" "}
+              {report.period.from || "Start"} – {report.period.to || "End"}
+              <br />
+              <strong>Total Hours:</strong> {report.totals.hours.toFixed(2)}
+              <br />
+              <strong>Total Cost:</strong> $
+              {report.totals.cost.toFixed(2)} {report.totals.currency}
+            </p>
+          </section>
+
+          {/* By Employee */}
+          <section style={{ marginBottom: "1.5rem" }}>
+            <h2>Hours & Cost by Employee</h2>
+            {report.byEmployee.length === 0 ? (
+              <p>No staff time allocated for this period.</p>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    <th align="left">Employee</th>
+                    <th align="left">Role</th>
+                    <th align="left">Hours</th>
+                    <th align="left">Pay Rate</th>
+                    <th align="left">Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.byEmployee.map(e => (
+                    <tr key={e.employeeId}>
+                      <td>{e.name}</td>
+                      <td>{e.role}</td>
+                      <td>{e.hours.toFixed(2)}</td>
+                      <td>
+                        {e.payRate !== null
+                          ? `$${e.payRate.toFixed(2)} ${e.currency}/hr`
+                          : "N/A"}
+                      </td>
+                      <td>
+                        {e.payRate !== null
+                          ? `$${e.cost.toFixed(2)} ${e.currency}`
+                          : "N/A"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+
+          {/* By Program */}
+          <section style={{ marginBottom: "1.5rem" }}>
+            <h2>Hours & Cost by Program</h2>
+            {report.byProgram.length === 0 ? (
+              <p>No program-linked hours for this funding source.</p>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    <th align="left">Program</th>
+                    <th align="left">Hours</th>
+                    <th align="left">Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.byProgram.map(p => (
+                    <tr key={p.programId}>
+                      <td>{p.name}</td>
+                      <td>{p.hours.toFixed(2)}</td>
+                      <td>
+                        ${p.cost.toFixed(2)} {p.currency}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+
+          {/* Detail Log */}
+          <section>
+            <h2>Detailed Time Entries</h2>
+            {report.entries.length === 0 ? (
+              <p>No line items in this window.</p>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    <th align="left">Date</th>
+                    <th align="left">Employee</th>
+                    <th align="left">Role</th>
+                    <th align="left">Hours</th>
+                    <th align="left">Program</th>
+                    <th align="left">Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.entries.map(entry => (
+                    <tr key={entry.id}>
+                      <td>{new Date(entry.date).toLocaleString()}</td>
+                      <td>{entry.employee.name}</td>
+                      <td>{entry.employee.role}</td>
+                      <td>{entry.hours}</td>
+                      <td>{entry.program?.name || "-"}</td>
+                      <td>{entry.notes || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+        </>
+      )}
+    </div>
+  );
+};
+
+export default GrantReportPage;

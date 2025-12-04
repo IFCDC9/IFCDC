@@ -92,6 +92,19 @@ router.get(
         a.name.localeCompare(b.name)
       );
 
+      // Get programs that use this funding source as their default
+      const programs = await prisma.program.findMany({
+        where: { fundingSourceId },
+      });
+
+      const byProgram = programs.map(p => ({
+        programId: p.id,
+        name: p.name,
+        hours: totalHours, // All hours for this funding source
+        cost: totalCost,
+        currency: "USD",
+      }));
+
       return res.json({
         fundingSource: {
           id: fundingSource.id,
@@ -110,6 +123,7 @@ router.get(
           currency: "USD",
         },
         byEmployee,
+        byProgram,
         entries: entries.map(e => ({
           id: e.id,
           date: e.date,
