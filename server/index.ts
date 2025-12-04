@@ -15,6 +15,11 @@ app.use(express.urlencoded({ extended: false }));
 // Serve static public pages (IFCDC website)
 app.use(express.static(path.resolve(import.meta.dirname, "../public")));
 
+// Clean URL routes for public pages
+app.get("/mental-health", (req, res) => {
+  res.sendFile("mental-health.html", { root: path.resolve(import.meta.dirname, "../public") });
+});
+
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",
