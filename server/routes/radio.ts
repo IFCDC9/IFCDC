@@ -1,0 +1,82 @@
+import { Router } from "express";
+import { prisma } from "../prisma";
+import { requireAuth, AuthedRequest } from "../middleware/auth";
+
+const router = Router();
+
+/**
+ * GET /api/radio/my-shows
+ * Logged-in radio host sees *their* shows.
+ */
+router.get(
+  "/my-shows",
+  requireAuth(["radio_host", "admin"]),
+  async (req: AuthedRequest, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        include: { employee: true },
+      });
+
+      if (!user || !user.employee) {
+        return res
+          .status(400)
+          .json({ error: "User is not linked to a radio host employee record" });
+      }
+
+      const shows = await prisma.radioShow.findMany({
+        where: {
+          hostId: user.employee.id,
+          status: "active",
+        },
+        orderBy: [
+          { dayOfWeek: "asc" },
+          { startTime: "asc" },
+        ],
+      });
+
+      return res.json(shows);
+    } catch (err) {
+      console.error("Error fetching radio shows", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
+
+/**
+ * PATCH /api/radio/shows/:id/status
+ * Admin (or future host controls) can pause/archive shows.
+ */
+router.patch(
+  "/shows/:id/status",
+  requireAuth(["admin"]),
+  async (req: AuthedRequest, res) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body as { status: string };
+
+      if (!["active", "paused", "archived"].includes(status)) {
+        return res.status(400).json({ error: "Invalid status" });
+      }
+
+      const updated = await prisma.radioShow.update({
+        where: { id },
+        data: { status },
+      });
+
+      return res.json(updated);
+    } catch (err: any) {
+      console.error("Error updating radio show status", err);
+      if (err.code === "P2025") {
+        return res.status(404).json({ error: "Show not found" });
+      }
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
+
+export default router;
