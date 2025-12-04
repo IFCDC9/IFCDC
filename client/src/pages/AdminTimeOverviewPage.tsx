@@ -238,11 +238,11 @@ const AdminTimeOverviewPage: React.FC = () => {
       </section>
 
       <section style={{ marginBottom: "2rem" }}>
-        <h2>Payroll Summary – Hours by Employee</h2>
+        <h2>Payroll Summary – Hours & Cost by Employee</h2>
         {employeeSummaries.length === 0 ? (
           <p>No time entries match the current filters.</p>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse" }} data-testid="table-employee-summary">
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
                 <th align="left">Employee</th>
@@ -254,12 +254,20 @@ const AdminTimeOverviewPage: React.FC = () => {
             </thead>
             <tbody>
               {employeeSummaries.map(s => (
-                <tr key={s.employeeId} data-testid={`row-employee-${s.employeeId}`}>
+                <tr key={s.employeeId}>
                   <td>{s.name}</td>
                   <td>{s.role}</td>
                   <td>{s.totalHours.toFixed(2)}</td>
-                  <td>{s.payRate ? `${s.currency || "USD"} ${s.payRate.toFixed(2)}/hr` : "-"}</td>
-                  <td>{s.totalCost > 0 ? `${s.currency || "USD"} ${s.totalCost.toFixed(2)}` : "-"}</td>
+                  <td>
+                    {typeof s.payRate === "number"
+                      ? `$${s.payRate.toFixed(2)} ${s.currency ?? "USD"}/hr`
+                      : "N/A"}
+                  </td>
+                  <td>
+                    {typeof s.payRate === "number"
+                      ? `$${s.totalCost.toFixed(2)} ${s.currency ?? "USD"}`
+                      : "N/A"}
+                  </td>
                 </tr>
               ))}
             </tbody>
