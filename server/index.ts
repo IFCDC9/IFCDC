@@ -225,6 +225,23 @@ async function initDb() {
     console.log("Seeded", seedPrograms.length, "IFCDC programs.");
   }
 
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS goals (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL,
+      program TEXT NOT NULL,
+      title TEXT NOT NULL,
+      status TEXT NOT NULL,
+      notes TEXT,
+      target_date TEXT,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      completed_at TEXT,
+      FOREIGN KEY (client_id) REFERENCES clients(id),
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+  `);
+
   const execUser = await db.get<User>("SELECT * FROM users WHERE role = ? LIMIT 1", ROLES.EXEC);
 
   if (!execUser) {
