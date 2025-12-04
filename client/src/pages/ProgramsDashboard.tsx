@@ -94,20 +94,21 @@ const ProgramsDashboard: React.FC = () => {
     }
   };
 
-  const handleFundingSourceChange = async (programId: string, fundingSourceId: string | null) => {
+  const handleAssignFundingSource = async (programId: string, fundingSourceId: string | "") => {
     const res = await fetch(`/api/programs/${programId}/funding-source`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
         Authorization: token ? `Bearer ${token}` : "",
       },
-      body: JSON.stringify({ fundingSourceId }),
+      body: JSON.stringify({ fundingSourceId: fundingSourceId || null }),
     });
 
     if (res.ok) {
       fetchPrograms();
     } else {
-      alert("Error updating funding source");
+      const body = await res.json().catch(() => null);
+      alert(body?.error || "Error updating funding source for program.");
     }
   };
 
@@ -177,7 +178,7 @@ const ProgramsDashboard: React.FC = () => {
                     <label>Funding Source: </label>
                     <select
                       value={p.fundingSourceId || ""}
-                      onChange={e => handleFundingSourceChange(p.id, e.target.value || null)}
+                      onChange={e => handleAssignFundingSource(p.id, e.target.value)}
                       data-testid={`select-funding-${p.id}`}
                     >
                       <option value="">-- None --</option>
