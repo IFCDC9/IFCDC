@@ -42,7 +42,7 @@ app.get("/contact", (req, res) => {
 });
 
 // ROI Form (printable)
-app.get("/roi-form", (req, res) => {
+app.get("/roi", (req, res) => {
   res.sendFile(path.join(publicDir, "roi-form.html"));
 });
 
