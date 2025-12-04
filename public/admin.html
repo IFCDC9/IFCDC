@@ -131,6 +131,36 @@
           Refresh Snapshot
         </button>
       </div>
+
+      <div class="admin-card" id="reports-card" style="margin-top:1rem;">
+        <h2>IFCDC Reports</h2>
+        <p style="font-size:0.8rem; opacity:0.9;">
+          Generate volume and risk summaries for a date range.
+        </p>
+        <div style="display:flex; flex-wrap:wrap; gap:0.75rem; margin-top:0.5rem;">
+          <div style="min-width:140px;">
+            <label class="admin-label">From</label>
+            <input id="reports-from" type="date" class="admin-input" />
+          </div>
+          <div style="min-width:140px;">
+            <label class="admin-label">To</label>
+            <input id="reports-to" type="date" class="admin-input" />
+          </div>
+          <div style="min-width:180px;">
+            <label class="admin-label">Program (optional)</label>
+            <input id="reports-program" class="admin-input" placeholder="e.g. MentalHealth" />
+          </div>
+        </div>
+
+        <button id="reports-run" class="ifcdc-btn ifcdc-btn-primary" style="margin-top:0.6rem;">
+          Run Reports
+        </button>
+
+        <p id="reports-status" style="font-size:0.8rem; margin-top:0.4rem;"></p>
+
+        <div id="reports-volume" style="margin-top:0.6rem; font-size:0.9rem;"></div>
+        <div id="reports-risk" style="margin-top:0.6rem; font-size:0.9rem;"></div>
+      </div>
     </section>
 
     <section class="ifcdc-section admin-layout">
@@ -468,6 +498,73 @@
     const snapshotBtn = document.getElementById("snapshot-refresh");
     if (snapshotBtn) {
       snapshotBtn.onclick = loadSnapshot;
+    }
+
+    // Reports
+    const reportsRunBtn = document.getElementById("reports-run");
+    if (reportsRunBtn) {
+      reportsRunBtn.onclick = async () => {
+        const fromEl = document.getElementById("reports-from");
+        const toEl = document.getElementById("reports-to");
+        const programEl = document.getElementById("reports-program");
+        const statusEl = document.getElementById("reports-status");
+        const volumeEl = document.getElementById("reports-volume");
+        const riskEl = document.getElementById("reports-risk");
+
+        statusEl.textContent = "Loading reports...";
+        statusEl.style.color = "";
+        volumeEl.innerHTML = "";
+        riskEl.innerHTML = "";
+
+        const from = fromEl.value || "";
+        const to = toEl.value || "";
+        const program = programEl.value.trim() || "";
+
+        let qs = [];
+        if (from) qs.push("from=" + encodeURIComponent(new Date(from).toISOString()));
+        if (to) qs.push("to=" + encodeURIComponent(new Date(to + "T23:59:59").toISOString()));
+        if (program) qs.push("program=" + encodeURIComponent(program));
+        const queryString = qs.length ? "?" + qs.join("&") : "";
+
+        try {
+          // Volume report
+          const volRes = await fetch("/api/reports/volume" + queryString, { headers: getAuthHeaders() });
+          const volData = await volRes.json();
+          if (!volRes.ok) {
+            statusEl.textContent = volData.error || "Failed to load volume report";
+            statusEl.style.color = "#e74c3c";
+            return;
+          }
+
+          volumeEl.innerHTML =
+            "<strong>Volume Report</strong><br/>" +
+            "Clients Served: " + volData.totalClientsServed + "<br/>" +
+            "Appointments: " + volData.totalAppointments + "<br/>" +
+            "Encounters: " + volData.totalEncounters + "<br/>" +
+            "<span style='opacity:0.8; font-size:0.8rem;'>By Program: " +
+            (volData.appointmentsByProgram || []).map(p => p.program + ": " + p.count).join(", ") +
+            "</span>";
+
+          // Risk mix report
+          const riskRes = await fetch("/api/reports/risk-mix", { headers: getAuthHeaders() });
+          const riskData = await riskRes.json();
+          if (!riskRes.ok) {
+            riskEl.textContent = riskData.error || "Failed to load risk report";
+            return;
+          }
+
+          riskEl.innerHTML =
+            "<strong>Risk Mix Report</strong><br/>" +
+            "Clients with Risk Assessment: " + riskData.totalWithRisk + "<br/>" +
+            "Suicide Risk: LOW=" + riskData.suicideRisk.LOW + ", MOD=" + riskData.suicideRisk.MODERATE + ", HIGH=" + riskData.suicideRisk.HIGH + "<br/>" +
+            "Violence Risk: LOW=" + riskData.violenceRisk.LOW + ", MOD=" + riskData.violenceRisk.MODERATE + ", HIGH=" + riskData.violenceRisk.HIGH;
+
+          statusEl.textContent = "Reports loaded.";
+        } catch (err) {
+          statusEl.textContent = "Error loading reports.";
+          statusEl.style.color = "#e74c3c";
+        }
+      };
     }
 
     // Staff list
