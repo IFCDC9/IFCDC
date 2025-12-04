@@ -5,9 +5,33 @@ import sqlite3 from "sqlite3";
 import { open, Database } from "sqlite";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import twilio from "twilio";
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "5000", 10);
+
+const {
+  TWILIO_ACCOUNT_SID,
+  TWILIO_AUTH_TOKEN,
+  TWILIO_FROM_NUMBER,
+} = process.env;
+
+const twilioClient =
+  TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN
+    ? twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+    : null;
+
+async function sendReminderSms(to: string, body: string) {
+  if (!twilioClient) {
+    console.warn("Twilio not configured; skipping SMS send.");
+    return;
+  }
+  await twilioClient.messages.create({
+    to,
+    from: TWILIO_FROM_NUMBER,
+    body,
+  });
+}
 
 app.use(express.json());
 
