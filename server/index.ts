@@ -120,6 +120,18 @@ async function initDb() {
     );
   `);
 
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS client_assignments (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (client_id) REFERENCES clients(id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+  `);
+
   const execUser = await db.get<User>("SELECT * FROM users WHERE role = ? LIMIT 1", ROLES.EXEC);
 
   if (!execUser) {
@@ -377,6 +389,98 @@ app.get("/api/clients/:id/encounters", authRequired, requireRole(ROLES.EXEC, ROL
     createdByRole: r.created_by_role,
     createdAt: r.created_at,
   })));
+});
+
+app.post("/api/clients/:id/assign", authRequired, requireRole(ROLES.EXEC), async (req, res) => {
+  const { userId, role } = req.body || {};
+
+  const client = await db.get("SELECT id FROM clients WHERE id = ?", req.params.id);
+  if (!client) {
+    return res.status(404).json({ error: "Client not found" });
+  }
+
+  const user = await db.get("SELECT id, name, role FROM users WHERE id = ?", userId);
+  if (!user) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  if (!role) {
+    return res.status(400).json({ error: "role is required (e.g. CLINICIAN, CASE_MANAGER)" });
+  }
+
+  const existing = await db.get(
+    "SELECT id FROM client_assignments WHERE client_id = ? AND user_id = ?",
+    client.id, user.id
+  );
+  if (existing) {
+    return res.status(409).json({ error: "User is already assigned to this client" });
+  }
+
+  const id = cryptoRandomId();
+  const created_at = new Date().toISOString();
+
+  await db.run(
+    `INSERT INTO client_assignments (id, client_id, user_id, role, created_at) VALUES (?, ?, ?, ?, ?)`,
+    id, client.id, user.id, role, created_at
+  );
+
+  await logAudit(req, "CLIENT_ASSIGNMENT", id, "ASSIGN_STAFF", { clientId: client.id, userId: user.id, role });
+
+  res.status(201).json({
+    id,
+    clientId: client.id,
+    userId: user.id,
+    userName: user.name,
+    role,
+    createdAt: created_at,
+  });
+});
+
+app.get("/api/clients/:id/assignments", authRequired, requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER), async (req, res) => {
+  const client = await db.get("SELECT id FROM clients WHERE id = ?", req.params.id);
+  if (!client) {
+    return res.status(404).json({ error: "Client not found" });
+  }
+
+  const rows = await db.all<any[]>(`
+    SELECT ca.id, ca.client_id, ca.user_id, ca.role, ca.created_at, u.name as user_name
+    FROM client_assignments ca
+    JOIN users u ON ca.user_id = u.id
+    WHERE ca.client_id = ?
+    ORDER BY ca.created_at DESC
+  `, client.id);
+
+  await logAudit(req, "CLIENT_ASSIGNMENT", null, "LIST_ASSIGNMENTS", { clientId: client.id, count: rows.length });
+
+  res.json(rows.map((r) => ({
+    id: r.id,
+    clientId: r.client_id,
+    userId: r.user_id,
+    userName: r.user_name,
+    role: r.role,
+    createdAt: r.created_at,
+  })));
+});
+
+app.delete("/api/clients/:id/assignments/:assignmentId", authRequired, requireRole(ROLES.EXEC), async (req, res) => {
+  const client = await db.get("SELECT id FROM clients WHERE id = ?", req.params.id);
+  if (!client) {
+    return res.status(404).json({ error: "Client not found" });
+  }
+
+  const assignment = await db.get(
+    "SELECT id, user_id FROM client_assignments WHERE id = ? AND client_id = ?",
+    req.params.assignmentId, client.id
+  );
+  if (!assignment) {
+    return res.status(404).json({ error: "Assignment not found" });
+  }
+
+  await db.run("DELETE FROM client_assignments WHERE id = ?", assignment.id);
+
+  await logAudit(req, "CLIENT_ASSIGNMENT", assignment.id, "REMOVE_ASSIGNMENT", { clientId: client.id, userId: assignment.user_id });
+
+  res.json({ message: "Assignment removed" });
 });
 
 app.get("/api/audit-logs", authRequired, requireRole(ROLES.EXEC), async (req, res) => {
