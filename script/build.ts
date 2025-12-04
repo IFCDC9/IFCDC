@@ -1,5 +1,5 @@
 import { build as esbuild } from "esbuild";
-import { rm, readFile } from "fs/promises";
+import { rm, readFile, writeFile } from "fs/promises";
 
 const allowlist = [
   "@neondatabase/serverless",
@@ -12,6 +12,8 @@ const allowlist = [
   "pg",
   "zod",
   "zod-validation-error",
+  "csv-stringify",
+  "jsonwebtoken",
 ];
 
 async function buildAll() {
@@ -29,15 +31,41 @@ async function buildAll() {
     entryPoints: ["server/index.ts"],
     platform: "node",
     bundle: true,
-    format: "cjs",
-    outfile: "dist/index.cjs",
+    format: "esm",
+    outfile: "dist/index.mjs",
     define: {
       "process.env.NODE_ENV": '"production"',
+    },
+    banner: {
+      js: `
+import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+const require = createRequire(import.meta.url);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+      `.trim(),
     },
     minify: true,
     external: externals,
     logLevel: "info",
   });
+
+  // Create CJS wrapper for deployment compatibility
+  const startScript = `#!/usr/bin/env node
+const { spawn } = require('child_process');
+const path = require('path');
+
+const mjsFile = path.join(__dirname, 'index.mjs');
+const child = spawn('node', [mjsFile], {
+  stdio: 'inherit',
+  env: { ...process.env, NODE_ENV: 'production' }
+});
+
+child.on('exit', (code) => process.exit(code));
+`;
+  await writeFile("dist/index.cjs", startScript);
+  console.log("Created dist/index.cjs wrapper");
 }
 
 buildAll().catch((err) => {
