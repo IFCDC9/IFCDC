@@ -424,9 +424,13 @@ app.get("/api/clients/:id", authRequired, requireRole(ROLES.EXEC, ROLES.CLINICIA
 app.post("/api/clients/:id/encounters", authRequired, requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER, ROLES.CHW), async (req, res) => {
   const { program, type, summary, note } = req.body || {};
 
-  const client = await db.get("SELECT id FROM clients WHERE id = ?", req.params.id);
+  const client = await db.get<{ id: string }>("SELECT id FROM clients WHERE id = ?", req.params.id);
   if (!client) {
     return res.status(404).json({ error: "Client not found" });
+  }
+
+  if (!(await hasClientAccess(req.user, client.id))) {
+    return res.status(403).json({ error: "Forbidden" });
   }
 
   if (!program || !type) {
@@ -454,9 +458,13 @@ app.post("/api/clients/:id/encounters", authRequired, requireRole(ROLES.EXEC, RO
 });
 
 app.get("/api/clients/:id/encounters", authRequired, requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER), async (req, res) => {
-  const client = await db.get("SELECT id FROM clients WHERE id = ?", req.params.id);
+  const client = await db.get<{ id: string }>("SELECT id FROM clients WHERE id = ?", req.params.id);
   if (!client) {
     return res.status(404).json({ error: "Client not found" });
+  }
+
+  if (!(await hasClientAccess(req.user, client.id))) {
+    return res.status(403).json({ error: "Forbidden" });
   }
 
   const rows = await db.all<any[]>(
