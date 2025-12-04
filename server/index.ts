@@ -1,5 +1,6 @@
 import express, { type Request, Response, NextFunction } from "express";
 import cors from "cors";
+import path from "path";
 import { createServer } from "http";
 import { registerRoutes } from "./routes/index";
 import { config } from "./config/env";
@@ -10,6 +11,9 @@ const server = createServer(app);
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+
+// Serve static public pages (IFCDC website)
+app.use(express.static(path.resolve(import.meta.dirname, "../public")));
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
