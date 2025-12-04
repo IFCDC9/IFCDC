@@ -102,6 +102,39 @@ model BarbershopBooking {
   @@map("barbershop_bookings")
 }
 
+model Client {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  firstName String   @map("first_name")
+  lastName  String   @map("last_name")
+  phone     String?
+  email     String?
+  notes     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  appointments Appointment[]
+
+  @@map("clients")
+}
+
+model Appointment {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  barberId    String   @map("barber_id") @db.Uuid
+  clientId    String   @map("client_id") @db.Uuid
+  startTime   DateTime @map("start_time")
+  endTime     DateTime @map("end_time")
+  serviceName String   @map("service_name")
+  status      String   @default("scheduled")
+  notes       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  barber Employee @relation(fields: [barberId], references: [id], onDelete: Cascade)
+  client Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("appointments")
+}
+
 model Employee {
   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   firstName String   @map("first_name")
@@ -120,8 +153,9 @@ model Employee {
   payCurrency String?  @map("pay_currency")
   payType     String?  @map("pay_type")
 
-  user        User?
-  timeEntries TimeEntry[]
+  user         User?
+  timeEntries  TimeEntry[]
+  appointments Appointment[]
 
   @@map("employees")
 }
