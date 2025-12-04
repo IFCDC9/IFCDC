@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Admin | IFCDC Health System</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/style.css" />
+  <style>
+    .admin-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+    .admin-login {
+      max-width: 400px;
+      margin: 4rem auto;
+      padding: 2rem;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    .admin-login h2 {
+      margin-bottom: 1.5rem;
+      text-align: center;
+      color: #1a365d;
+    }
+    .form-group {
+      margin-bottom: 1rem;
+    }
+    .form-group label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-weight: 500;
+      color: #333;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 0.75rem;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 1rem;
+      box-sizing: border-box;
+    }
+    .form-group input:focus {
+      outline: none;
+      border-color: #2c5282;
+      box-shadow: 0 0 0 2px rgba(44, 82, 130, 0.2);
+    }
+    .admin-btn {
+      width: 100%;
+      padding: 0.75rem;
+      background: #2c5282;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      font-size: 1rem;
+      cursor: pointer;
+      margin-top: 1rem;
+    }
+    .admin-btn:hover {
+      background: #1a365d;
+    }
+    .error-msg {
+      color: #c53030;
+      background: #fed7d7;
+      padding: 0.75rem;
+      border-radius: 4px;
+      margin-bottom: 1rem;
+      display: none;
+    }
+    .admin-dashboard {
+      display: none;
+    }
+    .dashboard-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2rem;
+      padding-bottom: 1rem;
+      border-bottom: 2px solid #e2e8f0;
+    }
+    .dashboard-header h1 {
+      color: #1a365d;
+      margin: 0;
+    }
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    .user-info span {
+      color: #4a5568;
+    }
+    .logout-btn {
+      padding: 0.5rem 1rem;
+      background: #e53e3e;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .logout-btn:hover {
+      background: #c53030;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+    .stat-card {
+      background: #fff;
+      padding: 1.5rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      text-align: center;
+    }
+    .stat-card h3 {
+      margin: 0 0 0.5rem 0;
+      color: #4a5568;
+      font-size: 0.875rem;
+      text-transform: uppercase;
+    }
+    .stat-card .stat-value {
+      font-size: 2rem;
+      font-weight: bold;
+      color: #2c5282;
+    }
+    .section-title {
+      color: #1a365d;
+      margin: 2rem 0 1rem 0;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .data-table {
+      width: 100%;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+    .data-table th,
+    .data-table td {
+      padding: 1rem;
+      text-align: left;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .data-table th {
+      background: #f7fafc;
+      font-weight: 600;
+      color: #4a5568;
+    }
+    .data-table tr:hover {
+      background: #f7fafc;
+    }
+    .role-badge {
+      display: inline-block;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .role-EXEC { background: #fed7d7; color: #c53030; }
+    .role-CLINICIAN { background: #c6f6d5; color: #276749; }
+    .role-CASE_MANAGER { background: #bee3f8; color: #2b6cb0; }
+    .role-CHW { background: #faf089; color: #975a16; }
+    .role-ADMIN { background: #e9d8fd; color: #6b46c1; }
+    .loading {
+      text-align: center;
+      padding: 2rem;
+      color: #718096;
+    }
+  </style>
+</head>
+<body class="ifcdc-body">
+  <header class="ifcdc-header">
+    <div class="ifcdc-header-inner">
+      <div class="ifcdc-brand">
+        <span class="ifcdc-logo-text">IFCDC</span>
+        <span class="ifcdc-subbrand">Health System Admin</span>
+      </div>
+      <nav class="ifcdc-nav">
+        <a href="/">Home</a>
+        <a href="/admin" class="active">Admin</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="admin-container">
+    <div id="loginSection" class="admin-login">
+      <h2>Staff Login</h2>
+      <div id="errorMsg" class="error-msg"></div>
+      <form id="loginForm">
+        <div class="form-group">
+          <label for="email">Email</label>
+          <input type="email" id="email" name="email" required placeholder="exec@ifcdc.org" />
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" required />
+        </div>
+        <button type="submit" class="admin-btn">Sign In</button>
+      </form>
+    </div>
+
+    <div id="dashboardSection" class="admin-dashboard">
+      <div class="dashboard-header">
+        <h1>IFCDC Health System Dashboard</h1>
+        <div class="user-info">
+          <span id="userName"></span>
+          <span id="userRole" class="role-badge"></span>
+          <button id="logoutBtn" class="logout-btn">Logout</button>
+        </div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <h3>Total Users</h3>
+          <div id="statUsers" class="stat-value">-</div>
+        </div>
+        <div class="stat-card">
+          <h3>Total Clients</h3>
+          <div id="statClients" class="stat-value">-</div>
+        </div>
+        <div class="stat-card">
+          <h3>Total Encounters</h3>
+          <div id="statEncounters" class="stat-value">-</div>
+        </div>
+      </div>
+
+      <h2 class="section-title">Staff Users</h2>
+      <table class="data-table" id="usersTable">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Role</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody id="usersTableBody">
+          <tr><td colspan="4" class="loading">Loading...</td></tr>
+        </tbody>
+      </table>
+
+      <h2 class="section-title">Recent Clients</h2>
+      <table class="data-table" id="clientsTable">
+        <thead>
+          <tr>
+            <th>Full Name</th>
+            <th>Date of Birth</th>
+            <th>Phone</th>
+            <th>Programs</th>
+          </tr>
+        </thead>
+        <tbody id="clientsTableBody">
+          <tr><td colspan="4" class="loading">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+  <footer class="ifcdc-footer">
+    <p>&copy; 2025 Imperial Foundation Community Development Center. All rights reserved.</p>
+  </footer>
+
+  <script>
+    const API_BASE = '';
+    let authToken = localStorage.getItem('ifcdc_token');
+    let currentUser = JSON.parse(localStorage.getItem('ifcdc_user') || 'null');
+
+    function showError(msg) {
+      const el = document.getElementById('errorMsg');
+      el.textContent = msg;
+      el.style.display = 'block';
+    }
+
+    function hideError() {
+      document.getElementById('errorMsg').style.display = 'none';
+    }
+
+    function showDashboard() {
+      document.getElementById('loginSection').style.display = 'none';
+      document.getElementById('dashboardSection').style.display = 'block';
+      document.getElementById('userName').textContent = currentUser.name;
+      const roleEl = document.getElementById('userRole');
+      roleEl.textContent = currentUser.role;
+      roleEl.className = 'role-badge role-' + currentUser.role;
+      loadDashboardData();
+    }
+
+    function showLogin() {
+      document.getElementById('loginSection').style.display = 'block';
+      document.getElementById('dashboardSection').style.display = 'none';
+    }
+
+    function logout() {
+      localStorage.removeItem('ifcdc_token');
+      localStorage.removeItem('ifcdc_user');
+      authToken = null;
+      currentUser = null;
+      showLogin();
+    }
+
+    async function apiCall(endpoint, options = {}) {
+      const headers = { 'Content-Type': 'application/json', ...options.headers };
+      if (authToken) {
+        headers['Authorization'] = 'Bearer ' + authToken;
+      }
+      const res = await fetch(API_BASE + endpoint, { ...options, headers });
+      if (res.status === 401) {
+        logout();
+        throw new Error('Session expired');
+      }
+      return res;
+    }
+
+    async function loadDashboardData() {
+      try {
+        const [usersRes, clientsRes] = await Promise.all([
+          apiCall('/api/users'),
+          apiCall('/api/clients')
+        ]);
+
+        if (usersRes.ok) {
+          const users = await usersRes.json();
+          document.getElementById('statUsers').textContent = users.length;
+          const tbody = document.getElementById('usersTableBody');
+          if (users.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4">No users found</td></tr>';
+          } else {
+            tbody.innerHTML = users.map(u => `
+              <tr>
+                <td>${u.name}</td>
+                <td>${u.email}</td>
+                <td><span class="role-badge role-${u.role}">${u.role}</span></td>
+                <td>${new Date(u.created_at).toLocaleDateString()}</td>
+              </tr>
+            `).join('');
+          }
+        }
+
+        if (clientsRes.ok) {
+          const clients = await clientsRes.json();
+          document.getElementById('statClients').textContent = clients.length;
+          const tbody = document.getElementById('clientsTableBody');
+          if (clients.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4">No clients found</td></tr>';
+          } else {
+            tbody.innerHTML = clients.slice(0, 10).map(c => `
+              <tr>
+                <td>${c.fullName}</td>
+                <td>${c.dateOfBirth || '-'}</td>
+                <td>${c.contactInfo?.phone || '-'}</td>
+                <td>${(c.programs || []).join(', ') || '-'}</td>
+              </tr>
+            `).join('');
+          }
+
+          let totalEncounters = 0;
+          for (const c of clients.slice(0, 5)) {
+            try {
+              const encRes = await apiCall('/api/clients/' + c.id + '/encounters');
+              if (encRes.ok) {
+                const enc = await encRes.json();
+                totalEncounters += enc.length;
+              }
+            } catch (e) {}
+          }
+          document.getElementById('statEncounters').textContent = totalEncounters + (clients.length > 5 ? '+' : '');
+        }
+      } catch (err) {
+        console.error('Error loading dashboard:', err);
+      }
+    }
+
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      hideError();
+
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+
+      try {
+        const res = await fetch(API_BASE + '/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          showError(data.error || 'Login failed');
+          return;
+        }
+
+        authToken = data.token;
+        currentUser = data.user;
+        localStorage.setItem('ifcdc_token', authToken);
+        localStorage.setItem('ifcdc_user', JSON.stringify(currentUser));
+        showDashboard();
+      } catch (err) {
+        showError('Connection error');
+      }
+    });
+
+    document.getElementById('logoutBtn').addEventListener('click', logout);
+
+    if (authToken && currentUser) {
+      showDashboard();
+    } else {
+      showLogin();
+    }
+  </script>
+</body>
+</html>
