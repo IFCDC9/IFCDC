@@ -667,56 +667,76 @@ app.get(
   }
 );
 
-async function getAgendaHandler(req: express.Request, res: express.Response) {
-  let { from, to } = req.query as { from?: string; to?: string };
+app.get(
+  "/api/appointments",
+  authRequired,
+  requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
+  async (req, res) => {
+    let { from, to } = req.query as { from?: string; to?: string };
 
-  const now = new Date();
-  if (!from) {
-    const start = new Date(now);
-    start.setDate(start.getDate() - 1);
-    from = start.toISOString();
+    const now = new Date();
+    if (!from) {
+      const start = new Date(now);
+      start.setDate(start.getDate() - 1);
+      from = start.toISOString();
+    }
+    if (!to) {
+      const end = new Date(now);
+      end.setDate(end.getDate() + 7);
+      to = end.toISOString();
+    }
+
+    try {
+      let rows;
+      if (req.user!.role === ROLES.EXEC) {
+        rows = await db.all<any[]>(
+          `SELECT a.id, a.client_id, a.program, a.start_time, a.end_time,
+                  a.location, a.notes, a.created_by, a.created_at,
+                  c.full_name as client_name, c.phone as client_phone
+           FROM appointments a
+           JOIN clients c ON a.client_id = c.id
+           WHERE a.start_time >= ? AND a.start_time <= ?
+           ORDER BY a.start_time ASC`,
+          from, to
+        );
+      } else {
+        rows = await db.all<any[]>(
+          `SELECT DISTINCT a.id, a.client_id, a.program, a.start_time, a.end_time,
+                           a.location, a.notes, a.created_by, a.created_at,
+                           c.full_name as client_name, c.phone as client_phone
+           FROM appointments a
+           JOIN clients c ON a.client_id = c.id
+           JOIN client_assignments ca ON ca.client_id = c.id
+           WHERE ca.user_id = ?
+             AND a.start_time >= ?
+             AND a.start_time <= ?
+           ORDER BY a.start_time ASC`,
+          req.user!.id, from, to
+        );
+      }
+
+      await logAudit(req, "APPOINTMENT", null, "LIST_APPOINTMENTS_BY_RANGE", { from, to, count: rows.length });
+
+      res.json(rows.map((a) => ({
+        id: a.id,
+        clientId: a.client_id,
+        clientName: a.client_name,
+        clientPhone: a.client_phone,
+        program: a.program,
+        startTime: a.start_time,
+        endTime: a.end_time,
+        location: a.location,
+        notes: a.notes,
+        createdBy: a.created_by,
+        createdAt: a.created_at,
+      })));
+    } catch (err) {
+      console.error("Error listing appointments by range:", err);
+      res.status(500).json({ error: "Failed to load appointments" });
+    }
   }
-  if (!to) {
-    const end = new Date(now);
-    end.setDate(end.getDate() + 7);
-    to = end.toISOString();
-  }
+);
 
-  try {
-    const rows = await db.all<any[]>(
-      `SELECT a.id, a.client_id, a.program, a.start_time, a.end_time,
-              a.location, a.notes, a.created_by, a.created_at,
-              c.full_name as client_name, c.phone as client_phone
-       FROM appointments a
-       JOIN clients c ON a.client_id = c.id
-       WHERE a.start_time >= ? AND a.start_time <= ?
-       ORDER BY a.start_time ASC`,
-      from, to
-    );
-
-    await logAudit(req, "APPOINTMENT", null, "LIST_APPOINTMENTS_BY_RANGE", { from, to, count: rows.length });
-
-    res.json(rows.map((a) => ({
-      id: a.id,
-      clientId: a.client_id,
-      clientName: a.client_name,
-      clientPhone: a.client_phone,
-      program: a.program,
-      startTime: a.start_time,
-      endTime: a.end_time,
-      location: a.location,
-      notes: a.notes,
-      createdBy: a.created_by,
-      createdAt: a.created_at,
-    })));
-  } catch (err) {
-    console.error("Error listing appointments by range:", err);
-    res.status(500).json({ error: "Failed to load appointments" });
-  }
-}
-
-app.get("/api/appointments", authRequired, requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER), getAgendaHandler);
-app.get("/api/agenda", authRequired, requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER), getAgendaHandler);
 
 app.post(
   "/api/clients/:clientId/appointments/:apptId/remind",
