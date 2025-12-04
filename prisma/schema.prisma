@@ -156,6 +156,7 @@ model Program {
   fundingSource FundingSource? @relation(fields: [fundingSourceId], references: [id], onDelete: SetNull)
   sessions      ProgramSession[]
   enrollments   ProgramEnrollment[]
+  timeEntries   TimeEntry[]
 
   @@map("programs")
 }
@@ -207,6 +208,7 @@ model ProgramSession {
 model TimeEntry {
   id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   employeeId      String   @map("employee_id") @db.Uuid
+  programId       String?  @map("program_id") @db.Uuid
   fundingSourceId String?  @map("funding_source_id") @db.Uuid
   date            DateTime @db.Date
   hours           Float
@@ -214,6 +216,7 @@ model TimeEntry {
   createdAt       DateTime @default(now()) @map("created_at")
 
   employee      Employee       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  program       Program?       @relation(fields: [programId], references: [id], onDelete: SetNull)
   fundingSource FundingSource? @relation(fields: [fundingSourceId], references: [id], onDelete: SetNull)
 
   @@map("time_entries")

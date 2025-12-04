@@ -9,6 +9,11 @@ type Employee = {
   payCurrency?: string | null;
 };
 
+type Program = {
+  id: string;
+  name: string;
+};
+
 type FundingSource = {
   id: string;
   name: string;
@@ -21,6 +26,7 @@ type TimeEntry = {
   notes?: string | null;
   createdAt: string;
   employee: Employee;
+  program?: Program | null;
   fundingSource?: FundingSource | null;
 };
 
@@ -32,6 +38,14 @@ type EmployeeSummary = {
   payRate?: number | null;
   currency?: string | null;
   totalCost: number;
+};
+
+type ProgramSummary = {
+  programId: string;
+  name: string;
+  totalHours: number;
+  totalCost: number;
+  currency: string;
 };
 
 type FundingSourceSummary = {
@@ -47,7 +61,9 @@ const AdminTimeOverviewPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
+  const [filterProgramId, setFilterProgramId] = useState("");
   const [filterFundingSourceId, setFilterFundingSourceId] = useState("");
+  const [programs, setPrograms] = useState<Program[]>([]);
   const [fundingSources, setFundingSources] = useState<FundingSource[]>([]);
 
   const token = localStorage.getItem("ifcdc_token");
@@ -69,6 +85,18 @@ const AdminTimeOverviewPage: React.FC = () => {
     }
   };
 
+  const fetchPrograms = async () => {
+    const res = await fetch("/api/programs", {
+      headers: {
+        Authorization: token ? `Bearer ${token}` : "",
+      },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setPrograms(data);
+    }
+  };
+
   const fetchFundingSources = async () => {
     const res = await fetch("/api/funding-sources", {
       headers: {
@@ -83,6 +111,7 @@ const AdminTimeOverviewPage: React.FC = () => {
 
   useEffect(() => {
     fetchTimeEntries();
+    fetchPrograms();
     fetchFundingSources();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -100,13 +129,17 @@ const AdminTimeOverviewPage: React.FC = () => {
       data = data.filter(e => new Date(e.date).getTime() <= toTs);
     }
 
+    if (filterProgramId) {
+      data = data.filter(e => e.program?.id === filterProgramId);
+    }
+
     if (filterFundingSourceId) {
       data = data.filter(e => e.fundingSource?.id === filterFundingSourceId);
     }
 
     data.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     return data;
-  }, [entries, filterFrom, filterTo, filterFundingSourceId]);
+  }, [entries, filterFrom, filterTo, filterProgramId, filterFundingSourceId]);
 
   const employeeSummaries: EmployeeSummary[] = useMemo(() => {
     const map = new Map<string, EmployeeSummary>();
@@ -132,6 +165,38 @@ const AdminTimeOverviewPage: React.FC = () => {
 
       if (typeof emp.payRate === "number") {
         current.totalCost += e.hours * emp.payRate;
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+  }, [filteredEntries]);
+
+  const programSummaries: ProgramSummary[] = useMemo(() => {
+    const map = new Map<string, ProgramSummary>();
+
+    for (const e of filteredEntries) {
+      if (!e.program) continue;
+      const emp = e.employee;
+      const payRate = emp.payRate ?? null;
+      const programId = e.program.id;
+
+      if (!map.has(programId)) {
+        map.set(programId, {
+          programId,
+          name: e.program.name,
+          totalHours: 0,
+          totalCost: 0,
+          currency: emp.payCurrency ?? "USD",
+        });
+      }
+
+      const current = map.get(programId)!;
+      current.totalHours += e.hours;
+
+      if (typeof payRate === "number") {
+        current.totalCost += e.hours * payRate;
       }
     }
 
@@ -176,6 +241,7 @@ const AdminTimeOverviewPage: React.FC = () => {
     const params = new URLSearchParams();
     if (filterFrom) params.append("from", filterFrom);
     if (filterTo) params.append("to", filterTo);
+    if (filterProgramId) params.append("programId", filterProgramId);
     if (filterFundingSourceId) params.append("fundingSourceId", filterFundingSourceId);
     return `/api/time-entries/export?${params.toString()}`;
   };
@@ -187,7 +253,7 @@ const AdminTimeOverviewPage: React.FC = () => {
 
   return (
     <div style={{ padding: "1.5rem" }}>
-      <h1>Admin – Time Overview (Payroll & Funding Sources)</h1>
+      <h1>Admin – Time Overview (Payroll, Programs & Funding Sources)</h1>
 
       <section
         style={{
@@ -195,7 +261,7 @@ const AdminTimeOverviewPage: React.FC = () => {
           marginBottom: "1.5rem",
           display: "grid",
           gap: "0.75rem",
-          maxWidth: 640,
+          maxWidth: 800,
         }}
       >
         <h2>Filters</h2>
@@ -217,6 +283,21 @@ const AdminTimeOverviewPage: React.FC = () => {
               value={filterTo}
               onChange={e => setFilterTo(e.target.value)}
             />
+          </div>
+          <div>
+            <label>Program</label>
+            <br />
+            <select
+              value={filterProgramId}
+              onChange={e => setFilterProgramId(e.target.value)}
+            >
+              <option value="">All Programs</option>
+              {programs.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label>Funding Source</label>
@@ -281,6 +362,34 @@ const AdminTimeOverviewPage: React.FC = () => {
       </section>
 
       <section style={{ marginBottom: "2rem" }}>
+        <h2>Program Summary – Hours & Cost by Program</h2>
+        {programSummaries.length === 0 ? (
+          <p>No program-linked hours in this window.</p>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                <th align="left">Program</th>
+                <th align="left">Total Hours</th>
+                <th align="left">Total Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {programSummaries.map(p => (
+                <tr key={p.programId}>
+                  <td>{p.name}</td>
+                  <td>{p.totalHours.toFixed(2)}</td>
+                  <td>
+                    ${p.totalCost.toFixed(2)} {p.currency}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section style={{ marginBottom: "2rem" }}>
         <h2>Funding Source Summary – Hours & Cost by Grant</h2>
         {fundingSourceSummaries.length === 0 ? (
           <p>No funding-source-linked hours in this window.</p>
@@ -322,6 +431,7 @@ const AdminTimeOverviewPage: React.FC = () => {
                 <th align="left">Employee</th>
                 <th align="left">Role</th>
                 <th align="left">Hours</th>
+                <th align="left">Program</th>
                 <th align="left">Funding Source</th>
                 <th align="left">Notes</th>
               </tr>
@@ -335,6 +445,7 @@ const AdminTimeOverviewPage: React.FC = () => {
                   </td>
                   <td>{e.employee.role}</td>
                   <td>{e.hours}</td>
+                  <td>{e.program?.name || "-"}</td>
                   <td>{e.fundingSource?.name || "-"}</td>
                   <td>{e.notes || "-"}</td>
                 </tr>
