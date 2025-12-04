@@ -11,6 +11,7 @@ import barbershopRoutes from "./barbershop.routes";
 import twilioRoutes from "./twilio.routes";
 import hrRoutes from "./hr.routes";
 import programsRoutes from "./programs.routes";
+import timeEntriesRoutes from "./time-entries.routes";
 
 export function registerRoutes(app: Express): void {
   app.use("/api/health", healthRoutes);
@@ -25,4 +26,5 @@ export function registerRoutes(app: Express): void {
   app.use("/twiml", twilioRoutes);
   app.use("/api/hr", hrRoutes);
   app.use("/api/programs", programsRoutes);
+  app.use("/api/time-entries", timeEntriesRoutes);
 }
