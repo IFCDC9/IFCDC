@@ -364,6 +364,15 @@ app.post("/auth/login", async (req, res) => {
   });
 });
 
+// ----- Programs -----
+app.get("/api/programs", authRequired, async (req, res) => {
+  const rows = await db.all<{ id: string; code: string; name: string; description: string }[]>(
+    "SELECT id, code, name, description FROM programs ORDER BY name ASC"
+  );
+  res.json(rows.map((p) => ({ id: p.id, code: p.code, name: p.name, description: p.description })));
+});
+
+// ----- Users -----
 app.post("/api/users", authRequired, requireRole(ROLES.EXEC), async (req, res) => {
   const { name, email, role, password } = req.body || {};
   if (!name || !email || !role || !password) {
