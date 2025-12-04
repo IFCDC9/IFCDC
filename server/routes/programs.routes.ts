@@ -44,4 +44,51 @@ router.post("/", requireAuth(["admin"]), async (req, res) => {
   }
 });
 
+router.post("/:programId/enroll", requireAuth(["admin", "program_staff"]), async (req, res) => {
+  try {
+    const { programId } = req.params;
+    const { firstName, lastName, email, phone, notes, participantId } = req.body;
+
+    let participant;
+
+    if (participantId) {
+      participant = await prisma.participant.findUnique({ where: { id: participantId } });
+      if (!participant) {
+        return res.status(400).json({ error: "Invalid participantId" });
+      }
+    } else {
+      if (!firstName || !lastName) {
+        return res.status(400).json({ error: "Participant name required" });
+      }
+      participant = await prisma.participant.create({
+        data: {
+          firstName,
+          lastName,
+          email: email || null,
+          phone: phone || null,
+          notes: notes || null,
+        },
+      });
+    }
+
+    const enrollment = await prisma.programEnrollment.create({
+      data: {
+        programId,
+        participantId: participant.id,
+        startDate: new Date(),
+        status: "active",
+      },
+      include: {
+        participant: true,
+        program: true,
+      },
+    });
+
+    return res.status(201).json(enrollment);
+  } catch (err) {
+    console.error("Error enrolling participant", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;
