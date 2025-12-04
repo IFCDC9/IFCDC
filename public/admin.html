@@ -1376,22 +1376,39 @@
       }
     }
 
-    async function updateGoalStatus(goalId, newStatus) {
-      if (!state.selectedClientId) return;
+    async function updateGoalStatus(goalId, status) {
+      const listEl = document.getElementById("goal-list");
+      const statusEl = document.getElementById("goal-status");
+      if (!state.selectedClientId) {
+        setStatus("goal-status", "Select a client first", true);
+        return;
+      }
+      if (!goalId) return;
+
+      statusEl.textContent = "Updating goal...";
+      statusEl.style.color = "#c5e1a5";
+
       try {
         const res = await fetch(
           "/api/clients/" + state.selectedClientId + "/goals/" + goalId,
           {
             method: "PATCH",
             headers: getAuthHeaders(),
-            body: JSON.stringify({ status: newStatus }),
+            body: JSON.stringify({ status }),
           }
         );
-        if (res.ok) {
-          loadGoalsForClient();
+        const data = await res.json();
+        if (!res.ok) {
+          statusEl.textContent = data.error || "Failed to update goal.";
+          statusEl.style.color = "#ff8a80";
+          return;
         }
+        statusEl.textContent = "Goal updated.";
+        statusEl.style.color = "#c5e1a5";
+        loadGoalsForClient();
       } catch (err) {
-        console.error("Error updating goal:", err);
+        statusEl.textContent = "Error updating goal.";
+        statusEl.style.color = "#ff8a80";
       }
     }
 
