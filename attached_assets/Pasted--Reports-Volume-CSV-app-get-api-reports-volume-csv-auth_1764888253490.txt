@@ -1,0 +1,114 @@
+// ----- Reports: Volume (CSV) -----
+app.get(
+  "/api/reports/volume.csv",
+  authRequired,
+  requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
+  async (req, res) => {
+    try {
+      let { from, to, program } = req.query;
+      const now = new Date();
+
+      if (!from || !to) {
+        const end = now;
+        const start = new Date(now);
+        start.setDate(start.getDate() - 30);
+        from = from || start.toISOString();
+        to = to || end.toISOString();
+      }
+
+      const report = await buildVolumeReportForUser(
+        req.user,
+        from,
+        to,
+        program || null
+      );
+
+      await logAudit(req, "REPORT", null, "REPORT_VOLUME_CSV", {
+        from,
+        to,
+        program,
+      });
+
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        'attachment; filename="ifcdc_volume_report.csv"'
+      );
+
+      const rows = [];
+      rows.push("section,metric,category,value,from,to,program");
+
+      // Summary
+      rows.push(
+        [
+          "summary",
+          "clients_served",
+          "",
+          report.totalClientsServed,
+          report.from,
+          report.to,
+          report.program || "",
+        ].join(",")
+      );
+      rows.push(
+        [
+          "summary",
+          "appointments_total",
+          "",
+          report.totalAppointments,
+          report.from,
+          report.to,
+          report.program || "",
+        ].join(",")
+      );
+      rows.push(
+        [
+          "summary",
+          "encounters_total",
+          "",
+          report.totalEncounters,
+          report.from,
+          report.to,
+          report.program || "",
+        ].join(",")
+      );
+
+      // Appointments by program
+      for (const p of report.appointmentsByProgram || []) {
+        rows.push(
+          [
+            "appointments_by_program",
+            "appointments",
+            p.program || "Unspecified",
+            p.count,
+            report.from,
+            report.to,
+            report.program || "",
+          ].join(",")
+        );
+      }
+
+      // Encounters by type
+      for (const e of report.encountersByType || []) {
+        rows.push(
+          [
+            "encounters_by_type",
+            "encounters",
+            e.type || "Unspecified",
+            e.count,
+            report.from,
+            report.to,
+            report.program || "",
+          ].join(",")
+        );
+      }
+
+      res.send(rows.join("\n"));
+    } catch (err) {
+      console.error("Error in /api/reports/volume.csv:", err);
+      res.status(500)
+        .setHeader("Content-Type", "text/plain; charset=utf-8")
+        .send("Failed to build volume CSV");
+    }
+  }
+);
