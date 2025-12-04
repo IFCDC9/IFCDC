@@ -566,6 +566,40 @@ app.post(
   }
 );
 
+app.get(
+  "/api/clients/:id/appointments",
+  authRequired,
+  requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
+  async (req, res) => {
+    const clientId = req.params.id;
+
+    const client = await db.get("SELECT id FROM clients WHERE id = ?", clientId);
+    if (!client) {
+      return res.status(404).json({ error: "Client not found" });
+    }
+
+    const rows = await db.all<any[]>(
+      `SELECT id, client_id, program, start_time, end_time, location, notes, created_by, created_at
+       FROM appointments WHERE client_id = ? ORDER BY start_time ASC`,
+      clientId
+    );
+
+    await logAudit(req, "APPOINTMENT", null, "LIST_APPOINTMENTS", { clientId, count: rows.length });
+
+    res.json(rows.map((a) => ({
+      id: a.id,
+      clientId: a.client_id,
+      program: a.program,
+      startTime: a.start_time,
+      endTime: a.end_time,
+      location: a.location,
+      notes: a.notes,
+      createdBy: a.created_by,
+      createdAt: a.created_at,
+    })));
+  }
+);
+
 app.post(
   "/api/clients/:id/notify",
   authRequired,
