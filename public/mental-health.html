@@ -221,38 +221,23 @@
           </p>
         </div>
         <div>
-          <h3>Quick Interest Form</h3>
-          <form class="ifcdc-form">
+          <h3>Request a Call Back</h3>
+          <form class="ifcdc-form" action="mailto:service@ifcdc.org" method="post" enctype="text/plain">
             <label>
               Name<br />
-              <input type="text" name="name" placeholder="Your full name" required />
+              <input type="text" name="name" required />
             </label>
             <label>
-              Age Group<br />
-              <select name="age_group" required>
-                <option value="">Select an option</option>
-                <option value="child">Child (4–9)</option>
-                <option value="youth">Youth/Teen (10–17)</option>
-                <option value="young_adult">Young Adult (18–29)</option>
-                <option value="adult">Adult (30–59)</option>
-                <option value="senior">Senior (60+)</option>
-              </select>
+              Phone or Email<br />
+              <input type="text" name="contact" required />
             </label>
             <label>
-              Reason for Inquiry<br />
-              <textarea
-                name="reason"
-                rows="4"
-                placeholder="Briefly describe what you need help with."
-              ></textarea>
+              Best time to contact you<br />
+              <input type="text" name="time" />
             </label>
-            <button type="submit" class="ifcdc-btn ifcdc-btn-primary" disabled>
-              Submit (Coming Soon)
+            <button type="submit" class="ifcdc-btn ifcdc-btn-primary">
+              Request a Call Back
             </button>
-            <p class="ifcdc-helper">
-              Online submissions will be activated once the secure intake system is live. In the meantime,
-              please call or email to connect with the team.
-            </p>
           </form>
         </div>
       </div>
