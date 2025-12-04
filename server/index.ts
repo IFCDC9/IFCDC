@@ -1285,20 +1285,20 @@ app.get(
   }
 );
 
-// ----- Reports: Risk Mix -----
+// ----- Reports: Risk Mix (JSON) -----
 app.get(
   "/api/reports/risk-mix",
   authRequired,
   requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
   async (req, res) => {
     try {
-      const result = await buildRiskMixReportForUser(req.user!);
+      const report = await buildRiskMixReportForUser(req.user!);
 
-      await logAudit(req, "REPORT", null, "REPORT_RISK_MIX", {
-        totalWithRisk: result.totalWithRisk,
+      await logAudit(req, "REPORT", null, "REPORT_RISK_MIX_JSON", {
+        totalWithRisk: report.totalWithRisk,
       });
 
-      res.json(result);
+      res.json(report);
     } catch (err) {
       console.error("Error in /api/reports/risk-mix:", err);
       res.status(500).json({ error: "Failed to build risk-mix report" });
