@@ -5,6 +5,8 @@ type Employee = {
   firstName: string;
   lastName: string;
   role: string;
+  payRate?: number | null;
+  payCurrency?: string | null;
 };
 
 type Program = {
@@ -27,6 +29,9 @@ type EmployeeSummary = {
   name: string;
   role: string;
   totalHours: number;
+  payRate?: number | null;
+  currency?: string | null;
+  totalCost: number;
 };
 
 const AdminTimeOverviewPage: React.FC = () => {
@@ -106,10 +111,16 @@ const AdminTimeOverviewPage: React.FC = () => {
           name: `${e.employee.firstName} ${e.employee.lastName}`,
           role: e.employee.role,
           totalHours: 0,
+          payRate: e.employee.payRate,
+          currency: e.employee.payCurrency,
+          totalCost: 0,
         });
       }
       const current = map.get(id)!;
       current.totalHours += e.hours;
+      if (current.payRate) {
+        current.totalCost = current.totalHours * current.payRate;
+      }
     }
 
     return Array.from(map.values()).sort((a, b) =>
@@ -216,6 +227,8 @@ const AdminTimeOverviewPage: React.FC = () => {
                 <th align="left">Employee</th>
                 <th align="left">Role</th>
                 <th align="left">Total Hours</th>
+                <th align="left">Pay Rate</th>
+                <th align="left">Total Cost</th>
               </tr>
             </thead>
             <tbody>
@@ -224,6 +237,8 @@ const AdminTimeOverviewPage: React.FC = () => {
                   <td>{s.name}</td>
                   <td>{s.role}</td>
                   <td>{s.totalHours.toFixed(2)}</td>
+                  <td>{s.payRate ? `${s.currency || "USD"} ${s.payRate.toFixed(2)}/hr` : "-"}</td>
+                  <td>{s.totalCost > 0 ? `${s.currency || "USD"} ${s.totalCost.toFixed(2)}` : "-"}</td>
                 </tr>
               ))}
             </tbody>
