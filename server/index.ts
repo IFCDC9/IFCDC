@@ -544,6 +544,47 @@ app.post(
   }
 );
 
+app.get(
+  "/api/clients/:id/assessments",
+  authRequired,
+  requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
+  async (req, res) => {
+    const clientId = req.params.id;
+    const client = await db.get<{ id: string }>("SELECT id FROM clients WHERE id = ?", clientId);
+    if (!client) {
+      return res.status(404).json({ error: "Client not found" });
+    }
+
+    if (!(await hasClientAccess(req.user, client.id))) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const rows = await db.all<any[]>(
+      `SELECT id, type, data, created_by, created_at
+       FROM assessments
+       WHERE client_id = ?
+       ORDER BY created_at DESC`,
+      clientId
+    );
+
+    await logAudit(req, "ASSESSMENT", null, "LIST_ASSESSMENTS", {
+      clientId,
+      count: rows.length,
+    });
+
+    res.json(
+      rows.map((a) => ({
+        id: a.id,
+        clientId,
+        type: a.type,
+        data: JSON.parse(a.data || "{}"),
+        createdBy: a.created_by,
+        createdAt: a.created_at,
+      }))
+    );
+  }
+);
+
 app.post("/api/clients/:id/assignments", authRequired, requireRole(ROLES.EXEC), async (req, res) => {
   const clientId = req.params.id;
   const { userId, role } = req.body || {};
