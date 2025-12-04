@@ -1,0 +1,110 @@
+// ----- Client Assignments -----
+
+// EXEC: assign a user to a client (e.g. clinician, case manager)
+app.post(
+  "/api/clients/:id/assignments",
+  authRequired,
+  requireRole(ROLES.EXEC),
+  async (req, res) => {
+    const clientId = req.params.id;
+    const { userId, role } = req.body || {};
+
+    if (!userId || !role) {
+      return res.status(400).json({ error: "userId and role are required" });
+    }
+
+    const client = await db.get(
+      "SELECT id FROM clients WHERE id = ?",
+      clientId
+    );
+    if (!client) {
+      return res.status(404).json({ error: "Client not found" });
+    }
+
+    const user = await db.get("SELECT id, role FROM users WHERE id = ?", userId);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Only allow assigning staff roles (not EXEC)
+    if (user.role === ROLES.EXEC) {
+      return res.status(400).json({ error: "Cannot assign EXEC as owner" });
+    }
+
+    const id = cryptoRandomId();
+    const created_at = new Date().toISOString();
+
+    await db.run(
+      `
+      INSERT INTO client_assignments (id, client_id, user_id, role, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `,
+      id,
+      clientId,
+      userId,
+      role,
+      created_at
+    );
+
+    await logAudit(req, "CLIENT_ASSIGNMENT", id, "CREATE_ASSIGNMENT", {
+      clientId,
+      userId,
+      role,
+    });
+
+    res.status(201).json({
+      id,
+      clientId,
+      userId,
+      role,
+      createdAt: created_at,
+    });
+  }
+);
+
+// View assignments for a client
+app.get(
+  "/api/clients/:id/assignments",
+  authRequired,
+  requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
+  async (req, res) => {
+    const clientId = req.params.id;
+
+    const client = await db.get(
+      "SELECT id FROM clients WHERE id = ?",
+      clientId
+    );
+    if (!client) {
+      return res.status(404).json({ error: "Client not found" });
+    }
+
+    const rows = await db.all(
+      `
+      SELECT ca.id, ca.client_id, ca.user_id, ca.role, ca.created_at,
+             u.name as user_name, u.email as user_email
+      FROM client_assignments ca
+      JOIN users u ON ca.user_id = u.id
+      WHERE ca.client_id = ?
+      ORDER BY ca.created_at DESC
+    `,
+      clientId
+    );
+
+    await logAudit(req, "CLIENT_ASSIGNMENT", null, "LIST_ASSIGNMENTS", {
+      clientId,
+      count: rows.length,
+    });
+
+    res.json(
+      rows.map((r) => ({
+        id: r.id,
+        clientId: r.client_id,
+        userId: r.user_id,
+        userName: r.user_name,
+        userEmail: r.user_email,
+        role: r.role,
+        createdAt: r.created_at,
+      }))
+    );
+  }
+);

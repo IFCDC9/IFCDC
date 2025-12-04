@@ -391,29 +391,26 @@ app.get("/api/clients/:id/encounters", authRequired, requireRole(ROLES.EXEC, ROL
   })));
 });
 
-app.post("/api/clients/:id/assign", authRequired, requireRole(ROLES.EXEC), async (req, res) => {
+app.post("/api/clients/:id/assignments", authRequired, requireRole(ROLES.EXEC), async (req, res) => {
+  const clientId = req.params.id;
   const { userId, role } = req.body || {};
 
-  const client = await db.get("SELECT id FROM clients WHERE id = ?", req.params.id);
+  if (!userId || !role) {
+    return res.status(400).json({ error: "userId and role are required" });
+  }
+
+  const client = await db.get("SELECT id FROM clients WHERE id = ?", clientId);
   if (!client) {
     return res.status(404).json({ error: "Client not found" });
   }
 
-  const user = await db.get("SELECT id, name, role FROM users WHERE id = ?", userId);
+  const user = await db.get("SELECT id, role FROM users WHERE id = ?", userId);
   if (!user) {
     return res.status(404).json({ error: "User not found" });
   }
 
-  if (!role) {
-    return res.status(400).json({ error: "role is required (e.g. CLINICIAN, CASE_MANAGER)" });
-  }
-
-  const existing = await db.get(
-    "SELECT id FROM client_assignments WHERE client_id = ? AND user_id = ?",
-    client.id, user.id
-  );
-  if (existing) {
-    return res.status(409).json({ error: "User is already assigned to this client" });
+  if (user.role === ROLES.EXEC) {
+    return res.status(400).json({ error: "Cannot assign EXEC as owner" });
   }
 
   const id = cryptoRandomId();
@@ -421,42 +418,45 @@ app.post("/api/clients/:id/assign", authRequired, requireRole(ROLES.EXEC), async
 
   await db.run(
     `INSERT INTO client_assignments (id, client_id, user_id, role, created_at) VALUES (?, ?, ?, ?, ?)`,
-    id, client.id, user.id, role, created_at
+    id, clientId, userId, role, created_at
   );
 
-  await logAudit(req, "CLIENT_ASSIGNMENT", id, "ASSIGN_STAFF", { clientId: client.id, userId: user.id, role });
+  await logAudit(req, "CLIENT_ASSIGNMENT", id, "CREATE_ASSIGNMENT", { clientId, userId, role });
 
   res.status(201).json({
     id,
-    clientId: client.id,
-    userId: user.id,
-    userName: user.name,
+    clientId,
+    userId,
     role,
     createdAt: created_at,
   });
 });
 
 app.get("/api/clients/:id/assignments", authRequired, requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER), async (req, res) => {
-  const client = await db.get("SELECT id FROM clients WHERE id = ?", req.params.id);
+  const clientId = req.params.id;
+
+  const client = await db.get("SELECT id FROM clients WHERE id = ?", clientId);
   if (!client) {
     return res.status(404).json({ error: "Client not found" });
   }
 
   const rows = await db.all<any[]>(`
-    SELECT ca.id, ca.client_id, ca.user_id, ca.role, ca.created_at, u.name as user_name
+    SELECT ca.id, ca.client_id, ca.user_id, ca.role, ca.created_at,
+           u.name as user_name, u.email as user_email
     FROM client_assignments ca
     JOIN users u ON ca.user_id = u.id
     WHERE ca.client_id = ?
     ORDER BY ca.created_at DESC
-  `, client.id);
+  `, clientId);
 
-  await logAudit(req, "CLIENT_ASSIGNMENT", null, "LIST_ASSIGNMENTS", { clientId: client.id, count: rows.length });
+  await logAudit(req, "CLIENT_ASSIGNMENT", null, "LIST_ASSIGNMENTS", { clientId, count: rows.length });
 
   res.json(rows.map((r) => ({
     id: r.id,
     clientId: r.client_id,
     userId: r.user_id,
     userName: r.user_name,
+    userEmail: r.user_email,
     role: r.role,
     createdAt: r.created_at,
   })));
