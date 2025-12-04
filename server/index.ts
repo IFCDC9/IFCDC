@@ -343,6 +343,11 @@ app.post("/api/clients", authRequired, requireRole(ROLES.EXEC, ROLES.CLINICIAN, 
     id, fullName, dateOfBirth || null, phone, email, programsJson, created_at
   );
 
+  await db.run(
+    `INSERT INTO client_assignments (id, client_id, user_id, role, created_at) VALUES (?, ?, ?, ?, ?)`,
+    cryptoRandomId(), id, req.user!.id, req.user!.role, created_at
+  );
+
   await logAudit(req, "CLIENT", id, "CREATE_CLIENT", { fullName });
 
   res.status(201).json({
