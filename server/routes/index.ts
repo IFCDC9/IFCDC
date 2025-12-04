@@ -13,6 +13,7 @@ import hrRoutes from "./hr.routes";
 import programsRoutes from "./programs.routes";
 import timeEntriesRoutes from "./time-entries.routes";
 import fundingSourcesRouter from "./fundingSources";
+import grantReportsRouter from "./grantReports";
 
 export function registerRoutes(app: Express): void {
   app.use("/api/health", healthRoutes);
@@ -29,4 +30,5 @@ export function registerRoutes(app: Express): void {
   app.use("/api/programs", programsRoutes);
   app.use("/api/time-entries", timeEntriesRoutes);
   app.use("/api/funding-sources", fundingSourcesRouter);
+  app.use("/api/reports", grantReportsRouter);
 }
