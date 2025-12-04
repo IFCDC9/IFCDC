@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>IFCDC Mental Health & Wellness Program | Imperial Foundation Community Development Center</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta
+    name="description"
+    content="IFCDC Mental Health & Wellness Program – all-ages behavioral health support for children, youth, adults, and seniors in the community."
+  />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="ifcdc-body">
+  <header class="ifcdc-header">
+    <div class="ifcdc-header-inner">
+      <div class="ifcdc-brand">
+        <!-- Swap this text for your logo <img> if you already have it -->
+        <span class="ifcdc-logo-text">IFCDC</span>
+        <span class="ifcdc-subbrand">Mental Health &amp; Wellness</span>
+      </div>
+      <nav class="ifcdc-nav">
+        <a href="/">Home</a>
+        <a href="/programs.html">Programs</a>
+        <a href="/mental-health.html" class="active">Mental Health</a>
+        <a href="/contact.html">Contact</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="ifcdc-main">
+    <!-- HERO -->
+    <section class="ifcdc-hero">
+      <div class="ifcdc-hero-content">
+        <h1>IFCDC Mental Health &amp; Wellness Program</h1>
+        <p>
+          A full-spectrum, all-ages behavioral health initiative designed to stabilize, support,
+          and strengthen our community from childhood through senior years.
+        </p>
+        <div class="ifcdc-hero-actions">
+          <a href="#intake" class="ifcdc-btn ifcdc-btn-primary">Request Support</a>
+          <a href="#overview" class="ifcdc-btn ifcdc-btn-outline">Learn More</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- PROGRAM OVERVIEW -->
+    <section id="overview" class="ifcdc-section">
+      <h2>Program Overview</h2>
+      <p>
+        The IFCDC Mental Health &amp; Wellness Program delivers integrated, community-based behavioral health
+        support for all ages. From early emotional development and youth resilience, to adult stabilization
+        and senior wellness, the program functions as a centralized hub for mental health access, navigation,
+        and support.
+      </p>
+      <p>
+        Our strategy leverages partnerships with licensed clinicians, schools, community agencies, and
+        senior-serving organizations to create a seamless ecosystem of care and connection.
+      </p>
+    </section>
+
+    <!-- AGE COHORTS -->
+    <section class="ifcdc-section ifcdc-grid">
+      <article class="ifcdc-card">
+        <h3>Children (Ages 4–9)</h3>
+        <ul>
+          <li>Emotional development and coping skills</li>
+          <li>Behavioral and developmental screenings</li>
+          <li>Parent–child bonding and support</li>
+          <li>Early trauma identification and referrals</li>
+        </ul>
+      </article>
+
+      <article class="ifcdc-card">
+        <h3>Youth &amp; Teens (Ages 10–17)</h3>
+        <ul>
+          <li>Anger management and conflict resolution groups</li>
+          <li>School-based wellness pods and workshops</li>
+          <li>Trauma-informed support and mentoring</li>
+          <li>Gang- and violence-prevention alignment with IFCDC programs</li>
+        </ul>
+      </article>
+
+      <article class="ifcdc-card">
+        <h3>Young Adults (Ages 18–29)</h3>
+        <ul>
+          <li>Stress and life-transition support</li>
+          <li>Violence interruption and crisis navigation</li>
+          <li>Career and life stability coaching</li>
+          <li>Connections to housing, education, and employment resources</li>
+        </ul>
+      </article>
+
+      <article class="ifcdc-card">
+        <h3>Adults (Ages 30–59)</h3>
+        <ul>
+          <li>Support for anxiety, depression, and trauma</li>
+          <li>Family and relationship mediation</li>
+          <li>Crisis stabilization and safety planning</li>
+          <li>Referrals to therapy, psychiatry, and community services</li>
+        </ul>
+      </article>
+
+      <article class="ifcdc-card">
+        <h3>Seniors (60+)</h3>
+        <ul>
+          <li>Social isolation and loneliness mitigation</li>
+          <li>Grief and loss support</li>
+          <li>Cognitive and emotional wellness activities</li>
+          <li>Caregiver and family support connections</li>
+        </ul>
+      </article>
+    </section>
+
+    <!-- SERVICE PILLARS -->
+    <section class="ifcdc-section">
+      <h2>Core Service Pillars</h2>
+      <div class="ifcdc-grid">
+        <article class="ifcdc-card">
+          <h3>Counseling &amp; Navigation</h3>
+          <p>
+            Screenings, support sessions, and coordinated referrals through trusted clinical partners,
+            ensuring residents know where to go, who to call, and how to access care.
+          </p>
+        </article>
+        <article class="ifcdc-card">
+          <h3>Crisis Stabilization</h3>
+          <p>
+            De-escalation support, safety planning, and warm hand-offs to emergency and crisis services
+            when residents are in immediate distress.
+          </p>
+        </article>
+        <article class="ifcdc-card">
+          <h3>Trauma-Informed Care</h3>
+          <p>
+            A cross-cutting approach baked into youth, adult, and senior support—recognizing the impact
+            of trauma and centering healing, dignity, and safety.
+          </p>
+        </article>
+        <article class="ifcdc-card">
+          <h3>Wellness &amp; Life Skills</h3>
+          <p>
+            Workshops and groups that build coping skills, resilience, and life stability to help
+            residents manage stress, relationships, and daily pressures.
+          </p>
+        </article>
+        <article class="ifcdc-card">
+          <h3>Community Healing &amp; Peer Support</h3>
+          <p>
+            Healing circles, peer-led support groups, and intergenerational engagement spaces that
+            rebuild trust, connection, and community cohesion.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <!-- INTEGRATION SECTION -->
+    <section class="ifcdc-section">
+      <h2>Integrated Across IFCDC Programs</h2>
+      <p>
+        The Mental Health &amp; Wellness Program is fully integrated with our Anti-Gang, Transitional Housing,
+        Economic Development, and Scholarship initiatives, providing behavioral health support that
+        strengthens outcomes across the entire IFCDC ecosystem.
+      </p>
+      <ul class="ifcdc-list">
+        <li><strong>Anti-Gang &amp; Violence Prevention:</strong> Trauma support and conflict resolution.</li>
+        <li><strong>Transitional Housing:</strong> Emotional stabilization and life planning.</li>
+        <li><strong>Economic Development:</strong> Mental readiness for work, training, and entrepreneurship.</li>
+        <li><strong>Youth &amp; Scholarships:</strong> Wellness support for academic and life success.</li>
+      </ul>
+    </section>
+
+    <!-- INTAKE / CONTACT CTA -->
+    <section id="intake" class="ifcdc-section ifcdc-cta">
+      <h2>Connect With the IFCDC Mental Health &amp; Wellness Team</h2>
+      <p>
+        To request support, make a referral, or explore partnership opportunities, use the options below.
+      </p>
+      <div class="ifcdc-cta-grid">
+        <div>
+          <h3>Contact Center</h3>
+          <p>
+            Phone: <strong>(732) 743-5048</strong><br />
+            Email: <strong>service@ifcdc.org</strong>
+          </p>
+          <p>
+            Physical Address:<br />
+            <strong>1215 Springwood Ave Suite 28<br />Asbury Park, NJ 07712</strong>
+          </p>
+        </div>
+        <div>
+          <h3>Quick Interest Form</h3>
+          <form class="ifcdc-form">
+            <label>
+              Name<br />
+              <input type="text" name="name" placeholder="Your full name" required />
+            </label>
+            <label>
+              Age Group<br />
+              <select name="age_group" required>
+                <option value="">Select an option</option>
+                <option value="child">Child (4–9)</option>
+                <option value="youth">Youth/Teen (10–17)</option>
+                <option value="young_adult">Young Adult (18–29)</option>
+                <option value="adult">Adult (30–59)</option>
+                <option value="senior">Senior (60+)</option>
+              </select>
+            </label>
+            <label>
+              Reason for Inquiry<br />
+              <textarea
+                name="reason"
+                rows="4"
+                placeholder="Briefly describe what you need help with."
+              ></textarea>
+            </label>
+            <!-- For now this is static; later we can wire it to Twilio, email, or a backend endpoint -->
+            <button type="submit" class="ifcdc-btn ifcdc-btn-primary" disabled>
+              Submit (Coming Soon)
+            </button>
+            <p class="ifcdc-helper">
+              Online submissions will be activated once the secure intake system is live. In the meantime,
+              please call or email to connect with the team.
+            </p>
+          </form>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="ifcdc-footer">
+    <p>&copy; <span id="year"></span> Imperial Foundation Community Development Center. All rights reserved.</p>
+  </footer>
+
+  <script>
+    // Auto-set current year
+    document.getElementById('year').textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>
