@@ -829,50 +829,72 @@
     }
     document.getElementById("agenda-load").onclick = loadAgenda;
 
-    // Outreach Tasks (OPEN only)
+    // Outreach tasks
     async function loadOutreachTasks() {
       const listEl = document.getElementById("outreach-list");
       listEl.textContent = "Loading outreach tasks...";
       try {
-        const res = await fetch("/api/outreach-tasks?status=OPEN", { headers: getAuthHeaders() });
+        const res = await fetch("/api/outreach-tasks?status=OPEN", {
+          headers: getAuthHeaders(),
+        });
         const data = await res.json();
         if (!res.ok) {
-          listEl.textContent = data.error || "Failed to load tasks.";
+          listEl.textContent = data.error || "Failed to load outreach tasks.";
           return;
         }
         listEl.innerHTML = "";
         if (!data.length) {
-          listEl.textContent = "No open tasks.";
+          listEl.textContent = "No open outreach tasks.";
           return;
         }
         data.forEach((t) => {
           const div = document.createElement("div");
           div.className = "admin-list-item";
-          const when = new Date(t.createdAt).toLocaleString();
           div.innerHTML =
-            "<strong>" + t.phone + "</strong> (" + t.channel + " - " + t.reason + ")" +
-            (t.clientName ? "<br/>Client: " + t.clientName : "<br/><em>Unknown caller</em>") +
-            "<br/><span style='opacity:0.6; font-size:0.78rem;'>" + when + "</span>" +
-            "<br/><button class='ifcdc-btn ifcdc-btn-outline' style='padding:0.2rem 0.5rem; font-size:0.75rem; margin-top:0.3rem;' data-task-id='" + t.id + "'>Mark Done</button>";
+            "<strong>" +
+            (t.clientName || "Unknown caller") +
+            "</strong><br/>" +
+            "<span style='opacity:0.8;'>Phone: " +
+            t.phone +
+            "</span><br/>" +
+            "<span style='opacity:0.7; font-size:0.78rem;'>Reason: " +
+            t.reason +
+            " | Created: " +
+            t.createdAt +
+            "</span>";
+
+          const btn = document.createElement("button");
+          btn.textContent = "Mark Completed";
+          btn.className = "ifcdc-btn ifcdc-btn-primary";
+          btn.style.marginTop = "0.25rem";
+          btn.onclick = async (ev) => {
+            ev.stopPropagation();
+            try {
+              const res2 = await fetch(
+                "/api/outreach-tasks/" + t.id + "/complete",
+                {
+                  method: "POST",
+                  headers: getAuthHeaders(),
+                  body: JSON.stringify({}),
+                }
+              );
+              const d2 = await res2.json();
+              if (!res2.ok) {
+                alert(d2.error || "Failed to complete task.");
+                return;
+              }
+              loadOutreachTasks();
+            } catch (err) {
+              alert("Error completing task.");
+            }
+          };
+
+          div.appendChild(document.createElement("br"));
+          div.appendChild(btn);
           listEl.appendChild(div);
         });
-
-        listEl.querySelectorAll("button[data-task-id]").forEach((btn) => {
-          btn.onclick = async () => {
-            const taskId = btn.getAttribute("data-task-id");
-            try {
-              const res = await fetch("/api/outreach-tasks/" + taskId + "/complete", {
-                method: "POST",
-                headers: getAuthHeaders(),
-              });
-              if (res.ok) {
-                loadOutreachTasks();
-              }
-            } catch (e) {}
-          };
-        });
-      } catch (e) {
-        listEl.textContent = "Error loading tasks.";
+      } catch (err) {
+        listEl.textContent = "Error loading outreach tasks.";
       }
     }
     document.getElementById("outreach-refresh").onclick = loadOutreachTasks;
