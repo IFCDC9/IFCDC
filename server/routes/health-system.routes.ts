@@ -85,8 +85,8 @@ router.post(
   async (req: Request, res: Response) => {
     const { name, email, role, password } = req.body;
 
-    if (!name || !email || !role) {
-      return res.status(400).json({ error: "name, email, and role are required" });
+    if (!name || !role) {
+      return res.status(400).json({ error: "name and role are required" });
     }
     if (!Object.values(ROLES).includes(role)) {
       return res.status(400).json({ error: "Invalid role" });
@@ -95,12 +95,13 @@ router.post(
     const apiKey = crypto.randomBytes(24).toString("hex");
     const bcrypt = await import("bcrypt");
     const passwordHash = await bcrypt.hash(password || crypto.randomBytes(12).toString("hex"), 10);
+    const userEmail = email || `${name.toLowerCase().replace(/\s+/g, ".")}.${crypto.randomBytes(4).toString("hex")}@ifcdc.local`;
 
     try {
       const user = await prisma.user.create({
         data: {
           name,
-          email,
+          email: userEmail,
           role,
           apiKey,
           passwordHash,
@@ -112,7 +113,6 @@ router.post(
       res.status(201).json({
         id: user.id,
         name: user.name,
-        email: user.email,
         role: user.role,
         apiKey,
       });
