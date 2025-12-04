@@ -1,0 +1,78 @@
+import { stringify } from "csv-stringify/sync";
+
+// ...
+
+/**
+ * GET /api/reports/funding/:fundingSourceId/export
+ * Query params: from, to
+ */
+router.get(
+  "/funding/:fundingSourceId/export",
+  requireAuth(["admin"]),
+  async (req: AuthedRequest, res) => {
+    try {
+      const { fundingSourceId } = req.params;
+      const { from, to } = req.query as { from?: string; to?: string };
+
+      const fundingSource = await prisma.fundingSource.findUnique({
+        where: { id: fundingSourceId },
+      });
+      if (!fundingSource) {
+        return res.status(404).json({ error: "Funding source not found" });
+      }
+
+      const where: any = { fundingSourceId };
+
+      if (from) {
+        where.date = { ...(where.date || {}), gte: new Date(from) };
+      }
+      if (to) {
+        const toDate = new Date(to);
+        toDate.setHours(23, 59, 59, 999);
+        where.date = { ...(where.date || {}), lte: toDate };
+      }
+
+      const entries = await prisma.timeEntry.findMany({
+        where,
+        include: {
+          employee: true,
+          program: true,
+        },
+        orderBy: { date: "asc" },
+      });
+
+      const records = entries.map(e => ({
+        FundingSource: fundingSource.name,
+        FundingCode: fundingSource.code ?? "",
+        Date: e.date.toISOString(),
+        "Employee Name": `${e.employee.firstName} ${e.employee.lastName}`,
+        "Employee Role": e.employee.role,
+        Hours: e.hours,
+        "Pay Rate": e.employee.payRate ?? "",
+        "Pay Currency": e.employee.payCurrency ?? "USD",
+        Cost:
+          typeof e.employee.payRate === "number"
+            ? e.hours * e.employee.payRate
+            : "",
+        Program: e.program?.name ?? "",
+        "Program ID": e.program?.id ?? "",
+        Notes: e.notes ?? "",
+      }));
+
+      const csv = stringify(records, { header: true });
+
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="ifcdc_grant_report_${fundingSource.code || fundingSource.id}_${
+          from || "start"
+        }_${to || "end"}.csv"`
+      );
+
+      return res.send(csv);
+    } catch (err) {
+      console.error("Error exporting funding source report CSV", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
