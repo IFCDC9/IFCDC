@@ -240,6 +240,37 @@
           </button>
           <div id="audit-list" class="admin-list"></div>
         </div>
+
+        <div class="admin-card">
+          <h2>Agenda: Appointments by Date</h2>
+          <p style="font-size:0.8rem;">
+            View all IFCDC appointments in a given date range.
+          </p>
+          <label class="admin-label">From</label>
+          <input id="agenda-from" type="date" class="admin-input" />
+          <label class="admin-label">To</label>
+          <input id="agenda-to" type="date" class="admin-input" />
+          <button id="agenda-load" class="ifcdc-btn ifcdc-btn-outline" style="margin-top:0.4rem;">
+            Load Agenda
+          </button>
+          <div id="agenda-list" class="admin-list" style="margin-top:0.6rem;"></div>
+        </div>
+
+        <div class="admin-card">
+          <h2>Outreach Tasks</h2>
+          <p style="font-size:0.8rem;">
+            Follow up on missed calls and other outreach needs.
+          </p>
+          <label class="admin-label">Status Filter</label>
+          <select id="outreach-status" class="admin-input">
+            <option value="OPEN">OPEN</option>
+            <option value="DONE">DONE</option>
+          </select>
+          <button id="outreach-load" class="ifcdc-btn ifcdc-btn-outline" style="margin-top:0.4rem;">
+            Load Tasks
+          </button>
+          <div id="outreach-list" class="admin-list" style="margin-top:0.6rem;"></div>
+        </div>
       </div>
     </section>
   </main>
@@ -744,6 +775,93 @@
       }
     }
     document.getElementById("refresh-audit").onclick = loadAudit;
+
+    // Agenda
+    async function loadAgenda() {
+      const from = document.getElementById("agenda-from").value;
+      const to = document.getElementById("agenda-to").value;
+      const listEl = document.getElementById("agenda-list");
+      listEl.textContent = "Loading agenda...";
+      try {
+        let url = "/api/agenda";
+        const params = [];
+        if (from) params.push("from=" + encodeURIComponent(from));
+        if (to) params.push("to=" + encodeURIComponent(to));
+        if (params.length) url += "?" + params.join("&");
+
+        const res = await fetch(url, { headers: getAuthHeaders() });
+        const data = await res.json();
+        if (!res.ok) {
+          listEl.textContent = data.error || "Failed to load agenda.";
+          return;
+        }
+        listEl.innerHTML = "";
+        if (!data.length) {
+          listEl.textContent = "No appointments in this range.";
+          return;
+        }
+        data.forEach((a) => {
+          const div = document.createElement("div");
+          div.className = "admin-list-item";
+          div.innerHTML =
+            "<strong>" + a.clientName + "</strong> - " + a.program +
+            "<br/><span style='opacity:0.7;'>" + a.startTime + "</span>" +
+            (a.location ? "<br/><span style='opacity:0.6; font-size:0.78rem;'>@ " + a.location + "</span>" : "");
+          listEl.appendChild(div);
+        });
+      } catch (e) {
+        listEl.textContent = "Error loading agenda.";
+      }
+    }
+    document.getElementById("agenda-load").onclick = loadAgenda;
+
+    // Outreach Tasks
+    async function loadOutreachTasks() {
+      const status = document.getElementById("outreach-status").value;
+      const listEl = document.getElementById("outreach-list");
+      listEl.textContent = "Loading outreach tasks...";
+      try {
+        const res = await fetch("/api/outreach-tasks?status=" + status, { headers: getAuthHeaders() });
+        const data = await res.json();
+        if (!res.ok) {
+          listEl.textContent = data.error || "Failed to load tasks.";
+          return;
+        }
+        listEl.innerHTML = "";
+        if (!data.length) {
+          listEl.textContent = "No " + status + " tasks.";
+          return;
+        }
+        data.forEach((t) => {
+          const div = document.createElement("div");
+          div.className = "admin-list-item";
+          div.innerHTML =
+            "<strong>" + t.phone + "</strong> (" + t.channel + " - " + t.reason + ")" +
+            (t.clientName ? "<br/>Client: " + t.clientName : "") +
+            "<br/><span style='opacity:0.6; font-size:0.78rem;'>" + t.createdAt + "</span>" +
+            (t.status === "OPEN" ? "<br/><button class='ifcdc-btn ifcdc-btn-outline' style='padding:0.2rem 0.5rem; font-size:0.75rem; margin-top:0.3rem;' data-task-id='" + t.id + "'>Mark Done</button>" : "");
+          listEl.appendChild(div);
+        });
+
+        listEl.querySelectorAll("button[data-task-id]").forEach((btn) => {
+          btn.onclick = async () => {
+            const taskId = btn.getAttribute("data-task-id");
+            try {
+              const res = await fetch("/api/outreach-tasks/" + taskId + "/complete", {
+                method: "POST",
+                headers: getAuthHeaders(),
+              });
+              if (res.ok) {
+                loadOutreachTasks();
+              }
+            } catch (e) {}
+          };
+        });
+      } catch (e) {
+        listEl.textContent = "Error loading tasks.";
+      }
+    }
+    document.getElementById("outreach-load").onclick = loadOutreachTasks;
   </script>
 </body>
 </html>
