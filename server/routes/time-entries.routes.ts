@@ -168,11 +168,11 @@ router.get(
         Hours: e.hours,
         "Pay Rate": e.employee.payRate ?? "",
         "Pay Currency": e.employee.payCurrency ?? "USD",
-        "Cost": e.employee.payRate ? e.hours * e.employee.payRate : "",
+        Cost: e.employee.payRate ? e.hours * e.employee.payRate : "",
         Program: e.program?.name ?? "",
         "Program ID": e.program?.id ?? "",
         "Funding Source": e.fundingSource?.name ?? "",
-        "Funding Source ID": e.fundingSource?.id ?? "",
+        "Funding Code": e.fundingSource?.code ?? "",
         Notes: e.notes ?? "",
       }));
 
