@@ -1,8 +1,8 @@
-# IFCDC Manual API
+# IFCDC Health System API
 
 ## Overview
 
-IFCDC Manual API is a Policy Acknowledgement System for managing policy chapters and tracking user acknowledgements. Staff members can view policy chapters and track which policies have been acknowledged. This is a standalone REST API built with Express and TypeScript, using PostgreSQL for data persistence via Prisma ORM.
+IFCDC Health System API is a comprehensive management system for the Imperial Foundation Community Development Center. It includes client management, encounter tracking, audit logging, and a public-facing website with Mental Health & Wellness Program information. This is a standalone REST API built with Express and TypeScript, using SQLite for data persistence.
 
 ## User Preferences
 
@@ -14,74 +14,34 @@ Preferred communication style: Simple, everyday language.
 
 **Framework**: Express.js with TypeScript, running on Node.js.
 
-**API Design**: RESTful API with the following endpoint structure:
-- `GET /` - API status check
-- `/health` - Health check endpoints
-- `/auth/*` - Authentication endpoints (login, register)
-- `/chapters/*` - Chapter CRUD operations
-- `/users/*` - User management
-- `/acknowledgements/*` - Policy acknowledgement tracking
+**Database**: SQLite via better-sqlite3 (file: `data/ifcdc.db`)
 
-**Route Organization**: Routes are organized into separate files:
-- `server/routes/health.routes.ts` - Health check endpoints
-- `server/routes/auth.routes.ts` - Authentication (register, login)
-- `server/routes/chapters.routes.ts` - Chapter CRUD
-- `server/routes/users.routes.ts` - User management
-- `server/routes/acknowledgements.routes.ts` - Acknowledgement tracking
-- `server/routes/index.ts` - Route registration
+**Authentication**: API key-based authentication via `x-api-key` header
 
-**Data Access Layer**: Storage abstraction pattern with an `IStorage` interface implemented by `DatabaseStorage`, allowing for potential storage backend changes without affecting business logic.
-
-**ORM**: Prisma 7 with driver adapters for type-safe database operations and schema management.
-
-**Validation**: Zod schemas for runtime type validation, shared between frontend and backend via the `shared/` directory.
-
-**Authentication**: 
-- bcryptjs for password hashing
-- Session-based authentication (infrastructure present in dependencies)
+**Project Structure**:
+```
+├─ server/index.ts      # Main server with all routes
+├─ data/ifcdc.db        # SQLite database (auto-created)
+└─ public/              # Static HTML pages
+   ├─ index.html
+   ├─ mental-health.html
+   ├─ records-policy.html
+   ├─ roi.html
+   └─ style.css
+```
 
 ### Data Storage
 
-**Database**: PostgreSQL accessed via Prisma with @prisma/adapter-pg.
-
-**Schema Design** (Prisma models):
-- `User` - Staff members with name, email, password, role (admin/director/staff), active status
-- `Chapter` - Policy chapters with number, title, section, slug, body content, version, and active status
-- `PolicyAcknowledgement` - Tracks which users acknowledged which policy versions
-- Foreign key relationships with cascade delete on user/chapter deletion
-
-**Connection Management**: Connection pooling via `pg` Pool with PrismaPg adapter.
-
-**Migrations**: Prisma Migrate for schema migrations, stored in `prisma/migrations/` directory.
-
-**Prisma Commands**:
-- `npx prisma migrate dev` - Create and apply migrations
-- `npx prisma db push` - Push schema changes directly
-- `npx prisma generate` - Regenerate Prisma client
-
-### Configuration
-
-**Environment Configuration**: `server/config/env.ts` exports configuration from environment variables:
-- `port` - Server port (default: 5000)
-- `nodeEnv` - Node environment
-- `databaseUrl` - PostgreSQL connection string
-- `jwtSecret` - JWT secret for authentication
-
-### Shared Code
-
-**Location**: `shared/` directory containing TypeScript code used by the API.
-
-**Schema Definitions**: Zod validation schemas defined once and shared across the stack, ensuring type safety and validation consistency.
-
-**Import Pattern**: Path aliases configured for clean imports:
-- `@shared/` maps to shared directory
+**Database Tables**:
+- `users` - Staff members with id, name, role, api_key
+- `clients` - Client records with full_name, date_of_birth, contact_info, programs
+- `encounters` - Visit/encounter logs linked to clients and staff
+- `audit_logs` - Complete audit trail of all API actions
 
 ### Development Commands
 
-- `npm run dev` - Start development server with hot reload
-- `npm run build` - Build for production
-- `npm run start` - Run production build
-- `npm run check` - TypeScript type checking
+- `npm run dev` - Start development server
+- `npm run start` - Run production server
 
 ### API Endpoints
 

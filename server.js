@@ -1,25 +1,21 @@
 import express from "express";
 import path from "path";
+import { fileURLToPath } from "url";
 import crypto from "crypto";
-// @ts-ignore
 import Database from "better-sqlite3";
 import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 
 const app = express();
-const PORT = parseInt(process.env.PORT || "5000", 10);
+const PORT = process.env.PORT || 5000;
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
 
-const publicDir = path.join(import.meta.dirname, "..", "public");
-app.use(express.static(publicDir));
-
-const dataDir = path.join(import.meta.dirname, "..", "data");
-import fs from "fs";
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
-}
-
-const db = new Database(path.join(dataDir, "ifcdc.db"));
+const db = new Database(path.join(__dirname, "data", "ifcdc.db"));
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -73,25 +69,9 @@ const ROLES = {
   CASE_MANAGER: "CASE_MANAGER",
   CHW: "CHW",
   ADMIN: "ADMIN",
-} as const;
+};
 
-interface User {
-  id: string;
-  name: string;
-  role: string;
-  api_key: string;
-  created_at: string;
-}
-
-declare global {
-  namespace Express {
-    interface Request {
-      user?: User;
-    }
-  }
-}
-
-let execUser = db.prepare("SELECT * FROM users WHERE role = ?").get(ROLES.EXEC) as User | undefined;
+let execUser = db.prepare("SELECT * FROM users WHERE role = ?").get(ROLES.EXEC);
 if (!execUser) {
   const EXEC_API_KEY = crypto.randomBytes(24).toString("hex");
   db.prepare(`
@@ -110,12 +90,12 @@ if (!execUser) {
   console.log("========================================");
 }
 
-function auth(req: express.Request, res: express.Response, next: express.NextFunction) {
+function auth(req, res, next) {
   const apiKey = req.header("x-api-key");
   if (!apiKey) {
     return res.status(401).json({ error: "Missing API key" });
   }
-  const user = db.prepare("SELECT * FROM users WHERE api_key = ?").get(apiKey) as User | undefined;
+  const user = db.prepare("SELECT * FROM users WHERE api_key = ?").get(apiKey);
   if (!user) {
     return res.status(401).json({ error: "Invalid API key" });
   }
@@ -123,8 +103,8 @@ function auth(req: express.Request, res: express.Response, next: express.NextFun
   next();
 }
 
-function requireRole(...allowedRoles: string[]) {
-  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+function requireRole(...allowedRoles) {
+  return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ error: "Unauthenticated" });
     }
@@ -135,7 +115,7 @@ function requireRole(...allowedRoles: string[]) {
   };
 }
 
-function logAudit(req: express.Request, entityType: string, entityId: string | null, action: string, extra: Record<string, unknown> = {}) {
+function logAudit(req, entityType, entityId, action, extra = {}) {
   db.prepare(`
     INSERT INTO audit_logs (id, user_id, user_role, method, path, entity_type, entity_id, action, extra)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -153,31 +133,19 @@ function logAudit(req: express.Request, entityType: string, entityId: string | n
 }
 
 app.get("/", (req, res) => {
-  res.sendFile(path.join(publicDir, "index.html"));
+  res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 app.get("/mental-health", (req, res) => {
-  res.sendFile(path.join(publicDir, "mental-health.html"));
+  res.sendFile(path.join(__dirname, "public", "mental-health.html"));
 });
 
 app.get("/records-policy", (req, res) => {
-  res.sendFile(path.join(publicDir, "records-policy.html"));
+  res.sendFile(path.join(__dirname, "public", "records-policy.html"));
 });
 
 app.get("/roi", (req, res) => {
-  res.sendFile(path.join(publicDir, "roi.html"));
-});
-
-app.get("/programs", (req, res) => {
-  res.sendFile(path.join(publicDir, "programs.html"));
-});
-
-app.get("/contact", (req, res) => {
-  res.sendFile(path.join(publicDir, "contact.html"));
-});
-
-app.get("/api", (req, res) => {
-  res.json({ status: "ok", service: "IFCDC Health System API" });
+  res.sendFile(path.join(__dirname, "public", "roi.html"));
 });
 
 app.post("/api/users", auth, requireRole(ROLES.EXEC), (req, res) => {
@@ -186,7 +154,7 @@ app.post("/api/users", auth, requireRole(ROLES.EXEC), (req, res) => {
   if (!name || !role) {
     return res.status(400).json({ error: "name and role are required" });
   }
-  if (!Object.values(ROLES).includes(role as typeof ROLES[keyof typeof ROLES])) {
+  if (!Object.values(ROLES).includes(role)) {
     return res.status(400).json({ error: "Invalid role" });
   }
 
@@ -231,7 +199,7 @@ app.post("/api/clients", auth, requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CA
 
   logAudit(req, "CLIENT", id, "CREATE_CLIENT");
 
-  const client = db.prepare("SELECT * FROM clients WHERE id = ?").get(id) as any;
+  const client = db.prepare("SELECT * FROM clients WHERE id = ?").get(id);
   res.status(201).json({
     ...client,
     contactInfo: JSON.parse(client.contact_info || "{}"),
@@ -240,7 +208,7 @@ app.post("/api/clients", auth, requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CA
 });
 
 app.get("/api/clients/:id", auth, requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER), (req, res) => {
-  const client = db.prepare("SELECT * FROM clients WHERE id = ?").get(req.params.id) as any;
+  const client = db.prepare("SELECT * FROM clients WHERE id = ?").get(req.params.id);
   if (!client) {
     return res.status(404).json({ error: "Client not found" });
   }
@@ -253,7 +221,7 @@ app.get("/api/clients/:id", auth, requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES
 });
 
 app.get("/api/clients", auth, requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER), (req, res) => {
-  const clients = db.prepare("SELECT * FROM clients").all() as any[];
+  const clients = db.prepare("SELECT * FROM clients").all();
   logAudit(req, "CLIENT", null, "LIST_CLIENTS");
   res.json(clients.map(c => ({
     ...c,
@@ -263,7 +231,7 @@ app.get("/api/clients", auth, requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CAS
 });
 
 app.post("/api/clients/:id/encounters", auth, requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER, ROLES.CHW), (req, res) => {
-  const client = db.prepare("SELECT * FROM clients WHERE id = ?").get(req.params.id) as any;
+  const client = db.prepare("SELECT * FROM clients WHERE id = ?").get(req.params.id);
   if (!client) {
     return res.status(404).json({ error: "Client not found" });
   }
@@ -281,7 +249,7 @@ app.post("/api/clients/:id/encounters", auth, requireRole(ROLES.EXEC, ROLES.CLIN
   db.prepare(`
     INSERT INTO encounters (id, client_id, program, type, summary, note, created_by_id, created_by_role)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, client.id, program, type, summary || "", note || "", req.user!.id, req.user!.role);
+  `).run(id, client.id, program, type, summary || "", note || "", req.user.id, req.user.role);
 
   logAudit(req, "ENCOUNTER", id, "CREATE_ENCOUNTER", {
     clientId: client.id,
@@ -294,7 +262,7 @@ app.post("/api/clients/:id/encounters", auth, requireRole(ROLES.EXEC, ROLES.CLIN
 });
 
 app.get("/api/clients/:id/encounters", auth, requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER), (req, res) => {
-  const client = db.prepare("SELECT * FROM clients WHERE id = ?").get(req.params.id) as any;
+  const client = db.prepare("SELECT * FROM clients WHERE id = ?").get(req.params.id);
   if (!client) {
     return res.status(404).json({ error: "Client not found" });
   }
@@ -310,7 +278,7 @@ app.get("/api/clients/:id/encounters", auth, requireRole(ROLES.EXEC, ROLES.CLINI
 });
 
 app.get("/api/audit-logs", auth, requireRole(ROLES.EXEC), (req, res) => {
-  const logs = db.prepare("SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 500").all() as any[];
+  const logs = db.prepare("SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 500").all();
   res.json(logs.map(log => ({
     ...log,
     extra: JSON.parse(log.extra || "{}"),
@@ -324,7 +292,7 @@ app.post("/api/generate-exec-key", (req, res) => {
     return res.status(403).json({ error: "Invalid secret" });
   }
 
-  const execUser = db.prepare("SELECT * FROM users WHERE role = ?").get(ROLES.EXEC) as User | undefined;
+  const execUser = db.prepare("SELECT * FROM users WHERE role = ?").get(ROLES.EXEC);
   if (!execUser) {
     return res.status(404).json({ error: "No EXEC user found" });
   }
