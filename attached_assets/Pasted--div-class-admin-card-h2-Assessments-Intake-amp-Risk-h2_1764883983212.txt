@@ -1,0 +1,72 @@
+<div class="admin-card">
+  <h2>Assessments (Intake &amp; Risk)</h2>
+  <p style="font-size:0.8rem;">
+    Capture structured intake and risk information for the selected client.
+  </p>
+
+  <h3 style="font-size:1rem; margin-top:0.5rem;">New Assessment</h3>
+  <label class="admin-label">Type</label>
+  <select id="assess-type" class="admin-input">
+    <option value="INTAKE">INTAKE</option>
+    <option value="RISK">RISK</option>
+  </select>
+
+  <!-- INTAKE fields -->
+  <div id="assess-intake-fields" style="margin-top:0.4rem;">
+    <label class="admin-label">Presenting Concerns</label>
+    <textarea id="assess-presenting" class="admin-input" rows="2"></textarea>
+
+    <label class="admin-label">Housing Status</label>
+    <input id="assess-housing" class="admin-input" placeholder="e.g. Renting, doubled-up, homeless" />
+
+    <label class="admin-label">Employment Status</label>
+    <input id="assess-employment" class="admin-input" placeholder="e.g. Employed PT, unemployed" />
+
+    <label class="admin-label">Education Status</label>
+    <input id="assess-education" class="admin-input" placeholder="e.g. HS diploma, GED in progress" />
+
+    <label class="admin-label">Supports</label>
+    <textarea id="assess-supports" class="admin-input" rows="2" placeholder="Family, friends, church, etc."></textarea>
+
+    <label class="admin-label">Legal Involvement</label>
+    <input id="assess-legal" class="admin-input" placeholder="e.g. None, probation, pending charges" />
+  </div>
+
+  <!-- RISK fields -->
+  <div id="assess-risk-fields" style="margin-top:0.4rem; display:none;">
+    <label class="admin-label">Suicide Risk</label>
+    <select id="assess-suicide" class="admin-input">
+      <option value="">Select...</option>
+      <option value="LOW">LOW</option>
+      <option value="MODERATE">MODERATE</option>
+      <option value="HIGH">HIGH</option>
+    </select>
+
+    <label class="admin-label">Violence Risk</label>
+    <select id="assess-violence" class="admin-input">
+      <option value="">Select...</option>
+      <option value="LOW">LOW</option>
+      <option value="MODERATE">MODERATE</option>
+      <option value="HIGH">HIGH</option>
+    </select>
+
+    <label class="admin-label">Substance Use</label>
+    <textarea id="assess-substance" class="admin-input" rows="2"></textarea>
+
+    <label class="admin-label">Protective Factors</label>
+    <textarea id="assess-protective" class="admin-input" rows="2"></textarea>
+
+    <label class="admin-label">
+      <input id="assess-safety-needed" type="checkbox" />
+      &nbsp;Safety plan needed
+    </label>
+  </div>
+
+  <button id="assess-create" class="ifcdc-btn ifcdc-btn-primary" style="margin-top:0.5rem;">
+    Save Assessment
+  </button>
+  <p id="assess-status" style="font-size:0.8rem; margin-top:0.4rem;"></p>
+
+  <h3 style="margin-top:0.75rem; font-size:1rem;">Existing Assessments</h3>
+  <div id="assess-list" class="admin-list"></div>
+</div>
