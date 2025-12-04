@@ -19,6 +19,10 @@ const BarberDashboard: React.FC = () => {
         <h2>Your Schedule</h2>
         {/* TODO: display barber shifts by employeeId */}
       </section>
+
+      <section style={{ marginTop: "1.5rem" }}>
+        <a href="/my-time">Log My Time</a>
+      </section>
     </div>
   );
 };

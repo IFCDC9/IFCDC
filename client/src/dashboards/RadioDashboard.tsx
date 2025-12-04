@@ -19,6 +19,10 @@ const RadioDashboard: React.FC = () => {
         <h2>Recent Shoutouts / Messages</h2>
         {/* TODO: /api/radio/hosts/{employeeId}/messages */}
       </section>
+
+      <section style={{ marginTop: "1.5rem" }}>
+        <a href="/my-time">Log My Time</a>
+      </section>
     </div>
   );
 };
