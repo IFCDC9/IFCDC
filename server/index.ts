@@ -359,15 +359,30 @@ app.post("/api/clients", authRequired, requireRole(ROLES.EXEC, ROLES.CLINICIAN, 
 });
 
 app.get("/api/clients", authRequired, requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER), async (req, res) => {
-  const rows = await db.all("SELECT id, full_name, date_of_birth, phone, email, programs, created_at FROM clients ORDER BY created_at DESC");
+  let rows;
+  if (req.user!.role === ROLES.EXEC) {
+    rows = await db.all<any[]>(
+      "SELECT id, full_name, date_of_birth, phone, email, programs, created_at FROM clients ORDER BY created_at DESC"
+    );
+  } else {
+    rows = await db.all<any[]>(
+      `SELECT DISTINCT c.id, c.full_name, c.date_of_birth, c.phone, c.email,
+                       c.programs, c.created_at
+       FROM clients c
+       JOIN client_assignments ca ON ca.client_id = c.id
+       WHERE ca.user_id = ?
+       ORDER BY c.created_at DESC`,
+      req.user!.id
+    );
+  }
 
-  const list = rows.map((r: any) => ({
-    id: r.id,
-    fullName: r.full_name,
-    dateOfBirth: r.date_of_birth,
-    contactInfo: { phone: r.phone, email: r.email },
-    programs: JSON.parse(r.programs || "[]"),
-    createdAt: r.created_at,
+  const list = rows.map((c) => ({
+    id: c.id,
+    fullName: c.full_name,
+    dateOfBirth: c.date_of_birth,
+    contactInfo: { phone: c.phone, email: c.email },
+    programs: JSON.parse(c.programs || "[]"),
+    createdAt: c.created_at,
   }));
 
   await logAudit(req, "CLIENT", null, "LIST_CLIENTS", { count: list.length });
