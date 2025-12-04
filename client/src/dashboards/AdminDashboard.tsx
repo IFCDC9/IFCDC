@@ -12,7 +12,7 @@ const AdminDashboard: React.FC = () => {
       <ul>
         <li><a href="/admin/hr">HR – Staff Onboarding</a></li>
         <li><a href="/admin/staff">View All Staff</a></li>
-        <li><a href="/admin/grants">Grants & Reporting</a></li>
+        <li><a href="/admin/funding-sources">Funding Sources (Grants)</a></li>
         <li><a href="/admin/system">System Settings</a></li>
         <li><a href="/programs">Programs</a></li>
         <li><a href="/my-time">Log My Time</a></li>
