@@ -349,43 +349,57 @@
         }
         state.token = data.token;
         setStatus("login-status", "Logged in as " + data.user.name + " (" + data.user.role + ")");
-        loadStats();
+        loadSnapshot();
       } catch (e) {
         setStatus("login-status", "Error logging in", true);
       }
     };
 
     // Stats overview (Snapshot)
-    async function loadStats() {
+    async function loadSnapshot() {
       const card = document.getElementById("snapshot-card");
       const statusEl = document.getElementById("snapshot-status");
       const metricsEl = document.getElementById("snapshot-metrics");
-      statusEl.textContent = "Loading...";
-      metricsEl.innerHTML = "";
+      if (!statusEl || !metricsEl) return;
+
       card.style.display = "block";
+      statusEl.textContent = "Loading snapshot...";
       try {
         const res = await fetch("/api/stats/overview", {
           headers: getAuthHeaders(),
         });
         const data = await res.json();
         if (!res.ok) {
-          statusEl.textContent = data.error || "Failed to load snapshot";
-          statusEl.style.color = "#ff8a80";
+          statusEl.textContent = data.error || "Failed to load snapshot.";
+          metricsEl.innerHTML = "";
           return;
         }
-        statusEl.textContent = "";
+        statusEl.textContent = "Snapshot reflects data you are authorized to see.";
+
         metricsEl.innerHTML = `
-          <div><strong>${data.totalClients}</strong> Clients</div>
-          <div><strong>${data.appointmentsThisWeek}</strong> Appointments This Week</div>
-          <div><strong>${data.openOutreachTasks}</strong> Open Outreach Tasks</div>
+          <div>
+            <div style="font-size:0.8rem; opacity:0.8;">Clients</div>
+            <div style="font-size:1.4rem; font-weight:600;">${data.totalClients}</div>
+          </div>
+          <div>
+            <div style="font-size:0.8rem; opacity:0.8;">Appts This Week</div>
+            <div style="font-size:1.4rem; font-weight:600;">${data.appointmentsThisWeek}</div>
+          </div>
+          <div>
+            <div style="font-size:0.8rem; opacity:0.8;">Open Outreach Tasks</div>
+            <div style="font-size:1.4rem; font-weight:600;">${data.openOutreachTasks}</div>
+          </div>
         `;
-      } catch (e) {
-        statusEl.textContent = "Error loading snapshot";
-        statusEl.style.color = "#ff8a80";
-        console.error("Error loading stats:", e);
+      } catch (err) {
+        statusEl.textContent = "Error loading snapshot.";
+        metricsEl.innerHTML = "";
       }
     }
-    document.getElementById("snapshot-refresh").onclick = loadStats;
+
+    const snapshotBtn = document.getElementById("snapshot-refresh");
+    if (snapshotBtn) {
+      snapshotBtn.onclick = loadSnapshot;
+    }
 
     // Staff list
     async function loadUsers() {
