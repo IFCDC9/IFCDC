@@ -276,11 +276,11 @@ const AdminTimeOverviewPage: React.FC = () => {
       </section>
 
       <section style={{ marginBottom: "2rem" }}>
-        <h2>Program Summary – Hours by Program</h2>
+        <h2>Program Summary – Hours & Cost by Program</h2>
         {programSummaries.length === 0 ? (
           <p>No program-linked hours in this window.</p>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse" }} data-testid="table-program-summary">
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
                 <th align="left">Program</th>
@@ -290,10 +290,12 @@ const AdminTimeOverviewPage: React.FC = () => {
             </thead>
             <tbody>
               {programSummaries.map(p => (
-                <tr key={p.programId} data-testid={`row-program-${p.programId}`}>
+                <tr key={p.programId}>
                   <td>{p.name}</td>
                   <td>{p.totalHours.toFixed(2)}</td>
-                  <td>{p.totalCost > 0 ? `${p.currency} ${p.totalCost.toFixed(2)}` : "-"}</td>
+                  <td>
+                    ${p.totalCost.toFixed(2)} {p.currency}
+                  </td>
                 </tr>
               ))}
             </tbody>
