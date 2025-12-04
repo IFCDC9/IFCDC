@@ -1405,33 +1405,37 @@
 
         const program = (document.getElementById("goal-program") || {}).value;
         const title = (document.getElementById("goal-title") || {}).value.trim();
-        const targetDate = (document.getElementById("goal-target") || {}).value || null;
         const notes = (document.getElementById("goal-notes") || {}).value.trim();
+        const targetDate = (document.getElementById("goal-target") || {}).value;
 
-        if (!title) {
-          setStatus("goal-status", "Goal title is required", true);
+        if (!program || !title) {
+          setStatus("goal-status", "Program and title are required for a goal.", true);
           return;
         }
 
         setStatus("goal-status", "Creating goal...");
+
         try {
           const res = await fetch(
             "/api/clients/" + state.selectedClientId + "/goals",
             {
               method: "POST",
               headers: getAuthHeaders(),
-              body: JSON.stringify({ program, title, targetDate, notes }),
+              body: JSON.stringify({
+                program,
+                title,
+                notes,
+                targetDate: targetDate || null,
+              }),
             }
           );
-          const result = await res.json();
+          const data = await res.json();
           if (!res.ok) {
-            setStatus("goal-status", result.error || "Failed to create goal", true);
+            setStatus("goal-status", data.error || "Failed to create goal", true);
             return;
           }
+
           setStatus("goal-status", "Goal created");
-          document.getElementById("goal-title").value = "";
-          document.getElementById("goal-target").value = "";
-          document.getElementById("goal-notes").value = "";
           loadGoalsForClient();
         } catch (err) {
           setStatus("goal-status", "Error creating goal", true);
