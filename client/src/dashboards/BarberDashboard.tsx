@@ -1,27 +1,199 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
+
+type Client = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  phone?: string | null;
+};
+
+type Appointment = {
+  id: string;
+  startTime: string;
+  endTime: string;
+  serviceName: string;
+  status: string;
+  notes?: string | null;
+  client: Client;
+};
 
 const BarberDashboard: React.FC = () => {
   const { user } = useAuth();
-  const emp = user?.employee;
+  const token = localStorage.getItem("ifcdc_token");
+
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [date, setDate] = useState<string>(() => {
+    return new Date().toISOString().slice(0, 10);
+  });
+
+  const fetchSchedule = async () => {
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (date) params.append("dateFrom", date);
+    if (date) params.append("dateTo", date);
+
+    const res = await fetch(`/api/barber/schedule?${params.toString()}`, {
+      headers: {
+        Authorization: token ? `Bearer ${token}` : "",
+      },
+    });
+    setLoading(false);
+
+    if (res.ok) {
+      const data = await res.json();
+      setAppointments(data);
+    } else {
+      alert("Error loading your schedule.");
+    }
+  };
+
+  useEffect(() => {
+    fetchSchedule();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date]);
+
+  const handleStatusChange = async (id: string, status: string) => {
+    const res = await fetch(`/api/barber/appointments/${id}/status`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: token ? `Bearer ${token}` : "",
+      },
+      body: JSON.stringify({ status }),
+    });
+
+    if (res.ok) {
+      fetchSchedule();
+    } else {
+      const body = await res.json().catch(() => null);
+      alert(body?.error || "Error updating appointment status.");
+    }
+  };
+
+  const displayName = user?.employee
+    ? `${user.employee.firstName} ${user.employee.lastName}`
+    : user?.email;
 
   return (
-    <div style={{ padding: "1.5rem" }}>
+    <div style={{ padding: "1.5rem" }} data-testid="barber-dashboard">
       <h1>Barber Dashboard</h1>
-      <p>Welcome, {emp?.firstName} {emp?.lastName}</p>
+      <p>Welcome, {displayName}</p>
 
-      <section>
-        <h2>Today&apos;s Appointments</h2>
-        {/* TODO: fetch /api/barbers/{employeeId}/appointments */}
+      <section style={{ marginTop: "1rem", marginBottom: "1rem" }}>
+        <h2>My Schedule</h2>
+        <div style={{ marginBottom: "0.75rem" }}>
+          <label>Day: </label>
+          <input
+            type="date"
+            value={date}
+            onChange={e => setDate(e.target.value)}
+            data-testid="input-schedule-date"
+          />
+          <button
+            style={{ marginLeft: "0.5rem" }}
+            onClick={fetchSchedule}
+            data-testid="button-refresh-schedule"
+          >
+            Refresh
+          </button>
+        </div>
       </section>
 
       <section>
-        <h2>Your Schedule</h2>
-        {/* TODO: display barber shifts by employeeId */}
+        {loading ? (
+          <p>Loading…</p>
+        ) : appointments.length === 0 ? (
+          <p>No appointments for this day.</p>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                <th align="left">Time</th>
+                <th align="left">Client</th>
+                <th align="left">Service</th>
+                <th align="left">Status</th>
+                <th align="left">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {appointments.map(a => (
+                <tr key={a.id} data-testid={`row-appointment-${a.id}`}>
+                  <td>
+                    {new Date(a.startTime).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}{" "}
+                    –{" "}
+                    {new Date(a.endTime).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </td>
+                  <td>
+                    {a.client.firstName} {a.client.lastName}
+                    {a.client.phone && (
+                      <div style={{ fontSize: "0.85rem" }}>
+                        {a.client.phone}
+                      </div>
+                    )}
+                  </td>
+                  <td>{a.serviceName}</td>
+                  <td>
+                    <span
+                      style={{
+                        padding: "0.1rem 0.4rem",
+                        borderRadius: "999px",
+                        fontSize: "0.8rem",
+                        border: "1px solid #ccc",
+                      }}
+                    >
+                      {a.status}
+                    </span>
+                  </td>
+                  <td>
+                    {a.status === "scheduled" && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleStatusChange(a.id, "completed")}
+                          data-testid={`button-complete-${a.id}`}
+                        >
+                          Complete
+                        </button>{" "}
+                        <button
+                          type="button"
+                          onClick={() => handleStatusChange(a.id, "no_show")}
+                          data-testid={`button-noshow-${a.id}`}
+                        >
+                          No-Show
+                        </button>{" "}
+                        <button
+                          type="button"
+                          onClick={() => handleStatusChange(a.id, "cancelled")}
+                          data-testid={`button-cancel-${a.id}`}
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    )}
+                    {a.status !== "scheduled" && <em>No actions</em>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </section>
 
       <section style={{ marginTop: "1.5rem" }}>
-        <a href="/my-time">Log My Time</a>
+        <h2>Quick Links</h2>
+        <ul>
+          <li>
+            <a href="/my-time">Log My Time (Hours Worked)</a>
+          </li>
+        </ul>
       </section>
     </div>
   );
