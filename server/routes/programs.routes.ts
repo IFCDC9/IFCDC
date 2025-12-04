@@ -137,4 +137,37 @@ router.get("/:programId", requireAuth(["admin", "program_staff"]), async (req, r
   }
 });
 
+router.post("/:programId/sessions", requireAuth(["admin", "program_staff"]), async (req, res) => {
+  try {
+    const { programId } = req.params;
+    const { title, date, durationMin, notes } = req.body;
+
+    if (!title || !date) {
+      return res.status(400).json({ error: "Title and date are required" });
+    }
+
+    const program = await prisma.program.findUnique({
+      where: { id: programId },
+    });
+    if (!program) {
+      return res.status(404).json({ error: "Program not found" });
+    }
+
+    const session = await prisma.programSession.create({
+      data: {
+        programId,
+        title,
+        date: new Date(date),
+        durationMin: durationMin ? Number(durationMin) : null,
+        notes: notes || null,
+      },
+    });
+
+    return res.status(201).json(session);
+  } catch (err) {
+    console.error("Error creating program session", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;
