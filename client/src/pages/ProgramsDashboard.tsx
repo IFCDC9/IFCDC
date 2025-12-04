@@ -167,30 +167,30 @@ const ProgramsDashboard: React.FC = () => {
         ) : (
           <ul>
             {programs.map(p => (
-              <li key={p.id} style={{ marginBottom: "0.75rem" }} data-testid={`program-item-${p.id}`}>
+              <li key={p.id} style={{ marginBottom: "0.75rem" }}>
                 <strong>{p.name}</strong>{" "}
                 {p.code && <span>({p.code})</span>}
                 {p.location && <div>Location: {p.location}</div>}
                 {p.description && <div>{p.description}</div>}
                 <div>Status: {p.status}</div>
-                {isAdmin && (
-                  <div style={{ marginTop: "0.5rem" }}>
-                    <label>Funding Source: </label>
-                    <select
-                      value={p.fundingSourceId || ""}
-                      onChange={e => handleAssignFundingSource(p.id, e.target.value)}
-                      data-testid={`select-funding-${p.id}`}
-                    >
-                      <option value="">-- None --</option>
-                      {fundingSources.map(fs => (
-                        <option key={fs.id} value={fs.id}>
-                          {fs.name} {fs.code ? `(${fs.code})` : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-                <Link to={`/programs/${p.id}`} data-testid={`link-program-${p.id}`}>View Details</Link>
+
+                {/* Funding Source selector */}
+                <div style={{ marginTop: "0.25rem" }}>
+                  <label>Funding Source: </label>
+                  <select
+                    value={p.fundingSourceId || ""}
+                    onChange={e => handleAssignFundingSource(p.id, e.target.value)}
+                  >
+                    <option value="">None / General</option>
+                    {fundingSources.map(fs => (
+                      <option key={fs.id} value={fs.id}>
+                        {fs.name} {fs.code ? `(${fs.code})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <a href={`/programs/${p.id}`}>View Details</a>
               </li>
             ))}
           </ul>
