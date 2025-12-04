@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>IFCDC Mental Health & Wellness Program</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="ifcdc-body">
+  <header class="ifcdc-header">
+    <div class="ifcdc-header-inner">
+      <div class="ifcdc-brand">
+        <span class="ifcdc-logo-text">IFCDC</span>
+        <span class="ifcdc-subbrand">Mental Health &amp; Wellness</span>
+      </div>
+      <nav class="ifcdc-nav">
+        <a href="/">Home</a>
+        <a href="/mental-health" class="active">Mental Health</a>
+        <a href="/records-policy">Records &amp; Privacy</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="ifcdc-main">
+    <section class="ifcdc-hero">
+      <div class="ifcdc-hero-content">
+        <h1>IFCDC Mental Health &amp; Wellness Program</h1>
+        <p>
+          All-ages behavioral health support designed to stabilize, support, and strengthen our
+          community—from children and youth to adults and seniors.
+        </p>
+      </div>
+    </section>
+
+    <!-- You can paste the full cohorts / pillars content from earlier here -->
+    <section class="ifcdc-section">
+      <h2>All-Ages Support</h2>
+      <p>
+        IFCDC delivers a cradle-to-senior mental health framework, including emotional development
+        for children, resilience for youth, stabilization for adults, and wellness support for seniors.
+      </p>
+    </section>
+
+    <section class="ifcdc-section ifcdc-cta">
+      <h2>Connect With the Mental Health &amp; Wellness Team</h2>
+      <p>
+        To request support or learn more, please contact us:
+      </p>
+      <p>
+        <strong>Phone:</strong> (732) 743-5048<br />
+        <strong>Email:</strong> service@ifcdc.org<br />
+        <strong>Address:</strong> 1215 Springwood Ave Suite 28, Asbury Park, NJ 07712
+      </p>
+    </section>
+  </main>
+
+  <footer class="ifcdc-footer">
+    <p>&copy; <span id="year"></span> Imperial Foundation Community Development Center. All rights reserved.</p>
+  </footer>
+
+  <script>
+    document.getElementById("year").textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>
