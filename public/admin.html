@@ -888,12 +888,23 @@
       }
     };
 
-    // Assessments
-    document.getElementById("assess-type").onchange = function () {
-      const type = this.value;
-      document.getElementById("assess-intake-fields").style.display = type === "INTAKE" ? "block" : "none";
-      document.getElementById("assess-risk-fields").style.display = type === "RISK" ? "block" : "none";
-    };
+    // Assessment type toggle (INTAKE vs RISK UI)
+    const assessTypeEl = document.getElementById("assess-type");
+    const assessIntakeFields = document.getElementById("assess-intake-fields");
+    const assessRiskFields = document.getElementById("assess-risk-fields");
+
+    if (assessTypeEl) {
+      assessTypeEl.onchange = () => {
+        const type = assessTypeEl.value;
+        if (type === "INTAKE") {
+          assessIntakeFields.style.display = "block";
+          assessRiskFields.style.display = "none";
+        } else if (type === "RISK") {
+          assessIntakeFields.style.display = "none";
+          assessRiskFields.style.display = "block";
+        }
+      };
+    }
 
     async function loadAssessmentsForClient() {
       const listEl = document.getElementById("assess-list");
