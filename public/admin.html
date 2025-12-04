@@ -776,20 +776,30 @@
     }
     document.getElementById("refresh-audit").onclick = loadAudit;
 
-    // Agenda
+    // Agenda: appointments by date range
     async function loadAgenda() {
-      const from = document.getElementById("agenda-from").value;
-      const to = document.getElementById("agenda-to").value;
       const listEl = document.getElementById("agenda-list");
       listEl.textContent = "Loading agenda...";
-      try {
-        let url = "/api/agenda";
-        const params = [];
-        if (from) params.push("from=" + encodeURIComponent(from));
-        if (to) params.push("to=" + encodeURIComponent(to));
-        if (params.length) url += "?" + params.join("&");
 
-        const res = await fetch(url, { headers: getAuthHeaders() });
+      const fromDate = document.getElementById("agenda-from").value;
+      const toDate = document.getElementById("agenda-to").value;
+
+      let query = "/api/appointments";
+      const params = [];
+      if (fromDate) {
+        const fromIso = new Date(fromDate + "T00:00:00").toISOString();
+        params.push("from=" + encodeURIComponent(fromIso));
+      }
+      if (toDate) {
+        const toIso = new Date(toDate + "T23:59:59").toISOString();
+        params.push("to=" + encodeURIComponent(toIso));
+      }
+      if (params.length) {
+        query += "?" + params.join("&");
+      }
+
+      try {
+        const res = await fetch(query, { headers: getAuthHeaders() });
         const data = await res.json();
         if (!res.ok) {
           listEl.textContent = data.error || "Failed to load agenda.";
@@ -803,13 +813,22 @@
         data.forEach((a) => {
           const div = document.createElement("div");
           div.className = "admin-list-item";
+          const when = new Date(a.startTime).toLocaleString();
           div.innerHTML =
-            "<strong>" + a.clientName + "</strong> - " + a.program +
-            "<br/><span style='opacity:0.7;'>" + a.startTime + "</span>" +
-            (a.location ? "<br/><span style='opacity:0.6; font-size:0.78rem;'>@ " + a.location + "</span>" : "");
+            "<strong>" +
+            (a.clientName || "Unknown") +
+            "</strong> (" +
+            a.program +
+            ")<br/>" +
+            "<span style='opacity:0.8;'>Starts: " +
+            when +
+            "</span><br/>" +
+            "<span style='opacity:0.7; font-size:0.78rem;'>Phone: " +
+            (a.clientPhone || "N/A") +
+            "</span>";
           listEl.appendChild(div);
         });
-      } catch (e) {
+      } catch (err) {
         listEl.textContent = "Error loading agenda.";
       }
     }
