@@ -120,24 +120,16 @@
     <section class="ifcdc-section">
       <h1>IFCDC Health System Admin</h1>
       <p style="opacity:0.9; font-size:0.9rem;">
-        Use this internal console to manage staff, clients, assignments and review audit activity.
+        Use this internal console to manage staff, clients, assignments, appointments and outreach.
       </p>
-    </section>
 
-    <section class="ifcdc-section" id="stats-section" style="display:none;">
-      <div class="stats-row">
-        <div class="stat-card">
-          <div class="stat-value" id="stat-clients">-</div>
-          <div class="stat-label">Total Clients</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" id="stat-appointments">-</div>
-          <div class="stat-label">Appointments This Week</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" id="stat-outreach">-</div>
-          <div class="stat-label">Open Outreach Tasks</div>
-        </div>
+      <div class="admin-card" id="snapshot-card" style="margin-top:1rem; display:none;">
+        <h2>IFCDC Health Snapshot</h2>
+        <p id="snapshot-status" style="font-size:0.8rem; margin-bottom:0.6rem;"></p>
+        <div id="snapshot-metrics" style="display:flex; gap:1.5rem; flex-wrap:wrap; font-size:0.9rem;"></div>
+        <button id="snapshot-refresh" class="ifcdc-btn ifcdc-btn-outline" style="margin-top:0.6rem;">
+          Refresh Snapshot
+        </button>
       </div>
     </section>
 
@@ -363,24 +355,37 @@
       }
     };
 
-    // Stats overview
+    // Stats overview (Snapshot)
     async function loadStats() {
+      const card = document.getElementById("snapshot-card");
+      const statusEl = document.getElementById("snapshot-status");
+      const metricsEl = document.getElementById("snapshot-metrics");
+      statusEl.textContent = "Loading...";
+      metricsEl.innerHTML = "";
+      card.style.display = "block";
       try {
         const res = await fetch("/api/stats/overview", {
           headers: getAuthHeaders(),
         });
         const data = await res.json();
         if (!res.ok) {
+          statusEl.textContent = data.error || "Failed to load snapshot";
+          statusEl.style.color = "#ff8a80";
           return;
         }
-        document.getElementById("stat-clients").textContent = data.totalClients;
-        document.getElementById("stat-appointments").textContent = data.appointmentsThisWeek;
-        document.getElementById("stat-outreach").textContent = data.openOutreachTasks;
-        document.getElementById("stats-section").style.display = "block";
+        statusEl.textContent = "";
+        metricsEl.innerHTML = `
+          <div><strong>${data.totalClients}</strong> Clients</div>
+          <div><strong>${data.appointmentsThisWeek}</strong> Appointments This Week</div>
+          <div><strong>${data.openOutreachTasks}</strong> Open Outreach Tasks</div>
+        `;
       } catch (e) {
+        statusEl.textContent = "Error loading snapshot";
+        statusEl.style.color = "#ff8a80";
         console.error("Error loading stats:", e);
       }
     }
+    document.getElementById("snapshot-refresh").onclick = loadStats;
 
     // Staff list
     async function loadUsers() {
