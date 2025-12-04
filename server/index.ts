@@ -1421,6 +1421,51 @@ app.get(
   }
 );
 
+// ----- Reports: Risk Mix (CSV) -----
+app.get(
+  "/api/reports/risk-mix.csv",
+  authRequired,
+  requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
+  async (req, res) => {
+    try {
+      const report = await buildRiskMixReportForUser(req.user!);
+
+      await logAudit(req, "REPORT", null, "REPORT_RISK_MIX_CSV", {
+        totalWithRisk: report.totalWithRisk,
+      });
+
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        'attachment; filename="ifcdc_risk_mix_report.csv"'
+      );
+
+      const rows: string[] = [];
+      rows.push("category,level,count,total_with_risk");
+
+      const s = report.suicideRisk || {};
+      const v = report.violenceRisk || {};
+
+      rows.push(["suicideRisk", "LOW", s.LOW || 0, report.totalWithRisk || 0].join(","));
+      rows.push(["suicideRisk", "MODERATE", s.MODERATE || 0, report.totalWithRisk || 0].join(","));
+      rows.push(["suicideRisk", "HIGH", s.HIGH || 0, report.totalWithRisk || 0].join(","));
+      rows.push(["suicideRisk", "UNKNOWN", s.UNKNOWN || 0, report.totalWithRisk || 0].join(","));
+
+      rows.push(["violenceRisk", "LOW", v.LOW || 0, report.totalWithRisk || 0].join(","));
+      rows.push(["violenceRisk", "MODERATE", v.MODERATE || 0, report.totalWithRisk || 0].join(","));
+      rows.push(["violenceRisk", "HIGH", v.HIGH || 0, report.totalWithRisk || 0].join(","));
+      rows.push(["violenceRisk", "UNKNOWN", v.UNKNOWN || 0, report.totalWithRisk || 0].join(","));
+
+      res.send(rows.join("\n"));
+    } catch (err) {
+      console.error("Error in /api/reports/risk-mix.csv:", err);
+      res.status(500)
+        .setHeader("Content-Type", "text/plain; charset=utf-8")
+        .send("Failed to build risk-mix CSV");
+    }
+  }
+);
+
 // ----- Twilio Voice Status Webhook -> Outreach tasks (NO AUTH) -----
 app.post(
   "/twilio/voice-status",
