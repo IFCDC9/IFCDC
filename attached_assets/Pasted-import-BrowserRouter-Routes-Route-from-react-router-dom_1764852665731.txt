@@ -1,0 +1,126 @@
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import ProtectedRoute from "./auth/ProtectedRoute";
+
+import AdminLayout from "./layouts/AdminLayout";
+import AdminDashboard from "./dashboards/AdminDashboard";
+import HrOnboardingPage from "./pages/HrOnboarding";
+import ProgramsDashboard from "./pages/ProgramsDashboard";
+import FundingSourcesAdminPage from "./pages/FundingSourcesAdminPage";
+import AdminTimeOverviewPage from "./pages/AdminTimeOverviewPage";
+import GrantReportPage from "./pages/GrantReportPage";
+
+import BarberDashboard from "./pages/BarberDashboard";
+import RadioDashboard from "./pages/RadioDashboard";
+import MyTimeEntriesPage from "./pages/MyTimeEntries";
+import LoginPage from "./pages/Login";
+
+const App: React.FC = () => {
+  return (
+    <BrowserRouter>
+      <Routes>
+        {/* Auth */}
+        <Route path="/login" element={<LoginPage />} />
+
+        {/* Role-based home redirect (we already discussed RoleRouter earlier) */}
+        {/* ... */}
+
+        {/* Admin routes wrapped in AdminLayout */}
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute allowedRoles={["admin"]}>
+              <AdminLayout>
+                <AdminDashboard />
+              </AdminLayout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/admin/hr"
+          element={
+            <ProtectedRoute allowedRoles={["admin"]}>
+              <AdminLayout>
+                <HrOnboardingPage />
+              </AdminLayout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/programs"
+          element={
+            <ProtectedRoute allowedRoles={["admin", "program_staff"]}>
+              <AdminLayout>
+                <ProgramsDashboard />
+              </AdminLayout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/admin/funding-sources"
+          element={
+            <ProtectedRoute allowedRoles={["admin"]}>
+              <AdminLayout>
+                <FundingSourcesAdminPage />
+              </AdminLayout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/admin/time"
+          element={
+            <ProtectedRoute allowedRoles={["admin"]}>
+              <AdminLayout>
+                <AdminTimeOverviewPage />
+              </AdminLayout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/admin/grant-report"
+          element={
+            <ProtectedRoute allowedRoles={["admin"]}>
+              <AdminLayout>
+                <GrantReportPage />
+              </AdminLayout>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Non-admin role dashboards */}
+        <Route
+          path="/barber"
+          element={
+            <ProtectedRoute allowedRoles={["barber", "admin"]}>
+              <BarberDashboard />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/radio"
+          element={
+            <ProtectedRoute allowedRoles={["radio_host", "admin"]}>
+              <RadioDashboard />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/my-time"
+          element={
+            <ProtectedRoute allowedRoles={["admin", "barber", "radio_host", "program_staff"]}>
+              <MyTimeEntriesPage />
+            </ProtectedRoute>
+          }
+        />
+      </Routes>
+    </BrowserRouter>
+  );
+};
+
+export default App;

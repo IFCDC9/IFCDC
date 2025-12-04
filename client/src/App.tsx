@@ -2,16 +2,19 @@ import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import { useAuth } from "./auth/AuthContext";
+
+import AdminLayout from "./layouts/AdminLayout";
 import AdminDashboard from "./dashboards/AdminDashboard";
-import BarberDashboard from "./dashboards/BarberDashboard";
-import RadioDashboard from "./dashboards/RadioDashboard";
 import HrOnboardingPage from "./pages/HrOnboardingPage";
 import ProgramsDashboard from "./pages/ProgramsDashboard";
 import ProgramDetailPage from "./pages/ProgramDetailPage";
-import MyTimeEntriesPage from "./pages/MyTimeEntriesPage";
-import AdminTimeOverviewPage from "./pages/AdminTimeOverviewPage";
 import FundingSourcesAdminPage from "./pages/FundingSourcesAdminPage";
+import AdminTimeOverviewPage from "./pages/AdminTimeOverviewPage";
 import GrantReportPage from "./pages/GrantReportPage";
+
+import BarberDashboard from "./dashboards/BarberDashboard";
+import RadioDashboard from "./dashboards/RadioDashboard";
+import MyTimeEntriesPage from "./pages/MyTimeEntriesPage";
 import LoginPage from "./pages/LoginPage";
 
 const RoleRouter: React.FC = () => {
@@ -22,6 +25,7 @@ const RoleRouter: React.FC = () => {
   if (user.role === "admin") return <Navigate to="/admin" replace />;
   if (user.role === "barber") return <Navigate to="/barber" replace />;
   if (user.role === "radio_host") return <Navigate to="/radio" replace />;
+  if (user.role === "program_staff") return <Navigate to="/programs" replace />;
 
   return <Navigate to="/login" replace />;
 };
@@ -45,39 +49,75 @@ const App: React.FC = () => {
           path="/admin"
           element={
             <ProtectedRoute allowedRoles={["admin"]}>
-              <AdminDashboard />
+              <AdminLayout>
+                <AdminDashboard />
+              </AdminLayout>
             </ProtectedRoute>
           }
         />
+
         <Route
           path="/admin/hr"
           element={
             <ProtectedRoute allowedRoles={["admin"]}>
-              <HrOnboardingPage />
+              <AdminLayout>
+                <HrOnboardingPage />
+              </AdminLayout>
             </ProtectedRoute>
           }
         />
+
         <Route
-          path="/admin/time"
+          path="/programs"
           element={
-            <ProtectedRoute allowedRoles={["admin"]}>
-              <AdminTimeOverviewPage />
+            <ProtectedRoute allowedRoles={["admin", "program_staff"]}>
+              <AdminLayout>
+                <ProgramsDashboard />
+              </AdminLayout>
             </ProtectedRoute>
           }
         />
+
+        <Route
+          path="/programs/:programId"
+          element={
+            <ProtectedRoute allowedRoles={["admin", "program_staff"]}>
+              <AdminLayout>
+                <ProgramDetailPage />
+              </AdminLayout>
+            </ProtectedRoute>
+          }
+        />
+
         <Route
           path="/admin/funding-sources"
           element={
             <ProtectedRoute allowedRoles={["admin"]}>
-              <FundingSourcesAdminPage />
+              <AdminLayout>
+                <FundingSourcesAdminPage />
+              </AdminLayout>
             </ProtectedRoute>
           }
         />
+
+        <Route
+          path="/admin/time"
+          element={
+            <ProtectedRoute allowedRoles={["admin"]}>
+              <AdminLayout>
+                <AdminTimeOverviewPage />
+              </AdminLayout>
+            </ProtectedRoute>
+          }
+        />
+
         <Route
           path="/admin/grant-report"
           element={
             <ProtectedRoute allowedRoles={["admin"]}>
-              <GrantReportPage />
+              <AdminLayout>
+                <GrantReportPage />
+              </AdminLayout>
             </ProtectedRoute>
           }
         />
@@ -90,6 +130,7 @@ const App: React.FC = () => {
             </ProtectedRoute>
           }
         />
+
         <Route
           path="/radio"
           element={
@@ -98,22 +139,7 @@ const App: React.FC = () => {
             </ProtectedRoute>
           }
         />
-        <Route
-          path="/programs"
-          element={
-            <ProtectedRoute allowedRoles={["admin", "program_staff"]}>
-              <ProgramsDashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/programs/:programId"
-          element={
-            <ProtectedRoute allowedRoles={["admin", "program_staff"]}>
-              <ProgramDetailPage />
-            </ProtectedRoute>
-          }
-        />
+
         <Route
           path="/my-time"
           element={
