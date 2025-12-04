@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../prisma";
 import { requireAuth, AuthedRequest } from "../middleware/auth";
+import { stringify } from "csv-stringify/sync";
 
 const router = Router();
 
@@ -98,6 +99,54 @@ router.get("/", requireAuth(["admin"]), async (_req, res) => {
     return res.json(entries);
   } catch (err) {
     console.error("Error fetching all time entries", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/export", requireAuth(["admin"]), async (req, res) => {
+  try {
+    const { from, to, programId } = req.query;
+
+    const where: Record<string, unknown> = {};
+
+    if (from || to) {
+      where.date = {};
+      if (from) (where.date as Record<string, Date>).gte = new Date(from as string);
+      if (to) (where.date as Record<string, Date>).lte = new Date(to as string);
+    }
+
+    if (programId) {
+      where.programId = programId as string;
+    }
+
+    const entries = await prisma.timeEntry.findMany({
+      where,
+      include: {
+        employee: true,
+        program: true,
+      },
+      orderBy: { date: "desc" },
+    });
+
+    const rows = entries.map((e) => ({
+      Date: e.date.toISOString().split("T")[0],
+      Employee: `${e.employee.firstName} ${e.employee.lastName}`,
+      Role: e.employee.role,
+      Hours: e.hours,
+      Program: e.program?.name || "",
+      Notes: e.notes || "",
+    }));
+
+    const csv = stringify(rows, { header: true });
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="time-entries-${new Date().toISOString().split("T")[0]}.csv"`
+    );
+    return res.send(csv);
+  } catch (err) {
+    console.error("Error exporting time entries", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
