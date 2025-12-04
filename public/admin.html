@@ -382,6 +382,39 @@
         </div>
 
         <div class="admin-card">
+          <h2>Client Goals (All Programs)</h2>
+          <p style="font-size:0.8rem;">
+            Track active goals for Mental Health, Housing, Anti-Gang, and Economic Development.
+          </p>
+
+          <h3 style="font-size:1rem; margin-top:0.5rem;">New Goal</h3>
+          <label class="admin-label">Program</label>
+          <select id="goal-program" class="admin-input">
+            <option value="MENTAL_HEALTH">Mental Health</option>
+            <option value="HOUSING">Transitional Housing</option>
+            <option value="ANTI_GANG">Anti-Gang Intervention</option>
+            <option value="ECON_DEV">Economic Development & Jobs</option>
+          </select>
+
+          <label class="admin-label">Goal Title</label>
+          <input id="goal-title" class="admin-input" placeholder="e.g. Attend weekly therapy for 8 weeks" />
+
+          <label class="admin-label">Target Date (optional)</label>
+          <input id="goal-target" type="date" class="admin-input" />
+
+          <label class="admin-label">Notes (optional)</label>
+          <textarea id="goal-notes" class="admin-input" rows="2"></textarea>
+
+          <button id="goal-create" class="ifcdc-btn ifcdc-btn-primary" style="margin-top:0.5rem;">
+            Add Goal
+          </button>
+          <p id="goal-status" style="font-size:0.8rem; margin-top:0.4rem;"></p>
+
+          <h3 style="margin-top:0.75rem; font-size:1rem;">Existing Goals</h3>
+          <div id="goal-list" class="admin-list"></div>
+        </div>
+
+        <div class="admin-card">
           <h2>Recent Audit Log (Exec)</h2>
           <button id="refresh-audit" class="ifcdc-btn ifcdc-btn-outline" style="margin-bottom:0.5rem;">
             Refresh Audit Log
@@ -822,6 +855,7 @@
       loadAppointmentsForClient();
       loadEncountersForClient();
       loadAssessmentsForClient();
+      loadGoalsForClient();
     }
 
     // Create client
@@ -1248,6 +1282,157 @@
           loadAssessmentsForClient();
         } catch (err) {
           setStatus("assess-status", "Error saving assessment", true);
+        }
+      };
+    }
+
+    // ----- Goals -----
+    async function loadGoalsForClient() {
+      const listEl = document.getElementById("goal-list");
+      if (!listEl) return;
+
+      if (!state.selectedClientId) {
+        listEl.textContent = "No client selected.";
+        return;
+      }
+      listEl.textContent = "Loading goals...";
+
+      try {
+        const res = await fetch(
+          "/api/clients/" + state.selectedClientId + "/goals",
+          { headers: getAuthHeaders() }
+        );
+        const data = await res.json();
+        if (!res.ok) {
+          listEl.textContent = data.error || "Failed to load goals.";
+          return;
+        }
+
+        if (!data.length) {
+          listEl.textContent = "No goals recorded.";
+          return;
+        }
+
+        listEl.innerHTML = "";
+        data.forEach((g) => {
+          const div = document.createElement("div");
+          div.className = "admin-list-item";
+
+          const when = new Date(g.createdAt).toLocaleString();
+          const target = g.targetDate ? "Target: " + g.targetDate : "";
+          const statusColor = g.status === "COMPLETED" ? "#4ade80" : g.status === "ON_HOLD" ? "#facc15" : "#60a5fa";
+
+          div.innerHTML =
+            "<strong>" + escapeHtml(g.title) + "</strong>" +
+            " <span style='background:" + statusColor + "; color:#000; padding:0.1rem 0.3rem; border-radius:3px; font-size:0.7rem;'>" + g.status + "</span>" +
+            "<br/><span style='opacity:0.7; font-size:0.78rem;'>" +
+            g.program + " | " + when + (target ? " | " + target : "") +
+            "</span>";
+
+          if (g.notes) {
+            div.innerHTML += "<br/><span style='opacity:0.8; font-size:0.78rem;'>" + escapeHtml(g.notes) + "</span>";
+          }
+
+          // Status buttons
+          if (g.status !== "COMPLETED") {
+            const btnComplete = document.createElement("button");
+            btnComplete.textContent = "Complete";
+            btnComplete.className = "ifcdc-btn ifcdc-btn-outline";
+            btnComplete.style.cssText = "margin-top:0.3rem; margin-right:0.3rem; font-size:0.7rem; padding:0.2rem 0.4rem;";
+            btnComplete.onclick = async () => {
+              await updateGoalStatus(g.id, "COMPLETED");
+            };
+            div.appendChild(btnComplete);
+          }
+
+          if (g.status === "ACTIVE") {
+            const btnHold = document.createElement("button");
+            btnHold.textContent = "On Hold";
+            btnHold.className = "ifcdc-btn ifcdc-btn-outline";
+            btnHold.style.cssText = "margin-top:0.3rem; margin-right:0.3rem; font-size:0.7rem; padding:0.2rem 0.4rem;";
+            btnHold.onclick = async () => {
+              await updateGoalStatus(g.id, "ON_HOLD");
+            };
+            div.appendChild(btnHold);
+          }
+
+          if (g.status === "ON_HOLD") {
+            const btnActive = document.createElement("button");
+            btnActive.textContent = "Reactivate";
+            btnActive.className = "ifcdc-btn ifcdc-btn-outline";
+            btnActive.style.cssText = "margin-top:0.3rem; margin-right:0.3rem; font-size:0.7rem; padding:0.2rem 0.4rem;";
+            btnActive.onclick = async () => {
+              await updateGoalStatus(g.id, "ACTIVE");
+            };
+            div.appendChild(btnActive);
+          }
+
+          listEl.appendChild(div);
+        });
+      } catch (err) {
+        listEl.textContent = "Error loading goals.";
+      }
+    }
+
+    async function updateGoalStatus(goalId, newStatus) {
+      if (!state.selectedClientId) return;
+      try {
+        const res = await fetch(
+          "/api/clients/" + state.selectedClientId + "/goals/" + goalId,
+          {
+            method: "PATCH",
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ status: newStatus }),
+          }
+        );
+        if (res.ok) {
+          loadGoalsForClient();
+        }
+      } catch (err) {
+        console.error("Error updating goal:", err);
+      }
+    }
+
+    const goalCreateBtn = document.getElementById("goal-create");
+    if (goalCreateBtn) {
+      goalCreateBtn.onclick = async () => {
+        if (!state.selectedClientId) {
+          setStatus("goal-status", "Select a client first", true);
+          return;
+        }
+
+        const program = (document.getElementById("goal-program") || {}).value;
+        const title = (document.getElementById("goal-title") || {}).value.trim();
+        const targetDate = (document.getElementById("goal-target") || {}).value || null;
+        const notes = (document.getElementById("goal-notes") || {}).value.trim();
+
+        if (!title) {
+          setStatus("goal-status", "Goal title is required", true);
+          return;
+        }
+
+        setStatus("goal-status", "Creating goal...");
+        try {
+          const res = await fetch(
+            "/api/clients/" + state.selectedClientId + "/goals",
+            {
+              method: "POST",
+              headers: getAuthHeaders(),
+              body: JSON.stringify({ program, title, targetDate, notes }),
+            }
+          );
+          const result = await res.json();
+          if (!res.ok) {
+            setStatus("goal-status", result.error || "Failed to create goal", true);
+            return;
+          }
+          setStatus("goal-status", "Goal created");
+          document.getElementById("goal-title").value = "";
+          document.getElementById("goal-target").value = "";
+          document.getElementById("goal-notes").value = "";
+          loadGoalsForClient();
+        } catch (err) {
+          setStatus("goal-status", "Error creating goal", true);
         }
       };
     }
