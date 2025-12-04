@@ -70,6 +70,34 @@
     .badge-case {
       border-color: #81c784;
     }
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+    .stat-card {
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 0.75rem;
+      padding: 1rem 1.25rem;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      text-align: center;
+    }
+    .stat-card .stat-value {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #f5f5f7;
+    }
+    .stat-card .stat-label {
+      font-size: 0.85rem;
+      opacity: 0.85;
+      margin-top: 0.25rem;
+    }
+    @media (max-width: 700px) {
+      .stats-row {
+        grid-template-columns: 1fr;
+      }
+    }
   </style>
 </head>
 <body class="ifcdc-body">
@@ -94,6 +122,23 @@
       <p style="opacity:0.9; font-size:0.9rem;">
         Use this internal console to manage staff, clients, assignments and review audit activity.
       </p>
+    </section>
+
+    <section class="ifcdc-section" id="stats-section" style="display:none;">
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-value" id="stat-clients">-</div>
+          <div class="stat-label">Total Clients</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-appointments">-</div>
+          <div class="stat-label">Appointments This Week</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-outreach">-</div>
+          <div class="stat-label">Open Outreach Tasks</div>
+        </div>
+      </div>
     </section>
 
     <section class="ifcdc-section admin-layout">
@@ -312,10 +357,30 @@
         }
         state.token = data.token;
         setStatus("login-status", "Logged in as " + data.user.name + " (" + data.user.role + ")");
+        loadStats();
       } catch (e) {
         setStatus("login-status", "Error logging in", true);
       }
     };
+
+    // Stats overview
+    async function loadStats() {
+      try {
+        const res = await fetch("/api/stats/overview", {
+          headers: getAuthHeaders(),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          return;
+        }
+        document.getElementById("stat-clients").textContent = data.totalClients;
+        document.getElementById("stat-appointments").textContent = data.appointmentsThisWeek;
+        document.getElementById("stat-outreach").textContent = data.openOutreachTasks;
+        document.getElementById("stats-section").style.display = "block";
+      } catch (e) {
+        console.error("Error loading stats:", e);
+      }
+    }
 
     // Staff list
     async function loadUsers() {
