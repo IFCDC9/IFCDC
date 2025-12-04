@@ -531,9 +531,13 @@ app.post("/api/clients/:id/assignments", authRequired, requireRole(ROLES.EXEC), 
 app.get("/api/clients/:id/assignments", authRequired, requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER), async (req, res) => {
   const clientId = req.params.id;
 
-  const client = await db.get("SELECT id FROM clients WHERE id = ?", clientId);
+  const client = await db.get<{ id: string }>("SELECT id FROM clients WHERE id = ?", clientId);
   if (!client) {
     return res.status(404).json({ error: "Client not found" });
+  }
+
+  if (!(await hasClientAccess(req.user, client.id))) {
+    return res.status(403).json({ error: "Forbidden" });
   }
 
   const rows = await db.all<any[]>(`
@@ -587,9 +591,13 @@ app.post(
     const clientId = req.params.id;
     const { program, startTime, endTime, location, notes } = req.body || {};
 
-    const client = await db.get("SELECT id FROM clients WHERE id = ?", clientId);
+    const client = await db.get<{ id: string }>("SELECT id FROM clients WHERE id = ?", clientId);
     if (!client) {
       return res.status(404).json({ error: "Client not found" });
+    }
+
+    if (!(await hasClientAccess(req.user, client.id))) {
+      return res.status(403).json({ error: "Forbidden" });
     }
 
     if (!program || !startTime) {
@@ -628,9 +636,13 @@ app.get(
   async (req, res) => {
     const clientId = req.params.id;
 
-    const client = await db.get("SELECT id FROM clients WHERE id = ?", clientId);
+    const client = await db.get<{ id: string }>("SELECT id FROM clients WHERE id = ?", clientId);
     if (!client) {
       return res.status(404).json({ error: "Client not found" });
+    }
+
+    if (!(await hasClientAccess(req.user, client.id))) {
+      return res.status(403).json({ error: "Forbidden" });
     }
 
     const rows = await db.all<any[]>(
@@ -721,6 +733,10 @@ app.post(
       return res.status(404).json({ error: "Client not found" });
     }
 
+    if (!(await hasClientAccess(req.user, client.id))) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
     const appt = await db.get<{ id: string; start_time: string; location: string; program: string }>(
       `SELECT id, start_time, location, program FROM appointments WHERE id = ? AND client_id = ?`,
       apptId, clientId
@@ -768,6 +784,10 @@ app.post(
     );
     if (!client) {
       return res.status(404).json({ error: "Client not found" });
+    }
+
+    if (!(await hasClientAccess(req.user, client.id))) {
+      return res.status(403).json({ error: "Forbidden" });
     }
 
     const to = phoneOverride || client.phone;
