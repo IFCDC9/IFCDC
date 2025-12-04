@@ -104,22 +104,26 @@ const AdminTimeOverviewPage: React.FC = () => {
     const map = new Map<string, EmployeeSummary>();
 
     for (const e of filteredEntries) {
-      const id = e.employee.id;
+      const emp = e.employee;
+      const id = emp.id;
+
       if (!map.has(id)) {
         map.set(id, {
           employeeId: id,
-          name: `${e.employee.firstName} ${e.employee.lastName}`,
-          role: e.employee.role,
+          name: `${emp.firstName} ${emp.lastName}`,
+          role: emp.role,
           totalHours: 0,
-          payRate: e.employee.payRate,
-          currency: e.employee.payCurrency,
+          payRate: emp.payRate ?? null,
+          currency: emp.payCurrency ?? "USD",
           totalCost: 0,
         });
       }
+
       const current = map.get(id)!;
       current.totalHours += e.hours;
-      if (current.payRate) {
-        current.totalCost = current.totalHours * current.payRate;
+
+      if (typeof emp.payRate === "number") {
+        current.totalCost += e.hours * emp.payRate;
       }
     }
 
