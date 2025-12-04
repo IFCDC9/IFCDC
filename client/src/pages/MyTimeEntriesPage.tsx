@@ -1,13 +1,9 @@
 import React, { useEffect, useState } from "react";
 
-type Program = {
-  id: string;
-  name: string;
-};
-
 type FundingSource = {
   id: string;
   name: string;
+  code?: string | null;
 };
 
 type TimeEntry = {
@@ -15,20 +11,17 @@ type TimeEntry = {
   date: string;
   hours: number;
   notes?: string | null;
-  program?: Program | null;
   fundingSource?: FundingSource | null;
 };
 
 const MyTimeEntriesPage: React.FC = () => {
   const [entries, setEntries] = useState<TimeEntry[]>([]);
-  const [programs, setPrograms] = useState<Program[]>([]);
   const [fundingSources, setFundingSources] = useState<FundingSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     date: "",
     hours: "",
-    programId: "",
     fundingSourceId: "",
     notes: "",
   });
@@ -51,18 +44,6 @@ const MyTimeEntriesPage: React.FC = () => {
     }
   };
 
-  const fetchPrograms = async () => {
-    const res = await fetch("/api/programs", {
-      headers: {
-        Authorization: token ? `Bearer ${token}` : "",
-      },
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setPrograms(data);
-    }
-  };
-
   const fetchFundingSources = async () => {
     const res = await fetch("/api/funding-sources", {
       headers: {
@@ -77,7 +58,6 @@ const MyTimeEntriesPage: React.FC = () => {
 
   useEffect(() => {
     fetchEntries();
-    fetchPrograms();
     fetchFundingSources();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -108,7 +88,7 @@ const MyTimeEntriesPage: React.FC = () => {
     setSaving(false);
 
     if (res.ok) {
-      setForm({ date: "", hours: "", programId: "", fundingSourceId: "", notes: "" });
+      setForm({ date: "", hours: "", fundingSourceId: "", notes: "" });
       fetchEntries();
     } else {
       alert("Error saving time entry.");
@@ -147,22 +127,6 @@ const MyTimeEntriesPage: React.FC = () => {
               required
               data-testid="input-time-hours"
             />
-          </div>
-          <div>
-            <label>Program (optional)</label>
-            <select
-              name="programId"
-              value={form.programId}
-              onChange={handleChange}
-              data-testid="select-time-program"
-            >
-              <option value="">-- None --</option>
-              {programs.map(p => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
           </div>
           <div>
             <label>Funding Source (optional)</label>
@@ -209,7 +173,6 @@ const MyTimeEntriesPage: React.FC = () => {
               <tr>
                 <th align="left">Date</th>
                 <th align="left">Hours</th>
-                <th align="left">Program</th>
                 <th align="left">Funding Source</th>
                 <th align="left">Notes</th>
               </tr>
@@ -219,7 +182,6 @@ const MyTimeEntriesPage: React.FC = () => {
                 <tr key={e.id} data-testid={`row-time-entry-${e.id}`}>
                   <td>{new Date(e.date).toLocaleString()}</td>
                   <td>{e.hours}</td>
-                  <td>{e.program?.name || "-"}</td>
                   <td>{e.fundingSource?.name || "-"}</td>
                   <td>{e.notes || "-"}</td>
                 </tr>
