@@ -1463,16 +1463,17 @@ app.post(
         client_id: string;
         program: string;
         start_time: string;
-        location: string;
         full_name: string;
         phone: string;
         notify_channel: string | null;
       }>(
-        `SELECT a.id, a.client_id, a.program, a.start_time, a.location,
-                c.full_name, c.phone, c.notify_channel
-         FROM appointments a
-         JOIN clients c ON c.id = a.client_id
-         WHERE a.id = ?`,
+        `
+        SELECT a.id, a.client_id, a.program, a.start_time,
+               c.full_name, c.phone, c.notify_channel
+        FROM appointments a
+        JOIN clients c ON c.id = a.client_id
+        WHERE a.id = ?
+        `,
         apptId
       );
 
@@ -1565,11 +1566,13 @@ app.post(
         phone: string;
         notify_channel: string | null;
       }>(
-        `SELECT a.id, a.client_id, a.program, a.start_time,
-                c.full_name, c.phone, c.notify_channel
-         FROM appointments a
-         JOIN clients c ON c.id = a.client_id
-         WHERE a.id = ?`,
+        `
+        SELECT a.id, a.client_id, a.program, a.start_time,
+               c.full_name, c.phone, c.notify_channel
+        FROM appointments a
+        JOIN clients c ON c.id = a.client_id
+        WHERE a.id = ?
+        `,
         apptId
       );
 
