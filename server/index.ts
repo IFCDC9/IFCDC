@@ -404,7 +404,6 @@ async function initDb() {
     console.log("===============================================");
     console.log("EXEC user seeded for IFCDC:");
     console.log("Email:", email);
-    console.log("Password:", rawPassword);
     console.log("ROLE:", ROLES.EXEC);
     console.log("Log in via /auth/login to generate a JWT.");
     console.log("===============================================");
