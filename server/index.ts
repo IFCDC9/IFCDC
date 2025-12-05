@@ -1555,6 +1555,70 @@ async function buildProgramDashboardForUser(user: { id: string; role: string }, 
   };
 }
 
+async function buildGoalsSummaryForUser(user: { id: string; role: string }, from: string, to: string) {
+  const isExec = user.role === ROLES.EXEC;
+  const userId = user.id;
+
+  let rows;
+  if (isExec) {
+    rows = await db.all<{ program: string; total_goals: number; completed_in_range: number }[]>(
+      `SELECT program,
+              COUNT(*) as total_goals,
+              SUM(CASE WHEN status = 'COMPLETED' AND completed_at >= ? AND completed_at < ? THEN 1 ELSE 0 END) as completed_in_range
+       FROM goals
+       GROUP BY program`,
+      from, to
+    );
+  } else {
+    rows = await db.all<{ program: string; total_goals: number; completed_in_range: number }[]>(
+      `SELECT g.program,
+              COUNT(*) as total_goals,
+              SUM(CASE WHEN g.status = 'COMPLETED' AND g.completed_at >= ? AND g.completed_at < ? THEN 1 ELSE 0 END) as completed_in_range
+       FROM goals g
+       JOIN client_assignments ca ON ca.client_id = g.client_id
+       WHERE ca.user_id = ?
+       GROUP BY g.program`,
+      from, to, userId
+    );
+  }
+
+  return (rows || []).map((r) => ({
+    program: r.program,
+    totalGoals: r.total_goals || 0,
+    completedInRange: r.completed_in_range || 0,
+  }));
+}
+
+// ----- Reports: Goals Summary (JSON) -----
+app.get(
+  "/api/reports/goals-summary",
+  authRequired,
+  requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
+  async (req, res) => {
+    try {
+      let { from, to } = req.query as { from?: string; to?: string };
+
+      const now = new Date();
+      if (!from || !to) {
+        const end = now;
+        const start = new Date(now);
+        start.setDate(start.getDate() - 90);
+        from = from || start.toISOString();
+        to = to || end.toISOString();
+      }
+
+      const summary = await buildGoalsSummaryForUser(req.user!, from, to);
+
+      await logAudit(req, "REPORT", null, "REPORT_GOALS_SUMMARY_JSON", { from, to });
+
+      res.json({ from, to, programs: summary });
+    } catch (err) {
+      console.error("Error in /api/reports/goals-summary:", err);
+      res.status(500).json({ error: "Failed to build goals summary report" });
+    }
+  }
+);
+
 // ----- Reports: Program Dashboard (JSON) -----
 app.get(
   "/api/reports/program-dashboard",
