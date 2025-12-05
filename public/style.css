@@ -51,6 +51,68 @@ p, li {
   color: var(--ifcdc-gold);
 }
 
+/* Core content wrapper */
+main, .page-wrapper, .content-wrapper {
+  background: var(--ifcdc-bg);
+  color: var(--ifcdc-gold);
+}
+
+/* Generic cards / panels */
+.card,
+.ifcdc-form-card,
+.section-card,
+.panel {
+  background: var(--ifcdc-card);
+  border-radius: 10px;
+  border: 1px solid var(--ifcdc-border);
+  box-shadow: 0 10px 26px rgba(0,0,0,0.8);
+}
+
+/* Section background */
+section {
+  background: var(--ifcdc-bg-soft);
+}
+
+/* Forms tuned for dark mode */
+.ifcdc-form-shell {
+  background: var(--ifcdc-bg);
+}
+
+/* Input fields on black theme */
+.ifcdc-form-row input,
+.ifcdc-form-row textarea,
+.ifcdc-form-row select,
+input,
+textarea,
+select {
+  background: #050505;
+  color: var(--ifcdc-gold);
+  border: 1px solid var(--ifcdc-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  box-sizing: border-box;
+}
+
+.ifcdc-form-row input::placeholder,
+.ifcdc-form-row textarea::placeholder,
+input::placeholder,
+textarea::placeholder {
+  color: rgba(212, 175, 55, 0.55);
+  text-shadow: none;
+}
+
+/* Focus state */
+.ifcdc-form-row input:focus,
+.ifcdc-form-row textarea:focus,
+.ifcdc-form-row select:focus,
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--ifcdc-gold);
+  box-shadow: 0 0 0 1px rgba(212, 175, 55, 0.5);
+}
+
 /* ===== IFCDC BLACK + GOLD BRAND BAR ===== */
 
 .ifcdc-brand-header {
