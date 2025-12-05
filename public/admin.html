@@ -1323,52 +1323,41 @@
     };
 
     // Notification preferences
-    document.getElementById("client-notify-save").onclick = async () => {
-      const statusEl = document.getElementById("client-notify-status");
-      if (!state.selectedClientId) {
-        if (statusEl) {
-          statusEl.textContent = "Select a client first.";
-          statusEl.style.color = "#ff8a80";
-        }
-        return;
-      }
+    const clientNotifySaveBtn = document.getElementById("client-notify-save");
+    if (clientNotifySaveBtn) {
+      clientNotifySaveBtn.onclick = async () => {
+        const statusEl = document.getElementById("client-notify-status");
+        const select = document.getElementById("client-notify-channel");
+        if (!state.selectedClientId || !select || !statusEl) return;
 
-      const selectEl = document.getElementById("client-notify-channel");
-      const channel = selectEl.value || null;
+        const value = select.value || null;
 
-      if (statusEl) {
-        statusEl.textContent = "Saving...";
+        statusEl.textContent = "Saving preference...";
         statusEl.style.color = "#c5e1a5";
-      }
 
-      try {
-        const res = await fetch(
-          "/api/clients/" + state.selectedClientId + "/notification-preferences",
-          {
-            method: "PATCH",
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ notifyChannel: channel }),
-          }
-        );
-        const data = await res.json();
-        if (!res.ok) {
-          if (statusEl) {
+        try {
+          const res = await fetch(
+            "/api/clients/" + state.selectedClientId + "/notification-preferences",
+            {
+              method: "PATCH",
+              headers: getAuthHeaders(),
+              body: JSON.stringify({ notifyChannel: value }),
+            }
+          );
+          const data = await res.json();
+          if (!res.ok) {
             statusEl.textContent = data.error || "Failed to save preference.";
             statusEl.style.color = "#ff8a80";
+            return;
           }
-          return;
-        }
-        if (statusEl) {
-          statusEl.textContent = "Saved.";
+          statusEl.textContent = "Notification preference saved.";
           statusEl.style.color = "#c5e1a5";
-        }
-      } catch (e) {
-        if (statusEl) {
+        } catch (err) {
           statusEl.textContent = "Error saving preference.";
           statusEl.style.color = "#ff8a80";
         }
-      }
-    };
+      };
+    }
 
     // Appointment reminder helpers
     async function sendAppointmentSmsReminder(apptId) {
