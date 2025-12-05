@@ -1,3 +1,5 @@
+import React from "react";
+
 export default function IFCDCHeader() {
   return (
     <header className="ifcdc-brand-header">
