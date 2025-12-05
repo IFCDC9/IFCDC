@@ -2347,6 +2347,111 @@ app.get(
   }
 );
 
+// ----- Cron: send upcoming appointment reminders (SMS) -----
+app.post("/api/cron/send-upcoming-reminders", async (req, res) => {
+  try {
+    const provided =
+      req.get("X-IFCDC-CRON-TOKEN") || req.query.token || (req.body?.token as string);
+    if (!CRON_SECRET_TOKEN || provided !== CRON_SECRET_TOKEN) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    if (!twilioClient) {
+      return res
+        .status(500)
+        .json({ error: "Twilio not configured on this server." });
+    }
+
+    const leadHours = parseInt(APPT_REMINDER_LEAD_HOURS || "24", 10);
+    if (!Number.isFinite(leadHours) || leadHours <= 0) {
+      return res
+        .status(500)
+        .json({ error: "Invalid APPT_REMINDER_LEAD_HOURS configuration." });
+    }
+
+    const upcoming = await findAppointmentsNeedingReminder(leadHours);
+
+    let attempted = 0;
+    let sent = 0;
+    const failures: Array<{ appointmentId: string; error: string }> = [];
+
+    for (const appt of upcoming) {
+      attempted++;
+      const body = buildSafeAppointmentReminderText(
+        { fullName: appt.full_name },
+        appt
+      );
+
+      try {
+        await sendSafeSms(appt.phone, body);
+
+        await recordAppointmentNotification(
+          appt.id,
+          "SMS",
+          leadHours,
+          "SENT",
+          null
+        );
+
+        await db.run(
+          `INSERT INTO outreach_tasks (id, client_id, phone, channel, reason, status, created_at)
+           VALUES (?, ?, ?, ?, ?, 'OPEN', ?)`,
+          cryptoRandomId(),
+          appt.client_id,
+          normalizePhone(appt.phone),
+          "SMS",
+          "Automated appointment reminder sent",
+          new Date().toISOString()
+        );
+
+        sent++;
+      } catch (err: any) {
+        console.error("Auto reminder SMS failed for", appt.id, err.message);
+
+        await recordAppointmentNotification(
+          appt.id,
+          "SMS",
+          leadHours,
+          "FAILED",
+          err.message
+        );
+
+        failures.push({ appointmentId: appt.id, error: err.message });
+      }
+    }
+
+    try {
+      await logAudit(
+        { user: { id: "cron", role: "SYSTEM" }, method: "POST", originalUrl: "/api/cron/send-upcoming-reminders" } as any,
+        "CRON",
+        null,
+        "AUTO_SEND_APPOINTMENT_REMINDERS",
+        {
+          leadHours,
+          totalCandidates: upcoming.length,
+          attempted,
+          sent,
+          failures: failures.length,
+        }
+      );
+    } catch (e: any) {
+      console.error("Failed to log cron audit:", e.message);
+    }
+
+    res.json({
+      leadHours,
+      totalCandidates: upcoming.length,
+      attempted,
+      sent,
+      failures,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("Error in /api/cron/send-upcoming-reminders:", err);
+    res.status(500).json({ error: "Cron reminder run failed." });
+  }
+});
+
 // ----- Twilio Voice Webhook: Reminder Message (no PHI) -----
 app.post("/twilio/voice/reminder", async (req, res) => {
   const VoiceResponse = twilio.twiml.VoiceResponse;
