@@ -1295,6 +1295,41 @@
       }
     };
 
+    // Appointment reminder helpers
+    async function sendAppointmentSmsReminder(appointmentId) {
+      try {
+        const res = await fetch("/api/appointments/" + appointmentId + "/remind-sms", {
+          method: "POST",
+          headers: getAuthHeaders(),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          alert(data.error || "Failed to send SMS reminder.");
+          return;
+        }
+        alert("SMS reminder sent successfully.");
+      } catch (err) {
+        alert("Error sending SMS reminder.");
+      }
+    }
+
+    async function sendAppointmentVoiceReminder(appointmentId) {
+      try {
+        const res = await fetch("/api/appointments/" + appointmentId + "/remind-voice", {
+          method: "POST",
+          headers: getAuthHeaders(),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          alert(data.error || "Failed to initiate voice reminder.");
+          return;
+        }
+        alert("Voice reminder call initiated successfully.");
+      } catch (err) {
+        alert("Error initiating voice reminder.");
+      }
+    }
+
     // Appointments
     async function loadAppointmentsForClient() {
       const listEl = document.getElementById("appt-list");
@@ -1322,50 +1357,46 @@
           const div = document.createElement("div");
           div.className = "admin-list-item";
 
-          const when = new Date(a.startTime).toLocaleString();
+          const when = new Date(a.startTime || a.start_time).toLocaleString();
           div.innerHTML =
             "<strong>" +
-            a.program +
+            (a.program || "Unspecified") +
             "</strong><br/>" +
-            "<span style='opacity:0.8;'>Starts: " +
+            "<span style='font-size:0.8rem; opacity:0.8;'>" +
             when +
-            "</span><br/>" +
-            "<span style='opacity:0.7; font-size:0.78rem;'>Location: " +
-            (a.location || "N/A") +
-            "</span>";
+            "</span>" +
+            (a.location
+              ? "<br/><span style='font-size:0.8rem; opacity:0.8;'>Location: " +
+                a.location +
+                "</span>"
+              : "");
 
-          const btn = document.createElement("button");
-          btn.textContent = "Send Reminder SMS";
-          btn.className = "ifcdc-btn ifcdc-btn-outline";
-          btn.style.marginTop = "0.25rem";
-          btn.onclick = async (ev) => {
+          const btnRow = document.createElement("div");
+          btnRow.style.marginTop = "0.35rem";
+
+          const smsBtn = document.createElement("button");
+          smsBtn.textContent = "SMS Reminder";
+          smsBtn.className = "ifcdc-btn ifcdc-btn-outline";
+          smsBtn.style.fontSize = "0.75rem";
+          smsBtn.style.marginRight = "0.3rem";
+          smsBtn.onclick = async (ev) => {
             ev.stopPropagation();
-            try {
-              const res2 = await fetch(
-                "/api/clients/" +
-                  a.clientId +
-                  "/appointments/" +
-                  a.id +
-                  "/remind",
-                {
-                  method: "POST",
-                  headers: getAuthHeaders(),
-                  body: JSON.stringify({}),
-                }
-              );
-              const d2 = await res2.json();
-              if (!res2.ok) {
-                alert(d2.error || "Failed to send reminder.");
-                return;
-              }
-              alert("Reminder sent.");
-            } catch (err) {
-              alert("Error sending reminder.");
-            }
+            await sendAppointmentSmsReminder(a.id);
           };
 
-          div.appendChild(document.createElement("br"));
-          div.appendChild(btn);
+          const voiceBtn = document.createElement("button");
+          voiceBtn.textContent = "Voice Reminder";
+          voiceBtn.className = "ifcdc-btn ifcdc-btn-outline";
+          voiceBtn.style.fontSize = "0.75rem";
+          voiceBtn.onclick = async (ev) => {
+            ev.stopPropagation();
+            await sendAppointmentVoiceReminder(a.id);
+          };
+
+          btnRow.appendChild(smsBtn);
+          btnRow.appendChild(voiceBtn);
+          div.appendChild(btnRow);
+
           listEl.appendChild(div);
         });
       } catch (err) {
