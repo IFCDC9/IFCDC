@@ -5,7 +5,7 @@
   color: #f5f5f7;
 }
 
-/* ===== IFCDC BLACK BRAND BAR ===== */
+/* ===== IFCDC BLACK + GOLD BRAND BAR ===== */
 
 .ifcdc-brand-header {
   width: 100%;
@@ -40,7 +40,7 @@
 .ifcdc-brand-text {
   display: flex;
   flex-direction: column;
-  color: #ffffff;
+  color: #d4af37;
 }
 
 .ifcdc-brand-name {
@@ -48,11 +48,13 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  color: #d4af37;
 }
 
 .ifcdc-brand-tagline {
   font-size: 0.75rem;
-  opacity: 0.85;
+  opacity: 0.95;
+  color: #d4af37;
 }
 
 /* ===== NAVIGATION BAR ===== */
