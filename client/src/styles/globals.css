@@ -1761,3 +1761,47 @@ body {
   color: #f0d060;
   text-shadow: 0 0 8px rgba(212, 175, 55, 0.5);
 }
+
+/* Footer */
+.ifcdc-footer {
+  background: linear-gradient(180deg, #0d0d0d 0%, #000000 100%);
+  border-top: 1px solid rgba(212, 175, 55, 0.3);
+  padding: 40px 24px 20px;
+  margin-top: auto;
+}
+
+.footer-content {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 32px;
+  margin-bottom: 32px;
+}
+
+.footer-section h4 {
+  color: #d4af37;
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 16px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.footer-section p {
+  color: #888888;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.footer-bottom {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 20px;
+  text-align: center;
+}
+
+.footer-bottom p {
+  color: #666666;
+  font-size: 0.85rem;
+  margin: 0;
+}
