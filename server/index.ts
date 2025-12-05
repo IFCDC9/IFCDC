@@ -6,6 +6,7 @@ import { open, Database } from "sqlite";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import twilio from "twilio";
+import cookieParser from "cookie-parser";
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "5000", 10);
@@ -104,6 +105,7 @@ async function sendVoiceReminderCall(to: string, appointmentId: string) {
 }
 
 app.use(express.json());
+app.use(cookieParser());
 
 const publicDir = path.join(import.meta.dirname, "..", "public");
 app.use(express.static(publicDir));
