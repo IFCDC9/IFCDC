@@ -282,6 +282,22 @@ async function initDb() {
   `);
 
   await db.exec(`
+    CREATE TABLE IF NOT EXISTS dashboard_widgets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      widget_type TEXT NOT NULL,
+      title TEXT,
+      layout TEXT NOT NULL,
+      settings TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+  `);
+
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_dashboard_widgets_user ON dashboard_widgets(user_id);`);
+
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS programs (
       id TEXT PRIMARY KEY,
       code TEXT NOT NULL UNIQUE,
@@ -1799,6 +1815,319 @@ app.get("/api/audit-logs", authRequired, requireRole(ROLES.EXEC), async (req, re
     ...log,
     extra: JSON.parse(log.extra || "{}"),
   })));
+});
+
+// ----- Dashboard Widgets -----
+const WIDGET_TYPES = [
+  "client_stats",
+  "recent_encounters",
+  "upcoming_appointments",
+  "audit_log_summary",
+  "program_enrollment",
+] as const;
+
+const DEFAULT_WIDGET_CONFIGS: Record<string, { title: string; w: number; h: number }> = {
+  client_stats: { title: "Client Statistics", w: 4, h: 2 },
+  recent_encounters: { title: "Recent Encounters", w: 4, h: 3 },
+  upcoming_appointments: { title: "Upcoming Appointments", w: 4, h: 3 },
+  audit_log_summary: { title: "Recent Activity", w: 6, h: 3 },
+  program_enrollment: { title: "Program Enrollment", w: 6, h: 2 },
+};
+
+// Get user's dashboard widgets
+app.get("/api/dashboard/widgets", authRequired, async (req, res) => {
+  try {
+    const widgets = await db.all<any[]>(
+      `SELECT * FROM dashboard_widgets WHERE user_id = ? ORDER BY created_at ASC`,
+      req.user!.id
+    );
+    res.json(widgets.map((w) => ({
+      id: w.id,
+      userId: w.user_id,
+      widgetType: w.widget_type,
+      title: w.title,
+      layout: JSON.parse(w.layout),
+      settings: w.settings ? JSON.parse(w.settings) : null,
+      createdAt: w.created_at,
+      updatedAt: w.updated_at,
+    })));
+  } catch (err) {
+    console.error("Error fetching widgets:", err);
+    res.status(500).json({ error: "Failed to fetch widgets" });
+  }
+});
+
+// Add a new widget
+app.post("/api/dashboard/widgets", authRequired, async (req, res) => {
+  try {
+    const { widgetType, title, layout, settings } = req.body;
+
+    if (!widgetType || !WIDGET_TYPES.includes(widgetType)) {
+      return res.status(400).json({ error: "Invalid widget type" });
+    }
+
+    const config = DEFAULT_WIDGET_CONFIGS[widgetType];
+    const finalLayout = layout || { x: 0, y: 0, w: config.w, h: config.h };
+    const finalTitle = title || config.title;
+
+    const id = cryptoRandomId();
+    const now = new Date().toISOString();
+
+    await db.run(
+      `INSERT INTO dashboard_widgets (id, user_id, widget_type, title, layout, settings, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      id, req.user!.id, widgetType, finalTitle, JSON.stringify(finalLayout),
+      settings ? JSON.stringify(settings) : null, now, now
+    );
+
+    await logAudit(req, "DASHBOARD_WIDGET", id, "CREATE", { widgetType });
+
+    res.status(201).json({
+      id,
+      userId: req.user!.id,
+      widgetType,
+      title: finalTitle,
+      layout: finalLayout,
+      settings: settings || null,
+      createdAt: now,
+      updatedAt: now,
+    });
+  } catch (err) {
+    console.error("Error creating widget:", err);
+    res.status(500).json({ error: "Failed to create widget" });
+  }
+});
+
+// Update a widget (layout, title, settings)
+app.patch("/api/dashboard/widgets/:id", authRequired, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, layout, settings } = req.body;
+
+    const widget = await db.get<any>(
+      `SELECT * FROM dashboard_widgets WHERE id = ? AND user_id = ?`,
+      id, req.user!.id
+    );
+
+    if (!widget) {
+      return res.status(404).json({ error: "Widget not found" });
+    }
+
+    const updates: string[] = [];
+    const params: any[] = [];
+
+    if (title !== undefined) {
+      updates.push("title = ?");
+      params.push(title);
+    }
+    if (layout !== undefined) {
+      updates.push("layout = ?");
+      params.push(JSON.stringify(layout));
+    }
+    if (settings !== undefined) {
+      updates.push("settings = ?");
+      params.push(JSON.stringify(settings));
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: "No updates provided" });
+    }
+
+    updates.push("updated_at = ?");
+    params.push(new Date().toISOString());
+    params.push(id);
+    params.push(req.user!.id);
+
+    await db.run(
+      `UPDATE dashboard_widgets SET ${updates.join(", ")} WHERE id = ? AND user_id = ?`,
+      ...params
+    );
+
+    await logAudit(req, "DASHBOARD_WIDGET", id, "UPDATE", { title, layout, settings });
+
+    const updated = await db.get<any>(
+      `SELECT * FROM dashboard_widgets WHERE id = ?`,
+      id
+    );
+
+    res.json({
+      id: updated.id,
+      userId: updated.user_id,
+      widgetType: updated.widget_type,
+      title: updated.title,
+      layout: JSON.parse(updated.layout),
+      settings: updated.settings ? JSON.parse(updated.settings) : null,
+      createdAt: updated.created_at,
+      updatedAt: updated.updated_at,
+    });
+  } catch (err) {
+    console.error("Error updating widget:", err);
+    res.status(500).json({ error: "Failed to update widget" });
+  }
+});
+
+// Batch update widget layouts (for drag-and-drop reordering)
+app.patch("/api/dashboard/widgets/batch-layout", authRequired, async (req, res) => {
+  try {
+    const updates = req.body;
+
+    if (!Array.isArray(updates)) {
+      return res.status(400).json({ error: "Expected array of updates" });
+    }
+
+    const now = new Date().toISOString();
+
+    for (const { id, layout } of updates) {
+      if (!id || !layout) continue;
+      await db.run(
+        `UPDATE dashboard_widgets SET layout = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+        JSON.stringify(layout), now, id, req.user!.id
+      );
+    }
+
+    await logAudit(req, "DASHBOARD_WIDGET", null, "BATCH_UPDATE_LAYOUT", { count: updates.length });
+
+    res.json({ ok: true, updated: updates.length });
+  } catch (err) {
+    console.error("Error batch updating layouts:", err);
+    res.status(500).json({ error: "Failed to batch update layouts" });
+  }
+});
+
+// Delete a widget
+app.delete("/api/dashboard/widgets/:id", authRequired, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const widget = await db.get<any>(
+      `SELECT * FROM dashboard_widgets WHERE id = ? AND user_id = ?`,
+      id, req.user!.id
+    );
+
+    if (!widget) {
+      return res.status(404).json({ error: "Widget not found" });
+    }
+
+    await db.run(
+      `DELETE FROM dashboard_widgets WHERE id = ? AND user_id = ?`,
+      id, req.user!.id
+    );
+
+    await logAudit(req, "DASHBOARD_WIDGET", id, "DELETE", { widgetType: widget.widget_type });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Error deleting widget:", err);
+    res.status(500).json({ error: "Failed to delete widget" });
+  }
+});
+
+// Get widget data (stats for different widget types)
+app.get("/api/dashboard/widget-data/:type", authRequired, async (req, res) => {
+  try {
+    const { type } = req.params;
+    const userId = req.user!.id;
+    const isExec = req.user!.role === ROLES.EXEC;
+
+    switch (type) {
+      case "client_stats": {
+        let totalClients, activePrograms;
+        if (isExec) {
+          totalClients = (await db.get<{ count: number }>("SELECT COUNT(*) as count FROM clients"))?.count || 0;
+        } else {
+          totalClients = (await db.get<{ count: number }>(
+            `SELECT COUNT(DISTINCT client_id) as count FROM client_assignments WHERE user_id = ?`,
+            userId
+          ))?.count || 0;
+        }
+        activePrograms = (await db.get<{ count: number }>("SELECT COUNT(*) as count FROM programs"))?.count || 0;
+        res.json({ totalClients, activePrograms });
+        break;
+      }
+
+      case "recent_encounters": {
+        let encounters;
+        if (isExec) {
+          encounters = await db.all<any[]>(
+            `SELECT e.*, c.full_name as client_name
+             FROM encounters e
+             JOIN clients c ON c.id = e.client_id
+             ORDER BY e.created_at DESC LIMIT 10`
+          );
+        } else {
+          encounters = await db.all<any[]>(
+            `SELECT e.*, c.full_name as client_name
+             FROM encounters e
+             JOIN clients c ON c.id = e.client_id
+             JOIN client_assignments ca ON ca.client_id = e.client_id
+             WHERE ca.user_id = ?
+             ORDER BY e.created_at DESC LIMIT 10`,
+            userId
+          );
+        }
+        res.json(encounters);
+        break;
+      }
+
+      case "upcoming_appointments": {
+        const now = new Date().toISOString();
+        let appointments;
+        if (isExec) {
+          appointments = await db.all<any[]>(
+            `SELECT a.*, c.full_name as client_name
+             FROM appointments a
+             JOIN clients c ON c.id = a.client_id
+             WHERE a.start_time >= ?
+             ORDER BY a.start_time ASC LIMIT 10`,
+            now
+          );
+        } else {
+          appointments = await db.all<any[]>(
+            `SELECT a.*, c.full_name as client_name
+             FROM appointments a
+             JOIN clients c ON c.id = a.client_id
+             JOIN client_assignments ca ON ca.client_id = a.client_id
+             WHERE ca.user_id = ? AND a.start_time >= ?
+             ORDER BY a.start_time ASC LIMIT 10`,
+            userId, now
+          );
+        }
+        res.json(appointments);
+        break;
+      }
+
+      case "audit_log_summary": {
+        if (!isExec) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
+        const logs = await db.all<any[]>(
+          `SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 15`
+        );
+        res.json(logs.map((log) => ({
+          ...log,
+          extra: JSON.parse(log.extra || "{}"),
+        })));
+        break;
+      }
+
+      case "program_enrollment": {
+        const programs = await db.all<any[]>(
+          `SELECT p.code, p.name, COUNT(DISTINCT e.client_id) as client_count
+           FROM programs p
+           LEFT JOIN encounters e ON e.program = p.code
+           GROUP BY p.id, p.code, p.name`
+        );
+        res.json(programs);
+        break;
+      }
+
+      default:
+        res.status(400).json({ error: "Unknown widget type" });
+    }
+  } catch (err) {
+    console.error("Error fetching widget data:", err);
+    res.status(500).json({ error: "Failed to fetch widget data" });
+  }
 });
 
 // ----- Stats Overview -----

@@ -73,3 +73,69 @@ export const insertAcknowledgementSchema = z.object({
 });
 
 export type InsertAcknowledgement = z.infer<typeof insertAcknowledgementSchema>;
+
+// Dashboard Widget types
+export const WIDGET_TYPES = [
+  "client_stats",
+  "recent_encounters",
+  "upcoming_appointments",
+  "audit_log_summary",
+  "program_enrollment",
+] as const;
+
+export type WidgetType = typeof WIDGET_TYPES[number];
+
+export type WidgetLayout = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
+
+export type DashboardWidget = {
+  id: string;
+  userId: string;
+  widgetType: WidgetType;
+  title: string | null;
+  layout: WidgetLayout;
+  settings: Record<string, any> | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export const insertWidgetSchema = z.object({
+  widgetType: z.enum(WIDGET_TYPES),
+  title: z.string().optional(),
+  layout: z.object({
+    x: z.number().int().min(0),
+    y: z.number().int().min(0),
+    w: z.number().int().min(1).max(12),
+    h: z.number().int().min(1).max(8),
+  }),
+  settings: z.record(z.any()).optional(),
+});
+
+export const updateWidgetSchema = z.object({
+  title: z.string().optional(),
+  layout: z.object({
+    x: z.number().int().min(0),
+    y: z.number().int().min(0),
+    w: z.number().int().min(1).max(12),
+    h: z.number().int().min(1).max(8),
+  }).optional(),
+  settings: z.record(z.any()).optional(),
+});
+
+export const batchUpdateLayoutSchema = z.array(z.object({
+  id: z.string(),
+  layout: z.object({
+    x: z.number().int().min(0),
+    y: z.number().int().min(0),
+    w: z.number().int().min(1).max(12),
+    h: z.number().int().min(1).max(8),
+  }),
+}));
+
+export type InsertWidget = z.infer<typeof insertWidgetSchema>;
+export type UpdateWidget = z.infer<typeof updateWidgetSchema>;
+export type BatchUpdateLayout = z.infer<typeof batchUpdateLayoutSchema>;
