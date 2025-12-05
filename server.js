@@ -80,13 +80,11 @@ if (!execUser) {
   `).run(crypto.randomUUID(), "Mr. Fahreal Allah", ROLES.EXEC, EXEC_API_KEY);
 
   console.log("========================================");
-  console.log("IFCDC EXEC API KEY (use in x-api-key):");
-  console.log(EXEC_API_KEY);
+  console.log("IFCDC EXEC API KEY generated for first-time setup");
   console.log("========================================");
 } else {
   console.log("========================================");
-  console.log("IFCDC EXEC API KEY (use in x-api-key):");
-  console.log(execUser.api_key);
+  console.log("IFCDC EXEC API KEY loaded from database");
   console.log("========================================");
 }
 
