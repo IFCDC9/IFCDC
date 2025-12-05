@@ -223,6 +223,19 @@ async function initDb() {
   `);
 
   await db.exec(`
+    CREATE TABLE IF NOT EXISTS appointment_notifications (
+      id TEXT PRIMARY KEY,
+      appointment_id TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      lead_hour INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      error TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (appointment_id) REFERENCES appointments(id)
+    );
+  `);
+
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS outreach_tasks (
       id TEXT PRIMARY KEY,
       client_id TEXT,
@@ -1317,23 +1330,40 @@ app.post(
         appt
       );
 
-      const sms = await sendSafeSms(appt.phone, body);
+      const now = new Date();
+      const apptTime = new Date(appt.start_time);
+      const leadHour = Math.max(0, Math.round((apptTime.getTime() - now.getTime()) / (1000 * 60 * 60)));
 
-      await logAudit(req, "APPOINTMENT", apptId, "SEND_SMS_REMINDER", {
-        to: normalizePhone(appt.phone),
-        sid: sms.sid,
-      });
+      let notifStatus = "SENT";
+      let notifError: string | null = null;
+
+      try {
+        const sms = await sendSafeSms(appt.phone, body);
+
+        await logAudit(req, "APPOINTMENT", apptId, "SEND_SMS_REMINDER", {
+          to: normalizePhone(appt.phone),
+          sid: sms.sid,
+        });
+      } catch (smsErr: any) {
+        notifStatus = "FAILED";
+        notifError = smsErr?.message || "Unknown SMS error";
+      }
 
       await db.run(
-        `INSERT INTO outreach_tasks (id, client_id, phone, channel, reason, status, created_at)
-         VALUES (?, ?, ?, ?, ?, 'OPEN', ?)`,
+        `INSERT INTO appointment_notifications (id, appointment_id, channel, lead_hour, status, error, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         cryptoRandomId(),
-        appt.client_id,
-        normalizePhone(appt.phone),
+        apptId,
         "SMS",
-        "Appointment reminder sent",
-        new Date().toISOString()
+        leadHour,
+        notifStatus,
+        notifError,
+        now.toISOString()
       );
+
+      if (notifStatus === "FAILED") {
+        return res.status(500).json({ error: notifError || "Failed to send SMS reminder" });
+      }
 
       res.json({ ok: true });
     } catch (err) {
@@ -1384,12 +1414,40 @@ app.post(
         return res.status(400).json({ error: "Client does not have a phone number on file" });
       }
 
-      const call = await sendVoiceReminderCall(appt.phone, appt.id);
+      const now = new Date();
+      const apptTime = new Date(appt.start_time);
+      const leadHour = Math.max(0, Math.round((apptTime.getTime() - now.getTime()) / (1000 * 60 * 60)));
 
-      await logAudit(req, "APPOINTMENT", apptId, "SEND_VOICE_REMINDER", {
-        to: normalizePhone(appt.phone),
-        sid: call.sid,
-      });
+      let notifStatus = "SENT";
+      let notifError: string | null = null;
+
+      try {
+        const call = await sendVoiceReminderCall(appt.phone, appt.id);
+
+        await logAudit(req, "APPOINTMENT", apptId, "SEND_VOICE_REMINDER", {
+          to: normalizePhone(appt.phone),
+          sid: call.sid,
+        });
+      } catch (callErr: any) {
+        notifStatus = "FAILED";
+        notifError = callErr?.message || "Unknown voice call error";
+      }
+
+      await db.run(
+        `INSERT INTO appointment_notifications (id, appointment_id, channel, lead_hour, status, error, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        cryptoRandomId(),
+        apptId,
+        "VOICE",
+        leadHour,
+        notifStatus,
+        notifError,
+        now.toISOString()
+      );
+
+      if (notifStatus === "FAILED") {
+        return res.status(500).json({ error: notifError || "Failed to start voice reminder call" });
+      }
 
       res.json({ ok: true });
     } catch (err) {
