@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>IFCDC Login</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <!-- HEADER -->
+  <header class="ifcdc-header">
+    <div class="logo-container">
+      <a href="/"><img src="/assets/ifcdc-logo.png" class="ifcdc-logo" alt="IFCDC Logo"></a>
+    </div>
+    <nav class="ifcdc-nav">
+      <a href="/" class="nav-link">Home</a>
+      <a href="/radio.html" class="nav-link">Radio</a>
+      <a href="/barber.html" class="nav-link">Barbers</a>
+      <a href="/client.html" class="nav-link">Community</a>
+      <div class="nav-auth">
+        <a href="/login.html" class="nav-button gold-3d">Login</a>
+        <a href="/register.html" class="nav-button gold-3d">Register</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <section class="auth-wrapper">
+      <h1 class="auth-title">Login</h1>
+      <p class="auth-subtitle">Access your IFCDC dashboard with your credentials.</p>
+
+      <div id="login-message"></div>
+
+      <form id="login-form">
+        <div class="auth-form-group">
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" required autocomplete="email">
+        </div>
+
+        <div class="auth-form-group">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" required autocomplete="current-password">
+        </div>
+
+        <button type="submit" class="nav-button gold-3d auth-submit">Sign In</button>
+      </form>
+
+      <div class="auth-footer">
+        Don’t have an account yet?
+        <a href="/register.html">Register now</a>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value.trim();
+      const msgBox = document.getElementById('login-message');
+      msgBox.innerHTML = '';
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          msgBox.innerHTML = `<p class="auth-error">${data.error || 'Login failed'}</p>`;
+          return;
+        }
+
+        msgBox.innerHTML = `<p class="auth-success">Login successful. Redirecting…</p>`;
+
+        // Redirect by role
+        if (data.role === 'admin') {
+          window.location.href = '/admin.html';
+        } else if (data.role === 'barber') {
+          window.location.href = '/barber.html';
+        } else if (data.role === 'radio') {
+          window.location.href = '/radio.html';
+        } else {
+          window.location.href = '/client.html';
+        }
+      } catch (err) {
+        msgBox.innerHTML = `<p class="auth-error">Network error. Try again.</p>`;
+      }
+    });
+  </script>
+</body>
+</html>

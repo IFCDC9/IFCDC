@@ -1,55 +1,108 @@
 import React, { useState } from "react";
+import IFCDCHeader from "../components/IFCDCHeader";
 
 const LoginPage = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState({ type: "", text: "" });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    const res = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
-    setLoading(false);
+    setMessage({ type: "", text: "" });
 
-    if (res.ok) {
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password: password.trim() }),
+      });
+
       const data = await res.json();
+      setLoading(false);
+
+      if (!res.ok) {
+        setMessage({ type: "error", text: data.error || "Login failed" });
+        return;
+      }
+
       localStorage.setItem("ifcdc_token", data.token);
       localStorage.setItem("ifcdc_role", data.role);
-      window.location.href = "/admin/hr";
-    } else {
-      alert("Invalid login.");
+      setMessage({ type: "success", text: "Login successful. Redirecting…" });
+
+      // Redirect by role
+      if (data.role === "admin" || data.role === "exec") {
+        window.location.href = "/admin/hr";
+      } else if (data.role === "barber") {
+        window.location.href = "/barber.html";
+      } else if (data.role === "radio") {
+        window.location.href = "/radio.html";
+      } else {
+        window.location.href = "/client.html";
+      }
+    } catch (err) {
+      setLoading(false);
+      setMessage({ type: "error", text: "Network error. Try again." });
     }
   };
 
   return (
-    <div style={{ padding: "1.5rem" }}>
-      <h1>IFCDC Admin Login</h1>
-      <form onSubmit={handleSubmit} style={{ maxWidth: 320, display: "grid", gap: "0.75rem", marginTop: "1rem" }}>
-        <input
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={e => setEmail(e.target.value)}
-          required
-          data-testid="input-email"
-        />
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={e => setPassword(e.target.value)}
-          required
-          data-testid="input-password"
-        />
-        <button type="submit" disabled={loading} data-testid="button-submit">
-          {loading ? "Logging in..." : "Log In"}
-        </button>
-      </form>
-    </div>
+    <>
+      <IFCDCHeader />
+
+      <main>
+        <section className="auth-wrapper">
+          <h1 className="auth-title">Login</h1>
+          <p className="auth-subtitle">Access your IFCDC dashboard with your credentials.</p>
+
+          {message.text && (
+            <p className={message.type === "error" ? "auth-error" : "auth-success"} data-testid="message-login">
+              {message.text}
+            </p>
+          )}
+
+          <form id="login-form" onSubmit={handleSubmit}>
+            <div className="auth-form-group">
+              <label htmlFor="email">Email</label>
+              <input
+                id="email"
+                name="email"
+                type="email"
+                required
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                data-testid="input-email"
+              />
+            </div>
+
+            <div className="auth-form-group">
+              <label htmlFor="password">Password</label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                required
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                data-testid="input-password"
+              />
+            </div>
+
+            <button type="submit" className="nav-button gold-3d auth-submit" disabled={loading} data-testid="button-submit">
+              {loading ? "Signing In..." : "Sign In"}
+            </button>
+          </form>
+
+          <div className="auth-footer">
+            Don't have an account yet?{" "}
+            <a href="/register.html">Register now</a>
+          </div>
+        </section>
+      </main>
+    </>
   );
 };
 
