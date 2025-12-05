@@ -1045,7 +1045,7 @@
 
     function selectClient(c) {
       state.selectedClientId = c.id;
-      loadClientSummary(c.id);
+      loadClientSummary();
       loadAssignmentsForClient();
       loadAppointmentsForClient();
       loadEncountersForClient();
@@ -1053,86 +1053,144 @@
       loadGoalsForClient();
     }
 
-    async function loadClientSummary(clientId) {
-      const infoEl = document.getElementById("selected-client-info");
+    async function loadClientSummary() {
       const statusEl = document.getElementById("client-summary-status");
       const summaryEl = document.getElementById("client-summary");
+      if (!statusEl || !summaryEl) return;
 
-      statusEl.textContent = "Loading 360° snapshot...";
+      if (!state.selectedClientId) {
+        statusEl.textContent = "No client selected.";
+        summaryEl.innerHTML = "";
+        return;
+      }
+
+      statusEl.textContent = "Loading snapshot...";
       statusEl.style.color = "#c5e1a5";
       summaryEl.innerHTML = "";
 
       try {
-        const res = await fetch("/api/clients/" + clientId + "/summary", {
-          headers: getAuthHeaders(),
-        });
+        const res = await fetch(
+          "/api/clients/" + state.selectedClientId + "/summary",
+          { headers: getAuthHeaders() }
+        );
         const data = await res.json();
         if (!res.ok) {
-          statusEl.textContent = data.error || "Failed to load summary.";
+          statusEl.textContent = data.error || "Failed to load client snapshot.";
           statusEl.style.color = "#ff8a80";
           return;
         }
 
-        // Basic info in selected-client-info
-        infoEl.innerHTML = "<strong>" + data.fullName + "</strong><br/>" +
-          "ID: " + data.clientId + "<br/>" +
-          "DOB: " + (data.dateOfBirth || "N/A") + "<br/>" +
-          "Programs: " + (data.programs && data.programs.length ? data.programs.join(", ") : "None");
-
-        // 360 snapshot in client-summary
-        let html = "";
-
-        // Risk section
-        if (data.risk) {
-          const sClass = (data.risk.suicideRisk || "UNKNOWN").toLowerCase();
-          const vClass = (data.risk.violenceRisk || "UNKNOWN").toLowerCase();
-          html += '<div class="summary-section"><h4>Risk Assessment</h4>';
-          html += '<span class="risk-badge risk-' + sClass + '">Suicide: ' + (data.risk.suicideRisk || "N/A") + '</span>';
-          html += '<span class="risk-badge risk-' + vClass + '">Violence: ' + (data.risk.violenceRisk || "N/A") + '</span>';
-          if (data.risk.safetyPlanNeeded) {
-            html += '<br/><span style="color:#ffb74d; font-size:0.8rem;">Safety Plan Needed</span>';
-          }
-          html += '<br/><span style="opacity:0.7; font-size:0.75rem;">As of ' + new Date(data.risk.createdAt).toLocaleDateString() + '</span>';
-          html += '</div>';
+        // Update basic info
+        const infoEl = document.getElementById("selected-client-info");
+        if (infoEl) {
+          infoEl.innerHTML = "<strong>" + data.fullName + "</strong><br/>" +
+            "ID: " + data.clientId + "<br/>" +
+            "DOB: " + (data.dateOfBirth || "N/A") + "<br/>" +
+            "Programs: " + (data.programs && data.programs.length ? data.programs.join(", ") : "None");
         }
 
-        // Next appointment
-        if (data.nextAppointment) {
-          const appt = data.nextAppointment;
-          html += '<div class="summary-section"><h4>Next Appointment</h4>';
-          html += appt.program + ' - ' + new Date(appt.startTime).toLocaleString();
-          if (appt.location) html += '<br/>Location: ' + appt.location;
-          html += '</div>';
-        }
+        statusEl.textContent = "Snapshot reflects data you are authorized to see.";
+        statusEl.style.color = "#c5e1a5";
 
-        // Last encounter
-        if (data.lastEncounter) {
-          const enc = data.lastEncounter;
-          html += '<div class="summary-section"><h4>Last Encounter</h4>';
-          html += enc.program + ' / ' + enc.type + '<br/>';
-          html += '<span style="opacity:0.8;">' + (enc.notePreview || "No notes") + '</span>';
-          html += '<br/><span style="opacity:0.7; font-size:0.75rem;">' + new Date(enc.createdAt).toLocaleDateString() + '</span>';
-          html += '</div>';
-        }
+        const risk = data.risk || null;
+        const nextAppt = data.nextAppointment || null;
+        const lastEnc = data.lastEncounter || null;
+        const goals = data.activeGoalsByProgram || [];
 
-        // Active goals by program
-        if (data.activeGoalsByProgram && data.activeGoalsByProgram.length) {
-          html += '<div class="summary-section"><h4>Active Goals</h4>';
-          data.activeGoalsByProgram.forEach(g => {
-            html += g.program + ': ' + g.count + '<br/>';
-          });
-          html += '</div>';
-        }
+        const riskHtml = risk
+          ? `
+          <div>
+            <div style="font-size:0.8rem; opacity:0.8;">Latest Risk</div>
+            <div style="font-size:0.9rem;">
+              Suicide: <strong>${risk.suicideRisk || "N/A"}</strong>,
+              Violence: <strong>${risk.violenceRisk || "N/A"}</strong>
+              ${risk.safetyPlanNeeded
+                ? "<span style='margin-left:0.4rem; padding:0.1rem 0.3rem; border-radius:3px; background:#ffebee; font-size:0.75rem;'>Safety Plan Needed</span>"
+                : ""}
+            </div>
+            <div style="font-size:0.75rem; opacity:0.7;">
+              As of ${new Date(risk.createdAt).toLocaleString()}
+            </div>
+          </div>
+        `
+          : `
+          <div>
+            <div style="font-size:0.8rem; opacity:0.8;">Latest Risk</div>
+            <div style="font-size:0.9rem; opacity:0.8;">No risk assessment on file.</div>
+          </div>
+        `;
 
-        if (!html) {
-          html = '<span style="opacity:0.7;">No risk, appointments, encounters, or goals on record.</span>';
-        }
+        const apptHtml = nextAppt
+          ? `
+          <div>
+            <div style="font-size:0.8rem; opacity:0.8;">Next Appointment</div>
+            <div style="font-size:0.9rem;">
+              <strong>${nextAppt.program || "Unspecified"}</strong><br/>
+              ${new Date(nextAppt.startTime).toLocaleString()}
+              ${nextAppt.location
+                ? "<br/><span style='font-size:0.8rem; opacity:0.8;'>Location: " + nextAppt.location + "</span>"
+                : ""}
+            </div>
+          </div>
+        `
+          : `
+          <div>
+            <div style="font-size:0.8rem; opacity:0.8;">Next Appointment</div>
+            <div style="font-size:0.9rem; opacity:0.8;">None scheduled.</div>
+          </div>
+        `;
 
-        statusEl.textContent = "";
-        summaryEl.innerHTML = html;
-      } catch (e) {
-        statusEl.textContent = "Error loading 360° snapshot.";
+        const encHtml = lastEnc
+          ? `
+          <div>
+            <div style="font-size:0.8rem; opacity:0.8;">Last Encounter</div>
+            <div style="font-size:0.9rem;">
+              <strong>${lastEnc.type || "Encounter"}</strong> (${lastEnc.program || "Unspecified"})<br/>
+              ${new Date(lastEnc.createdAt).toLocaleString()}
+            </div>
+            ${lastEnc.notePreview
+              ? "<div style='font-size:0.75rem; opacity:0.75; margin-top:0.2rem;'>" +
+                lastEnc.notePreview +
+                (lastEnc.notePreview.length === 120 ? "..." : "") +
+                "</div>"
+              : ""}
+          </div>
+        `
+          : `
+          <div>
+            <div style="font-size:0.8rem; opacity:0.8;">Last Encounter</div>
+            <div style="font-size:0.9rem; opacity:0.8;">No encounters recorded.</div>
+          </div>
+        `;
+
+        const goalsHtml = goals && goals.length
+          ? `
+          <div>
+            <div style="font-size:0.8rem; opacity:0.8;">Active Goals by Program</div>
+            <ul style="padding-left:1.1rem; margin-top:0.2rem; font-size:0.85rem;">
+              ${goals.map((g) => "<li>" + (g.program || "Unspecified") + ": " + g.count + "</li>").join("")}
+            </ul>
+          </div>
+        `
+          : `
+          <div>
+            <div style="font-size:0.8rem; opacity:0.8;">Active Goals by Program</div>
+            <div style="font-size:0.9rem; opacity:0.8;">No active goals on file.</div>
+          </div>
+        `;
+
+        summaryEl.innerHTML = `
+          <div style="display:flex; flex-direction:column; gap:0.6rem;">
+            ${riskHtml}
+            ${apptHtml}
+            ${encHtml}
+            ${goalsHtml}
+          </div>
+        `;
+      } catch (err) {
+        statusEl.textContent = "Error loading client snapshot.";
         statusEl.style.color = "#ff8a80";
+        summaryEl.innerHTML = "";
       }
     }
 
