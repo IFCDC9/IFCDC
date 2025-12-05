@@ -8,8 +8,8 @@ export default function IFCDCHeader() {
       </div>
 
       <nav className="ifcdc-nav">
-        <a href="/login" className="nav-button gold-3d" data-testid="link-login">Login</a>
-        <a href="/register" className="nav-button gold-3d" data-testid="link-register">Register</a>
+        <a href="/login" className="gold-3d" data-testid="link-login">Login</a>
+        <a href="/register" className="gold-3d" data-testid="link-register">Register</a>
       </nav>
     </header>
   );
