@@ -23,13 +23,45 @@ const twilioClient =
     ? twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
     : null;
 
-async function sendReminderSms(to: string, body: string) {
-  if (!twilioClient) {
-    console.warn("Twilio not configured; skipping SMS send.");
-    return;
+function ensureTwilioConfigured() {
+  if (!twilioClient || !TWILIO_SMS_FROM || !TWILIO_VOICE_FROM) {
+    throw new Error("Twilio is not configured. Check env vars.");
   }
-  await twilioClient.messages.create({
-    to,
+}
+
+function normalizePhone(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const digits = raw.replace(/[^\d+]/g, "");
+  return digits || null;
+}
+
+function buildSafeAppointmentReminderText(client: any, appointment: any): string {
+  const when = new Date(appointment.start_time || appointment.startTime);
+  const dateStr = when.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  const timeStr = when.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  return (
+    `Reminder from IFCDC: You have an upcoming appointment on ${dateStr} at ${timeStr}. ` +
+    `If you need to cancel or reschedule, please call us.`
+  );
+}
+
+async function sendSafeSms(to: string, body: string) {
+  ensureTwilioConfigured();
+  const toNorm = normalizePhone(to);
+  if (!toNorm) {
+    throw new Error("Invalid phone number");
+  }
+
+  return twilioClient!.messages.create({
+    to: toNorm,
     from: TWILIO_SMS_FROM,
     body,
   });
@@ -1212,7 +1244,7 @@ app.post(
       `If you have questions, please contact us. Reply STOP to opt out.`;
 
     try {
-      await sendReminderSms(to, body);
+      await sendSafeSms(to, body);
       await logAudit(req, "APPOINTMENT", appt.id, "SEND_APPT_REMINDER", { clientId, phone: to });
       res.json({ ok: true });
     } catch (err) {
@@ -1252,7 +1284,7 @@ app.post(
       "You have an upcoming IFCDC appointment. If you have any questions, please call us. Reply STOP to opt out.";
 
     try {
-      await sendReminderSms(to, safeBody);
+      await sendSafeSms(to, safeBody);
       await logAudit(req, "NOTIFICATION", clientId, "SEND_SMS", { to });
       res.json({ ok: true });
     } catch (err) {
