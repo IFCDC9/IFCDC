@@ -646,7 +646,21 @@ async function hasClientAccess(user: { id: string; role: string } | undefined, c
   return !!assignment;
 }
 
-app.get("/", (req, res) => res.sendFile(path.join(publicDir, "index.html")));
+// SPA routes - serve React app
+const clientIndexPath = path.join(import.meta.dirname, "..", "client", "index.html");
+const serveSPA = (req: express.Request, res: express.Response) => {
+  const spaPath = path.join(import.meta.dirname, "..", "dist", "public", "index.html");
+  if (fs.existsSync(spaPath)) {
+    return res.sendFile(spaPath);
+  }
+  return res.sendFile(clientIndexPath);
+};
+
+app.get("/", serveSPA);
+app.get("/login", serveSPA);
+app.get("/register", serveSPA);
+
+// Legacy static pages
 app.get("/mental-health", (req, res) => res.sendFile(path.join(publicDir, "mental-health.html")));
 app.get("/records-policy", (req, res) => res.sendFile(path.join(publicDir, "records-policy.html")));
 app.get("/roi", (req, res) => res.sendFile(path.join(publicDir, "roi.html")));
