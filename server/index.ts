@@ -1659,6 +1659,21 @@ app.get('/api/bookings/barber', authRequired, requireRole(['barber', 'admin']), 
   }
 });
 
+// RADIO: Get radio board data (radio + admin access)
+app.get('/api/radio/board', authRequired, requireRole(['radio', 'admin']), async (req, res) => {
+  try {
+    // Return radio schedule/board data
+    res.json({
+      schedule: [],
+      onAir: null,
+      upcoming: []
+    });
+  } catch (err) {
+    console.error("Error fetching radio board:", err);
+    res.status(500).json({ error: "Failed to load radio board" });
+  }
+});
+
 app.post(
   "/api/clients/:clientId/appointments/:apptId/remind",
   authRequired,
