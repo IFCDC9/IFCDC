@@ -1619,6 +1619,46 @@ app.get(
   }
 );
 
+// ----- Reports: Goals Summary (CSV) -----
+app.get(
+  "/api/reports/goals-summary.csv",
+  authRequired,
+  requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
+  async (req, res) => {
+    try {
+      let { from, to } = req.query as { from?: string; to?: string };
+      const now = new Date();
+
+      if (!from || !to) {
+        const end = now;
+        const start = new Date(now);
+        start.setDate(start.getDate() - 90);
+        from = from || start.toISOString();
+        to = to || end.toISOString();
+      }
+
+      const summary = await buildGoalsSummaryForUser(req.user!, from, to);
+
+      await logAudit(req, "REPORT", null, "REPORT_GOALS_SUMMARY_CSV", { from, to });
+
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", 'attachment; filename="ifcdc_goals_summary.csv"');
+
+      const rows: string[] = [];
+      rows.push("program,total_goals,completed_in_range,from,to");
+
+      for (const p of summary) {
+        rows.push([p.program || "", p.totalGoals, p.completedInRange, from, to].join(","));
+      }
+
+      res.send(rows.join("\n"));
+    } catch (err) {
+      console.error("Error in /api/reports/goals-summary.csv:", err);
+      res.status(500).setHeader("Content-Type", "text/plain; charset=utf-8").send("Failed to build goals summary CSV");
+    }
+  }
+);
+
 // ----- Reports: Program Dashboard (JSON) -----
 app.get(
   "/api/reports/program-dashboard",
