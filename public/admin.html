@@ -536,6 +536,7 @@
         setStatus("login-status", "Logged in as " + data.user.name + " (" + data.user.role + ")");
         loadSnapshot();
         initReportsDefaultRange();
+        initProgramDashDefaultRange();
       } catch (e) {
         setStatus("login-status", "Error logging in", true);
       }
