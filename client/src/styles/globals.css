@@ -1509,6 +1509,11 @@ body {
   align-items: center;
 }
 
+.logo-container a {
+  display: flex;
+  align-items: center;
+}
+
 .ifcdc-logo {
   height: 60px;
   width: auto;
@@ -1518,10 +1523,29 @@ body {
 .ifcdc-nav {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 24px;
 }
 
-.gold-3d {
+.nav-link {
+  color: #fff;
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.95rem;
+  transition: color 0.2s ease;
+}
+
+.nav-link:hover {
+  color: #d4af37;
+}
+
+.nav-auth {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: 16px;
+}
+
+.nav-button.gold-3d {
   font-weight: 700;
   color: #d4af37;
   text-transform: uppercase;
@@ -1534,7 +1558,7 @@ body {
   transition: 0.2s ease;
 }
 
-.gold-3d:hover {
+.nav-button.gold-3d:hover {
   filter: brightness(1.3);
   transform: translateY(-1px);
 }
