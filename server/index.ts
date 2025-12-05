@@ -558,6 +558,139 @@ app.get("/api/clients/:id/encounters", authRequired, requireRole(ROLES.EXEC, ROL
   })));
 });
 
+// ----- Client 360 Summary -----
+app.get(
+  "/api/clients/:id/summary",
+  authRequired,
+  requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
+  async (req, res) => {
+    const clientId = req.params.id;
+
+    try {
+      const client = await db.get<{ id: string; full_name: string; date_of_birth: string; programs: string }>(
+        "SELECT id, full_name, date_of_birth, programs FROM clients WHERE id = ?",
+        clientId
+      );
+      if (!client) {
+        return res.status(404).json({ error: "Client not found" });
+      }
+
+      if (!(await hasClientAccess(req.user, client.id))) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      // ---- Latest RISK assessment ----
+      const riskRow = await db.get<{ data: string; created_at: string }>(
+        `SELECT data, created_at
+         FROM assessments
+         WHERE client_id = ? AND type = 'RISK'
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        clientId
+      );
+
+      let riskSummary: { suicideRisk: string | null; violenceRisk: string | null; safetyPlanNeeded: boolean; createdAt: string } | null = null;
+      if (riskRow) {
+        try {
+          const data = JSON.parse(riskRow.data || "{}");
+          riskSummary = {
+            suicideRisk: data.suicideRisk || null,
+            violenceRisk: data.violenceRisk || null,
+            safetyPlanNeeded: !!data.safetyPlanNeeded,
+            createdAt: riskRow.created_at,
+          };
+        } catch (_) {
+          riskSummary = null;
+        }
+      }
+
+      // ---- Next appointment ----
+      const nowIso = new Date().toISOString();
+      const nextAppt = await db.get<{ id: string; program: string; start_time: string; end_time: string; location: string }>(
+        `SELECT id, program, start_time, end_time, location
+         FROM appointments
+         WHERE client_id = ? AND start_time >= ?
+         ORDER BY start_time ASC
+         LIMIT 1`,
+        clientId,
+        nowIso
+      );
+
+      let nextAppointment: { id: string; program: string; startTime: string; endTime: string; location: string } | null = null;
+      if (nextAppt) {
+        nextAppointment = {
+          id: nextAppt.id,
+          program: nextAppt.program,
+          startTime: nextAppt.start_time,
+          endTime: nextAppt.end_time,
+          location: nextAppt.location,
+        };
+      }
+
+      // ---- Last encounter ----
+      const lastEnc = await db.get<{ id: string; type: string; program: string; note: string; created_at: string }>(
+        `SELECT id, type, program, note, created_at
+         FROM encounters
+         WHERE client_id = ?
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        clientId
+      );
+
+      let lastEncounter: { id: string; type: string; program: string; notePreview: string; createdAt: string } | null = null;
+      if (lastEnc) {
+        lastEncounter = {
+          id: lastEnc.id,
+          type: lastEnc.type,
+          program: lastEnc.program,
+          notePreview: (lastEnc.note || "").slice(0, 120),
+          createdAt: lastEnc.created_at,
+        };
+      }
+
+      // ---- Active goals by program ----
+      const goalsRows = await db.all<{ program: string; count: number }[]>(
+        `SELECT program, COUNT(*) as count
+         FROM goals
+         WHERE client_id = ? AND status = 'ACTIVE'
+         GROUP BY program`,
+        clientId
+      );
+
+      const activeGoalsByProgram = goalsRows.map((g) => ({
+        program: g.program,
+        count: g.count,
+      }));
+
+      await logAudit(req, "CLIENT_SUMMARY", clientId, "VIEW_CLIENT_SUMMARY", {
+        hasRisk: !!riskSummary,
+        hasNextAppt: !!nextAppointment,
+        hasLastEnc: !!lastEncounter,
+      });
+
+      res.json({
+        clientId: client.id,
+        fullName: client.full_name,
+        dateOfBirth: client.date_of_birth,
+        programs: (() => {
+          try {
+            return JSON.parse(client.programs || "[]");
+          } catch {
+            return [];
+          }
+        })(),
+        risk: riskSummary,
+        nextAppointment,
+        lastEncounter,
+        activeGoalsByProgram,
+      });
+    } catch (err) {
+      console.error("Error in /api/clients/:id/summary:", err);
+      res.status(500).json({ error: "Failed to build client summary" });
+    }
+  }
+);
+
 // ----- Goals (per client, per program) -----
 
 // List goals for a client
