@@ -1,0 +1,133 @@
+    function initProgramDashDefaultRange() {
+      const fromEl = document.getElementById("pd-from");
+      const toEl = document.getElementById("pd-to");
+      if (!fromEl || !toEl) return;
+
+      const now = new Date();
+      const endDateStr = now.toISOString().slice(0, 10);
+
+      const start = new Date(now);
+      start.setMonth(start.getMonth() - 3); // last quarter-ish
+      const startDateStr = start.toISOString().slice(0, 10);
+
+      if (!fromEl.value) fromEl.value = startDateStr;
+      if (!toEl.value) toEl.value = endDateStr;
+    }
+
+    async function runProgramDashboard() {
+      const progEl = document.getElementById("pd-program");
+      const fromEl = document.getElementById("pd-from");
+      const toEl = document.getElementById("pd-to");
+      const statusEl = document.getElementById("pd-status");
+      const metricsEl = document.getElementById("pd-metrics");
+
+      if (!progEl || !fromEl || !toEl || !statusEl || !metricsEl) return;
+
+      const program = progEl.value;
+      const fromDate = fromEl.value;
+      const toDate = toEl.value;
+
+      if (!program || !fromDate || !toDate) {
+        statusEl.textContent = "Select program and date range.";
+        statusEl.style.color = "#ff8a80";
+        return;
+      }
+
+      statusEl.textContent = "Loading program dashboard...";
+      statusEl.style.color = "#c5e1a5";
+      metricsEl.innerHTML = "";
+
+      const fromIso = new Date(fromDate + "T00:00:00").toISOString();
+      const toIso = new Date(toDate + "T23:59:59").toISOString();
+
+      const params = new URLSearchParams();
+      params.set("program", program);
+      params.set("from", fromIso);
+      params.set("to", toIso);
+
+      try {
+        const res = await fetch(
+          "/api/reports/program-dashboard?" + params.toString(),
+          { headers: getAuthHeaders() }
+        );
+        const data = await res.json();
+        if (!res.ok) {
+          statusEl.textContent = data.error || "Failed to load program dashboard.";
+          statusEl.style.color = "#ff8a80";
+          return;
+        }
+
+        statusEl.textContent = "Program dashboard loaded (scoped to your access).";
+        statusEl.style.color = "#c5e1a5";
+
+        metricsEl.innerHTML = `
+          <div style="display:flex; flex-wrap:wrap; gap:1.5rem;">
+            <div>
+              <div style="font-size:0.8rem; opacity:0.8;">Clients in Program</div>
+              <div style="font-size:1.2rem; font-weight:600;">${data.totalClientsInProgram}</div>
+            </div>
+            <div>
+              <div style="font-size:0.8rem; opacity:0.8;">Active Goals</div>
+              <div style="font-size:1.2rem; font-weight:600;">${data.activeGoals}</div>
+            </div>
+            <div>
+              <div style="font-size:0.8rem; opacity:0.8;">Goals Completed (Range)</div>
+              <div style="font-size:1.2rem; font-weight:600;">${data.completedGoalsInRange}</div>
+            </div>
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:1.5rem; margin-top:0.6rem;">
+            <div>
+              <div style="font-size:0.8rem; opacity:0.8;">Appointments (Range)</div>
+              <div style="font-size:1.2rem; font-weight:600;">${data.appointmentsInRange}</div>
+            </div>
+            <div>
+              <div style="font-size:0.8rem; opacity:0.8;">Encounters (Range)</div>
+              <div style="font-size:1.2rem; font-weight:600;">${data.encountersInRange}</div>
+            </div>
+            <div>
+              <div style="font-size:0.8rem; opacity:0.8;">Move-ins (Range)</div>
+              <div style="font-size:1.2rem; font-weight:600;">${data.moveInsInRange}</div>
+            </div>
+          </div>
+        `;
+      } catch (err) {
+        statusEl.textContent = "Error loading program dashboard.";
+        statusEl.style.color = "#ff8a80";
+      }
+    }
+
+    function buildGoalsSummaryQueryParams() {
+      const fromEl = document.getElementById("pd-from");
+      const toEl = document.getElementById("pd-to");
+      const fromDate = fromEl?.value;
+      const toDate = toEl?.value;
+
+      const params = new URLSearchParams();
+      if (fromDate) {
+        params.set(
+          "from",
+          new Date(fromDate + "T00:00:00").toISOString()
+        );
+      }
+      if (toDate) {
+        params.set(
+          "to",
+          new Date(toDate + "T23:59:59").toISOString()
+        );
+      }
+      return params.toString();
+    }
+
+    const pdRunBtn = document.getElementById("pd-run");
+    if (pdRunBtn) {
+      pdRunBtn.onclick = runProgramDashboard;
+    }
+
+    const pdGoalsCsvBtn = document.getElementById("pd-download-goals");
+    if (pdGoalsCsvBtn) {
+      pdGoalsCsvBtn.onclick = () => {
+        const qs = buildGoalsSummaryQueryParams();
+        window.location.href =
+          "/api/reports/goals-summary.csv" + (qs ? "?" + qs : "");
+      };
+    }
