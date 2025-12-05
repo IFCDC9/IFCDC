@@ -51,9 +51,7 @@ const App: React.FC = () => {
           path="/admin"
           element={
             <ProtectedRoute allowedRoles={["admin"]}>
-              <AdminLayout>
-                <AdminDashboard />
-              </AdminLayout>
+              <AdminDashboard />
             </ProtectedRoute>
           }
         />
