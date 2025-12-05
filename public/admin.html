@@ -171,6 +171,47 @@
           </button>
         </div>
       </div>
+
+      <div class="admin-card" id="program-dash-card" style="margin-top:1rem;">
+        <h2>Program Dashboards</h2>
+        <p style="font-size:0.8rem; opacity:0.9;">
+          View metrics for a specific IFCDC program (e.g., Housing, Mental Health) over a date range.
+        </p>
+        <div style="display:flex; flex-wrap:wrap; gap:0.75rem; margin-top:0.5rem;">
+          <div style="min-width:160px;">
+            <label class="admin-label">Program</label>
+            <select id="pd-program" class="admin-input">
+              <option value="HOUSING">Transitional Housing</option>
+              <option value="MENTAL_HEALTH">Mental Health Services</option>
+              <option value="ANTI_GANG">Anti-Gang Intervention</option>
+              <option value="ECON_DEV">Economic Development & Jobs</option>
+            </select>
+          </div>
+          <div style="min-width:140px;">
+            <label class="admin-label">From</label>
+            <input id="pd-from" type="date" class="admin-input" />
+          </div>
+          <div style="min-width:140px;">
+            <label class="admin-label">To</label>
+            <input id="pd-to" type="date" class="admin-input" />
+          </div>
+        </div>
+
+        <button id="pd-run" class="ifcdc-btn ifcdc-btn-primary" style="margin-top:0.6rem;">
+          Run Program Dashboard
+        </button>
+
+        <p id="pd-status" style="font-size:0.8rem; margin-top:0.4rem;"></p>
+
+        <div id="pd-metrics" style="margin-top:0.6rem; font-size:0.9rem;"></div>
+
+        <div style="margin-top:0.8rem; font-size:0.85rem;">
+          <span style="opacity:0.8;">Exports (Goals):</span>
+          <button id="pd-download-goals" class="ifcdc-btn ifcdc-btn-outline" style="margin-left:0.5rem;">
+            Download Goals Summary CSV
+          </button>
+        </div>
+      </div>
     </section>
 
     <section class="ifcdc-section admin-layout">
@@ -739,6 +780,77 @@
       dlRiskBtn.onclick = () => {
         const qs = state.token ? "?token=" + encodeURIComponent(state.token) : "";
         window.location.href = "/api/reports/risk-mix.csv" + qs;
+      };
+    }
+
+    // ----- Program Dashboard -----
+    const pdRunBtn = document.getElementById("pd-run");
+    if (pdRunBtn) {
+      pdRunBtn.onclick = async () => {
+        const program = (document.getElementById("pd-program") || {}).value;
+        const fromVal = (document.getElementById("pd-from") || {}).value;
+        const toVal = (document.getElementById("pd-to") || {}).value;
+
+        const statusEl = document.getElementById("pd-status");
+        const metricsEl = document.getElementById("pd-metrics");
+
+        if (!program) {
+          statusEl.textContent = "Please select a program.";
+          statusEl.style.color = "#ff8a80";
+          return;
+        }
+
+        statusEl.textContent = "Loading program dashboard...";
+        statusEl.style.color = "#c5e1a5";
+        metricsEl.innerHTML = "";
+
+        const params = new URLSearchParams();
+        params.set("program", program);
+        if (fromVal) params.set("from", new Date(fromVal + "T00:00:00").toISOString());
+        if (toVal) params.set("to", new Date(toVal + "T23:59:59").toISOString());
+
+        try {
+          const res = await fetch("/api/reports/program-dashboard?" + params.toString(), {
+            headers: getAuthHeaders(),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            statusEl.textContent = data.error || "Failed to load program dashboard.";
+            statusEl.style.color = "#ff8a80";
+            return;
+          }
+
+          statusEl.textContent = "Dashboard loaded.";
+          statusEl.style.color = "#c5e1a5";
+
+          metricsEl.innerHTML =
+            "<strong>Program:</strong> " + data.program + "<br/>" +
+            "<strong>Date Range:</strong> " + new Date(data.from).toLocaleDateString() + " - " + new Date(data.to).toLocaleDateString() + "<br/><br/>" +
+            "<strong>Clients in Program:</strong> " + data.totalClientsInProgram + "<br/>" +
+            "<strong>Active Goals:</strong> " + data.activeGoals + "<br/>" +
+            "<strong>Goals Completed (in range):</strong> " + data.completedGoalsInRange + "<br/>" +
+            "<strong>Appointments (in range):</strong> " + data.appointmentsInRange + "<br/>" +
+            "<strong>Encounters (in range):</strong> " + data.encountersInRange + "<br/>" +
+            "<strong>Move-Ins (in range):</strong> " + data.moveInsInRange;
+        } catch (err) {
+          statusEl.textContent = "Error loading program dashboard.";
+          statusEl.style.color = "#ff8a80";
+        }
+      };
+    }
+
+    const pdDownloadGoalsBtn = document.getElementById("pd-download-goals");
+    if (pdDownloadGoalsBtn) {
+      pdDownloadGoalsBtn.onclick = () => {
+        const fromVal = (document.getElementById("pd-from") || {}).value;
+        const toVal = (document.getElementById("pd-to") || {}).value;
+
+        const params = new URLSearchParams();
+        if (fromVal) params.set("from", new Date(fromVal + "T00:00:00").toISOString());
+        if (toVal) params.set("to", new Date(toVal + "T23:59:59").toISOString());
+        if (state.token) params.set("token", state.token);
+
+        window.location.href = "/api/reports/goals-summary.csv?" + params.toString();
       };
     }
 
