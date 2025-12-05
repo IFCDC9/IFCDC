@@ -16,6 +16,9 @@ const {
   TWILIO_SMS_FROM,
   TWILIO_VOICE_FROM,
   PUBLIC_IFCDC_PHONE,
+  PUBLIC_APP_URL,
+  CRON_SECRET_TOKEN,
+  APPT_REMINDER_LEAD_HOURS,
 } = process.env;
 
 const twilioClient =
@@ -74,7 +77,7 @@ async function sendVoiceReminderCall(to: string, appointmentId: string) {
     throw new Error("Invalid phone number");
   }
 
-  const baseUrl = process.env.PUBLIC_APP_URL || "https://your-app-url.example.com";
+  const baseUrl = PUBLIC_APP_URL || "https://your-app-url.example.com";
 
   return twilioClient!.calls.create({
     to: toNorm,
