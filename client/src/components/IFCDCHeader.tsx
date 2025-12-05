@@ -3,17 +3,17 @@ import { Link } from "react-router-dom";
 
 export default function IFCDCHeader() {
   return (
-    <header className="header" data-testid="header-ifcdc">
-      <div className="logo-container">
+    <header className="ifcdc-header" data-testid="header-ifcdc">
+      <div className="ifcdc-logo-wrap">
         <Link to="/">
-          <img src="/assets/ifcdc-logo.png" alt="IFCDC Logo" className="ifcdc-logo" />
+          <img src="/assets/ifcdc-logo.png" alt="IFCDC" className="ifcdc-logo" />
         </Link>
       </div>
 
-      <div className="nav-actions">
-        <Link to="/login" className="gold-link" data-testid="link-login">Login</Link>
-        <Link to="/register" className="gold-link" data-testid="link-register">Register</Link>
-      </div>
+      <nav className="ifcdc-nav-actions">
+        <Link to="/login" className="ifcdc-nav-link" data-testid="link-login">Login</Link>
+        <Link to="/register" className="ifcdc-nav-link ifcdc-nav-primary" data-testid="link-register">Register</Link>
+      </nav>
     </header>
   );
 }
