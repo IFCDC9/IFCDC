@@ -623,7 +623,8 @@ async function authRequired(req: express.Request, res: express.Response, next: e
   }
 }
 
-function requireRole(...allowedRoles: string[]) {
+function requireRole(...roles: (string | string[])[]) {
+  const allowedRoles = roles.flat();
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (!req.user) {
       return res.status(401).json({ error: "Unauthenticated" });
@@ -1590,7 +1591,7 @@ app.get(
 
 
 // ADMIN: Get all bookings/appointments
-app.get('/api/bookings/admin', authRequired, requireRole(ROLES.EXEC, ROLES.ADMIN, 'admin'), async (req, res) => {
+app.get('/api/bookings/admin', authRequired, requireRole(['admin']), async (req, res) => {
   try {
     const rows = await db.all<any[]>(
       `SELECT a.id, a.client_id, a.program, a.start_time, a.end_time,
