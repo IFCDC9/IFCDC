@@ -1045,6 +1045,15 @@
 
     function selectClient(c) {
       state.selectedClientId = c.id;
+      document.getElementById("selected-client-info").innerHTML =
+        "<strong>" +
+        c.fullName +
+        "</strong><br/>ID: " +
+        c.id +
+        "<br/>DOB: " +
+        (c.dateOfBirth || "N/A") +
+        "<br/>Programs: " +
+        (c.programs && c.programs.length ? c.programs.join(", ") : "None");
       loadClientSummary();
       loadAssignmentsForClient();
       loadAppointmentsForClient();
@@ -1078,15 +1087,6 @@
           statusEl.textContent = data.error || "Failed to load client snapshot.";
           statusEl.style.color = "#ff8a80";
           return;
-        }
-
-        // Update basic info
-        const infoEl = document.getElementById("selected-client-info");
-        if (infoEl) {
-          infoEl.innerHTML = "<strong>" + data.fullName + "</strong><br/>" +
-            "ID: " + data.clientId + "<br/>" +
-            "DOB: " + (data.dateOfBirth || "N/A") + "<br/>" +
-            "Programs: " + (data.programs && data.programs.length ? data.programs.join(", ") : "None");
         }
 
         statusEl.textContent = "Snapshot reflects data you are authorized to see.";
