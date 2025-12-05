@@ -273,6 +273,22 @@ async function initDb() {
     );
   `);
 
+  // --- Notification preferences per client ---
+  try {
+    await db.exec(`ALTER TABLE clients ADD COLUMN notify_channel TEXT`);
+  } catch (e) {
+    // column probably already exists; ignore
+  }
+
+  // --- Per-program reminder lead hours ---
+  try {
+    await db.exec(`ALTER TABLE programs ADD COLUMN default_sms_lead_hours INTEGER`);
+  } catch (e) {}
+
+  try {
+    await db.exec(`ALTER TABLE programs ADD COLUMN default_voice_lead_hours INTEGER`);
+  } catch (e) {}
+
   // Seed basic IFCDC programs if table is empty
   const progCount = await db.get<{ count: number }>("SELECT COUNT(*) as count FROM programs");
   if (!progCount || progCount.count === 0) {
