@@ -1,5 +1,6 @@
 import React from "react";
 import { Link } from "react-router-dom";
+import LoginRegister from "./LoginRegister";
 
 export default function IFCDCHeader() {
   return (
@@ -16,14 +17,7 @@ export default function IFCDCHeader() {
         <Link to="/radio" className="nav-link" data-testid="link-radio">Radio</Link>
         <Link to="/community" className="nav-link" data-testid="link-community">Community</Link>
 
-        <div className="auth-actions">
-          <Link to="/login" className="nav-link nav-link-gold" data-testid="link-login">
-            Login
-          </Link>
-          <Link to="/register" className="nav-link nav-link-gold nav-link-outline" data-testid="link-register">
-            Register
-          </Link>
-        </div>
+        <LoginRegister />
       </nav>
     </header>
   );
