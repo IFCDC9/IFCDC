@@ -2550,14 +2550,15 @@ app.post("/api/cron/send-upcoming-reminders", async (req, res) => {
         .json({ error: "Twilio not configured on this server." });
     }
 
-    const leadHours = parseInt(APPT_REMINDER_LEAD_HOURS || "24", 10);
-    if (!Number.isFinite(leadHours) || leadHours <= 0) {
+    const globalFallback = parseInt(APPT_REMINDER_LEAD_HOURS || "24", 10);
+    if (!Number.isFinite(globalFallback) || globalFallback <= 0) {
       return res
         .status(500)
         .json({ error: "Invalid APPT_REMINDER_LEAD_HOURS configuration." });
     }
 
-    const upcoming = await findAppointmentsNeedingReminder(leadHours);
+    const programMap = await getProgramLeadHoursMap();
+    const upcoming = await findSmsReminderCandidates(programMap, globalFallback);
 
     let attempted = 0;
     let sent = 0;
@@ -2576,14 +2577,16 @@ app.post("/api/cron/send-upcoming-reminders", async (req, res) => {
         await recordAppointmentNotification(
           appt.id,
           "SMS",
-          leadHours,
+          appt.leadHours,
           "SENT",
           null
         );
 
         await db.run(
-          `INSERT INTO outreach_tasks (id, client_id, phone, channel, reason, status, created_at)
-           VALUES (?, ?, ?, ?, ?, 'OPEN', ?)`,
+          `
+          INSERT INTO outreach_tasks (id, client_id, phone, channel, reason, status, created_at)
+          VALUES (?, ?, ?, ?, ?, 'OPEN', ?)
+          `,
           cryptoRandomId(),
           appt.client_id,
           normalizePhone(appt.phone),
@@ -2599,7 +2602,7 @@ app.post("/api/cron/send-upcoming-reminders", async (req, res) => {
         await recordAppointmentNotification(
           appt.id,
           "SMS",
-          leadHours,
+          appt.leadHours,
           "FAILED",
           err.message
         );
@@ -2615,7 +2618,7 @@ app.post("/api/cron/send-upcoming-reminders", async (req, res) => {
         null,
         "AUTO_SEND_APPOINTMENT_REMINDERS",
         {
-          leadHours,
+          globalFallbackHours: globalFallback,
           totalCandidates: upcoming.length,
           attempted,
           sent,
@@ -2627,7 +2630,7 @@ app.post("/api/cron/send-upcoming-reminders", async (req, res) => {
     }
 
     res.json({
-      leadHours,
+      globalFallbackHours: globalFallback,
       totalCandidates: upcoming.length,
       attempted,
       sent,
