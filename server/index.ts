@@ -1624,6 +1624,41 @@ app.get('/api/bookings/admin', authRequired, requireRole(['admin']), async (req,
   }
 });
 
+// BARBER: Get barber bookings (barber + admin access)
+app.get('/api/bookings/barber', authRequired, requireRole(['barber', 'admin']), async (req, res) => {
+  try {
+    const rows = await db.all<any[]>(
+      `SELECT a.id, a.client_id, a.program, a.start_time, a.end_time,
+              a.location, a.notes, a.created_by, a.created_at,
+              c.full_name as client_name, c.phone as client_phone, c.email as client_email
+       FROM appointments a
+       LEFT JOIN clients c ON a.client_id = c.id
+       WHERE a.program = 'BARBERSHOP' OR a.program = 'barbershop'
+       ORDER BY a.start_time DESC`
+    );
+
+    await logAudit(req, "APPOINTMENT", null, "BARBER_LIST_BOOKINGS", { count: rows.length });
+
+    res.json(rows.map((a) => ({
+      id: a.id,
+      clientId: a.client_id,
+      clientName: a.client_name,
+      clientPhone: a.client_phone,
+      clientEmail: a.client_email,
+      program: a.program,
+      startTime: a.start_time,
+      endTime: a.end_time,
+      location: a.location,
+      notes: a.notes,
+      createdBy: a.created_by,
+      createdAt: a.created_at,
+    })));
+  } catch (err) {
+    console.error("Error fetching barber bookings:", err);
+    res.status(500).json({ error: "Failed to load bookings" });
+  }
+});
+
 app.post(
   "/api/clients/:clientId/appointments/:apptId/remind",
   authRequired,
