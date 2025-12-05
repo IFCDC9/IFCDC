@@ -1343,6 +1343,62 @@ app.post(
   }
 );
 
+// ----- Appointment Notifications: Voice Reminder (initiate call) -----
+app.post(
+  "/api/appointments/:id/remind-voice",
+  authRequired,
+  requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
+  async (req, res) => {
+    try {
+      if (!twilioClient) {
+        return res.status(500).json({ error: "Twilio not configured on this server." });
+      }
+
+      const apptId = req.params.id;
+
+      const appt = await db.get<{
+        id: string;
+        client_id: string;
+        program: string;
+        start_time: string;
+        full_name: string;
+        phone: string;
+      }>(
+        `SELECT a.id, a.client_id, a.program, a.start_time,
+                c.full_name, c.phone
+         FROM appointments a
+         JOIN clients c ON c.id = a.client_id
+         WHERE a.id = ?`,
+        apptId
+      );
+
+      if (!appt) {
+        return res.status(404).json({ error: "Appointment not found" });
+      }
+
+      if (!(await hasClientAccess(req.user, appt.client_id))) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      if (!appt.phone) {
+        return res.status(400).json({ error: "Client does not have a phone number on file" });
+      }
+
+      const call = await sendVoiceReminderCall(appt.phone, appt.id);
+
+      await logAudit(req, "APPOINTMENT", apptId, "SEND_VOICE_REMINDER", {
+        to: normalizePhone(appt.phone),
+        sid: call.sid,
+      });
+
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("Error sending voice reminder:", err);
+      res.status(500).json({ error: "Failed to start voice reminder call" });
+    }
+  }
+);
+
 app.post(
   "/api/clients/:id/notify",
   authRequired,
