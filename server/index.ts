@@ -1445,6 +1445,150 @@ async function buildRiskMixReportForUser(user: { id: string; role: string }) {
   };
 }
 
+async function buildProgramDashboardForUser(user: { id: string; role: string }, programCode: string, from: string, to: string) {
+  const isExec = user.role === ROLES.EXEC;
+  const userId = user.id;
+
+  // ---- Clients in this program ----
+  let clientsRow;
+  if (isExec) {
+    clientsRow = await db.get<{ count: number }>(
+      `SELECT COUNT(*) as count FROM clients WHERE programs LIKE ?`,
+      `%"${programCode}"%`
+    );
+  } else {
+    clientsRow = await db.get<{ count: number }>(
+      `SELECT COUNT(DISTINCT c.id) as count
+       FROM clients c
+       JOIN client_assignments ca ON ca.client_id = c.id
+       WHERE ca.user_id = ? AND c.programs LIKE ?`,
+      userId,
+      `%"${programCode}"%`
+    );
+  }
+  const totalClientsInProgram = clientsRow?.count || 0;
+
+  // ---- Goals (all time: active; in range: completed) ----
+  let activeGoalsRow;
+  let completedGoalsRow;
+
+  if (isExec) {
+    activeGoalsRow = await db.get<{ count: number }>(
+      `SELECT COUNT(*) as count FROM goals WHERE program = ? AND status = 'ACTIVE'`,
+      programCode
+    );
+    completedGoalsRow = await db.get<{ count: number }>(
+      `SELECT COUNT(*) as count FROM goals
+       WHERE program = ? AND status = 'COMPLETED' AND completed_at >= ? AND completed_at < ?`,
+      programCode, from, to
+    );
+  } else {
+    activeGoalsRow = await db.get<{ count: number }>(
+      `SELECT COUNT(*) as count FROM goals g
+       JOIN client_assignments ca ON ca.client_id = g.client_id
+       WHERE g.program = ? AND g.status = 'ACTIVE' AND ca.user_id = ?`,
+      programCode, userId
+    );
+    completedGoalsRow = await db.get<{ count: number }>(
+      `SELECT COUNT(*) as count FROM goals g
+       JOIN client_assignments ca ON ca.client_id = g.client_id
+       WHERE g.program = ? AND g.status = 'COMPLETED' AND g.completed_at >= ? AND g.completed_at < ? AND ca.user_id = ?`,
+      programCode, from, to, userId
+    );
+  }
+  const activeGoals = activeGoalsRow?.count || 0;
+  const completedGoalsInRange = completedGoalsRow?.count || 0;
+
+  // ---- Appointments & encounters in this program (in range) ----
+  let apptRow;
+  let encRow;
+  let moveInRow;
+
+  if (isExec) {
+    apptRow = await db.get<{ count: number }>(
+      `SELECT COUNT(*) as count FROM appointments WHERE program = ? AND start_time >= ? AND start_time < ?`,
+      programCode, from, to
+    );
+    encRow = await db.get<{ count: number }>(
+      `SELECT COUNT(*) as count FROM encounters WHERE program = ? AND created_at >= ? AND created_at < ?`,
+      programCode, from, to
+    );
+    moveInRow = await db.get<{ count: number }>(
+      `SELECT COUNT(*) as count FROM encounters WHERE program = ? AND type = 'MOVE_IN' AND created_at >= ? AND created_at < ?`,
+      programCode, from, to
+    );
+  } else {
+    apptRow = await db.get<{ count: number }>(
+      `SELECT COUNT(*) as count FROM appointments a
+       JOIN client_assignments ca ON ca.client_id = a.client_id
+       WHERE a.program = ? AND a.start_time >= ? AND a.start_time < ? AND ca.user_id = ?`,
+      programCode, from, to, userId
+    );
+    encRow = await db.get<{ count: number }>(
+      `SELECT COUNT(*) as count FROM encounters e
+       JOIN client_assignments ca ON ca.client_id = e.client_id
+       WHERE e.program = ? AND e.created_at >= ? AND e.created_at < ? AND ca.user_id = ?`,
+      programCode, from, to, userId
+    );
+    moveInRow = await db.get<{ count: number }>(
+      `SELECT COUNT(*) as count FROM encounters e
+       JOIN client_assignments ca ON ca.client_id = e.client_id
+       WHERE e.program = ? AND e.type = 'MOVE_IN' AND e.created_at >= ? AND e.created_at < ? AND ca.user_id = ?`,
+      programCode, from, to, userId
+    );
+  }
+
+  const appointmentsInRange = apptRow?.count || 0;
+  const encountersInRange = encRow?.count || 0;
+  const moveInsInRange = moveInRow?.count || 0;
+
+  return {
+    program: programCode,
+    from,
+    to,
+    totalClientsInProgram,
+    activeGoals,
+    completedGoalsInRange,
+    appointmentsInRange,
+    encountersInRange,
+    moveInsInRange,
+  };
+}
+
+// ----- Reports: Program Dashboard -----
+app.get(
+  "/api/reports/program-dashboard",
+  authRequired,
+  requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
+  async (req, res) => {
+    try {
+      let { program, from, to } = req.query as { program?: string; from?: string; to?: string };
+
+      if (!program) {
+        return res.status(400).json({ error: "program query parameter is required" });
+      }
+
+      const now = new Date();
+      if (!from || !to) {
+        const end = now;
+        const start = new Date(now);
+        start.setDate(start.getDate() - 30);
+        from = from || start.toISOString();
+        to = to || end.toISOString();
+      }
+
+      const dashboard = await buildProgramDashboardForUser(req.user!, program, from, to);
+
+      await logAudit(req, "REPORT", null, "REPORT_PROGRAM_DASHBOARD", { program, from, to });
+
+      res.json(dashboard);
+    } catch (err) {
+      console.error("Error in /api/reports/program-dashboard:", err);
+      res.status(500).json({ error: "Failed to build program dashboard" });
+    }
+  }
+);
+
 // ----- Reports: Volume (JSON) -----
 app.get(
   "/api/reports/volume",
