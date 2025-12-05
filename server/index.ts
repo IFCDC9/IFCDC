@@ -468,6 +468,42 @@ async function recordAppointmentNotification(
   );
 }
 
+async function getProgramLeadHoursMap(): Promise<Record<string, { sms: number | null; voice: number | null }>> {
+  const rows = await db.all<any[]>(
+    `SELECT code, default_sms_lead_hours, default_voice_lead_hours FROM programs`
+  );
+  const map: Record<string, { sms: number | null; voice: number | null }> = {};
+  for (const r of rows) {
+    map[r.code] = {
+      sms: r.default_sms_lead_hours,
+      voice: r.default_voice_lead_hours,
+    };
+  }
+  return map;
+}
+
+function resolveSmsLeadHours(
+  programCode: string,
+  programMap: Record<string, { sms: number | null; voice: number | null }>,
+  globalFallbackHours: number
+): number {
+  const entry = programMap[programCode] || {};
+  const v = entry.sms;
+  if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+  return globalFallbackHours;
+}
+
+function resolveVoiceLeadHours(
+  programCode: string,
+  programMap: Record<string, { sms: number | null; voice: number | null }>,
+  globalFallbackHours: number
+): number {
+  const entry = programMap[programCode] || {};
+  const v = entry.voice;
+  if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+  return globalFallbackHours;
+}
+
 async function authRequired(req: express.Request, res: express.Response, next: express.NextFunction) {
   const authHeader = req.header("Authorization") || "";
   let token = authHeader.startsWith("Bearer ") ? authHeader.replace("Bearer ", "") : null;
