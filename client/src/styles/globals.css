@@ -1546,6 +1546,13 @@ body {
   border-radius: 999px;
 }
 
+.ifcdc-main {
+  min-height: calc(100vh - 70px);
+  background: #000;
+  color: #f0f0f0;
+  padding: 20px 30px;
+}
+
 /* GOLD 3D BUTTONS */
 .nav-button.gold-3d {
   font-weight: 700;
