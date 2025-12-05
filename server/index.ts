@@ -307,6 +307,35 @@ async function initDb() {
     console.log("Seeded", seedPrograms.length, "IFCDC programs.");
   }
 
+  // Defaults: Housing 48h SMS, MH 24h SMS; voice off by default
+  await db.run(
+    `UPDATE programs
+     SET default_sms_lead_hours = 48
+     WHERE code = 'HOUSING' AND default_sms_lead_hours IS NULL`
+  );
+  await db.run(
+    `UPDATE programs
+     SET default_sms_lead_hours = 24
+     WHERE code = 'MENTAL_HEALTH' AND default_sms_lead_hours IS NULL`
+  );
+  await db.run(
+    `UPDATE programs
+     SET default_sms_lead_hours = 24
+     WHERE code = 'ANTI_GANG' AND default_sms_lead_hours IS NULL`
+  );
+  await db.run(
+    `UPDATE programs
+     SET default_sms_lead_hours = 24
+     WHERE code = 'ECON_DEV' AND default_sms_lead_hours IS NULL`
+  );
+
+  // Voice defaults = null (you can turn them on later if you want)
+  await db.run(
+    `UPDATE programs
+     SET default_voice_lead_hours = NULL
+     WHERE default_voice_lead_hours IS NULL`
+  );
+
   await db.exec(`
     CREATE TABLE IF NOT EXISTS goals (
       id TEXT PRIMARY KEY,
