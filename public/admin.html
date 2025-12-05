@@ -1054,12 +1054,12 @@
         (c.dateOfBirth || "N/A") +
         "<br/>Programs: " +
         (c.programs && c.programs.length ? c.programs.join(", ") : "None");
-      loadClientSummary();
       loadAssignmentsForClient();
       loadAppointmentsForClient();
       loadEncountersForClient();
       loadAssessmentsForClient();
       loadGoalsForClient();
+      loadClientSummary();
     }
 
     async function loadClientSummary() {
