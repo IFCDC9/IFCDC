@@ -1,7 +1,7 @@
 /* IFCDC Brand Palette */
 :root {
-  --ifcdc-bg: #000000;
-  --ifcdc-bg-soft: #101010;
+  --ifcdc-bg: #1a1a1a;         /* deep charcoal — not full black */
+  --ifcdc-bg-soft: #222222;    /* softer dark section background */
   --ifcdc-gold: #d4af37;
 }
 
