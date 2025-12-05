@@ -345,6 +345,67 @@ async function logAudit(req: express.Request, entityType: string, entityId: stri
   );
 }
 
+async function findAppointmentsNeedingReminder(leadHours: number) {
+  const now = new Date();
+  const windowEnd = new Date(now.getTime() + leadHours * 60 * 60 * 1000);
+
+  const nowIso = now.toISOString();
+  const endIso = windowEnd.toISOString();
+
+  const rows = await db.all<any[]>(
+    `
+    SELECT a.id, a.client_id, a.program, a.start_time, a.location,
+           c.full_name, c.phone
+    FROM appointments a
+    JOIN clients c ON c.id = a.client_id
+    WHERE a.start_time >= ?
+      AND a.start_time < ?
+      AND c.phone IS NOT NULL
+      AND c.phone <> ''
+      AND NOT EXISTS (
+        SELECT 1
+        FROM appointment_notifications an
+        WHERE an.appointment_id = a.id
+          AND an.channel = 'SMS'
+          AND an.lead_hour = ?
+      )
+    ORDER BY a.start_time ASC
+    `,
+    nowIso,
+    endIso,
+    leadHours
+  );
+
+  return rows;
+}
+
+async function recordAppointmentNotification(
+  appointmentId: string,
+  channel: string,
+  leadHours: number,
+  status: string,
+  errorMessage?: string | null
+) {
+  const id = cryptoRandomId();
+  const created_at = new Date().toISOString();
+
+  await db.run(
+    `
+    INSERT INTO appointment_notifications (
+      id, appointment_id, channel, lead_hour, status, error, created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    `,
+    id,
+    appointmentId,
+    channel,
+    leadHours,
+    status,
+    errorMessage || null,
+    created_at
+  );
+}
+
 async function authRequired(req: express.Request, res: express.Response, next: express.NextFunction) {
   const authHeader = req.header("Authorization") || "";
   let token = authHeader.startsWith("Bearer ") ? authHeader.replace("Bearer ", "") : null;
