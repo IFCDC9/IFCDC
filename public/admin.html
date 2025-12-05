@@ -1069,13 +1069,24 @@
         (c.dateOfBirth || "N/A") +
         "<br/>Programs: " +
         (c.programs && c.programs.length ? c.programs.join(", ") : "None");
+
+      // Sync channel selector
+      const chanSelect = document.getElementById("client-notify-channel");
+      if (chanSelect) {
+        const v = (c.notifyChannel || "").toUpperCase();
+        if (["SMS", "VOICE", "BOTH", "NONE"].includes(v)) {
+          chanSelect.value = v;
+        } else {
+          chanSelect.value = "";
+        }
+      }
+
       loadAssignmentsForClient();
       loadAppointmentsForClient();
       loadEncountersForClient();
       loadAssessmentsForClient();
       loadGoalsForClient();
       loadClientSummary();
-      loadNotifyChannelForClient();
     }
 
     async function loadClientSummary() {
@@ -1312,35 +1323,6 @@
     };
 
     // Notification preferences
-    async function loadNotifyChannelForClient() {
-      const selectEl = document.getElementById("client-notify-channel");
-      const statusEl = document.getElementById("client-notify-status");
-      if (!selectEl) return;
-
-      if (!state.selectedClientId) {
-        selectEl.value = "";
-        if (statusEl) statusEl.textContent = "";
-        return;
-      }
-
-      try {
-        const res = await fetch("/api/clients/" + state.selectedClientId, {
-          headers: getAuthHeaders(),
-        });
-        const data = await res.json();
-        if (res.ok && data) {
-          const chan = (data.notifyChannel || "").toUpperCase();
-          if (["SMS", "VOICE", "BOTH", "NONE"].includes(chan)) {
-            selectEl.value = chan;
-          } else {
-            selectEl.value = "";
-          }
-        }
-      } catch (e) {
-        console.error("Failed to load notify channel", e);
-      }
-    }
-
     document.getElementById("client-notify-save").onclick = async () => {
       const statusEl = document.getElementById("client-notify-status");
       if (!state.selectedClientId) {
