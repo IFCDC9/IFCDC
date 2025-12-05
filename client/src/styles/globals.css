@@ -1498,11 +1498,11 @@ body {
 /* ===== IFCDC HEADER ===== */
 .ifcdc-header {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  background: #000;
-  padding: 10px 30px;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.7);
+  align-items: center;
+  padding: 12px 24px;
+  background: #000000;
+  border-bottom: 1px solid #333;
   position: sticky;
   top: 0;
   z-index: 100;
@@ -1519,31 +1519,36 @@ body {
 }
 
 .ifcdc-logo {
-  height: 50px;
+  height: 48px;
   object-fit: contain;
 }
 
 .ifcdc-nav-actions {
   display: flex;
   align-items: center;
-  gap: 1rem;
 }
 
 .ifcdc-nav-link {
-  color: #D4AF37;
-  font-weight: 700;
+  margin-left: 18px;
   text-decoration: none;
-  text-shadow: 0 0 4px rgba(212,175,55,.6);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #d4af37;
+  text-shadow: 0 0 3px rgba(212, 175, 55, 0.7);
+  transition: transform 0.15s ease, text-shadow 0.15s ease, opacity 0.15s;
 }
 
 .ifcdc-nav-link:hover {
-  text-decoration: underline;
+  transform: translateY(-1px);
+  text-shadow: 0 0 7px rgba(212, 175, 55, 1);
+  opacity: 0.95;
 }
 
 .ifcdc-nav-primary {
-  padding: 0.25rem 0.75rem;
-  border: 1px solid #D4AF37;
+  padding: 6px 14px;
   border-radius: 999px;
+  border: 1px solid #d4af37;
+  box-shadow: 0 0 6px rgba(212, 175, 55, 0.6);
 }
 
 .ifcdc-main {
