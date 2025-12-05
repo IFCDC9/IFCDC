@@ -1064,16 +1064,19 @@ app.post("/api/clients/:id/goals", authRequired, requireRole(ROLES.EXEC, ROLES.C
   });
 });
 
-// Update client notification channel preference
+// ----- Client notification preferences -----
 app.patch(
-  "/api/clients/:id/notify-channel",
+  "/api/clients/:id/notification-preferences",
   authRequired,
   requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
   async (req, res) => {
     const clientId = req.params.id;
     const { notifyChannel } = req.body || {};
 
-    const client = await db.get<{ id: string }>("SELECT id FROM clients WHERE id = ?", clientId);
+    const client = await db.get<{ id: string }>(
+      "SELECT id FROM clients WHERE id = ?",
+      clientId
+    );
     if (!client) {
       return res.status(404).json({ error: "Client not found" });
     }
@@ -1081,17 +1084,26 @@ app.patch(
       return res.status(403).json({ error: "Forbidden" });
     }
 
-    const normalized = normalizeChannel(notifyChannel);
+    let value: string | null = notifyChannel;
+    if (value != null) {
+      value = normalizeChannel(value);
+    }
 
     await db.run(
-      `UPDATE clients SET notify_channel = ? WHERE id = ?`,
-      normalized,
+      `
+      UPDATE clients
+      SET notify_channel = ?
+      WHERE id = ?
+      `,
+      value,
       clientId
     );
 
-    await logAudit(req, "CLIENT", clientId, "UPDATE_NOTIFY_CHANNEL", { notifyChannel: normalized });
+    await logAudit(req, "CLIENT", clientId, "UPDATE_NOTIFY_CHANNEL", {
+      notifyChannel: value,
+    });
 
-    res.json({ ok: true, notifyChannel: normalized });
+    res.json({ ok: true, notifyChannel: value });
   }
 );
 
