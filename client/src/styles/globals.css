@@ -1496,11 +1496,10 @@ body {
 }
 
 /* ===== IFCDC HEADER / TOP BAR ===== */
-.top-bar,
-.ifcdc-header {
+.top-bar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
   background: #000;
   padding: 10px 30px;
   box-shadow: 0 2px 6px rgba(0,0,0,0.7);
@@ -1509,14 +1508,12 @@ body {
   z-index: 100;
 }
 
-.logo-area,
-.logo-container {
+.logo-area {
   display: flex;
   align-items: center;
 }
 
-.logo-area a,
-.logo-container a {
+.logo-area a {
   display: flex;
   align-items: center;
 }
@@ -1526,15 +1523,14 @@ body {
   object-fit: contain;
 }
 
-.top-nav,
-.ifcdc-nav {
+.top-nav {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 1.5rem;
+  margin-left: auto;
 }
 
-.top-nav .nav-link,
-.ifcdc-nav .nav-link {
+.top-nav .nav-link {
   text-decoration: none;
   color: #f0f0f0;
   text-transform: uppercase;
@@ -1544,34 +1540,25 @@ body {
   transition: opacity 0.2s ease;
 }
 
-.top-nav .nav-link:hover,
-.ifcdc-nav .nav-link:hover {
+.top-nav .nav-link:hover {
   opacity: 1;
 }
 
 .nav-link-gold {
-  color: #d4af37 !important;
   font-weight: 600;
-  opacity: 1 !important;
+  text-decoration: none;
+  color: #d4af37;
 }
 
 .nav-link-outline {
-  border: 1px solid rgba(212, 175, 55, 0.6);
-  padding: 6px 14px;
-  border-radius: 4px;
-  transition: background 0.2s ease, border-color 0.2s ease;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid #d4af37;
+  border-radius: 999px;
 }
 
-.nav-link-outline:hover {
-  background: rgba(212, 175, 55, 0.15);
-  border-color: #d4af37;
-}
-
-.auth-actions,
-.nav-auth {
+.auth-actions {
   display: flex;
-  gap: 10px;
-  margin-left: 20px;
+  gap: 0.75rem;
 }
 
 /* GOLD 3D BUTTONS */
