@@ -1064,6 +1064,37 @@ app.post("/api/clients/:id/goals", authRequired, requireRole(ROLES.EXEC, ROLES.C
   });
 });
 
+// Update client notification channel preference
+app.patch(
+  "/api/clients/:id/notify-channel",
+  authRequired,
+  requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
+  async (req, res) => {
+    const clientId = req.params.id;
+    const { notifyChannel } = req.body || {};
+
+    const client = await db.get<{ id: string }>("SELECT id FROM clients WHERE id = ?", clientId);
+    if (!client) {
+      return res.status(404).json({ error: "Client not found" });
+    }
+    if (!(await hasClientAccess(req.user, client.id))) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const normalized = normalizeChannel(notifyChannel);
+
+    await db.run(
+      `UPDATE clients SET notify_channel = ? WHERE id = ?`,
+      normalized,
+      clientId
+    );
+
+    await logAudit(req, "CLIENT", clientId, "UPDATE_NOTIFY_CHANNEL", { notifyChannel: normalized });
+
+    res.json({ ok: true, notifyChannel: normalized });
+  }
+);
+
 // Update goal status / notes
 app.patch("/api/clients/:clientId/goals/:goalId", authRequired, requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER), async (req, res) => {
   const { clientId, goalId } = req.params;
