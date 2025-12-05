@@ -13,7 +13,9 @@ const PORT = parseInt(process.env.PORT || "5000", 10);
 const {
   TWILIO_ACCOUNT_SID,
   TWILIO_AUTH_TOKEN,
-  TWILIO_FROM_NUMBER,
+  TWILIO_SMS_FROM,
+  TWILIO_VOICE_FROM,
+  PUBLIC_IFCDC_PHONE,
 } = process.env;
 
 const twilioClient =
@@ -28,7 +30,7 @@ async function sendReminderSms(to: string, body: string) {
   }
   await twilioClient.messages.create({
     to,
-    from: TWILIO_FROM_NUMBER,
+    from: TWILIO_SMS_FROM,
     body,
   });
 }

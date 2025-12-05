@@ -103,4 +103,9 @@ Preferred communication style: Simple, everyday language.
 - `+18587588791` - IFCDC Radio line (voicemail for shoutouts)
 - Default - General IFCDC greeting
 
-**Note**: Twilio integration is configured manually (not using Replit integration). If credentials are needed in the future, they should be stored as TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN secrets.
+**Twilio Environment Variables** (configured manually, not using Replit integration):
+- `TWILIO_ACCOUNT_SID` - Twilio Account SID
+- `TWILIO_AUTH_TOKEN` - Twilio Auth Token
+- `TWILIO_SMS_FROM` - Default "from" number for SMS messages
+- `TWILIO_VOICE_FROM` - Default "from" number for voice calls
+- `PUBLIC_IFCDC_PHONE` - Main IFCDC callback number to read out in greetings
