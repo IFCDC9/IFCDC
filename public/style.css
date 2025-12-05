@@ -21,6 +21,18 @@
 
 .ifcdc-brand {
   display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.ifcdc-logo {
+  height: 48px;
+  width: auto;
+  border-radius: 6px;
+}
+
+.ifcdc-brand-text {
+  display: flex;
   flex-direction: column;
 }
 
