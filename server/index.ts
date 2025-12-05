@@ -62,8 +62,24 @@ async function sendSafeSms(to: string, body: string) {
 
   return twilioClient!.messages.create({
     to: toNorm,
-    from: TWILIO_SMS_FROM,
+    from: TWILIO_SMS_FROM!,
     body,
+  });
+}
+
+async function sendVoiceReminderCall(to: string, appointmentId: string) {
+  ensureTwilioConfigured();
+  const toNorm = normalizePhone(to);
+  if (!toNorm) {
+    throw new Error("Invalid phone number");
+  }
+
+  const baseUrl = process.env.PUBLIC_APP_URL || "https://your-app-url.example.com";
+
+  return twilioClient!.calls.create({
+    to: toNorm,
+    from: TWILIO_VOICE_FROM!,
+    url: `${baseUrl}/twilio/voice/reminder?appointmentId=${encodeURIComponent(appointmentId)}`,
   });
 }
 
