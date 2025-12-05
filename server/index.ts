@@ -1466,9 +1466,10 @@ app.post(
         location: string;
         full_name: string;
         phone: string;
+        notify_channel: string | null;
       }>(
         `SELECT a.id, a.client_id, a.program, a.start_time, a.location,
-                c.full_name, c.phone
+                c.full_name, c.phone, c.notify_channel
          FROM appointments a
          JOIN clients c ON c.id = a.client_id
          WHERE a.id = ?`,
@@ -1481,6 +1482,10 @@ app.post(
 
       if (!(await hasClientAccess(req.user, appt.client_id))) {
         return res.status(403).json({ error: "Forbidden" });
+      }
+
+      if (!isSmsAllowedForChannel(appt.notify_channel)) {
+        return res.status(400).json({ error: "Client has opted out of SMS notifications" });
       }
 
       if (!appt.phone) {
@@ -1555,9 +1560,10 @@ app.post(
         start_time: string;
         full_name: string;
         phone: string;
+        notify_channel: string | null;
       }>(
         `SELECT a.id, a.client_id, a.program, a.start_time,
-                c.full_name, c.phone
+                c.full_name, c.phone, c.notify_channel
          FROM appointments a
          JOIN clients c ON c.id = a.client_id
          WHERE a.id = ?`,
@@ -1570,6 +1576,10 @@ app.post(
 
       if (!(await hasClientAccess(req.user, appt.client_id))) {
         return res.status(403).json({ error: "Forbidden" });
+      }
+
+      if (!isVoiceAllowedForChannel(appt.notify_channel)) {
+        return res.status(400).json({ error: "Client has opted out of voice notifications" });
       }
 
       if (!appt.phone) {
