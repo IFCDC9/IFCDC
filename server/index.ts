@@ -1555,7 +1555,7 @@ async function buildProgramDashboardForUser(user: { id: string; role: string }, 
   };
 }
 
-// ----- Reports: Program Dashboard -----
+// ----- Reports: Program Dashboard (JSON) -----
 app.get(
   "/api/reports/program-dashboard",
   authRequired,
@@ -1565,26 +1565,26 @@ app.get(
       let { program, from, to } = req.query as { program?: string; from?: string; to?: string };
 
       if (!program) {
-        return res.status(400).json({ error: "program query parameter is required" });
+        return res.status(400).json({ error: "program is required" });
       }
 
       const now = new Date();
       if (!from || !to) {
         const end = now;
         const start = new Date(now);
-        start.setDate(start.getDate() - 30);
+        start.setDate(start.getDate() - 90);
         from = from || start.toISOString();
         to = to || end.toISOString();
       }
 
-      const dashboard = await buildProgramDashboardForUser(req.user!, program, from, to);
+      const report = await buildProgramDashboardForUser(req.user!, program, from, to);
 
-      await logAudit(req, "REPORT", null, "REPORT_PROGRAM_DASHBOARD", { program, from, to });
+      await logAudit(req, "REPORT", null, "REPORT_PROGRAM_DASHBOARD_JSON", { program, from, to });
 
-      res.json(dashboard);
+      res.json(report);
     } catch (err) {
       console.error("Error in /api/reports/program-dashboard:", err);
-      res.status(500).json({ error: "Failed to build program dashboard" });
+      res.status(500).json({ error: "Failed to build program dashboard report" });
     }
   }
 );
