@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Client Intake Form | IFCDC</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta
+    name="description"
+    content="IFCDC Client Intake Form – Submit your information to connect with Imperial Foundation Community Development Center services."
+  />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <section class="ifcdc-form-shell">
+    <div class="ifcdc-form-card">
+      <div class="ifcdc-form-header">
+        <img src="/ifcdc-logo.png" alt="IFCDC Logo" class="ifcdc-form-logo" />
+        <div class="ifcdc-form-header-text">
+          <h1>IFCDC Client Intake Form</h1>
+          <p>Imperial Foundation Community Development Center</p>
+        </div>
+      </div>
+
+      <form action="/submit-intake" method="POST" class="ifcdc-form">
+        <div class="ifcdc-form-row">
+          <label for="fullName">Full Name</label>
+          <input id="fullName" name="fullName" type="text" required />
+        </div>
+
+        <div class="ifcdc-form-row">
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" required />
+        </div>
+
+        <div class="ifcdc-form-row">
+          <label for="phone">Phone</label>
+          <input id="phone" name="phone" type="tel" />
+        </div>
+
+        <div class="ifcdc-form-row">
+          <label for="dob">Date of Birth</label>
+          <input id="dob" name="dob" type="date" />
+        </div>
+
+        <div class="ifcdc-form-row">
+          <label for="program">Program of Interest</label>
+          <select id="program" name="program">
+            <option value="">Select a program</option>
+            <option value="mental-health">Mental Health & Wellness</option>
+            <option value="housing">Transitional Housing</option>
+            <option value="anti-gang">Anti-Gang & Violence Prevention</option>
+            <option value="economic-dev">Economic Development</option>
+            <option value="youth">Youth Programs</option>
+            <option value="workforce">Workforce Development</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+
+        <div class="ifcdc-form-row">
+          <label for="notes">Additional Notes</label>
+          <textarea id="notes" name="notes" rows="4" placeholder="Tell us how we can help..."></textarea>
+        </div>
+
+        <button type="submit" class="ifcdc-button-primary">
+          Submit Form
+        </button>
+      </form>
+    </div>
+  </section>
+</body>
+</html>

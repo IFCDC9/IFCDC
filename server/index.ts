@@ -630,6 +630,7 @@ app.get("/roi", (req, res) => res.sendFile(path.join(publicDir, "roi.html")));
 app.get("/programs", (req, res) => res.sendFile(path.join(publicDir, "programs.html")));
 app.get("/contact", (req, res) => res.sendFile(path.join(publicDir, "contact.html")));
 app.get("/admin", (req, res) => res.sendFile(path.join(publicDir, "admin.html")));
+app.get("/intake", (req, res) => res.sendFile(path.join(publicDir, "intake.html")));
 
 app.post("/auth/login", async (req, res) => {
   const { email, password } = req.body || {};

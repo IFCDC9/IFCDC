@@ -173,3 +173,133 @@
   font-size: 0.8rem;
   opacity: 0.7;
 }
+
+/* ===== IFCDC FORM STYLES ===== */
+
+.ifcdc-form-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
+}
+
+.ifcdc-form-card {
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.1);
+  max-width: 560px;
+  width: 100%;
+  padding: 2rem;
+}
+
+.ifcdc-form-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 2px solid #e0e0e0;
+}
+
+.ifcdc-form-logo {
+  height: 56px;
+  width: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.15));
+}
+
+.ifcdc-form-header-text h1 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0 0 4px 0;
+  color: #1a1a1a;
+}
+
+.ifcdc-form-header-text p {
+  font-size: 0.85rem;
+  margin: 0;
+  color: #666;
+}
+
+.ifcdc-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.ifcdc-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ifcdc-form-row label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.ifcdc-form-row input,
+.ifcdc-form-row textarea,
+.ifcdc-form-row select {
+  padding: 0.75rem 1rem;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-family: inherit;
+  background: #fafafa;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.ifcdc-form-row input:focus,
+.ifcdc-form-row textarea:focus,
+.ifcdc-form-row select:focus {
+  outline: none;
+  border-color: #3f51b5;
+  box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.15);
+  background: #ffffff;
+}
+
+.ifcdc-form-row textarea {
+  resize: vertical;
+  min-height: 100px;
+}
+
+.ifcdc-button-primary {
+  padding: 0.875rem 1.5rem;
+  background: #3f51b5;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+}
+
+.ifcdc-button-primary:hover {
+  background: #303f9f;
+}
+
+.ifcdc-button-primary:active {
+  transform: scale(0.98);
+}
+
+/* Mobile optimization for forms */
+@media (max-width: 600px) {
+  .ifcdc-form-card {
+    padding: 1.5rem;
+  }
+  .ifcdc-form-header {
+    flex-direction: column;
+    text-align: center;
+  }
+  .ifcdc-form-logo {
+    height: 48px;
+  }
+  .ifcdc-form-header-text h1 {
+    font-size: 1.1rem;
+  }
+}
