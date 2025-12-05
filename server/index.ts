@@ -2225,6 +2225,26 @@ app.get(
   }
 );
 
+// ----- Twilio Voice Webhook: Reminder Message (no PHI) -----
+app.post("/twilio/voice/reminder", async (req, res) => {
+  const VoiceResponse = twilio.twiml.VoiceResponse;
+  const twiml = new VoiceResponse();
+
+  const mainPhone = PUBLIC_IFCDC_PHONE || "our main office number";
+
+  const msg =
+    "Hello. This is a reminder from I. F. C. D. C. " +
+    "You have an upcoming appointment scheduled with our organization. " +
+    "If you need to cancel or reschedule, please call " +
+    mainPhone +
+    ". Thank you.";
+
+  twiml.say({ voice: "alice", language: "en-US" }, msg);
+
+  res.type("text/xml");
+  res.send(twiml.toString());
+});
+
 // ----- Twilio Voice Status Webhook -> Outreach tasks (NO AUTH) -----
 app.post(
   "/twilio/voice-status",
