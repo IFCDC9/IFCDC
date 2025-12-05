@@ -468,6 +468,56 @@ async function recordAppointmentNotification(
   );
 }
 
+async function findSmsReminderCandidates(
+  programMap: Record<string, { sms: number | null; voice: number | null }>,
+  globalFallbackHours: number
+): Promise<any[]> {
+  const now = new Date();
+  const windowEnd = new Date(now.getTime() + 96 * 60 * 60 * 1000);
+
+  const nowIso = now.toISOString();
+  const endIso = windowEnd.toISOString();
+
+  const rows = await db.all<any[]>(
+    `
+    SELECT a.id, a.client_id, a.program, a.start_time, a.location,
+           c.full_name, c.phone, c.notify_channel
+    FROM appointments a
+    JOIN clients c ON c.id = a.client_id
+    WHERE a.start_time >= ?
+      AND a.start_time < ?
+      AND c.phone IS NOT NULL
+      AND c.phone <> ''
+    ORDER BY a.start_time ASC
+    `,
+    nowIso,
+    endIso
+  );
+
+  const candidates: any[] = [];
+  for (const appt of rows) {
+    const chan = normalizeChannel(appt.notify_channel);
+    if (!isSmsAllowedForChannel(chan)) continue;
+
+    const programCode = appt.program || "";
+    const leadHours = resolveSmsLeadHours(programCode, programMap, globalFallbackHours);
+    if (!leadHours || leadHours <= 0) continue;
+
+    const start = new Date(appt.start_time);
+    const diffMs = start.getTime() - now.getTime();
+    const diffHours = diffMs / (60 * 60 * 1000);
+
+    if (diffHours < leadHours || diffHours >= leadHours + 24) continue;
+
+    const exists = await appointmentNotificationExists(appt.id, "SMS", leadHours);
+    if (exists) continue;
+
+    candidates.push({ ...appt, leadHours });
+  }
+
+  return candidates;
+}
+
 async function appointmentNotificationExists(
   appointmentId: string,
   channel: string,
