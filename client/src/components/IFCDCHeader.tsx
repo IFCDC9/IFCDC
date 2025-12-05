@@ -7,6 +7,7 @@ export default function IFCDCHeader() {
       <div className="ifcdc-logo-wrap">
         <Link to="/">
           <img src="/assets/ifcdc-logo.png" alt="IFCDC" className="ifcdc-logo" />
+          <span className="ifcdc-brand-text">IFCDC</span>
         </Link>
       </div>
 
