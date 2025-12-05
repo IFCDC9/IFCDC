@@ -1730,3 +1730,34 @@ body {
   color: #aaaaaa;
   line-height: 1.4;
 }
+
+/* Phone Links */
+.phone-links {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.phone-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.95rem;
+  color: #cccccc;
+}
+
+.phone-line span {
+  color: #888888;
+}
+
+.phone-link {
+  color: #d4af37;
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.2s ease, text-shadow 0.2s ease;
+}
+
+.phone-link:hover {
+  color: #f0d060;
+  text-shadow: 0 0 8px rgba(212, 175, 55, 0.5);
+}
