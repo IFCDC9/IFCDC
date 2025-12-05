@@ -2,6 +2,7 @@ import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import { useAuth } from "./auth/AuthContext";
+import IFCDCHeader from "./components/IFCDCHeader";
 
 import AdminLayout from "./layouts/AdminLayout";
 import AdminDashboard from "./dashboards/AdminDashboard";
@@ -33,6 +34,7 @@ const RoleRouter: React.FC = () => {
 const App: React.FC = () => {
   return (
     <BrowserRouter>
+      <IFCDCHeader />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
 
