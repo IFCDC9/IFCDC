@@ -2,7 +2,6 @@ import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import { useAuth } from "./auth/AuthContext";
-import IFCDCHeader from "./components/IFCDCHeader";
 
 import AdminLayout from "./layouts/AdminLayout";
 import AdminDashboard from "./dashboards/AdminDashboard";
@@ -17,6 +16,7 @@ import BarberDashboard from "./dashboards/BarberDashboard";
 import RadioDashboard from "./dashboards/RadioDashboard";
 import MyTimeEntriesPage from "./pages/MyTimeEntriesPage";
 import LoginPage from "./pages/LoginPage";
+import RegisterPage from "./pages/RegisterPage";
 
 const RoleRouter: React.FC = () => {
   const { user } = useAuth();
@@ -34,9 +34,9 @@ const RoleRouter: React.FC = () => {
 const App: React.FC = () => {
   return (
     <BrowserRouter>
-      <IFCDCHeader />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
 
         <Route
           path="/"

@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>IFCDC Register</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <!-- HEADER -->
+  <header class="ifcdc-header">
+    <div class="logo-container">
+      <a href="/"><img src="/assets/ifcdc-logo.png" class="ifcdc-logo" alt="IFCDC Logo"></a>
+    </div>
+    <nav class="ifcdc-nav">
+      <a href="/" class="nav-link">Home</a>
+      <a href="/radio.html" class="nav-link">Radio</a>
+      <a href="/barber.html" class="nav-link">Barbers</a>
+      <a href="/client.html" class="nav-link">Community</a>
+      <div class="nav-auth">
+        <a href="/login.html" class="nav-button gold-3d">Login</a>
+        <a href="/register.html" class="nav-button gold-3d">Register</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <section class="auth-wrapper">
+      <h1 class="auth-title">Create an Account</h1>
+      <p class="auth-subtitle">
+        Register once and plug into IFCDC Barbers, Radio, and Community programs.
+      </p>
+
+      <div id="register-message"></div>
+
+      <form id="register-form">
+        <div class="auth-form-group">
+          <label for="name">Full Name</label>
+          <input id="name" name="name" type="text" required autocomplete="name">
+        </div>
+
+        <div class="auth-form-group">
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" required autocomplete="email">
+        </div>
+
+        <div class="auth-form-group">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" required minlength="6">
+        </div>
+
+        <div class="auth-form-group">
+          <label for="role">Role</label>
+          <select id="role" name="role" required>
+            <!-- You can lock this to "client" in production -->
+            <option value="client" selected>Client / Community</option>
+            <option value="barber">Barber</option>
+            <option value="radio">Radio Ops</option>
+            <option value="admin">Admin (IFCDC Internal)</option>
+          </select>
+        </div>
+
+        <button type="submit" class="nav-button gold-3d auth-submit">Create Account</button>
+      </form>
+
+      <div class="auth-footer">
+        Already have an account?
+        <a href="/login.html">Login here</a>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    document.getElementById('register-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const name = document.getElementById('name').value.trim();
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value.trim();
+      const role = document.getElementById('role').value;
+      const msgBox = document.getElementById('register-message');
+      msgBox.innerHTML = '';
+
+      try {
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email, password, role })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          msgBox.innerHTML = `<p class="auth-error">${data.error || 'Registration failed'}</p>`;
+          return;
+        }
+
+        msgBox.innerHTML = `<p class="auth-success">Account created. Redirecting to login…</p>`;
+        setTimeout(() => {
+          window.location.href = '/login.html';
+        }, 1000);
+      } catch (err) {
+        msgBox.innerHTML = `<p class="auth-error">Network error. Try again.</p>`;
+      }
+    });
+  </script>
+</body>
+</html>
