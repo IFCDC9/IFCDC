@@ -1,3 +1,10 @@
+/* IFCDC Brand Palette */
+:root {
+  --ifcdc-bg: #000000;
+  --ifcdc-bg-soft: #101010;
+  --ifcdc-gold: #d4af37;
+}
+
 * {
   margin: 0;
   padding: 0;
