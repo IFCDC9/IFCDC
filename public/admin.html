@@ -312,6 +312,10 @@
             No client selected.
           </div>
 
+          <h3 style="font-size:1rem; margin-top:0.6rem;">Client 360° Snapshot</h3>
+          <p id="client-summary-status" style="font-size:0.8rem; margin-bottom:0.3rem;"></p>
+          <div id="client-summary" style="font-size:0.86rem;"></div>
+
           <h3 style="font-size:1rem; margin-top:0.75rem;">Assignments</h3>
           <p style="font-size:0.8rem;">
             Choose a client on the left, then assign a clinician or case manager below.
@@ -1051,7 +1055,12 @@
 
     async function loadClientSummary(clientId) {
       const infoEl = document.getElementById("selected-client-info");
-      infoEl.innerHTML = "Loading client summary...";
+      const statusEl = document.getElementById("client-summary-status");
+      const summaryEl = document.getElementById("client-summary");
+
+      statusEl.textContent = "Loading 360° snapshot...";
+      statusEl.style.color = "#c5e1a5";
+      summaryEl.innerHTML = "";
 
       try {
         const res = await fetch("/api/clients/" + clientId + "/summary", {
@@ -1059,14 +1068,19 @@
         });
         const data = await res.json();
         if (!res.ok) {
-          infoEl.innerHTML = data.error || "Failed to load client summary.";
+          statusEl.textContent = data.error || "Failed to load summary.";
+          statusEl.style.color = "#ff8a80";
           return;
         }
 
-        let html = "<strong>" + data.fullName + "</strong><br/>" +
+        // Basic info in selected-client-info
+        infoEl.innerHTML = "<strong>" + data.fullName + "</strong><br/>" +
           "ID: " + data.clientId + "<br/>" +
           "DOB: " + (data.dateOfBirth || "N/A") + "<br/>" +
           "Programs: " + (data.programs && data.programs.length ? data.programs.join(", ") : "None");
+
+        // 360 snapshot in client-summary
+        let html = "";
 
         // Risk section
         if (data.risk) {
@@ -1110,9 +1124,15 @@
           html += '</div>';
         }
 
-        infoEl.innerHTML = html;
+        if (!html) {
+          html = '<span style="opacity:0.7;">No risk, appointments, encounters, or goals on record.</span>';
+        }
+
+        statusEl.textContent = "";
+        summaryEl.innerHTML = html;
       } catch (e) {
-        infoEl.innerHTML = "Error loading client summary.";
+        statusEl.textContent = "Error loading 360° snapshot.";
+        statusEl.style.color = "#ff8a80";
       }
     }
 
