@@ -593,8 +593,13 @@ function resolveVoiceLeadHours(
 }
 
 async function authRequired(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const authHeader = req.header("Authorization") || "";
-  let token = authHeader.startsWith("Bearer ") ? authHeader.replace("Bearer ", "") : null;
+  // Check cookie first, then Authorization header, then query string
+  let token = req.cookies?.ifcdc_token || null;
+  
+  if (!token) {
+    const authHeader = req.header("Authorization") || "";
+    token = authHeader.startsWith("Bearer ") ? authHeader.replace("Bearer ", "") : null;
+  }
 
   // Also support token via query string (for CSV downloads)
   if (!token && req.query.token) {
@@ -602,7 +607,7 @@ async function authRequired(req: express.Request, res: express.Response, next: e
   }
 
   if (!token) {
-    return res.status(401).json({ error: "Missing or invalid Authorization header" });
+    return res.status(401).json({ error: "Not authenticated" });
   }
 
   try {
@@ -649,33 +654,92 @@ app.get("/contact", (req, res) => res.sendFile(path.join(publicDir, "contact.htm
 app.get("/admin", (req, res) => res.sendFile(path.join(publicDir, "admin.html")));
 app.get("/intake", (req, res) => res.sendFile(path.join(publicDir, "intake.html")));
 
-app.post("/auth/login", async (req, res) => {
-  const { email, password } = req.body || {};
-  if (!email || !password) {
-    return res.status(400).json({ error: "email and password required" });
+// REGISTER
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { name, email, password, role } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const lowerEmail = email.toLowerCase();
+
+    const existing = await db.get("SELECT 1 FROM users WHERE email = ?", lowerEmail);
+    if (existing) {
+      return res.status(409).json({ error: 'Email already registered' });
+    }
+
+    const allowedRoles = ['client', 'barber', 'radio', 'admin'];
+    const finalRole = allowedRoles.includes(role) ? role : 'client';
+
+    const id = cryptoRandomId();
+    const password_hash = await bcrypt.hash(password, 10);
+    const created_at = new Date().toISOString();
+
+    await db.run(
+      `INSERT INTO users (id, name, email, role, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      id, name, lowerEmail, finalRole, password_hash, created_at
+    );
+
+    await logAudit(
+      { method: "POST", originalUrl: "/api/auth/register" } as express.Request,
+      "USER", id, "REGISTER", { role: finalRole }
+    );
+
+    return res.status(201).json({ message: 'User created', role: finalRole });
+  } catch (err) {
+    console.error('Register error', err);
+    return res.status(500).json({ error: 'Server error' });
   }
+});
 
-  const user = await db.get<User>("SELECT * FROM users WHERE email = ?", email);
-  if (!user) {
-    return res.status(401).json({ error: "Invalid credentials" });
+// LOGIN
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const lowerEmail = (email || '').toLowerCase();
+
+    const user = await db.get<User>("SELECT * FROM users WHERE email = ?", lowerEmail);
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const token = jwt.sign({ sub: user.id, role: user.role, name: user.name }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+
+    res.cookie('ifcdc_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
+    await logAudit(
+      { method: "POST", originalUrl: "/api/auth/login", user: { id: user.id, name: user.name, email: user.email, role: user.role } } as express.Request,
+      "USER", user.id, "LOGIN", {}
+    );
+
+    return res.json({ message: 'Logged in', role: user.role, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+  } catch (err) {
+    console.error('Login error', err);
+    return res.status(500).json({ error: 'Server error' });
   }
+});
 
-  const match = await bcrypt.compare(password, user.password_hash);
-  if (!match) {
-    return res.status(401).json({ error: "Invalid credentials" });
-  }
+// LOGOUT
+app.post('/api/auth/logout', (req, res) => {
+  res.clearCookie('ifcdc_token');
+  return res.json({ message: 'Logged out' });
+});
 
-  const token = jwt.sign({ sub: user.id, role: user.role, name: user.name }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-
-  await logAudit(
-    { method: "POST", originalUrl: "/auth/login", user: { id: user.id, name: user.name, email: user.email, role: user.role } } as express.Request,
-    "USER", user.id, "LOGIN", {}
-  );
-
-  res.json({
-    token,
-    user: { id: user.id, name: user.name, email: user.email, role: user.role },
-  });
+// GET CURRENT USER
+app.get('/api/auth/me', authRequired, (req, res) => {
+  return res.json({ user: req.user });
 });
 
 // ----- Programs -----
