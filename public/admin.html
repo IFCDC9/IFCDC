@@ -358,6 +358,7 @@
           <p id="appt-status" style="font-size:0.8rem; margin-top:0.4rem;"></p>
 
           <h3 style="margin-top:0.75rem; font-size:1rem;">Client Appointments</h3>
+          <p id="appointments-status" style="font-size:0.8rem; margin-bottom:0.3rem;"></p>
           <div id="appt-list" class="admin-list" style="margin-bottom:0.75rem;"></div>
 
           <hr style="border:none; border-top:1px solid rgba(255,255,255,0.08); margin:0.75rem 0;" />
@@ -1296,37 +1297,71 @@
     };
 
     // Appointment reminder helpers
-    async function sendAppointmentSmsReminder(appointmentId) {
+    async function sendAppointmentSmsReminder(apptId) {
+      const statusEl = document.getElementById("appointments-status") || document.getElementById("client-summary-status");
+      if (statusEl) {
+        statusEl.textContent = "Sending SMS reminder...";
+        statusEl.style.color = "#c5e1a5";
+      }
+
       try {
-        const res = await fetch("/api/appointments/" + appointmentId + "/remind-sms", {
+        const res = await fetch("/api/appointments/" + apptId + "/remind-sms", {
           method: "POST",
           headers: getAuthHeaders(),
         });
         const data = await res.json();
         if (!res.ok) {
-          alert(data.error || "Failed to send SMS reminder.");
+          if (statusEl) {
+            statusEl.textContent = data.error || "Failed to send SMS reminder.";
+            statusEl.style.color = "#ff8a80";
+          }
           return;
         }
-        alert("SMS reminder sent successfully.");
+        if (statusEl) {
+          statusEl.textContent = "SMS reminder sent.";
+          statusEl.style.color = "#c5e1a5";
+        }
       } catch (err) {
-        alert("Error sending SMS reminder.");
+        if (statusEl) {
+          statusEl.textContent = "Error sending SMS reminder.";
+          statusEl.style.color = "#ff8a80";
+        }
       }
     }
 
-    async function sendAppointmentVoiceReminder(appointmentId) {
+    async function sendAppointmentVoiceReminder(apptId) {
+      const statusEl = document.getElementById("appointments-status") || document.getElementById("client-summary-status");
+      if (statusEl) {
+        statusEl.textContent = "Starting voice reminder call...";
+        statusEl.style.color = "#c5e1a5";
+      }
+
       try {
-        const res = await fetch("/api/appointments/" + appointmentId + "/remind-voice", {
-          method: "POST",
-          headers: getAuthHeaders(),
-        });
+        const res = await fetch(
+          "/api/appointments/" + apptId + "/remind-voice",
+          {
+            method: "POST",
+            headers: getAuthHeaders(),
+          }
+        );
         const data = await res.json();
         if (!res.ok) {
-          alert(data.error || "Failed to initiate voice reminder.");
+          if (statusEl) {
+            statusEl.textContent =
+              data.error || "Failed to start voice reminder.";
+            statusEl.style.color = "#ff8a80";
+          }
           return;
         }
-        alert("Voice reminder call initiated successfully.");
+        if (statusEl) {
+          statusEl.textContent = "Voice reminder call initiated.";
+          statusEl.style.color = "#c5e1a5";
+        }
       } catch (err) {
-        alert("Error initiating voice reminder.");
+        if (statusEl) {
+          statusEl.textContent = "Error starting voice reminder.";
+          statusEl.style.color = "#ff8a80";
+        }
       }
     }
 

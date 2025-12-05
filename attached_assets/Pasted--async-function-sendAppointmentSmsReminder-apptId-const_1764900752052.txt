@@ -1,0 +1,67 @@
+    async function sendAppointmentSmsReminder(apptId) {
+      const statusEl = document.getElementById("appointments-status") || document.getElementById("client-summary-status");
+      if (statusEl) {
+        statusEl.textContent = "Sending SMS reminder...";
+        statusEl.style.color = "#c5e1a5";
+      }
+
+      try {
+        const res = await fetch("/api/appointments/" + apptId + "/remind-sms", {
+          method: "POST",
+          headers: getAuthHeaders(),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          if (statusEl) {
+            statusEl.textContent = data.error || "Failed to send SMS reminder.";
+            statusEl.style.color = "#ff8a80";
+          }
+          return;
+        }
+        if (statusEl) {
+          statusEl.textContent = "SMS reminder sent.";
+          statusEl.style.color = "#c5e1a5";
+        }
+      } catch (err) {
+        if (statusEl) {
+          statusEl.textContent = "Error sending SMS reminder.";
+          statusEl.style.color = "#ff8a80";
+        }
+      }
+    }
+
+    async function sendAppointmentVoiceReminder(apptId) {
+      const statusEl = document.getElementById("appointments-status") || document.getElementById("client-summary-status");
+      if (statusEl) {
+        statusEl.textContent = "Starting voice reminder call...";
+        statusEl.style.color = "#c5e1a5";
+      }
+
+      try {
+        const res = await fetch(
+          "/api/appointments/" + apptId + "/remind-voice",
+          {
+            method: "POST",
+            headers: getAuthHeaders(),
+          }
+        );
+        const data = await res.json();
+        if (!res.ok) {
+          if (statusEl) {
+            statusEl.textContent =
+              data.error || "Failed to start voice reminder.";
+            statusEl.style.color = "#ff8a80";
+          }
+          return;
+        }
+        if (statusEl) {
+          statusEl.textContent = "Voice reminder call initiated.";
+          statusEl.style.color = "#c5e1a5";
+        }
+      } catch (err) {
+        if (statusEl) {
+          statusEl.textContent = "Error starting voice reminder.";
+          statusEl.style.color = "#ff8a80";
+        }
+      }
+    }
