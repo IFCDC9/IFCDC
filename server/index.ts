@@ -655,6 +655,7 @@ app.get("/contact", (req, res) => res.sendFile(path.join(publicDir, "contact.htm
 app.get("/admin", (req, res) => res.sendFile(path.join(publicDir, "admin.html")));
 app.get("/intake", (req, res) => res.sendFile(path.join(publicDir, "intake.html")));
 
+
 // REGISTER
 app.post('/api/auth/register', async (req, res) => {
   try {
@@ -3314,6 +3315,25 @@ app.post(
     res.json({ ok: true });
   }
 );
+
+// SPA catch-all: serve React app for client-side routes (production)
+const spaIndexPath = path.join(import.meta.dirname, "..", "dist", "public", "index.html");
+app.use(express.static(path.join(import.meta.dirname, "..", "dist", "public")));
+
+app.get("*", (req, res, next) => {
+  // Skip API routes and static file requests
+  if (req.path.startsWith("/api") || req.path.startsWith("/twilio")) {
+    return next();
+  }
+  
+  // Check if SPA build exists
+  if (fs.existsSync(spaIndexPath)) {
+    return res.sendFile(spaIndexPath);
+  }
+  
+  // Fallback to public index.html in development
+  return res.sendFile(path.join(publicDir, "index.html"));
+});
 
 initDb().then(() => {
   app.listen(PORT, "0.0.0.0", () => {
