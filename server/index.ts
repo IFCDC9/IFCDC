@@ -1484,8 +1484,11 @@ app.post(
         return res.status(403).json({ error: "Forbidden" });
       }
 
-      if (!isSmsAllowedForChannel(appt.notify_channel)) {
-        return res.status(400).json({ error: "Client has opted out of SMS notifications" });
+      const chan = normalizeChannel(appt.notify_channel);
+      if (!isSmsAllowedForChannel(chan)) {
+        return res.status(400).json({
+          error: "Client is not configured to receive SMS reminders.",
+        });
       }
 
       if (!appt.phone) {
@@ -1578,8 +1581,11 @@ app.post(
         return res.status(403).json({ error: "Forbidden" });
       }
 
-      if (!isVoiceAllowedForChannel(appt.notify_channel)) {
-        return res.status(400).json({ error: "Client has opted out of voice notifications" });
+      const chan = normalizeChannel(appt.notify_channel);
+      if (!isVoiceAllowedForChannel(chan)) {
+        return res.status(400).json({
+          error: "Client is not configured to receive voice reminders.",
+        });
       }
 
       if (!appt.phone) {
