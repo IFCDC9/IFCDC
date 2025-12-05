@@ -1270,6 +1270,79 @@ app.post(
   }
 );
 
+// ----- Appointment Notifications: SMS Reminder (by appointment ID) -----
+app.post(
+  "/api/appointments/:id/remind-sms",
+  authRequired,
+  requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER),
+  async (req, res) => {
+    try {
+      if (!twilioClient) {
+        return res.status(500).json({ error: "Twilio not configured on this server." });
+      }
+
+      const apptId = req.params.id;
+
+      const appt = await db.get<{
+        id: string;
+        client_id: string;
+        program: string;
+        start_time: string;
+        location: string;
+        full_name: string;
+        phone: string;
+      }>(
+        `SELECT a.id, a.client_id, a.program, a.start_time, a.location,
+                c.full_name, c.phone
+         FROM appointments a
+         JOIN clients c ON c.id = a.client_id
+         WHERE a.id = ?`,
+        apptId
+      );
+
+      if (!appt) {
+        return res.status(404).json({ error: "Appointment not found" });
+      }
+
+      if (!(await hasClientAccess(req.user, appt.client_id))) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      if (!appt.phone) {
+        return res.status(400).json({ error: "Client does not have a phone number on file" });
+      }
+
+      const body = buildSafeAppointmentReminderText(
+        { fullName: appt.full_name },
+        appt
+      );
+
+      const sms = await sendSafeSms(appt.phone, body);
+
+      await logAudit(req, "APPOINTMENT", apptId, "SEND_SMS_REMINDER", {
+        to: normalizePhone(appt.phone),
+        sid: sms.sid,
+      });
+
+      await db.run(
+        `INSERT INTO outreach_tasks (id, client_id, phone, channel, reason, status, created_at)
+         VALUES (?, ?, ?, ?, ?, 'OPEN', ?)`,
+        cryptoRandomId(),
+        appt.client_id,
+        normalizePhone(appt.phone),
+        "SMS",
+        "Appointment reminder sent",
+        new Date().toISOString()
+      );
+
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("Error sending SMS reminder:", err);
+      res.status(500).json({ error: "Failed to send SMS reminder" });
+    }
+  }
+);
+
 app.post(
   "/api/clients/:id/notify",
   authRequired,
