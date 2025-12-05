@@ -1530,9 +1530,10 @@ body {
 }
 
 .gold-link {
+  color: #D4AF37;
+  font-weight: 700;
   text-decoration: none;
-  font-weight: 600;
-  color: #d4af37;
+  text-shadow: 0 0 4px rgba(212,175,55,.6);
 }
 
 .gold-link:hover {
