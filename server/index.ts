@@ -38,6 +38,23 @@ function normalizePhone(raw: string | null | undefined): string | null {
   return digits || null;
 }
 
+function normalizeChannel(value: string | null | undefined): string {
+  if (!value) return "SMS";
+  const v = value.toString().toUpperCase();
+  if (["SMS", "VOICE", "BOTH", "NONE"].includes(v)) return v;
+  return "SMS";
+}
+
+function isSmsAllowedForChannel(channel: string | null | undefined): boolean {
+  const v = normalizeChannel(channel);
+  return v === "SMS" || v === "BOTH";
+}
+
+function isVoiceAllowedForChannel(channel: string | null | undefined): boolean {
+  const v = normalizeChannel(channel);
+  return v === "VOICE" || v === "BOTH";
+}
+
 function buildSafeAppointmentReminderText(client: any, appointment: any): string {
   const when = new Date(appointment.start_time || appointment.startTime);
   const dateStr = when.toLocaleDateString("en-US", {
