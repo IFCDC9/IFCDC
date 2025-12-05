@@ -468,6 +468,27 @@ async function recordAppointmentNotification(
   );
 }
 
+async function appointmentNotificationExists(
+  appointmentId: string,
+  channel: string,
+  leadHours: number
+): Promise<boolean> {
+  const row = await db.get(
+    `
+    SELECT 1
+    FROM appointment_notifications
+    WHERE appointment_id = ?
+      AND channel = ?
+      AND lead_hour = ?
+    LIMIT 1
+    `,
+    appointmentId,
+    channel,
+    leadHours
+  );
+  return !!row;
+}
+
 async function getProgramLeadHoursMap(): Promise<Record<string, { sms: number | null; voice: number | null }>> {
   const rows = await db.all<any[]>(
     `SELECT code, default_sms_lead_hours, default_voice_lead_hours FROM programs`
