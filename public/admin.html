@@ -53,6 +53,31 @@
     .admin-list-item:hover {
       background: rgba(255, 255, 255, 0.05);
     }
+    .admin-selected {
+      font-size: 0.88rem;
+      opacity: 0.95;
+    }
+    .admin-selected .summary-section {
+      margin-top: 0.75rem;
+      padding-top: 0.5rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .admin-selected .summary-section h4 {
+      font-size: 0.85rem;
+      margin: 0 0 0.3rem 0;
+      opacity: 0.9;
+    }
+    .admin-selected .risk-badge {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      margin-right: 0.4rem;
+    }
+    .admin-selected .risk-low { background: rgba(129, 199, 132, 0.3); border: 1px solid #81c784; }
+    .admin-selected .risk-moderate { background: rgba(255, 183, 77, 0.3); border: 1px solid #ffb74d; }
+    .admin-selected .risk-high { background: rgba(229, 115, 115, 0.3); border: 1px solid #e57373; }
+    .admin-selected .risk-unknown { background: rgba(158, 158, 158, 0.3); border: 1px solid #9e9e9e; }
     .badge {
       display: inline-block;
       padding: 0.1rem 0.4rem;
@@ -282,10 +307,10 @@
       <!-- RIGHT COLUMN: DETAILS / ASSIGNMENTS / ENCOUNTERS -->
       <div>
         <div class="admin-card">
-          <h2>Selected Client Details</h2>
-          <p id="selected-client-info" style="font-size:0.88rem; opacity:0.95;">
+          <h2>Selected Client</h2>
+          <div id="selected-client-info" class="admin-selected">
             No client selected.
-          </p>
+          </div>
 
           <h3 style="font-size:1rem; margin-top:0.75rem;">Assignments</h3>
           <p style="font-size:0.8rem;">
@@ -1016,20 +1041,79 @@
 
     function selectClient(c) {
       state.selectedClientId = c.id;
-      document.getElementById("selected-client-info").innerHTML =
-        "<strong>" +
-        c.fullName +
-        "</strong><br/>ID: " +
-        c.id +
-        "<br/>DOB: " +
-        (c.dateOfBirth || "N/A") +
-        "<br/>Programs: " +
-        (c.programs && c.programs.length ? c.programs.join(", ") : "None");
+      loadClientSummary(c.id);
       loadAssignmentsForClient();
       loadAppointmentsForClient();
       loadEncountersForClient();
       loadAssessmentsForClient();
       loadGoalsForClient();
+    }
+
+    async function loadClientSummary(clientId) {
+      const infoEl = document.getElementById("selected-client-info");
+      infoEl.innerHTML = "Loading client summary...";
+
+      try {
+        const res = await fetch("/api/clients/" + clientId + "/summary", {
+          headers: getAuthHeaders(),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          infoEl.innerHTML = data.error || "Failed to load client summary.";
+          return;
+        }
+
+        let html = "<strong>" + data.fullName + "</strong><br/>" +
+          "ID: " + data.clientId + "<br/>" +
+          "DOB: " + (data.dateOfBirth || "N/A") + "<br/>" +
+          "Programs: " + (data.programs && data.programs.length ? data.programs.join(", ") : "None");
+
+        // Risk section
+        if (data.risk) {
+          const sClass = (data.risk.suicideRisk || "UNKNOWN").toLowerCase();
+          const vClass = (data.risk.violenceRisk || "UNKNOWN").toLowerCase();
+          html += '<div class="summary-section"><h4>Risk Assessment</h4>';
+          html += '<span class="risk-badge risk-' + sClass + '">Suicide: ' + (data.risk.suicideRisk || "N/A") + '</span>';
+          html += '<span class="risk-badge risk-' + vClass + '">Violence: ' + (data.risk.violenceRisk || "N/A") + '</span>';
+          if (data.risk.safetyPlanNeeded) {
+            html += '<br/><span style="color:#ffb74d; font-size:0.8rem;">Safety Plan Needed</span>';
+          }
+          html += '<br/><span style="opacity:0.7; font-size:0.75rem;">As of ' + new Date(data.risk.createdAt).toLocaleDateString() + '</span>';
+          html += '</div>';
+        }
+
+        // Next appointment
+        if (data.nextAppointment) {
+          const appt = data.nextAppointment;
+          html += '<div class="summary-section"><h4>Next Appointment</h4>';
+          html += appt.program + ' - ' + new Date(appt.startTime).toLocaleString();
+          if (appt.location) html += '<br/>Location: ' + appt.location;
+          html += '</div>';
+        }
+
+        // Last encounter
+        if (data.lastEncounter) {
+          const enc = data.lastEncounter;
+          html += '<div class="summary-section"><h4>Last Encounter</h4>';
+          html += enc.program + ' / ' + enc.type + '<br/>';
+          html += '<span style="opacity:0.8;">' + (enc.notePreview || "No notes") + '</span>';
+          html += '<br/><span style="opacity:0.7; font-size:0.75rem;">' + new Date(enc.createdAt).toLocaleDateString() + '</span>';
+          html += '</div>';
+        }
+
+        // Active goals by program
+        if (data.activeGoalsByProgram && data.activeGoalsByProgram.length) {
+          html += '<div class="summary-section"><h4>Active Goals</h4>';
+          data.activeGoalsByProgram.forEach(g => {
+            html += g.program + ': ' + g.count + '<br/>';
+          });
+          html += '</div>';
+        }
+
+        infoEl.innerHTML = html;
+      } catch (e) {
+        infoEl.innerHTML = "Error loading client summary.";
+      }
     }
 
     // Create client
