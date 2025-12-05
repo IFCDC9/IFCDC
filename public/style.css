@@ -5,12 +5,14 @@
   color: #f5f5f7;
 }
 
-.ifcdc-header {
+.ifcdc-header,
+.ifcdc-brand-header {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: #101018;
 }
 
-.ifcdc-header-inner {
+.ifcdc-header-inner,
+.ifcdc-brand-inner {
   max-width: 1100px;
   margin: 0 auto;
   padding: 0.9rem 1.5rem;
@@ -19,21 +21,34 @@
   align-items: center;
 }
 
-.ifcdc-brand {
+.ifcdc-brand,
+.ifcdc-brand-inner {
   display: flex;
   align-items: center;
   gap: 0.75rem;
 }
 
 .ifcdc-logo {
-  height: 48px;
+  height: 56px;
   width: auto;
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
 .ifcdc-brand-text {
   display: flex;
   flex-direction: column;
+}
+
+.ifcdc-brand-name {
+  font-weight: 700;
+  font-size: 1.1rem;
+  letter-spacing: 0.02em;
+}
+
+.ifcdc-brand-tagline {
+  font-size: 0.8rem;
+  opacity: 0.7;
+  letter-spacing: 0.04em;
 }
 
 .ifcdc-logo-text {
@@ -48,17 +63,29 @@
   opacity: 0.7;
 }
 
+.ifcdc-nav {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .ifcdc-nav a {
-  margin-left: 1rem;
+  padding: 0.4rem 0.75rem;
   font-size: 0.9rem;
   text-decoration: none;
   color: #d9d9e6;
   opacity: 0.8;
+  border-radius: 4px;
+  transition: background 0.15s, opacity 0.15s;
 }
 
-.ifcdc-nav a:hover,
+.ifcdc-nav a:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .ifcdc-nav a.active {
   opacity: 1;
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .ifcdc-main {
