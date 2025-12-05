@@ -1495,8 +1495,8 @@ body {
   border-bottom: 2px solid #ccc;
 }
 
-/* ===== IFCDC HEADER / TOP BAR ===== */
-.top-bar {
+/* ===== IFCDC HEADER ===== */
+.header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1508,12 +1508,12 @@ body {
   z-index: 100;
 }
 
-.logo-area {
+.logo-container {
   display: flex;
   align-items: center;
 }
 
-.logo-area a {
+.logo-container a {
   display: flex;
   align-items: center;
 }
@@ -1523,42 +1523,20 @@ body {
   object-fit: contain;
 }
 
-.top-nav {
+.nav-actions {
   display: flex;
   align-items: center;
-  gap: 1.5rem;
-  margin-left: auto;
+  gap: 1rem;
 }
 
-.top-nav .nav-link {
+.gold-link {
   text-decoration: none;
-  color: #f0f0f0;
-  text-transform: uppercase;
-  font-size: 0.8rem;
-  letter-spacing: 1px;
-  opacity: 0.8;
-  transition: opacity 0.2s ease;
-}
-
-.top-nav .nav-link:hover {
-  opacity: 1;
-}
-
-.nav-link-gold {
   font-weight: 600;
-  text-decoration: none;
   color: #d4af37;
 }
 
-.nav-link-outline {
-  padding: 0.25rem 0.75rem;
-  border: 1px solid #d4af37;
-  border-radius: 999px;
-}
-
-.auth-actions {
-  display: flex;
-  gap: 0.75rem;
+.gold-link:hover {
+  text-decoration: underline;
 }
 
 /* GOLD 3D BUTTONS */
