@@ -22,6 +22,7 @@ const {
   PUBLIC_APP_URL,
   CRON_SECRET_TOKEN,
   APPT_REMINDER_LEAD_HOURS,
+  MASTER_OWNER_EMAIL,
 } = process.env;
 
 const twilioClient =
@@ -632,6 +633,10 @@ function requireRole(...roles: (string | string[])[]) {
     if (!req.user) {
       return res.status(401).json({ error: "Unauthenticated" });
     }
+    // Owner has access to everything
+    if (req.user.role === "owner") {
+      return next();
+    }
     if (!allowedRoles.includes(req.user.role)) {
       return res.status(403).json({ error: "Forbidden" });
     }
@@ -641,7 +646,7 @@ function requireRole(...roles: (string | string[])[]) {
 
 async function hasClientAccess(user: { id: string; role: string } | undefined, clientId: string): Promise<boolean> {
   if (!user) return false;
-  if (user.role === ROLES.EXEC) return true;
+  if (user.role === "owner" || user.role === ROLES.EXEC) return true;
   const assignment = await db.get(
     "SELECT 1 FROM client_assignments WHERE client_id = ? AND user_id = ?",
     clientId, user.id
@@ -713,7 +718,13 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const token = jwt.sign({ sub: user.id, role: user.role, name: user.name }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+    // Override role to "owner" if email matches MASTER_OWNER_EMAIL
+    let effectiveRole = user.role;
+    if (MASTER_OWNER_EMAIL && lowerEmail === MASTER_OWNER_EMAIL.toLowerCase()) {
+      effectiveRole = "owner";
+    }
+
+    const token = jwt.sign({ sub: user.id, role: effectiveRole, name: user.name }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
     res.cookie('ifcdc_token', token, {
       httpOnly: true,
@@ -723,11 +734,11 @@ app.post('/api/auth/login', async (req, res) => {
     });
 
     await logAudit(
-      { method: "POST", originalUrl: "/api/auth/login", user: { id: user.id, name: user.name, email: user.email, role: user.role } } as express.Request,
+      { method: "POST", originalUrl: "/api/auth/login", user: { id: user.id, name: user.name, email: user.email, role: effectiveRole } } as express.Request,
       "USER", user.id, "LOGIN", {}
     );
 
-    return res.json({ message: 'Logged in', role: user.role, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+    return res.json({ message: 'Logged in', role: effectiveRole, user: { id: user.id, name: user.name, email: user.email, role: effectiveRole } });
   } catch (err) {
     console.error('Login error', err);
     return res.status(500).json({ error: 'Server error' });

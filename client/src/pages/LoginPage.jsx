@@ -31,7 +31,7 @@ const LoginPage = () => {
 
       // Redirect by role
       setTimeout(() => {
-        if (data.role === "admin" || data.role === "EXEC") {
+        if (data.role === "owner" || data.role === "admin" || data.role === "EXEC") {
           window.location.href = "/admin";
         } else if (data.role === "barber") {
           window.location.href = "/barber";
