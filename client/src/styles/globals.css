@@ -1499,9 +1499,6 @@ body {
 .ifcdc-header {
   background: #000;
   padding: 12px 20px;
-  position: sticky;
-  top: 0;
-  z-index: 20;
 }
 
 .ifcdc-header-inner {
@@ -1510,15 +1507,6 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-}
-
-.ifcdc-logo {
-  display: flex;
-  align-items: center;
-}
-
-.ifcdc-logo a {
-  text-decoration: none;
 }
 
 .ifcdc-logo-text {
