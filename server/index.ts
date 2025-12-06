@@ -7,9 +7,11 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import twilio from "twilio";
 import cookieParser from "cookie-parser";
+import { createServer as createViteServer } from "vite";
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "5000", 10);
+const isDev = process.env.NODE_ENV !== "production";
 
 const {
   TWILIO_ACCOUNT_SID,
@@ -646,28 +648,7 @@ async function hasClientAccess(user: { id: string; role: string } | undefined, c
   return !!assignment;
 }
 
-// SPA routes - serve React app
-const clientIndexPath = path.join(import.meta.dirname, "..", "client", "index.html");
-const serveSPA = (req: express.Request, res: express.Response) => {
-  const spaPath = path.join(import.meta.dirname, "..", "dist", "public", "index.html");
-  if (fs.existsSync(spaPath)) {
-    return res.sendFile(spaPath);
-  }
-  return res.sendFile(clientIndexPath);
-};
-
-app.get("/", serveSPA);
-app.get("/login", serveSPA);
-app.get("/register", serveSPA);
-app.get("/admin", serveSPA);
-app.get("/admin/*", serveSPA);
-app.get("/barber", serveSPA);
-app.get("/radio", serveSPA);
-app.get("/programs", serveSPA);
-app.get("/programs/*", serveSPA);
-app.get("/my-time", serveSPA);
-
-// Legacy static pages
+// Legacy static pages (served before Vite takes over)
 app.get("/mental-health", (req, res) => res.sendFile(path.join(publicDir, "mental-health.html")));
 app.get("/records-policy", (req, res) => res.sendFile(path.join(publicDir, "records-policy.html")));
 app.get("/roi", (req, res) => res.sendFile(path.join(publicDir, "roi.html")));
@@ -3335,30 +3316,39 @@ app.post(
   }
 );
 
-// SPA catch-all: serve React app for client-side routes (production)
-const spaIndexPath = path.join(import.meta.dirname, "..", "dist", "public", "index.html");
-app.use(express.static(path.join(import.meta.dirname, "..", "dist", "public")));
+// Start server with Vite in development or static files in production
+async function startServer() {
+  await initDb();
 
-app.get("*", (req, res, next) => {
-  // Skip API routes and static file requests
-  if (req.path.startsWith("/api") || req.path.startsWith("/twilio")) {
-    return next();
-  }
-  
-  // Check if SPA build exists
-  if (fs.existsSync(spaIndexPath)) {
-    return res.sendFile(spaIndexPath);
-  }
-  
-  // Fallback to public index.html in development
-  return res.sendFile(path.join(publicDir, "index.html"));
-});
+  if (isDev) {
+    // In development, use Vite middleware
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    // In production, serve built static files
+    const spaIndexPath = path.join(import.meta.dirname, "..", "dist", "public", "index.html");
+    app.use(express.static(path.join(import.meta.dirname, "..", "dist", "public")));
 
-initDb().then(() => {
+    app.get("*", (req, res, next) => {
+      if (req.path.startsWith("/api") || req.path.startsWith("/twilio")) {
+        return next();
+      }
+      if (fs.existsSync(spaIndexPath)) {
+        return res.sendFile(spaIndexPath);
+      }
+      return res.sendFile(path.join(publicDir, "index.html"));
+    });
+  }
+
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`IFCDC Health System API live on port ${PORT}`);
   });
-}).catch((err) => {
-  console.error("Failed to initialize database:", err);
+}
+
+startServer().catch((err) => {
+  console.error("Failed to start server:", err);
   process.exit(1);
 });
