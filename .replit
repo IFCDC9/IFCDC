@@ -100,3 +100,8 @@ waitForPort = 5000
 
 [agent]
 mockupState = "FULLSTACK"
+
+[userenv]
+
+[userenv.shared]
+MASTER_OWNER_EMAIL = "813786b@gmail.com"
