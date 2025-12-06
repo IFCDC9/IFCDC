@@ -1500,9 +1500,8 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 20px;
+  padding: 18px 32px;
   background: #000;
-  border-bottom: 1px solid #262626;
   position: sticky;
   top: 0;
   z-index: 20;
@@ -1519,40 +1518,30 @@ body {
 }
 
 .ifcdc-logo {
-  height: 46px;
-  width: auto;
-  object-fit: contain;
+  height: 55px;
 }
 
 .nav-actions {
   display: flex;
-  align-items: center;
-  gap: 16px;
+  gap: 28px;
 }
 
 .auth-link {
-  text-decoration: none;
+  color: gold;
   font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  font-size: 0.8rem;
-  color: #d4af37;
-  text-shadow: 0 0 3px rgba(212,175,55,0.65);
-  transition: transform 0.15s ease, text-shadow 0.15s ease, opacity 0.15s ease;
+  letter-spacing: 0.5px;
+  text-decoration: none;
+  font-size: 1.05rem;
+  transition: opacity .2s;
 }
 
 .auth-link:hover {
-  transform: translateY(-1px);
-  text-shadow: 0 0 7px rgba(212,175,55,1);
-  opacity: 0.95;
+  opacity: 0.65;
 }
 
 .auth-link.register {
-  padding: 6px 14px;
-  border-radius: 999px;
-  border: 1px solid #d4af37;
-  box-shadow: 0 0 6px rgba(212,175,55,0.6);
-  background: radial-gradient(circle at top, #2b210b, #080808 70%);
+  border-left: 1px solid gold;
+  padding-left: 18px;
 }
 
 .ifcdc-main {
