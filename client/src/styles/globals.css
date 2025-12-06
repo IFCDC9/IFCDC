@@ -1495,8 +1495,8 @@ body {
   border-bottom: 2px solid #ccc;
 }
 
-/* ===== IFCDC HEADER ===== */
-.ifcdc-header {
+/* ===== SITE HEADER ===== */
+.site-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1508,16 +1508,14 @@ body {
   z-index: 20;
 }
 
-.ifcdc-logo-wrap {
+.branding {
   display: flex;
   align-items: center;
-  gap: 10px;
 }
 
-.ifcdc-logo-wrap a {
+.branding a {
   display: flex;
   align-items: center;
-  gap: 10px;
 }
 
 .ifcdc-logo {
@@ -1526,22 +1524,13 @@ body {
   object-fit: contain;
 }
 
-.ifcdc-brand-text {
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  font-size: 0.85rem;
-  text-transform: uppercase;
-  color: #d4af37;
-  text-shadow: 0 0 4px rgba(212,175,55,0.7);
-}
-
-.ifcdc-nav-actions {
+.nav-actions {
   display: flex;
   align-items: center;
   gap: 16px;
 }
 
-.ifcdc-nav-link {
+.auth-link {
   text-decoration: none;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -1552,13 +1541,13 @@ body {
   transition: transform 0.15s ease, text-shadow 0.15s ease, opacity 0.15s ease;
 }
 
-.ifcdc-nav-link:hover {
+.auth-link:hover {
   transform: translateY(-1px);
   text-shadow: 0 0 7px rgba(212,175,55,1);
   opacity: 0.95;
 }
 
-.ifcdc-nav-primary {
+.auth-link.register {
   padding: 6px 14px;
   border-radius: 999px;
   border: 1px solid #d4af37;
