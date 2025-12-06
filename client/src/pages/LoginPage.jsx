@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import IFCDCHeader from "../components/IFCDCHeader";
+import Header from "../components/IFCDCHeader";
 
 const LoginPage = () => {
   const [email, setEmail] = useState("");
@@ -49,7 +49,7 @@ const LoginPage = () => {
 
   return (
     <>
-      <IFCDCHeader />
+      <Header />
 
       <main>
         <section className="auth-wrapper">
@@ -98,7 +98,7 @@ const LoginPage = () => {
 
           <div className="auth-footer">
             Don't have an account yet?{" "}
-            <a href="/register.html">Register now</a>
+            <a href="/register">Register now</a>
           </div>
         </section>
       </main>

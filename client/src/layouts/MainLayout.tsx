@@ -1,5 +1,5 @@
 import React from "react";
-import IFCDCHeader from "../components/IFCDCHeader";
+import Header from "../components/IFCDCHeader";
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -8,7 +8,7 @@ interface MainLayoutProps {
 export default function MainLayout({ children }: MainLayoutProps) {
   return (
     <>
-      <IFCDCHeader />
+      <Header />
       <main className="ifcdc-main">
         {children}
       </main>

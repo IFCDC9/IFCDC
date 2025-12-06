@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import IFCDCHeader from "../components/IFCDCHeader";
+import Header from "../components/IFCDCHeader";
 
 const RegisterPage = () => {
   const [name, setName] = useState("");
@@ -46,7 +46,7 @@ const RegisterPage = () => {
 
   return (
     <>
-      <IFCDCHeader />
+      <Header />
 
       <main>
         <section className="auth-wrapper">
