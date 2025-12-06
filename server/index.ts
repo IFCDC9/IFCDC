@@ -110,7 +110,8 @@ app.use(express.json());
 app.use(cookieParser());
 
 const publicDir = path.join(import.meta.dirname, "..", "public");
-app.use(express.static(publicDir));
+// Serve static assets from public/ but don't serve index.html (let Vite handle SPA)
+app.use(express.static(publicDir, { index: false }));
 
 const ROLES = {
   EXEC: "EXEC",
