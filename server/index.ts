@@ -659,14 +659,19 @@ const serveSPA = (req: express.Request, res: express.Response) => {
 app.get("/", serveSPA);
 app.get("/login", serveSPA);
 app.get("/register", serveSPA);
+app.get("/admin", serveSPA);
+app.get("/admin/*", serveSPA);
+app.get("/barber", serveSPA);
+app.get("/radio", serveSPA);
+app.get("/programs", serveSPA);
+app.get("/programs/*", serveSPA);
+app.get("/my-time", serveSPA);
 
 // Legacy static pages
 app.get("/mental-health", (req, res) => res.sendFile(path.join(publicDir, "mental-health.html")));
 app.get("/records-policy", (req, res) => res.sendFile(path.join(publicDir, "records-policy.html")));
 app.get("/roi", (req, res) => res.sendFile(path.join(publicDir, "roi.html")));
-app.get("/programs", (req, res) => res.sendFile(path.join(publicDir, "programs.html")));
 app.get("/contact", (req, res) => res.sendFile(path.join(publicDir, "contact.html")));
-app.get("/admin", (req, res) => res.sendFile(path.join(publicDir, "admin.html")));
 app.get("/intake", (req, res) => res.sendFile(path.join(publicDir, "intake.html")));
 
 

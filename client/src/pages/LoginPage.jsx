@@ -27,20 +27,20 @@ const LoginPage = () => {
         return;
       }
 
-      localStorage.setItem("ifcdc_token", data.token);
-      localStorage.setItem("ifcdc_role", data.role);
       setMessage({ type: "success", text: "Login successful. Redirecting…" });
 
       // Redirect by role
-      if (data.role === "admin" || data.role === "exec") {
-        window.location.href = "/admin/hr";
-      } else if (data.role === "barber") {
-        window.location.href = "/barber.html";
-      } else if (data.role === "radio") {
-        window.location.href = "/radio.html";
-      } else {
-        window.location.href = "/client.html";
-      }
+      setTimeout(() => {
+        if (data.role === "admin" || data.role === "EXEC") {
+          window.location.href = "/admin";
+        } else if (data.role === "barber") {
+          window.location.href = "/barber";
+        } else if (data.role === "radio" || data.role === "radio_host") {
+          window.location.href = "/radio";
+        } else {
+          window.location.href = "/";
+        }
+      }, 500);
     } catch (err) {
       setLoading(false);
       setMessage({ type: "error", text: "Network error. Try again." });
