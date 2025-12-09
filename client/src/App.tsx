@@ -11,6 +11,7 @@ import ProgramDetailPage from "./pages/ProgramDetailPage";
 import FundingSourcesAdminPage from "./pages/FundingSourcesAdminPage";
 import AdminTimeOverviewPage from "./pages/AdminTimeOverviewPage";
 import GrantReportPage from "./pages/GrantReportPage";
+import LogicModelPage from "./pages/LogicModelPage";
 
 import BarberDashboard from "./dashboards/BarberDashboard";
 import RadioDashboard from "./dashboards/RadioDashboard";
@@ -145,6 +146,17 @@ const App: React.FC = () => {
           element={
             <ProtectedRoute allowedRoles={["admin", "barber", "radio_host", "program_staff"]}>
               <MyTimeEntriesPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/logic-model"
+          element={
+            <ProtectedRoute allowedRoles={["admin", "program_staff", "owner"]}>
+              <AdminLayout>
+                <LogicModelPage />
+              </AdminLayout>
             </ProtectedRoute>
           }
         />

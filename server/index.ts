@@ -843,6 +843,45 @@ app.get("/api/programs", authRequired, async (req, res) => {
   res.json(rows.map((p) => ({ id: p.id, code: p.code, name: p.name, description: p.description })));
 });
 
+// Logic Models API
+app.get("/api/logic-models", authRequired, async (req, res) => {
+  const rows = await db.all<any[]>("SELECT * FROM logic_models ORDER BY program_name ASC");
+  res.json(rows.map((m) => ({
+    id: m.id,
+    programCode: m.program_code,
+    programName: m.program_name,
+    inputs: JSON.parse(m.inputs),
+    activities: JSON.parse(m.activities),
+    outputs: JSON.parse(m.outputs),
+    shortTermOutcomes: JSON.parse(m.short_term_outcomes),
+    midTermOutcomes: JSON.parse(m.mid_term_outcomes),
+    longTermImpact: JSON.parse(m.long_term_impact),
+    createdAt: m.created_at,
+    updatedAt: m.updated_at
+  })));
+});
+
+app.get("/api/logic-models/:programCode", authRequired, async (req, res) => {
+  const { programCode } = req.params;
+  const row = await db.get<any>("SELECT * FROM logic_models WHERE program_code = ?", programCode);
+  if (!row) {
+    return res.status(404).json({ error: "Logic model not found" });
+  }
+  res.json({
+    id: row.id,
+    programCode: row.program_code,
+    programName: row.program_name,
+    inputs: JSON.parse(row.inputs),
+    activities: JSON.parse(row.activities),
+    outputs: JSON.parse(row.outputs),
+    shortTermOutcomes: JSON.parse(row.short_term_outcomes),
+    midTermOutcomes: JSON.parse(row.mid_term_outcomes),
+    longTermImpact: JSON.parse(row.long_term_impact),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  });
+});
+
 // ----- Users -----
 app.post("/api/users", authRequired, requireRole(ROLES.EXEC), async (req, res) => {
   const { name, email, role, password } = req.body || {};
