@@ -392,6 +392,85 @@ async function initDb() {
     );
   `);
 
+  // Logic Models table for program frameworks
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS logic_models (
+      id TEXT PRIMARY KEY,
+      program_code TEXT NOT NULL,
+      program_name TEXT NOT NULL,
+      inputs TEXT NOT NULL,
+      activities TEXT NOT NULL,
+      outputs TEXT NOT NULL,
+      short_term_outcomes TEXT NOT NULL,
+      mid_term_outcomes TEXT NOT NULL,
+      long_term_impact TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+
+  // Seed Violence Prevention Logic Model if not exists
+  const existingLogicModel = await db.get("SELECT 1 FROM logic_models WHERE program_code = ?", "VIOLENCE_PREVENTION");
+  if (!existingLogicModel) {
+    const logicModelId = cryptoRandomId();
+    const now = new Date().toISOString();
+    
+    const inputs = JSON.stringify([
+      "IFCDC staff (outreach, mentors, case managers)",
+      "Evidence-based curriculum",
+      "Community partners + schools",
+      "Workforce partners",
+      "Evaluation team",
+      "IFCDC Radio + outreach platforms"
+    ]);
+    
+    const activities = JSON.stringify([
+      "Violence interruption & mediation",
+      "Mentorship sessions (weekly)",
+      "Intake, screening, case management",
+      "Workforce training + placement",
+      "Family engagement",
+      "Public awareness & prevention messaging"
+    ]);
+    
+    const outputs = JSON.stringify([
+      "# of youth enrolled",
+      "# of outreach engagements",
+      "# of conflicts interrupted",
+      "# of families connected to supports",
+      "# of jobs/internships secured",
+      "# of prevention messages broadcast"
+    ]);
+    
+    const shortTermOutcomes = JSON.stringify([
+      "Increased conflict resolution skills",
+      "Increased school engagement",
+      "Increased access to resources",
+      "Reduced exposure to violent peers"
+    ]);
+    
+    const midTermOutcomes = JSON.stringify([
+      "Reduced violent incidents among participants",
+      "Increased employment rates",
+      "Increased family stability",
+      "Reduced school suspensions"
+    ]);
+    
+    const longTermImpact = JSON.stringify([
+      "Reduction in community violence",
+      "Reduced gang involvement",
+      "Increased economic mobility",
+      "Improved community safety and wellbeing"
+    ]);
+
+    await db.run(
+      `INSERT INTO logic_models (id, program_code, program_name, inputs, activities, outputs, short_term_outcomes, mid_term_outcomes, long_term_impact, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      logicModelId, "VIOLENCE_PREVENTION", "Violence Prevention Program", inputs, activities, outputs, shortTermOutcomes, midTermOutcomes, longTermImpact, now, now
+    );
+    console.log("Seeded Violence Prevention Logic Model");
+  }
+
   const execUser = await db.get<User>("SELECT * FROM users WHERE role = ? LIMIT 1", ROLES.EXEC);
 
   if (!execUser) {
