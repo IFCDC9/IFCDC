@@ -808,6 +808,11 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    // Check if user has a password (Replit Auth users won't have one)
+    if (!user.password_hash) {
+      return res.status(401).json({ error: 'This account uses Replit login. Please use "Continue with Replit" instead.' });
+    }
+
     const ok = await bcrypt.compare(password, user.password_hash);
     if (!ok) {
       return res.status(401).json({ error: 'Invalid credentials' });
