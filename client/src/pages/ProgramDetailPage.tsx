@@ -40,7 +40,6 @@ type Program = {
 const ProgramDetailPage: React.FC = () => {
   const { programId } = useParams();
   const { user } = useAuth();
-  const token = localStorage.getItem("ifcdc_token");
 
   const [program, setProgram] = useState<Program | null>(null);
   const [loading, setLoading] = useState(true);
@@ -59,9 +58,7 @@ const ProgramDetailPage: React.FC = () => {
     if (!programId) return;
     setLoading(true);
     const res = await fetch(`/api/programs/${programId}`, {
-      headers: {
-        Authorization: token ? `Bearer ${token}` : "",
-      },
+      credentials: "include",
     });
     setLoading(false);
     if (res.ok) {
@@ -74,7 +71,6 @@ const ProgramDetailPage: React.FC = () => {
 
   useEffect(() => {
     fetchProgram();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [programId]);
 
   const handleSessionChange = (
@@ -97,8 +93,8 @@ const ProgramDetailPage: React.FC = () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: token ? `Bearer ${token}` : "",
       },
+      credentials: "include",
       body: JSON.stringify({
         title: sessionForm.title,
         date: sessionForm.date,

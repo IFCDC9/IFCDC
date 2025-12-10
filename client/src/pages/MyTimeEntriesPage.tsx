@@ -26,14 +26,10 @@ const MyTimeEntriesPage: React.FC = () => {
     notes: "",
   });
 
-  const token = localStorage.getItem("ifcdc_token");
-
   const fetchEntries = async () => {
     setLoading(true);
     const res = await fetch("/api/time-entries/my", {
-      headers: {
-        Authorization: token ? `Bearer ${token}` : "",
-      },
+      credentials: "include",
     });
     setLoading(false);
     if (res.ok) {
@@ -46,9 +42,7 @@ const MyTimeEntriesPage: React.FC = () => {
 
   const fetchFundingSources = async () => {
     const res = await fetch("/api/funding-sources", {
-      headers: {
-        Authorization: token ? `Bearer ${token}` : "",
-      },
+      credentials: "include",
     });
     if (res.ok) {
       const data = await res.json();
@@ -59,7 +53,6 @@ const MyTimeEntriesPage: React.FC = () => {
   useEffect(() => {
     fetchEntries();
     fetchFundingSources();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleChange = (
@@ -81,8 +74,8 @@ const MyTimeEntriesPage: React.FC = () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: token ? `Bearer ${token}` : "",
       },
+      credentials: "include",
       body: JSON.stringify(form),
     });
     setSaving(false);

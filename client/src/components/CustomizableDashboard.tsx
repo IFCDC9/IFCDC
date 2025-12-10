@@ -28,23 +28,23 @@ const WIDGET_COMPONENTS: Record<string, React.ComponentType<{ onRemove: () => vo
 };
 
 export default function CustomizableDashboard() {
-  const { token, user } = useAuth();
+  const { user } = useAuth();
   const [widgets, setWidgets] = useState<DashboardWidget[]>([]);
   const [loading, setLoading] = useState(true);
   const [showPicker, setShowPicker] = useState(false);
   const [containerWidth, setContainerWidth] = useState(1200);
 
   const fetchWidgets = useCallback(async () => {
-    if (!token) return;
+    if (!user) return;
     try {
-      const data = await getWidgets(token);
+      const data = await getWidgets();
       setWidgets(data);
     } catch (err) {
       console.error("Failed to fetch widgets:", err);
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [user]);
 
   useEffect(() => {
     fetchWidgets();
@@ -64,7 +64,7 @@ export default function CustomizableDashboard() {
 
   const handleLayoutChange = useCallback(
     async (newLayout: Layout[]) => {
-      if (!token) return;
+      if (!user) return;
 
       const updates = newLayout.map((item) => ({
         id: item.i,
@@ -85,19 +85,19 @@ export default function CustomizableDashboard() {
       );
 
       try {
-        await batchUpdateLayouts(token, updates);
+        await batchUpdateLayouts(updates);
       } catch (err) {
         console.error("Failed to save layout:", err);
       }
     },
-    [token]
+    [user]
   );
 
   const handleAddWidget = async (widgetType: string) => {
-    if (!token) return;
+    if (!user) return;
     try {
       const maxY = widgets.reduce((max, w) => Math.max(max, w.layout.y + w.layout.h), 0);
-      const newWidget = await addWidget(token, widgetType, undefined, {
+      const newWidget = await addWidget(widgetType, undefined, {
         x: 0,
         y: maxY,
         w: 4,
@@ -111,9 +111,9 @@ export default function CustomizableDashboard() {
   };
 
   const handleRemoveWidget = async (widgetId: string) => {
-    if (!token) return;
+    if (!user) return;
     try {
-      await deleteWidget(token, widgetId);
+      await deleteWidget(widgetId);
       setWidgets((prev) => prev.filter((w) => w.id !== widgetId));
     } catch (err) {
       console.error("Failed to remove widget:", err);

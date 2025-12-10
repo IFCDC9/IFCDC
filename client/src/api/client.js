@@ -1,28 +1,18 @@
 const API_BASE = '/api';
 
-export async function apiRequest(path, options = {}, token) {
+export async function apiRequest(path, options = {}) {
   const headers = {
     'Content-Type': 'application/json',
     ...(options.headers || {}),
   };
 
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  } else {
-    const storedToken = localStorage.getItem('ifcdc_token');
-    if (storedToken) {
-      headers['Authorization'] = `Bearer ${storedToken}`;
-    }
-  }
-
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers,
+    credentials: 'include',
   });
 
   if (res.status === 401) {
-    localStorage.removeItem('ifcdc_token');
-    localStorage.removeItem('ifcdc_user');
     window.location.href = '/login';
     throw new Error('Unauthorized');
   }

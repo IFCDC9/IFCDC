@@ -20,7 +20,6 @@ type Appointment = {
 
 const BarberDashboard: React.FC = () => {
   const { user } = useAuth();
-  const token = localStorage.getItem("ifcdc_token");
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,9 +34,7 @@ const BarberDashboard: React.FC = () => {
     if (date) params.append("dateTo", date);
 
     const res = await fetch(`/api/barber/schedule?${params.toString()}`, {
-      headers: {
-        Authorization: token ? `Bearer ${token}` : "",
-      },
+      credentials: "include",
     });
     setLoading(false);
 
@@ -51,7 +48,6 @@ const BarberDashboard: React.FC = () => {
 
   useEffect(() => {
     fetchSchedule();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date]);
 
   const handleStatusChange = async (id: string, status: string) => {
@@ -59,8 +55,8 @@ const BarberDashboard: React.FC = () => {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        Authorization: token ? `Bearer ${token}` : "",
       },
+      credentials: "include",
       body: JSON.stringify({ status }),
     });
 

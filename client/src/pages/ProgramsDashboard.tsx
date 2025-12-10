@@ -32,14 +32,10 @@ const ProgramsDashboard: React.FC = () => {
     location: "",
   });
 
-  const token = localStorage.getItem("ifcdc_token");
-
   const fetchPrograms = async () => {
     setLoading(true);
     const res = await fetch("/api/programs", {
-      headers: {
-        Authorization: token ? `Bearer ${token}` : "",
-      },
+      credentials: "include",
     });
     setLoading(false);
     if (res.ok) {
@@ -52,9 +48,7 @@ const ProgramsDashboard: React.FC = () => {
 
   const fetchFundingSources = async () => {
     const res = await fetch("/api/funding-sources", {
-      headers: {
-        Authorization: token ? `Bearer ${token}` : "",
-      },
+      credentials: "include",
     });
     if (res.ok) {
       const data = await res.json();
@@ -65,7 +59,6 @@ const ProgramsDashboard: React.FC = () => {
   useEffect(() => {
     fetchPrograms();
     fetchFundingSources();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -81,8 +74,8 @@ const ProgramsDashboard: React.FC = () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: token ? `Bearer ${token}` : "",
       },
+      credentials: "include",
       body: JSON.stringify(newProgram),
     });
 
@@ -99,8 +92,8 @@ const ProgramsDashboard: React.FC = () => {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        Authorization: token ? `Bearer ${token}` : "",
       },
+      credentials: "include",
       body: JSON.stringify({ fundingSourceId: fundingSourceId || null }),
     });
 

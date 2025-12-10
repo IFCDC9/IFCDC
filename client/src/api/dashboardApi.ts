@@ -18,24 +18,23 @@ export interface DashboardWidget {
   updatedAt: string;
 }
 
-export async function getWidgets(token: string): Promise<DashboardWidget[]> {
+export async function getWidgets(): Promise<DashboardWidget[]> {
   const res = await fetch(`${API_BASE}/api/dashboard/widgets`, {
-    headers: { Authorization: `Bearer ${token}` },
+    credentials: "include",
   });
   if (!res.ok) throw new Error("Failed to fetch widgets");
   return res.json();
 }
 
 export async function addWidget(
-  token: string,
   widgetType: string,
   title?: string,
   layout?: WidgetLayout
 ): Promise<DashboardWidget> {
   const res = await fetch(`${API_BASE}/api/dashboard/widgets`, {
     method: "POST",
+    credentials: "include",
     headers: {
-      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ widgetType, title, layout }),
@@ -45,14 +44,13 @@ export async function addWidget(
 }
 
 export async function updateWidget(
-  token: string,
   id: string,
   updates: { title?: string; layout?: WidgetLayout; settings?: Record<string, any> }
 ): Promise<DashboardWidget> {
   const res = await fetch(`${API_BASE}/api/dashboard/widgets/${id}`, {
     method: "PATCH",
+    credentials: "include",
     headers: {
-      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(updates),
@@ -62,13 +60,12 @@ export async function updateWidget(
 }
 
 export async function batchUpdateLayouts(
-  token: string,
   updates: { id: string; layout: WidgetLayout }[]
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/api/dashboard/widgets/batch-layout`, {
     method: "PATCH",
+    credentials: "include",
     headers: {
-      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(updates),
@@ -76,17 +73,17 @@ export async function batchUpdateLayouts(
   if (!res.ok) throw new Error("Failed to batch update layouts");
 }
 
-export async function deleteWidget(token: string, id: string): Promise<void> {
+export async function deleteWidget(id: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/dashboard/widgets/${id}`, {
     method: "DELETE",
-    headers: { Authorization: `Bearer ${token}` },
+    credentials: "include",
   });
   if (!res.ok) throw new Error("Failed to delete widget");
 }
 
-export async function getWidgetData(token: string, type: string): Promise<any> {
+export async function getWidgetData(type: string): Promise<any> {
   const res = await fetch(`${API_BASE}/api/dashboard/widget-data/${type}`, {
-    headers: { Authorization: `Bearer ${token}` },
+    credentials: "include",
   });
   if (!res.ok) throw new Error("Failed to fetch widget data");
   return res.json();

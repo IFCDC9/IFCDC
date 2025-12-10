@@ -52,14 +52,10 @@ const AdminTimeOverviewPage: React.FC = () => {
   const [filterFundingSourceId, setFilterFundingSourceId] = useState("");
   const [fundingSources, setFundingSources] = useState<FundingSource[]>([]);
 
-  const token = localStorage.getItem("ifcdc_token");
-
   const fetchTimeEntries = async () => {
     setLoading(true);
     const res = await fetch("/api/time-entries", {
-      headers: {
-        Authorization: token ? `Bearer ${token}` : "",
-      },
+      credentials: "include",
     });
     setLoading(false);
 
@@ -73,9 +69,7 @@ const AdminTimeOverviewPage: React.FC = () => {
 
   const fetchFundingSources = async () => {
     const res = await fetch("/api/funding-sources", {
-      headers: {
-        Authorization: token ? `Bearer ${token}` : "",
-      },
+      credentials: "include",
     });
     if (res.ok) {
       const data = await res.json();
@@ -86,7 +80,6 @@ const AdminTimeOverviewPage: React.FC = () => {
   useEffect(() => {
     fetchTimeEntries();
     fetchFundingSources();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filteredEntries = useMemo(() => {

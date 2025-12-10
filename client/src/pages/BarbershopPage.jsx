@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { getBookings } from '../api/barbershopApi';
 
 export default function BarbershopPage() {
-  const { token } = useAuth();
+  const { user } = useAuth();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [datetime, setDatetime] = useState('');
@@ -12,14 +12,14 @@ export default function BarbershopPage() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (token) {
+    if (user) {
       loadBookings();
     }
-  }, [token]);
+  }, [user]);
 
   async function loadBookings() {
     try {
-      const data = await getBookings(token);
+      const data = await getBookings();
       setBookings(data);
     } catch (err) {
       console.error('Failed to load bookings:', err);
@@ -36,8 +36,8 @@ export default function BarbershopPage() {
       method: "POST",
       headers: { 
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`
       },
+      credentials: "include",
       body: JSON.stringify({ name, phone, datetime }),
     });
 

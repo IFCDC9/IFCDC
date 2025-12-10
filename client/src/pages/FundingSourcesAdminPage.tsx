@@ -21,14 +21,10 @@ const FundingSourcesAdminPage: React.FC = () => {
     notes: "",
   });
 
-  const token = localStorage.getItem("ifcdc_token");
-
   const fetchSources = async () => {
     setLoading(true);
     const res = await fetch("/api/funding-sources", {
-      headers: {
-        Authorization: token ? `Bearer ${token}` : "",
-      },
+      credentials: "include",
     });
     setLoading(false);
     if (res.ok) {
@@ -41,7 +37,6 @@ const FundingSourcesAdminPage: React.FC = () => {
 
   useEffect(() => {
     fetchSources();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleChange = (
@@ -60,8 +55,8 @@ const FundingSourcesAdminPage: React.FC = () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: token ? `Bearer ${token}` : "",
       },
+      credentials: "include",
       body: JSON.stringify(form),
     });
 
@@ -81,9 +76,7 @@ const FundingSourcesAdminPage: React.FC = () => {
     if (!window.confirm("Are you sure you want to delete this funding source?")) return;
     const res = await fetch(`/api/funding-sources/${id}`, {
       method: "DELETE",
-      headers: {
-        Authorization: token ? `Bearer ${token}` : "",
-      },
+      credentials: "include",
     });
     if (res.ok) {
       fetchSources();

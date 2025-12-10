@@ -72,13 +72,9 @@ const GrantReportPage: React.FC = () => {
   const [report, setReport] = useState<ReportResponse | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const token = localStorage.getItem("ifcdc_token");
-
   const fetchFundingSources = async () => {
     const res = await fetch("/api/funding-sources", {
-      headers: {
-        Authorization: token ? `Bearer ${token}` : "",
-      },
+      credentials: "include",
     });
     if (res.ok) {
       const data = await res.json();
@@ -90,7 +86,6 @@ const GrantReportPage: React.FC = () => {
 
   useEffect(() => {
     fetchFundingSources();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleRunReport = async (e: React.FormEvent) => {
@@ -107,9 +102,7 @@ const GrantReportPage: React.FC = () => {
     const res = await fetch(
       `/api/reports/funding/${selectedFundingId}?${params.toString()}`,
       {
-        headers: {
-          Authorization: token ? `Bearer ${token}` : "",
-        },
+        credentials: "include",
       }
     );
     setLoading(false);

@@ -17,7 +17,6 @@ const dayLabel = (d: number) =>
 
 const RadioDashboard: React.FC = () => {
   const { user } = useAuth();
-  const token = localStorage.getItem("ifcdc_token");
 
   const [shows, setShows] = useState<RadioShow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -25,9 +24,7 @@ const RadioDashboard: React.FC = () => {
   const fetchShows = async () => {
     setLoading(true);
     const res = await fetch("/api/radio/my-shows", {
-      headers: {
-        Authorization: token ? `Bearer ${token}` : "",
-      },
+      credentials: "include",
     });
     setLoading(false);
 
@@ -41,7 +38,6 @@ const RadioDashboard: React.FC = () => {
 
   useEffect(() => {
     fetchShows();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const displayName = user?.employee
