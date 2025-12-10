@@ -120,6 +120,26 @@ const publicDir = path.join(import.meta.dirname, "..", "public");
 // Serve static assets from public/ but don't serve index.html (let Vite handle SPA)
 app.use(express.static(publicDir, { index: false }));
 
+// Explicit routes for public HTML pages
+app.get("/book-barbershop", (_req, res) => {
+  res.sendFile(path.join(publicDir, "book-barbershop.html"));
+});
+app.get("/mental-health", (_req, res) => {
+  res.sendFile(path.join(publicDir, "mental-health.html"));
+});
+app.get("/programs", (_req, res) => {
+  res.sendFile(path.join(publicDir, "programs.html"));
+});
+app.get("/contact", (_req, res) => {
+  res.sendFile(path.join(publicDir, "contact.html"));
+});
+app.get("/records-policy", (_req, res) => {
+  res.sendFile(path.join(publicDir, "records-policy.html"));
+});
+app.get("/roi", (_req, res) => {
+  res.sendFile(path.join(publicDir, "roi.html"));
+});
+
 const ROLES = {
   EXEC: "EXEC",
   CLINICIAN: "CLINICIAN",
@@ -3645,7 +3665,7 @@ app.get("/api/hr/staffing-overview", authRequired, requireRole(ROLES.ADMIN, "adm
 // Barbershop services list
 const BARBERSHOP_SERVICES = [
   { id: "haircut", name: "Haircut", duration: 30, price: 25 },
-  { id: "beard_trim", name: "Beard Trim", duration: 15, price: 15 },
+  { id: "beard", name: "Beard Trim", duration: 15, price: 15 },
   { id: "haircut_beard", name: "Haircut + Beard", duration: 45, price: 35 },
   { id: "lineup", name: "Line Up / Edge Up", duration: 15, price: 15 },
   { id: "kids_cut", name: "Kids Cut (12 & Under)", duration: 25, price: 20 },
@@ -3766,6 +3786,77 @@ app.post("/api/barbershop/book", authRequired, requireRole("barber", "admin", "o
   } catch (err) {
     console.error("Error creating booking:", err);
     res.status(500).json({ error: "Failed to create booking" });
+  }
+});
+
+// Public booking endpoint (no auth required) - creates a booking request
+app.post("/api/public/book-barbershop", async (req, res) => {
+  try {
+    const { firstName, lastName, phone, email, service, serviceName, date, time, notes } = req.body;
+
+    // Validate required fields
+    if (!firstName || !lastName || !phone || !service || !date || !time) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const fullName = `${firstName} ${lastName}`;
+
+    // Find or create client
+    let client = await db.get<any>(
+      `SELECT id FROM clients WHERE phone = ? AND phone IS NOT NULL`,
+      [phone]
+    );
+
+    if (!client) {
+      const clientId = cryptoRandomId();
+      const now = new Date().toISOString();
+      await db.run(
+        `INSERT INTO clients (id, full_name, phone, email, programs, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+        clientId, fullName, phone, email || null, JSON.stringify(["BARBERSHOP"]), now
+      );
+      client = { id: clientId };
+    }
+
+    // Get service details from known services or use provided serviceName
+    const knownService = BARBERSHOP_SERVICES.find(s => s.id === service);
+    const duration = knownService?.duration || 30;
+    const displayName = knownService?.name || serviceName || service;
+
+    // Calculate end time
+    const [hours, minutes] = time.split(":").map(Number);
+    const startDateTime = new Date(`${date}T${time}:00`);
+    const endDateTime = new Date(startDateTime.getTime() + duration * 60000);
+    const endTime = `${String(endDateTime.getHours()).padStart(2, '0')}:${String(endDateTime.getMinutes()).padStart(2, '0')}`;
+
+    const startISO = `${date}T${time}:00`;
+    const endISO = `${date}T${endTime}:00`;
+
+    // Create appointment as "pending" status (needs staff confirmation)
+    const appointmentId = cryptoRandomId();
+    const now = new Date().toISOString();
+    const appointmentNotes = `[${displayName}] ONLINE REQUEST${notes ? ' - ' + notes : ''}`;
+
+    // Get a default barber (first available) or use placeholder
+    const defaultBarber = await db.get<any>(`SELECT id FROM users WHERE role IN ('barber', 'owner') LIMIT 1`);
+    const barberId = defaultBarber?.id || "unassigned";
+
+    await db.run(
+      `INSERT INTO appointments (id, client_id, program, start_time, end_time, location, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      appointmentId, client.id, "BARBERSHOP", startISO, endISO, "IFCDC Barbershop", appointmentNotes, barberId, now
+    );
+
+    res.status(201).json({
+      success: true,
+      message: "Booking request submitted",
+      appointmentId,
+      clientName: fullName,
+      service: displayName,
+      date,
+      time
+    });
+  } catch (err) {
+    console.error("Error creating public booking:", err);
+    res.status(500).json({ error: "Failed to submit booking request" });
   }
 });
 

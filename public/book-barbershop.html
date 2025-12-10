@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Book an Appointment | IFCDC Barbershop</title>
+  <meta name="description" content="Book your barbershop appointment at IFCDC Barbershop in Asbury Park, NJ. Haircuts, beard trims, hot shaves and more.">
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .booking-hero {
+      background: linear-gradient(135deg, #1a1a1a 0%, #000 100%);
+      padding: 60px 20px;
+      text-align: center;
+      border-bottom: 3px solid #d4af37;
+    }
+    .booking-hero h1 {
+      color: #d4af37;
+      font-size: 2.5rem;
+      margin-bottom: 10px;
+    }
+    .booking-hero p {
+      color: #ccc;
+      font-size: 1.1rem;
+    }
+    .booking-container {
+      max-width: 700px;
+      margin: 40px auto;
+      padding: 0 20px;
+    }
+    .booking-form {
+      background: #111;
+      border: 1px solid #333;
+      border-radius: 12px;
+      padding: 30px;
+    }
+    .form-section {
+      margin-bottom: 24px;
+    }
+    .form-section h3 {
+      color: #d4af37;
+      font-size: 1rem;
+      margin: 0 0 16px 0;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid #333;
+      padding-bottom: 8px;
+    }
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 16px;
+    }
+    .form-group label {
+      color: #aaa;
+      font-size: 0.85rem;
+    }
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      background: #1a1a1a;
+      border: 1px solid #444;
+      color: #f5f5f5;
+      padding: 12px 14px;
+      border-radius: 6px;
+      font-size: 1rem;
+    }
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+      border-color: #d4af37;
+      outline: none;
+    }
+    .btn-book {
+      background: #d4af37;
+      color: #000;
+      border: none;
+      padding: 16px 40px;
+      border-radius: 6px;
+      font-size: 1.1rem;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      transition: background 0.2s ease;
+    }
+    .btn-book:hover {
+      background: #b8972e;
+    }
+    .btn-book:disabled {
+      background: #555;
+      color: #888;
+      cursor: not-allowed;
+    }
+    .booking-success {
+      background: rgba(76, 175, 80, 0.15);
+      border: 1px solid #4caf50;
+      color: #4caf50;
+      padding: 20px;
+      border-radius: 8px;
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .booking-success h3 {
+      margin: 0 0 10px 0;
+    }
+    .booking-error {
+      background: rgba(229, 57, 53, 0.15);
+      border: 1px solid #e53935;
+      color: #e53935;
+      padding: 16px;
+      border-radius: 6px;
+      margin-bottom: 20px;
+    }
+    .services-list {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .service-option {
+      background: #1a1a1a;
+      border: 2px solid #333;
+      border-radius: 8px;
+      padding: 16px;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+    .service-option:hover {
+      border-color: #555;
+    }
+    .service-option.selected {
+      border-color: #d4af37;
+      background: rgba(212, 175, 55, 0.1);
+    }
+    .service-option input {
+      display: none;
+    }
+    .service-name {
+      color: #f5f5f5;
+      font-weight: 600;
+      font-size: 1.1rem;
+    }
+    .service-details {
+      color: #888;
+      font-size: 0.9rem;
+      margin-top: 4px;
+    }
+    .service-price {
+      color: #d4af37;
+      font-weight: 600;
+    }
+    .contact-info {
+      background: #1a1a1a;
+      border-radius: 8px;
+      padding: 20px;
+      margin-top: 30px;
+      text-align: center;
+    }
+    .contact-info p {
+      color: #aaa;
+      margin: 8px 0;
+    }
+    .contact-info a {
+      color: #d4af37;
+    }
+    @media (max-width: 600px) {
+      .form-row {
+        grid-template-columns: 1fr;
+      }
+      .booking-hero h1 {
+        font-size: 1.8rem;
+      }
+    }
+  </style>
+</head>
+<body class="ifcdc-body">
+  <header class="ifcdc-header">
+    <div class="ifcdc-header-inner">
+      <a href="/" class="ifcdc-logo">IFCDC</a>
+      <nav class="ifcdc-nav">
+        <a href="/">Home</a>
+        <a href="/programs">Programs</a>
+        <a href="/mental-health">Mental Health</a>
+        <a href="/contact">Contact</a>
+      </nav>
+    </div>
+  </header>
+
+  <section class="booking-hero">
+    <h1>IFCDC Barbershop</h1>
+    <p>Book your appointment online - More than haircuts, a community experience</p>
+  </section>
+
+  <div class="booking-container">
+    <div id="successMessage" class="booking-success" style="display: none;">
+      <h3>Appointment Requested!</h3>
+      <p id="successDetails"></p>
+      <p>We'll confirm your appointment shortly. Call <a href="tel:+13313168167">(331) 316-8167</a> if you have questions.</p>
+    </div>
+
+    <div id="errorMessage" class="booking-error" style="display: none;"></div>
+
+    <form id="bookingForm" class="booking-form">
+      <div class="form-section">
+        <h3>Choose Your Service</h3>
+        <div class="services-list" id="servicesList">
+          <label class="service-option">
+            <input type="radio" name="service" value="haircut" data-duration="30" data-price="25" required>
+            <div class="service-name">Haircut</div>
+            <div class="service-details"><span class="service-price">$25</span> - 30 minutes</div>
+          </label>
+          <label class="service-option">
+            <input type="radio" name="service" value="beard" data-duration="15" data-price="15">
+            <div class="service-name">Beard Trim</div>
+            <div class="service-details"><span class="service-price">$15</span> - 15 minutes</div>
+          </label>
+          <label class="service-option">
+            <input type="radio" name="service" value="shave" data-duration="20" data-price="20">
+            <div class="service-name">Hot Shave</div>
+            <div class="service-details"><span class="service-price">$20</span> - 20 minutes</div>
+          </label>
+          <label class="service-option">
+            <input type="radio" name="service" value="full" data-duration="45" data-price="40">
+            <div class="service-name">Full Service</div>
+            <div class="service-details"><span class="service-price">$40</span> - 45 minutes (Haircut + Beard + Shave)</div>
+          </label>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <h3>Your Information</h3>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="firstName">First Name *</label>
+            <input type="text" id="firstName" name="firstName" required>
+          </div>
+          <div class="form-group">
+            <label for="lastName">Last Name *</label>
+            <input type="text" id="lastName" name="lastName" required>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="phone">Phone Number *</label>
+            <input type="tel" id="phone" name="phone" placeholder="(555) 555-5555" required>
+          </div>
+          <div class="form-group">
+            <label for="email">Email (optional)</label>
+            <input type="email" id="email" name="email" placeholder="your@email.com">
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <h3>Preferred Date & Time</h3>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="date">Date *</label>
+            <input type="date" id="date" name="date" required>
+          </div>
+          <div class="form-group">
+            <label for="time">Time *</label>
+            <select id="time" name="time" required>
+              <option value="">Select a time...</option>
+              <option value="09:00">9:00 AM</option>
+              <option value="09:30">9:30 AM</option>
+              <option value="10:00">10:00 AM</option>
+              <option value="10:30">10:30 AM</option>
+              <option value="11:00">11:00 AM</option>
+              <option value="11:30">11:30 AM</option>
+              <option value="12:00">12:00 PM</option>
+              <option value="12:30">12:30 PM</option>
+              <option value="13:00">1:00 PM</option>
+              <option value="13:30">1:30 PM</option>
+              <option value="14:00">2:00 PM</option>
+              <option value="14:30">2:30 PM</option>
+              <option value="15:00">3:00 PM</option>
+              <option value="15:30">3:30 PM</option>
+              <option value="16:00">4:00 PM</option>
+              <option value="16:30">4:30 PM</option>
+              <option value="17:00">5:00 PM</option>
+              <option value="17:30">5:30 PM</option>
+              <option value="18:00">6:00 PM</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <h3>Additional Notes (optional)</h3>
+        <div class="form-group">
+          <textarea id="notes" name="notes" rows="3" placeholder="Any special requests or notes..."></textarea>
+        </div>
+      </div>
+
+      <button type="submit" class="btn-book" id="submitBtn">Request Appointment</button>
+    </form>
+
+    <div class="contact-info">
+      <p><strong>Prefer to call?</strong></p>
+      <p>Phone: <a href="tel:+13313168167">(331) 316-8167</a></p>
+      <p>Location: Asbury Park, NJ</p>
+    </div>
+  </div>
+
+  <footer class="ifcdc-footer">
+    <p>IFCDC Barbershop | Part of Imperial Foundation Community Development Center</p>
+    <p><a href="/">Return to Homepage</a></p>
+  </footer>
+
+  <script>
+    // Set minimum date to today
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('date').setAttribute('min', today);
+    document.getElementById('date').value = today;
+
+    // Service selection styling
+    document.querySelectorAll('.service-option').forEach(option => {
+      option.addEventListener('click', () => {
+        document.querySelectorAll('.service-option').forEach(o => o.classList.remove('selected'));
+        option.classList.add('selected');
+      });
+    });
+
+    // Form submission
+    document.getElementById('bookingForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const submitBtn = document.getElementById('submitBtn');
+      const errorDiv = document.getElementById('errorMessage');
+      const successDiv = document.getElementById('successMessage');
+      
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Submitting...';
+      errorDiv.style.display = 'none';
+      successDiv.style.display = 'none';
+
+      const serviceInput = document.querySelector('input[name="service"]:checked');
+      if (!serviceInput) {
+        errorDiv.textContent = 'Please select a service.';
+        errorDiv.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Request Appointment';
+        return;
+      }
+
+      const formData = {
+        firstName: document.getElementById('firstName').value.trim(),
+        lastName: document.getElementById('lastName').value.trim(),
+        phone: document.getElementById('phone').value.trim(),
+        email: document.getElementById('email').value.trim(),
+        service: serviceInput.value,
+        serviceName: serviceInput.closest('.service-option').querySelector('.service-name').textContent,
+        date: document.getElementById('date').value,
+        time: document.getElementById('time').value,
+        notes: document.getElementById('notes').value.trim()
+      };
+
+      try {
+        const res = await fetch('/api/public/book-barbershop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formData)
+        });
+
+        const data = await res.json();
+
+        if (res.ok) {
+          const dateStr = new Date(formData.date + 'T12:00:00').toLocaleDateString('en-US', { 
+            weekday: 'long', 
+            month: 'long', 
+            day: 'numeric' 
+          });
+          document.getElementById('successDetails').textContent = 
+            `${formData.serviceName} on ${dateStr} at ${document.getElementById('time').options[document.getElementById('time').selectedIndex].text}`;
+          successDiv.style.display = 'block';
+          document.getElementById('bookingForm').style.display = 'none';
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        } else {
+          errorDiv.textContent = data.error || 'Failed to submit booking request. Please try again or call us.';
+          errorDiv.style.display = 'block';
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Request Appointment';
+        }
+      } catch (err) {
+        errorDiv.textContent = 'Network error. Please try again or call us at (331) 316-8167.';
+        errorDiv.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Request Appointment';
+      }
+    });
+  </script>
+</body>
+</html>
