@@ -3594,7 +3594,7 @@ app.post("/api/hr/employees", authRequired, requireRole(ROLES.ADMIN, "owner"), a
   }
 });
 
-app.get("/api/hr/staffing-overview", authRequired, requireRole(ROLES.ADMIN, "owner"), async (_req, res) => {
+app.get("/api/hr/staffing-overview", authRequired, requireRole(ROLES.ADMIN, "admin", "owner", ROLES.EXEC), async (_req, res) => {
   try {
     const staffingPlan = await db.all<any[]>(
       "SELECT * FROM staffing_plan ORDER BY priority ASC"

@@ -30,14 +30,17 @@ export default function StaffingOverviewWidget({ onRemove }: Props) {
   useEffect(() => {
     fetch("/api/hr/staffing-overview", { credentials: "include" })
       .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       })
       .then((data) => {
-        setOverview(data.overview);
-        setSummary(data.summary);
+        setOverview(data.overview || []);
+        setSummary(data.summary || null);
       })
-      .catch(() => setError(true))
+      .catch((err) => {
+        console.error("Staffing overview error:", err);
+        setError(true);
+      })
       .finally(() => setLoading(false));
   }, []);
 
