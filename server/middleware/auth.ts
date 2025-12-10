@@ -47,6 +47,11 @@ export function requireAuth(allowedRoles?: string[]) {
       return res.status(401).json({ error: "Not authenticated" });
     }
 
+    // Owner role has full access to everything
+    if (req.user.role === "owner") {
+      return next();
+    }
+
     if (allowedRoles && !allowedRoles.includes(req.user.role)) {
       return res.status(403).json({ error: "Access denied" });
     }
