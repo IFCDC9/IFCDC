@@ -17,6 +17,7 @@ import RecentEncountersWidget from "./widgets/RecentEncountersWidget";
 import UpcomingAppointmentsWidget from "./widgets/UpcomingAppointmentsWidget";
 import AuditLogSummaryWidget from "./widgets/AuditLogSummaryWidget";
 import ProgramEnrollmentWidget from "./widgets/ProgramEnrollmentWidget";
+import StaffingOverviewWidget from "./widgets/StaffingOverviewWidget";
 import WidgetPicker from "./widgets/WidgetPicker";
 
 const WIDGET_COMPONENTS: Record<string, React.ComponentType<{ onRemove: () => void }>> = {
@@ -25,6 +26,7 @@ const WIDGET_COMPONENTS: Record<string, React.ComponentType<{ onRemove: () => vo
   upcoming_appointments: UpcomingAppointmentsWidget,
   audit_log_summary: AuditLogSummaryWidget,
   program_enrollment: ProgramEnrollmentWidget,
+  staffing_overview: StaffingOverviewWidget,
 };
 
 export default function CustomizableDashboard() {

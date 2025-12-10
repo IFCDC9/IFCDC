@@ -32,6 +32,11 @@ const WIDGET_OPTIONS: WidgetOption[] = [
     title: "Program Enrollment",
     description: "See client counts by program",
   },
+  {
+    type: "staffing_overview",
+    title: "Staffing Overview",
+    description: "View open positions and current staff by role",
+  },
 ];
 
 interface Props {

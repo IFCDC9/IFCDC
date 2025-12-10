@@ -1290,6 +1290,102 @@ body {
   margin-top: 4px;
 }
 
+/* Staffing Overview Widget */
+.staffing-overview-content {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  overflow: hidden;
+}
+
+.staffing-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  background: #1a1a2e;
+  padding: 12px;
+  border-radius: 8px;
+}
+
+.staffing-summary-item {
+  text-align: center;
+}
+
+.staffing-summary-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #d4af37;
+}
+
+.staffing-summary-label {
+  font-size: 0.7rem;
+  color: #aaa;
+  margin-top: 2px;
+}
+
+.staffing-roles-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.staffing-role-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #f5f5f5;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.staffing-role-row.has-openings {
+  background: #fff8e1;
+  border-left: 3px solid #d4af37;
+}
+
+.staffing-role-name {
+  font-weight: 500;
+  color: #333;
+}
+
+.staffing-role-counts {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.staffing-active {
+  color: #666;
+}
+
+.staffing-open {
+  color: #d4af37;
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+
+.staffing-hire-link {
+  display: block;
+  text-align: center;
+  padding: 8px;
+  background: #d4af37;
+  color: #000;
+  font-weight: 600;
+  text-decoration: none;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  margin-top: auto;
+}
+
+.staffing-hire-link:hover {
+  background: #b8972e;
+}
+
 /* Widget List */
 .widget-list {
   flex: 1;

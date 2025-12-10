@@ -4,7 +4,95 @@ import { requireAuth } from "../middleware/auth";
 
 const router = Router();
 
-router.use(requireAuth(["admin"]));
+router.use(requireAuth(["admin", "owner"]));
+
+// Seed default staffing plan if empty
+async function seedStaffingPlan() {
+  const count = await prisma.staffingPlan.count();
+  if (count === 0) {
+    await prisma.staffingPlan.createMany({
+      data: [
+        { roleKey: "barber", roleName: "Barber", targetCount: 5, priority: 1 },
+        { roleKey: "radio_host", roleName: "Radio Host", targetCount: 3, priority: 2 },
+        { roleKey: "program_staff", roleName: "Program Staff", targetCount: 4, priority: 3 },
+        { roleKey: "admin", roleName: "Admin", targetCount: 2, priority: 4 },
+        { roleKey: "clinician", roleName: "Clinician", targetCount: 2, priority: 5 },
+        { roleKey: "case_manager", roleName: "Case Manager", targetCount: 2, priority: 6 },
+        { roleKey: "chw", roleName: "Community Health Worker", targetCount: 3, priority: 7 },
+      ],
+    });
+  }
+}
+seedStaffingPlan().catch(console.error);
+
+// Get staffing overview with current counts vs targets
+router.get("/staffing-overview", async (_req, res) => {
+  try {
+    // Get all staffing plan entries
+    const staffingPlan = await prisma.staffingPlan.findMany({
+      orderBy: { priority: "asc" },
+    });
+
+    // Get employee counts by role and status
+    const employees = await prisma.employee.groupBy({
+      by: ["role", "status"],
+      _count: { id: true },
+    });
+
+    // Build overview with counts
+    const overview = staffingPlan.map((plan) => {
+      const activeCount = employees
+        .filter((e) => e.role === plan.roleKey && e.status === "active")
+        .reduce((sum, e) => sum + e._count.id, 0);
+      const onboardingCount = employees
+        .filter((e) => e.role === plan.roleKey && e.status === "onboarding")
+        .reduce((sum, e) => sum + e._count.id, 0);
+      const openCount = Math.max(0, plan.targetCount - activeCount);
+
+      return {
+        id: plan.id,
+        roleKey: plan.roleKey,
+        roleName: plan.roleName,
+        targetCount: plan.targetCount,
+        activeCount,
+        onboardingCount,
+        openCount,
+        priority: plan.priority,
+        notes: plan.notes,
+      };
+    });
+
+    const summary = {
+      totalTarget: overview.reduce((sum, o) => sum + o.targetCount, 0),
+      totalActive: overview.reduce((sum, o) => sum + o.activeCount, 0),
+      totalOnboarding: overview.reduce((sum, o) => sum + o.onboardingCount, 0),
+      totalOpen: overview.reduce((sum, o) => sum + o.openCount, 0),
+    };
+
+    return res.json({ overview, summary });
+  } catch (err) {
+    console.error("Error fetching staffing overview", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Update staffing plan target
+router.patch("/staffing-plan/:id", async (req, res) => {
+  try {
+    const { targetCount, notes } = req.body;
+    const updated = await prisma.staffingPlan.update({
+      where: { id: req.params.id },
+      data: {
+        ...(targetCount !== undefined && { targetCount: Number(targetCount) }),
+        ...(notes !== undefined && { notes }),
+      },
+    });
+    return res.json(updated);
+  } catch (err) {
+    console.error("Error updating staffing plan", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 router.get("/employees", async (_req, res) => {
   try {
