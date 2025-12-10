@@ -25,9 +25,9 @@ const RoleRouter: React.FC = () => {
 
   if (!user) return <Navigate to="/login" replace />;
 
-  if (user.role === "admin") return <Navigate to="/admin" replace />;
+  if (user.role === "owner" || user.role === "admin" || user.role === "EXEC") return <Navigate to="/admin" replace />;
   if (user.role === "barber") return <Navigate to="/barber" replace />;
-  if (user.role === "radio_host") return <Navigate to="/radio" replace />;
+  if (user.role === "radio_host" || user.role === "radio") return <Navigate to="/radio" replace />;
   if (user.role === "program_staff") return <Navigate to="/programs" replace />;
 
   return <Navigate to="/login" replace />;
@@ -52,7 +52,7 @@ const App: React.FC = () => {
         <Route
           path="/admin"
           element={
-            <ProtectedRoute allowedRoles={["admin"]}>
+            <ProtectedRoute allowedRoles={["admin", "owner", "EXEC"]}>
               <AdminDashboard />
             </ProtectedRoute>
           }
@@ -61,7 +61,7 @@ const App: React.FC = () => {
         <Route
           path="/admin/hr"
           element={
-            <ProtectedRoute allowedRoles={["admin"]}>
+            <ProtectedRoute allowedRoles={["admin", "owner", "EXEC"]}>
               <AdminLayout>
                 <HrOnboardingPage />
               </AdminLayout>
@@ -72,7 +72,7 @@ const App: React.FC = () => {
         <Route
           path="/programs"
           element={
-            <ProtectedRoute allowedRoles={["admin", "program_staff"]}>
+            <ProtectedRoute allowedRoles={["admin", "owner", "EXEC", "program_staff"]}>
               <AdminLayout>
                 <ProgramsDashboard />
               </AdminLayout>
@@ -83,7 +83,7 @@ const App: React.FC = () => {
         <Route
           path="/programs/:programId"
           element={
-            <ProtectedRoute allowedRoles={["admin", "program_staff"]}>
+            <ProtectedRoute allowedRoles={["admin", "owner", "EXEC", "program_staff"]}>
               <AdminLayout>
                 <ProgramDetailPage />
               </AdminLayout>
@@ -94,7 +94,7 @@ const App: React.FC = () => {
         <Route
           path="/admin/funding-sources"
           element={
-            <ProtectedRoute allowedRoles={["admin"]}>
+            <ProtectedRoute allowedRoles={["admin", "owner", "EXEC"]}>
               <AdminLayout>
                 <FundingSourcesAdminPage />
               </AdminLayout>
@@ -105,7 +105,7 @@ const App: React.FC = () => {
         <Route
           path="/admin/time"
           element={
-            <ProtectedRoute allowedRoles={["admin"]}>
+            <ProtectedRoute allowedRoles={["admin", "owner", "EXEC"]}>
               <AdminLayout>
                 <AdminTimeOverviewPage />
               </AdminLayout>
@@ -116,7 +116,7 @@ const App: React.FC = () => {
         <Route
           path="/admin/grant-report"
           element={
-            <ProtectedRoute allowedRoles={["admin"]}>
+            <ProtectedRoute allowedRoles={["admin", "owner", "EXEC"]}>
               <AdminLayout>
                 <GrantReportPage />
               </AdminLayout>
@@ -127,7 +127,7 @@ const App: React.FC = () => {
         <Route
           path="/barber"
           element={
-            <ProtectedRoute allowedRoles={["barber", "admin"]}>
+            <ProtectedRoute allowedRoles={["barber", "admin", "owner"]}>
               <BarberDashboard />
             </ProtectedRoute>
           }
@@ -136,7 +136,7 @@ const App: React.FC = () => {
         <Route
           path="/radio"
           element={
-            <ProtectedRoute allowedRoles={["radio_host", "admin"]}>
+            <ProtectedRoute allowedRoles={["radio_host", "radio", "admin", "owner"]}>
               <RadioDashboard />
             </ProtectedRoute>
           }
@@ -145,7 +145,7 @@ const App: React.FC = () => {
         <Route
           path="/my-time"
           element={
-            <ProtectedRoute allowedRoles={["admin", "barber", "radio_host", "program_staff"]}>
+            <ProtectedRoute allowedRoles={["admin", "owner", "barber", "radio_host", "program_staff"]}>
               <MyTimeEntriesPage />
             </ProtectedRoute>
           }
