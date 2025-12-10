@@ -720,7 +720,8 @@ async function authRequired(req: express.Request, res: express.Response, next: e
     if (!user) {
       return res.status(401).json({ error: "User not found" });
     }
-    req.user = { id: user.id, name: user.name, email: user.email, role: user.role };
+    // Use JWT role (which may have owner override) instead of database role
+    req.user = { id: user.id, name: user.name, email: user.email, role: payload.role || user.role };
     next();
   } catch (err) {
     return res.status(401).json({ error: "Invalid or expired token" });
