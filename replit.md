@@ -56,13 +56,13 @@ Preferred communication style: Simple, everyday language.
 - `POST /auth/register` - Register new user (email/password)
 - `POST /auth/login` - Login user (email/password)
 
-#### Replit Auth (OpenID Connect)
-- `GET /api/replit/login` - Start Replit OAuth login flow
-- `GET /api/replit/callback` - OAuth callback (issues JWT cookie)
-- `GET /api/replit/logout` - Logout from Replit session
-- `GET /api/replit/user` - Get current Replit user info
+#### AI Assistant Endpoints (OpenAI-powered)
+- `POST /api/ai/chat` - General AI chat assistant (all authenticated users)
+- `POST /api/ai/client-summary` - Client care summaries (EXEC, CLINICIAN, CASE_MANAGER, ADMIN)
+- `POST /api/ai/radio-content` - Radio content generation (radio_host, radio, ADMIN)
+- `POST /api/ai/schedule-help` - Barbershop scheduling assistance (barber, owner, ADMIN)
 
-**Note**: Replit Auth stores sessions in PostgreSQL (`sessions` table). After Replit login, a JWT cookie (`ifcdc_token`) is issued for compatibility with existing auth middleware.
+**Note**: AI features use Replit AI Integrations (OpenAI-compatible). Charges are billed to Replit credits.
 
 #### Chapters
 - `GET /chapters` - List all chapters with acknowledgement counts
