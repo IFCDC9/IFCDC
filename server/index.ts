@@ -813,14 +813,16 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Check if user has a password (Replit Auth users won't have one)
+    // If user has no password_hash, set this password for them (migrate from Replit Auth)
     if (!user.password_hash) {
-      return res.status(401).json({ error: 'This account uses Replit login. Please use "Continue with Replit" instead.' });
-    }
-
-    const ok = await bcrypt.compare(password, user.password_hash);
-    if (!ok) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      const newHash = await bcrypt.hash(password, 10);
+      await db.run("UPDATE users SET password_hash = ? WHERE id = ?", newHash, user.id);
+      // Continue with login
+    } else {
+      const ok = await bcrypt.compare(password, user.password_hash);
+      if (!ok) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
     }
 
     // Override role to "owner" if email matches MASTER_OWNER_EMAIL
@@ -859,15 +861,6 @@ app.post('/api/auth/logout', (req, res) => {
 // GET CURRENT USER
 app.get('/api/auth/me', authRequired, (req, res) => {
   return res.json({ user: req.user });
-});
-
-app.post('/api/auth/logout', (req, res) => {
-  res.clearCookie('ifcdc_token', {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-  });
-  res.json({ success: true });
 });
 
 // ----- Programs -----
