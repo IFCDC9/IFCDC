@@ -131,7 +131,7 @@ const ROLES = {
 const ROLE_VALUES = Object.values(ROLES);
 
 const JWT_SECRET = process.env.JWT_SECRET || "DEV_ONLY_CHANGE_ME_IFCDC";
-const JWT_EXPIRES_IN = "8h";
+const JWT_EXPIRES_IN = "30d";
 
 interface User {
   id: string;
@@ -838,7 +838,7 @@ app.post('/api/auth/login', async (req, res) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000
+      maxAge: 30 * 24 * 60 * 60 * 1000
     });
 
     await logAudit(
