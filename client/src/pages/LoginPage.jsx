@@ -1,7 +1,9 @@
 import React, { useState } from "react";
+import { useAuth } from "../auth/AuthContext";
 import Header from "../components/IFCDCHeader";
 
 const LoginPage = () => {
+  const { refreshUser } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -16,6 +18,7 @@ const LoginPage = () => {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ email: email.trim(), password: password.trim() }),
       });
 
@@ -29,18 +32,19 @@ const LoginPage = () => {
 
       setMessage({ type: "success", text: "Login successful. Redirecting…" });
 
-      // Redirect by role
-      setTimeout(() => {
-        if (data.role === "owner" || data.role === "admin" || data.role === "EXEC") {
-          window.location.href = "/admin";
-        } else if (data.role === "barber") {
-          window.location.href = "/barber";
-        } else if (data.role === "radio" || data.role === "radio_host") {
-          window.location.href = "/radio";
-        } else {
-          window.location.href = "/";
-        }
-      }, 500);
+      // Refresh user context then redirect
+      await refreshUser();
+      
+      const role = data.role;
+      if (role === "owner" || role === "admin" || role === "EXEC") {
+        window.location.href = "/admin";
+      } else if (role === "barber") {
+        window.location.href = "/barber";
+      } else if (role === "radio" || role === "radio_host") {
+        window.location.href = "/radio";
+      } else {
+        window.location.href = "/";
+      }
     } catch (err) {
       setLoading(false);
       setMessage({ type: "error", text: "Network error. Try again." });

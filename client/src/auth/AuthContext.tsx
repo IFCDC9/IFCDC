@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 
 type EmployeeInfo = {
   id: string;
@@ -19,64 +19,57 @@ type UserInfo = {
 type AuthContextType = {
   user: UserInfo | null;
   loading: boolean;
-  token: string | null;
-  setToken: (token: string | null) => void;
+  refreshUser: () => Promise<void>;
+  logout: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
-  token: null,
-  setToken: () => {},
+  refreshUser: async () => {},
+  logout: async () => {},
 });
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [token, setTokenState] = useState<string | null>(
-    () => localStorage.getItem("ifcdc_token")
-  );
   const [user, setUser] = useState<UserInfo | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const setToken = (value: string | null) => {
-    setTokenState(value);
-    if (value) {
-      localStorage.setItem("ifcdc_token", value);
-    } else {
-      localStorage.removeItem("ifcdc_token");
+  const refreshUser = useCallback(async () => {
+    try {
+      const res = await fetch("/api/auth/me", {
+        credentials: "include",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data.user || data);
+      } else {
+        setUser(null);
+      }
+    } catch {
+      setUser(null);
+    } finally {
+      setLoading(false);
     }
-  };
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch {
+      // ignore
+    }
+    setUser(null);
+  }, []);
 
   useEffect(() => {
-    const fetchMe = async () => {
-      if (!token) {
-        setUser(null);
-        setLoading(false);
-        return;
-      }
-      try {
-        const res = await fetch("/api/auth/me", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setUser(data);
-        } else {
-          setUser(null);
-        }
-      } catch {
-        setUser(null);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchMe();
-  }, [token]);
+    refreshUser();
+  }, [refreshUser]);
 
   return (
-    <AuthContext.Provider value={{ user, loading, token, setToken }}>
+    <AuthContext.Provider value={{ user, loading, refreshUser, logout }}>
       {children}
     </AuthContext.Provider>
   );

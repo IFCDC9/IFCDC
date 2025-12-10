@@ -861,6 +861,15 @@ app.get('/api/auth/me', authRequired, (req, res) => {
   return res.json({ user: req.user });
 });
 
+app.post('/api/auth/logout', (req, res) => {
+  res.clearCookie('ifcdc_token', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+  });
+  res.json({ success: true });
+});
+
 // ----- Programs -----
 app.get("/api/programs", authRequired, async (req, res) => {
   const rows = await db.all<{ id: string; code: string; name: string; description: string }[]>(
