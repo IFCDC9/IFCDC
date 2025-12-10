@@ -3640,6 +3640,135 @@ app.get("/api/hr/staffing-overview", authRequired, requireRole(ROLES.ADMIN, "adm
   }
 });
 
+// ----- Barbershop Booking Endpoints -----
+
+// Barbershop services list
+const BARBERSHOP_SERVICES = [
+  { id: "haircut", name: "Haircut", duration: 30, price: 25 },
+  { id: "beard_trim", name: "Beard Trim", duration: 15, price: 15 },
+  { id: "haircut_beard", name: "Haircut + Beard", duration: 45, price: 35 },
+  { id: "lineup", name: "Line Up / Edge Up", duration: 15, price: 15 },
+  { id: "kids_cut", name: "Kids Cut (12 & Under)", duration: 25, price: 20 },
+  { id: "shave", name: "Full Shave", duration: 30, price: 25 },
+];
+
+app.get("/api/barbershop/services", authRequired, async (_req, res) => {
+  res.json(BARBERSHOP_SERVICES);
+});
+
+app.get("/api/barbershop/barbers", authRequired, async (_req, res) => {
+  try {
+    const barbers = await db.all<any[]>(
+      `SELECT id, first_name, last_name, email, phone FROM employees WHERE role = 'barber' AND status = 'active' ORDER BY first_name`
+    );
+    res.json(barbers.map(b => ({
+      id: b.id,
+      firstName: b.first_name,
+      lastName: b.last_name,
+      name: `${b.first_name} ${b.last_name}`,
+      email: b.email,
+      phone: b.phone,
+    })));
+  } catch (err) {
+    console.error("Error fetching barbers:", err);
+    res.status(500).json({ error: "Failed to load barbers" });
+  }
+});
+
+app.post("/api/barbershop/book", authRequired, requireRole("barber", "admin", "owner", ROLES.EXEC), async (req, res) => {
+  try {
+    const { clientFirstName, clientLastName, clientPhone, clientEmail, serviceId, barberId, date, startTime, notes } = req.body;
+
+    // Validate required fields
+    if (!clientFirstName || !clientLastName || !serviceId || !barberId || !date || !startTime) {
+      return res.status(400).json({ error: "Missing required fields: clientFirstName, clientLastName, serviceId, barberId, date, startTime" });
+    }
+
+    const fullName = `${clientFirstName} ${clientLastName}`;
+
+    // Find or create client - use correct schema with phone/email columns
+    let client = await db.get<any>(
+      `SELECT id FROM clients WHERE LOWER(full_name) = LOWER(?) OR (phone = ? AND phone IS NOT NULL AND phone != '')`,
+      [fullName, clientPhone || null]
+    );
+
+    if (!client) {
+      const clientId = cryptoRandomId();
+      const now = new Date().toISOString();
+      await db.run(
+        `INSERT INTO clients (id, full_name, phone, email, programs, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+        clientId, fullName, clientPhone || null, clientEmail || null, JSON.stringify(["BARBERSHOP"]), now
+      );
+      client = { id: clientId };
+    }
+
+    // Get service details
+    const service = BARBERSHOP_SERVICES.find(s => s.id === serviceId);
+    if (!service) {
+      return res.status(400).json({ error: "Invalid service" });
+    }
+
+    // Calculate end time
+    const [hours, minutes] = startTime.split(":").map(Number);
+    const startDateTime = new Date(`${date}T${startTime}:00`);
+    const endDateTime = new Date(startDateTime.getTime() + service.duration * 60000);
+    const endTime = `${String(endDateTime.getHours()).padStart(2, '0')}:${String(endDateTime.getMinutes()).padStart(2, '0')}`;
+
+    const startISO = `${date}T${startTime}:00`;
+    const endISO = `${date}T${endTime}:00`;
+
+    // Check for conflicts - match by barber (created_by) on same day with overlapping times
+    const conflicts = await db.get<any>(
+      `SELECT id FROM appointments 
+       WHERE program = 'BARBERSHOP' 
+       AND created_by = ?
+       AND start_time >= ? AND start_time < ?
+       AND (
+         (start_time < ? AND end_time > ?)
+         OR (start_time >= ? AND start_time < ?)
+       )`,
+      barberId, `${date}T00:00:00`, `${date}T23:59:59`, endISO, startISO, startISO, endISO
+    );
+
+    if (conflicts) {
+      return res.status(409).json({ error: "Time slot conflicts with existing appointment" });
+    }
+
+    // Create appointment - store service name in notes for display
+    const appointmentId = cryptoRandomId();
+    const now = new Date().toISOString();
+    const appointmentNotes = `[${service.name}]${notes ? ' ' + notes : ''}`;
+
+    await db.run(
+      `INSERT INTO appointments (id, client_id, program, start_time, end_time, location, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      appointmentId, client.id, "BARBERSHOP", startISO, endISO, "IFCDC Barbershop", appointmentNotes, barberId, now
+    );
+
+    await logAudit(req, "APPOINTMENT", appointmentId, "CREATE_BARBERSHOP_BOOKING", { 
+      clientName: fullName, 
+      service: service.name,
+      date, 
+      startTime,
+      barberId 
+    });
+
+    res.status(201).json({
+      id: appointmentId,
+      clientId: client.id,
+      clientName: fullName,
+      service: service.name,
+      serviceDuration: service.duration,
+      date,
+      startTime,
+      endTime,
+      barberId,
+    });
+  } catch (err) {
+    console.error("Error creating booking:", err);
+    res.status(500).json({ error: "Failed to create booking" });
+  }
+});
+
 // ----- AI Assistant Endpoints -----
 
 app.post("/api/ai/chat", authRequired, async (req, res) => {

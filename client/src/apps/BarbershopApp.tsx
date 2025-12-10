@@ -18,12 +18,44 @@ type Appointment = {
   client: Client;
 };
 
+type Service = {
+  id: string;
+  name: string;
+  duration: number;
+  price: number;
+};
+
+type Barber = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  name: string;
+};
+
 const BarbershopApp: React.FC = () => {
   const { user, logout } = useAuth();
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [date, setDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [activeTab, setActiveTab] = useState<"schedule" | "book" | "time">("schedule");
+
+  // Booking form state
+  const [services, setServices] = useState<Service[]>([]);
+  const [barbers, setBarbers] = useState<Barber[]>([]);
+  const [bookingForm, setBookingForm] = useState({
+    clientFirstName: "",
+    clientLastName: "",
+    clientPhone: "",
+    clientEmail: "",
+    serviceId: "",
+    barberId: "",
+    date: new Date().toISOString().slice(0, 10),
+    startTime: "09:00",
+    notes: "",
+  });
+  const [bookingLoading, setBookingLoading] = useState(false);
+  const [bookingSuccess, setBookingSuccess] = useState<string | null>(null);
+  const [bookingError, setBookingError] = useState<string | null>(null);
 
   const fetchSchedule = async () => {
     setLoading(true);
@@ -39,9 +71,28 @@ const BarbershopApp: React.FC = () => {
     }
   };
 
+  const fetchServicesAndBarbers = async () => {
+    try {
+      const [servicesRes, barbersRes] = await Promise.all([
+        fetch("/api/barbershop/services", { credentials: "include" }),
+        fetch("/api/barbershop/barbers", { credentials: "include" }),
+      ]);
+      if (servicesRes.ok) setServices(await servicesRes.json());
+      if (barbersRes.ok) setBarbers(await barbersRes.json());
+    } catch (err) {
+      console.error("Error loading booking data:", err);
+    }
+  };
+
   useEffect(() => {
     fetchSchedule();
   }, [date]);
+
+  useEffect(() => {
+    if (activeTab === "book") {
+      fetchServicesAndBarbers();
+    }
+  }, [activeTab]);
 
   const handleStatusChange = async (id: string, status: string) => {
     const res = await fetch(`/api/barber/appointments/${id}/status`, {
@@ -57,6 +108,50 @@ const BarbershopApp: React.FC = () => {
     logout();
     window.location.href = "/login";
   };
+
+  const handleBookingSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBookingError(null);
+    setBookingSuccess(null);
+    setBookingLoading(true);
+
+    try {
+      const res = await fetch("/api/barbershop/book", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(bookingForm),
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        setBookingSuccess(`Appointment booked for ${data.clientName} on ${data.date} at ${data.startTime}`);
+        setBookingForm({
+          clientFirstName: "",
+          clientLastName: "",
+          clientPhone: "",
+          clientEmail: "",
+          serviceId: "",
+          barberId: "",
+          date: new Date().toISOString().slice(0, 10),
+          startTime: "09:00",
+          notes: "",
+        });
+        // Refresh schedule if viewing same date
+        if (bookingForm.date === date) {
+          fetchSchedule();
+        }
+      } else {
+        setBookingError(data.error || "Failed to book appointment");
+      }
+    } catch (err) {
+      setBookingError("Network error. Please try again.");
+    }
+    setBookingLoading(false);
+  };
+
+  const selectedService = services.find(s => s.id === bookingForm.serviceId);
 
   return (
     <div className="standalone-app barbershop-app" data-testid="barbershop-app">
@@ -149,8 +244,177 @@ const BarbershopApp: React.FC = () => {
         {activeTab === "book" && (
           <section className="app-section" data-testid="section-book">
             <h2>Book a Client</h2>
-            <p>Client booking form coming soon. Use the main admin portal for now.</p>
-            <a href="/admin" className="btn-link">Go to Admin Portal</a>
+            
+            {bookingSuccess && (
+              <div className="booking-success" data-testid="booking-success">
+                {bookingSuccess}
+              </div>
+            )}
+            
+            {bookingError && (
+              <div className="booking-error" data-testid="booking-error">
+                {bookingError}
+              </div>
+            )}
+
+            <form onSubmit={handleBookingSubmit} className="booking-form">
+              <div className="form-section">
+                <h3>Client Information</h3>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>First Name *</label>
+                    <input
+                      type="text"
+                      value={bookingForm.clientFirstName}
+                      onChange={(e) => setBookingForm({ ...bookingForm, clientFirstName: e.target.value })}
+                      required
+                      data-testid="input-client-first-name"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Last Name *</label>
+                    <input
+                      type="text"
+                      value={bookingForm.clientLastName}
+                      onChange={(e) => setBookingForm({ ...bookingForm, clientLastName: e.target.value })}
+                      required
+                      data-testid="input-client-last-name"
+                    />
+                  </div>
+                </div>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Phone</label>
+                    <input
+                      type="tel"
+                      value={bookingForm.clientPhone}
+                      onChange={(e) => setBookingForm({ ...bookingForm, clientPhone: e.target.value })}
+                      placeholder="(555) 555-5555"
+                      data-testid="input-client-phone"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Email</label>
+                    <input
+                      type="email"
+                      value={bookingForm.clientEmail}
+                      onChange={(e) => setBookingForm({ ...bookingForm, clientEmail: e.target.value })}
+                      placeholder="client@email.com"
+                      data-testid="input-client-email"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="form-section">
+                <h3>Service & Barber</h3>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Service *</label>
+                    <select
+                      value={bookingForm.serviceId}
+                      onChange={(e) => setBookingForm({ ...bookingForm, serviceId: e.target.value })}
+                      required
+                      data-testid="select-service"
+                    >
+                      <option value="">Select a service...</option>
+                      {services.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} - ${s.price} ({s.duration} min)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>Barber *</label>
+                    <select
+                      value={bookingForm.barberId}
+                      onChange={(e) => setBookingForm({ ...bookingForm, barberId: e.target.value })}
+                      required
+                      data-testid="select-barber"
+                    >
+                      <option value="">Select a barber...</option>
+                      {barbers.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="form-section">
+                <h3>Date & Time</h3>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Date *</label>
+                    <input
+                      type="date"
+                      value={bookingForm.date}
+                      onChange={(e) => setBookingForm({ ...bookingForm, date: e.target.value })}
+                      min={new Date().toISOString().slice(0, 10)}
+                      required
+                      data-testid="input-booking-date"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Start Time *</label>
+                    <select
+                      value={bookingForm.startTime}
+                      onChange={(e) => setBookingForm({ ...bookingForm, startTime: e.target.value })}
+                      required
+                      data-testid="select-start-time"
+                    >
+                      {Array.from({ length: 20 }, (_, i) => {
+                        const hour = Math.floor(i / 2) + 9;
+                        const minute = (i % 2) * 30;
+                        const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+                        const displayTime = new Date(`2000-01-01T${time}`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+                        return (
+                          <option key={time} value={time}>
+                            {displayTime}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                </div>
+                {selectedService && (
+                  <div className="form-info">
+                    Appointment will end at approximately {(() => {
+                      const [h, m] = bookingForm.startTime.split(':').map(Number);
+                      const endDate = new Date(2000, 0, 1, h, m + selectedService.duration);
+                      return endDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+                    })()}
+                  </div>
+                )}
+              </div>
+
+              <div className="form-section">
+                <h3>Notes</h3>
+                <div className="form-group">
+                  <textarea
+                    value={bookingForm.notes}
+                    onChange={(e) => setBookingForm({ ...bookingForm, notes: e.target.value })}
+                    placeholder="Any special requests or notes..."
+                    rows={3}
+                    data-testid="input-notes"
+                  />
+                </div>
+              </div>
+
+              <div className="form-actions">
+                <button 
+                  type="submit" 
+                  disabled={bookingLoading}
+                  className="btn-book"
+                  data-testid="btn-submit-booking"
+                >
+                  {bookingLoading ? "Booking..." : "Book Appointment"}
+                </button>
+              </div>
+            </form>
           </section>
         )}
 
