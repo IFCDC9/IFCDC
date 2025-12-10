@@ -413,6 +413,62 @@ async function initDb() {
     );
   `);
 
+  // HR Employees table
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS employees (
+      id TEXT PRIMARY KEY,
+      first_name TEXT NOT NULL,
+      last_name TEXT NOT NULL,
+      email TEXT UNIQUE NOT NULL,
+      phone TEXT,
+      role TEXT NOT NULL,
+      location TEXT,
+      start_date TEXT,
+      status TEXT DEFAULT 'onboarding',
+      notes TEXT,
+      pay_rate REAL,
+      pay_currency TEXT DEFAULT 'USD',
+      pay_type TEXT DEFAULT 'hourly',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+
+  // Staffing Plan table
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS staffing_plan (
+      id TEXT PRIMARY KEY,
+      role_key TEXT UNIQUE NOT NULL,
+      role_name TEXT NOT NULL,
+      target_count INTEGER DEFAULT 0,
+      priority INTEGER DEFAULT 1,
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+
+  // Seed default staffing plan if empty
+  const staffingPlanCount = await db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM staffing_plan");
+  if (staffingPlanCount && staffingPlanCount.cnt === 0) {
+    const now = new Date().toISOString();
+    const roles = [
+      { key: "barber", name: "Barber", target: 5, priority: 1 },
+      { key: "radio_host", name: "Radio Host", target: 3, priority: 2 },
+      { key: "program_staff", name: "Program Staff", target: 4, priority: 3 },
+      { key: "admin", name: "Admin", target: 2, priority: 4 },
+      { key: "clinician", name: "Clinician", target: 2, priority: 5 },
+      { key: "case_manager", name: "Case Manager", target: 2, priority: 6 },
+      { key: "chw", name: "Community Health Worker", target: 3, priority: 7 },
+    ];
+    for (const r of roles) {
+      await db.run(
+        `INSERT INTO staffing_plan (id, role_key, role_name, target_count, priority, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        cryptoRandomId(), r.key, r.name, r.target, r.priority, now, now
+      );
+    }
+  }
+
   // Logic Models table for program frameworks
   await db.exec(`
     CREATE TABLE IF NOT EXISTS logic_models (
@@ -3474,6 +3530,115 @@ app.post(
     res.json({ ok: true });
   }
 );
+
+// ----- HR Employee Endpoints -----
+
+app.get("/api/hr/employees", authRequired, requireRole(ROLES.ADMIN, "owner"), async (_req, res) => {
+  try {
+    const employees = await db.all<any[]>(
+      "SELECT * FROM employees ORDER BY created_at DESC"
+    );
+    res.json(employees.map(e => ({
+      id: e.id,
+      firstName: e.first_name,
+      lastName: e.last_name,
+      email: e.email,
+      phone: e.phone,
+      role: e.role,
+      location: e.location,
+      startDate: e.start_date,
+      status: e.status,
+      notes: e.notes,
+      payRate: e.pay_rate,
+      payCurrency: e.pay_currency,
+      payType: e.pay_type,
+    })));
+  } catch (err) {
+    console.error("Error fetching employees", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/api/hr/employees", authRequired, requireRole(ROLES.ADMIN, "owner"), async (req, res) => {
+  try {
+    const { firstName, lastName, email, phone, role, location, startDate, status, notes, payRate, payCurrency, payType } = req.body;
+
+    if (!firstName || !lastName || !email || !role) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const existing = await db.get("SELECT 1 FROM employees WHERE email = ?", email.toLowerCase());
+    if (existing) {
+      return res.status(409).json({ error: "Email already exists for another employee" });
+    }
+
+    const id = cryptoRandomId();
+    const now = new Date().toISOString();
+
+    await db.run(
+      `INSERT INTO employees (id, first_name, last_name, email, phone, role, location, start_date, status, notes, pay_rate, pay_currency, pay_type, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id, firstName, lastName, email.toLowerCase(), phone || null, role, location || null, 
+      startDate || null, status || "onboarding", notes || null, 
+      payRate ? Number(payRate) : null, payCurrency || "USD", payType || "hourly", now, now
+    );
+
+    await logAudit(req, "EMPLOYEE", id, "CREATE_EMPLOYEE", { firstName, lastName, role });
+
+    res.status(201).json({
+      id, firstName, lastName, email: email.toLowerCase(), phone, role, location, startDate, status: status || "onboarding", notes
+    });
+  } catch (err) {
+    console.error("Error creating employee", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.get("/api/hr/staffing-overview", authRequired, requireRole(ROLES.ADMIN, "owner"), async (_req, res) => {
+  try {
+    const staffingPlan = await db.all<any[]>(
+      "SELECT * FROM staffing_plan ORDER BY priority ASC"
+    );
+
+    const employees = await db.all<any[]>(
+      "SELECT role, status, COUNT(*) as cnt FROM employees GROUP BY role, status"
+    );
+
+    const overview = staffingPlan.map((plan) => {
+      const activeCount = employees
+        .filter((e) => e.role === plan.role_key && e.status === "active")
+        .reduce((sum, e) => sum + e.cnt, 0);
+      const onboardingCount = employees
+        .filter((e) => e.role === plan.role_key && e.status === "onboarding")
+        .reduce((sum, e) => sum + e.cnt, 0);
+      const openCount = Math.max(0, plan.target_count - activeCount);
+
+      return {
+        id: plan.id,
+        roleKey: plan.role_key,
+        roleName: plan.role_name,
+        targetCount: plan.target_count,
+        activeCount,
+        onboardingCount,
+        openCount,
+        priority: plan.priority,
+        notes: plan.notes,
+      };
+    });
+
+    const summary = {
+      totalTarget: overview.reduce((sum, o) => sum + o.targetCount, 0),
+      totalActive: overview.reduce((sum, o) => sum + o.activeCount, 0),
+      totalOnboarding: overview.reduce((sum, o) => sum + o.onboardingCount, 0),
+      totalOpen: overview.reduce((sum, o) => sum + o.openCount, 0),
+    };
+
+    res.json({ overview, summary });
+  } catch (err) {
+    console.error("Error fetching staffing overview", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 // ----- AI Assistant Endpoints -----
 
