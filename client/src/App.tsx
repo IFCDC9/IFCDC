@@ -12,6 +12,7 @@ import FundingSourcesAdminPage from "./pages/FundingSourcesAdminPage";
 import AdminTimeOverviewPage from "./pages/AdminTimeOverviewPage";
 import GrantReportPage from "./pages/GrantReportPage";
 import LogicModelPage from "./pages/LogicModelPage";
+import AIAssistantPage from "./pages/AIAssistantPage";
 
 import BarberDashboard from "./dashboards/BarberDashboard";
 import RadioDashboard from "./dashboards/RadioDashboard";
@@ -157,6 +158,15 @@ const App: React.FC = () => {
               <AdminLayout>
                 <LogicModelPage />
               </AdminLayout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/ai-assistant"
+          element={
+            <ProtectedRoute allowedRoles={["admin", "barber", "radio_host", "program_staff", "owner"]}>
+              <AIAssistantPage />
             </ProtectedRoute>
           }
         />

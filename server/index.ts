@@ -8,6 +8,12 @@ import jwt from "jsonwebtoken";
 import twilio from "twilio";
 import cookieParser from "cookie-parser";
 import { createServer as createViteServer } from "vite";
+import OpenAI from "openai";
+
+const openai = new OpenAI({
+  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+});
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "5000", 10);
@@ -3465,6 +3471,159 @@ app.post(
     res.json({ ok: true });
   }
 );
+
+// ----- AI Assistant Endpoints -----
+
+app.post("/api/ai/chat", authRequired, async (req, res) => {
+  try {
+    const { message, context } = req.body;
+    
+    if (!message || typeof message !== "string") {
+      return res.status(400).json({ error: "Message is required" });
+    }
+
+    const systemPrompt = `You are an AI assistant for IFCDC (Imperial Foundation Community Development Center), a community health organization. You help staff with:
+- Client care and case management insights
+- Barbershop appointment scheduling
+- Radio show content and community announcements
+- Violence prevention program support
+- General community health questions
+
+Be helpful, professional, and culturally sensitive. Keep responses concise and actionable.`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: message }
+      ],
+      max_tokens: 500,
+    });
+
+    const aiResponse = response.choices[0]?.message?.content || "I couldn't generate a response.";
+    
+    await logAudit(req, "AI", "chat", "AI_CHAT", { messageLength: message.length });
+    
+    res.json({ response: aiResponse });
+  } catch (err) {
+    console.error("AI chat error:", err);
+    res.status(500).json({ error: "AI service unavailable" });
+  }
+});
+
+app.post("/api/ai/client-summary", authRequired, requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER, ROLES.ADMIN), async (req, res) => {
+  try {
+    const { clientId } = req.body;
+    
+    if (!clientId) {
+      return res.status(400).json({ error: "Client ID is required" });
+    }
+
+    const client = await db.get<any>("SELECT * FROM clients WHERE id = ?", clientId);
+    if (!client) {
+      return res.status(404).json({ error: "Client not found" });
+    }
+
+    const encounters = await db.all<any[]>(
+      "SELECT * FROM encounters WHERE client_id = ? ORDER BY visit_date DESC LIMIT 10",
+      clientId
+    );
+
+    const prompt = `Based on this client information, provide a brief care summary and recommendations:
+Client: ${client.full_name}
+Programs: ${client.programs || "None specified"}
+Recent Encounters: ${encounters.length} visits
+${encounters.slice(0, 3).map((e: any) => `- ${e.visit_date}: ${e.type} - ${e.notes?.substring(0, 100) || "No notes"}`).join("\n")}
+
+Provide a 2-3 sentence summary and 2-3 actionable recommendations for the care team.`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: "You are a healthcare case management assistant. Provide concise, actionable summaries. Never include PHI in your response beyond what was provided." },
+        { role: "user", content: prompt }
+      ],
+      max_tokens: 300,
+    });
+
+    const summary = response.choices[0]?.message?.content || "Unable to generate summary.";
+    
+    await logAudit(req, "AI", clientId, "AI_CLIENT_SUMMARY", {});
+    
+    res.json({ summary, clientName: client.full_name });
+  } catch (err) {
+    console.error("AI client summary error:", err);
+    res.status(500).json({ error: "AI service unavailable" });
+  }
+});
+
+app.post("/api/ai/radio-content", authRequired, requireRole(ROLES.ADMIN, "radio_host", "radio"), async (req, res) => {
+  try {
+    const { topic, contentType } = req.body;
+    
+    if (!topic) {
+      return res.status(400).json({ error: "Topic is required" });
+    }
+
+    const typePrompts: Record<string, string> = {
+      announcement: "Write a 30-second radio announcement",
+      segment: "Create a 2-minute radio segment outline",
+      talking_points: "Generate 5 talking points for a discussion"
+    };
+
+    const typePrompt = typePrompts[contentType] || typePrompts.announcement;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: "You are a radio content creator for IFCDC Radio, a community radio station focused on health, wellness, and community empowerment. Write engaging, culturally relevant content." },
+        { role: "user", content: `${typePrompt} about: ${topic}` }
+      ],
+      max_tokens: 400,
+    });
+
+    const content = response.choices[0]?.message?.content || "Unable to generate content.";
+    
+    await logAudit(req, "AI", "radio", "AI_RADIO_CONTENT", { topic, contentType });
+    
+    res.json({ content, contentType: contentType || "announcement" });
+  } catch (err) {
+    console.error("AI radio content error:", err);
+    res.status(500).json({ error: "AI service unavailable" });
+  }
+});
+
+app.post("/api/ai/schedule-help", authRequired, requireRole(ROLES.ADMIN, "barber", "owner"), async (req, res) => {
+  try {
+    const { question, appointments } = req.body;
+    
+    if (!question) {
+      return res.status(400).json({ error: "Question is required" });
+    }
+
+    const appointmentContext = appointments?.length 
+      ? `Current appointments today: ${appointments.map((a: any) => `${a.time} - ${a.service}`).join(", ")}`
+      : "No current appointments provided.";
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: `You are a scheduling assistant for IFCDC Barbershop. Help with appointment scheduling, time management, and client preferences. ${appointmentContext}` },
+        { role: "user", content: question }
+      ],
+      max_tokens: 250,
+    });
+
+    const answer = response.choices[0]?.message?.content || "Unable to help with scheduling.";
+    
+    await logAudit(req, "AI", "schedule", "AI_SCHEDULE_HELP", {});
+    
+    res.json({ answer });
+  } catch (err) {
+    console.error("AI schedule help error:", err);
+    res.status(500).json({ error: "AI service unavailable" });
+  }
+});
 
 // Start server with Vite in development or static files in production
 async function startServer() {
