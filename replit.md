@@ -53,8 +53,16 @@ Preferred communication style: Simple, everyday language.
 - `GET /health/ready` - Readiness check
 
 #### Authentication
-- `POST /auth/register` - Register new user
-- `POST /auth/login` - Login user
+- `POST /auth/register` - Register new user (email/password)
+- `POST /auth/login` - Login user (email/password)
+
+#### Replit Auth (OpenID Connect)
+- `GET /api/replit/login` - Start Replit OAuth login flow
+- `GET /api/replit/callback` - OAuth callback (issues JWT cookie)
+- `GET /api/replit/logout` - Logout from Replit session
+- `GET /api/replit/user` - Get current Replit user info
+
+**Note**: Replit Auth stores sessions in PostgreSQL (`sessions` table). After Replit login, a JWT cookie (`ifcdc_token`) is issued for compatibility with existing auth middleware.
 
 #### Chapters
 - `GET /chapters` - List all chapters with acknowledgement counts
