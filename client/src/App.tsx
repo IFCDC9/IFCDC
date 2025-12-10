@@ -20,6 +20,10 @@ import MyTimeEntriesPage from "./pages/MyTimeEntriesPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 
+import BarbershopApp from "./apps/BarbershopApp";
+import RadioApp from "./apps/RadioApp";
+import ProgramsApp from "./apps/ProgramsApp";
+
 const RoleRouter: React.FC = () => {
   const { user } = useAuth();
 
@@ -172,6 +176,34 @@ const App: React.FC = () => {
         />
 
         <Route path="/unauthorized" element={<div>Unauthorized</div>} />
+
+        {/* Standalone Apps */}
+        <Route
+          path="/app/barbershop"
+          element={
+            <ProtectedRoute allowedRoles={["barber", "admin", "owner"]}>
+              <BarbershopApp />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/app/radio"
+          element={
+            <ProtectedRoute allowedRoles={["radio_host", "radio", "admin", "owner"]}>
+              <RadioApp />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/app/programs"
+          element={
+            <ProtectedRoute allowedRoles={["program_staff", "admin", "owner", "EXEC"]}>
+              <ProgramsApp />
+            </ProtectedRoute>
+          }
+        />
       </Routes>
     </BrowserRouter>
   );

@@ -19,6 +19,26 @@ const AdminDashboard: React.FC = () => {
         </div>
 
         <div className="admin-quick-links">
+          <h2 className="quick-links-title">Standalone Apps</h2>
+          <div className="quick-links-grid">
+            <a href="/app/barbershop" className="quick-link-card app-link-barbershop" data-testid="link-app-barbershop">
+              <h3>Barbershop App</h3>
+              <p>Dedicated view for barbershop scheduling, appointments, and services.</p>
+            </a>
+
+            <a href="/app/radio" className="quick-link-card app-link-radio" data-testid="link-app-radio">
+              <h3>Radio App</h3>
+              <p>Manage radio shows, generate content, and track broadcast schedules.</p>
+            </a>
+
+            <a href="/app/programs" className="quick-link-card app-link-programs" data-testid="link-app-programs">
+              <h3>Programs App</h3>
+              <p>Community programs dashboard for sessions, clients, and impact tracking.</p>
+            </a>
+          </div>
+        </div>
+
+        <div className="admin-quick-links">
           <h2 className="quick-links-title">Quick Links</h2>
           <div className="quick-links-grid">
             <a href="/admin/hr" className="quick-link-card" data-testid="link-hr">
