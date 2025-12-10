@@ -1675,6 +1675,53 @@ body {
   display: inline-block;
 }
 
+.replit-auth-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 16px;
+  background: #1c1c1c;
+  border: 1px solid #444;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.replit-auth-button:hover {
+  background: #2a2a2a;
+  border-color: #d4af37;
+}
+
+.replit-auth-button svg {
+  color: #f26207;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  margin: 20px 0;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  border-bottom: 1px solid #444;
+}
+
+.auth-divider span {
+  padding: 0 12px;
+  color: #888;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
 .auth-footer {
   margin-top: 16px;
   font-size: 0.8rem;
