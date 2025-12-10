@@ -8,7 +8,6 @@ import jwt from "jsonwebtoken";
 import twilio from "twilio";
 import cookieParser from "cookie-parser";
 import { createServer as createViteServer } from "vite";
-import { setupReplitAuth } from "./replitAuth";
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "5000", 10);
@@ -3468,57 +3467,8 @@ app.post(
 );
 
 // Start server with Vite in development or static files in production
-async function upsertReplitUser(claims: any) {
-  const replitId = claims.sub;
-  const email = claims.email || null;
-  const firstName = claims.first_name || null;
-  const lastName = claims.last_name || null;
-  const profileImageUrl = claims.profile_image_url || null;
-  
-  const existingUser = await db.get<User>("SELECT * FROM users WHERE replit_id = ?", replitId);
-  
-  if (existingUser) {
-    await db.run(
-      `UPDATE users SET email = COALESCE(?, email), name = COALESCE(?, name), profile_image_url = ? WHERE replit_id = ?`,
-      email, firstName ? `${firstName} ${lastName || ""}`.trim() : null, profileImageUrl, replitId
-    );
-    return existingUser;
-  }
-  
-  const id = cryptoRandomId();
-  const name = firstName ? `${firstName} ${lastName || ""}`.trim() : email || `User-${replitId}`;
-  const now = new Date().toISOString();
-  
-  await db.run(
-    `INSERT INTO users (id, name, email, role, replit_id, profile_image_url, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    id, name, email, "client", replitId, profileImageUrl, now
-  );
-  
-  return { id, name, email, role: "client", replit_id: replitId };
-}
-
-async function getUserByReplitId(replitId: string) {
-  return db.get<User>("SELECT * FROM users WHERE replit_id = ?", replitId);
-}
-
-function issueJwtCookie(res: express.Response, user: { id: string; name: string; email: string; role: string }) {
-  const token = jwt.sign({ sub: user.id, role: user.role, name: user.name }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-  res.cookie('ifcdc_token', token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000
-  });
-}
-
 async function startServer() {
   await initDb();
-  
-  await setupReplitAuth(app, {
-    upsertReplitUser,
-    issueJwtCookie,
-    getUserByReplitId
-  });
 
   if (isDev) {
     // In development, use Vite middleware
