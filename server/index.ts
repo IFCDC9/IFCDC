@@ -187,17 +187,11 @@ async function initDb() {
       email TEXT UNIQUE,
       role TEXT NOT NULL,
       password_hash TEXT,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      replit_id TEXT UNIQUE,
+      profile_image_url TEXT
     );
   `);
-
-  try {
-    await db.exec(`ALTER TABLE users ADD COLUMN replit_id TEXT UNIQUE`);
-  } catch (e) {}
-  
-  try {
-    await db.exec(`ALTER TABLE users ADD COLUMN profile_image_url TEXT`);
-  } catch (e) {}
 
   await db.exec(`
     CREATE TABLE IF NOT EXISTS clients (
