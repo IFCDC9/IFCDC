@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { useAuth } from "../../auth/AuthContext";
 import { getWidgetData } from "../../api/dashboardApi";
 
 interface AuditLog {
@@ -16,14 +15,12 @@ interface Props {
 }
 
 export default function AuditLogSummaryWidget({ onRemove }: Props) {
-  const { token, user } = useAuth();
   const [data, setData] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!token) return;
-    getWidgetData(token, "audit_log_summary")
+    getWidgetData("audit_log_summary")
       .then(setData)
       .catch((err) => {
         if (err.message.includes("403")) {
@@ -33,7 +30,7 @@ export default function AuditLogSummaryWidget({ onRemove }: Props) {
         }
       })
       .finally(() => setLoading(false));
-  }, [token]);
+  }, []);
 
   const formatTime = (dateStr: string) => {
     const d = new Date(dateStr);

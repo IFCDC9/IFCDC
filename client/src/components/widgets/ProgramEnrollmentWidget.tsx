@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { useAuth } from "../../auth/AuthContext";
 import { getWidgetData } from "../../api/dashboardApi";
 
 interface ProgramData {
@@ -13,17 +12,15 @@ interface Props {
 }
 
 export default function ProgramEnrollmentWidget({ onRemove }: Props) {
-  const { token } = useAuth();
   const [data, setData] = useState<ProgramData[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!token) return;
-    getWidgetData(token, "program_enrollment")
+    getWidgetData("program_enrollment")
       .then(setData)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [token]);
+  }, []);
 
   const maxCount = Math.max(...data.map((p) => p.client_count), 1);
 

@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { useAuth } from "../../auth/AuthContext";
 import { getWidgetData } from "../../api/dashboardApi";
 
 interface Encounter {
@@ -15,17 +14,15 @@ interface Props {
 }
 
 export default function RecentEncountersWidget({ onRemove }: Props) {
-  const { token } = useAuth();
   const [data, setData] = useState<Encounter[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!token) return;
-    getWidgetData(token, "recent_encounters")
+    getWidgetData("recent_encounters")
       .then(setData)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [token]);
+  }, []);
 
   const formatDate = (dateStr: string) => {
     const d = new Date(dateStr);

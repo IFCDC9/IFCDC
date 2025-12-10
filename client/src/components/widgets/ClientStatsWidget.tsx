@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { useAuth } from "../../auth/AuthContext";
 import { getWidgetData } from "../../api/dashboardApi";
 
 interface Props {
@@ -7,17 +6,15 @@ interface Props {
 }
 
 export default function ClientStatsWidget({ onRemove }: Props) {
-  const { token } = useAuth();
   const [data, setData] = useState<{ totalClients: number; activePrograms: number } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!token) return;
-    getWidgetData(token, "client_stats")
+    getWidgetData("client_stats")
       .then(setData)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [token]);
+  }, []);
 
   return (
     <div className="widget-content" data-testid="widget-client-stats">

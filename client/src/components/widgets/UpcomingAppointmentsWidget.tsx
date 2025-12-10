@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { useAuth } from "../../auth/AuthContext";
 import { getWidgetData } from "../../api/dashboardApi";
 
 interface Appointment {
@@ -15,17 +14,15 @@ interface Props {
 }
 
 export default function UpcomingAppointmentsWidget({ onRemove }: Props) {
-  const { token } = useAuth();
   const [data, setData] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!token) return;
-    getWidgetData(token, "upcoming_appointments")
+    getWidgetData("upcoming_appointments")
       .then(setData)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [token]);
+  }, []);
 
   const formatDateTime = (dateStr: string) => {
     const d = new Date(dateStr);
