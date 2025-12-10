@@ -269,6 +269,53 @@ a:hover {
   background: rgba(255, 255, 255, 0.1);
 }
 
+/* ===== IFCDC BUTTONS ===== */
+
+.ifcdc-btn {
+  display: inline-block;
+  padding: 12px 24px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-decoration: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.ifcdc-btn-primary {
+  background: linear-gradient(135deg, #d4af37 0%, #b8972e 100%);
+  color: #000 !important;
+  border: none;
+  box-shadow: 0 4px 12px rgba(212, 175, 55, 0.3);
+}
+
+.ifcdc-btn-primary:hover {
+  background: linear-gradient(135deg, #e5c44b 0%, #d4af37 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(212, 175, 55, 0.4);
+  text-decoration: none;
+}
+
+.ifcdc-btn-outline {
+  background: transparent;
+  color: #d4af37 !important;
+  border: 2px solid #d4af37;
+}
+
+.ifcdc-btn-outline:hover {
+  background: rgba(212, 175, 55, 0.15);
+  transform: translateY(-2px);
+  text-decoration: none;
+}
+
+.ifcdc-hero-actions {
+  display: flex;
+  gap: 16px;
+  margin-top: 24px;
+  flex-wrap: wrap;
+}
+
 .ifcdc-main {
   max-width: 1100px;
   margin: 0 auto;
