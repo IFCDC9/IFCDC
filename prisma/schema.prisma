@@ -320,3 +320,16 @@ model AuditLog {
 
   @@map("audit_logs")
 }
+
+model StaffingPlan {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roleKey     String   @unique @map("role_key")
+  roleName    String   @map("role_name")
+  targetCount Int      @default(0) @map("target_count")
+  priority    Int      @default(1)
+  notes       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("staffing_plan")
+}
