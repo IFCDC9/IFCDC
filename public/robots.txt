@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://imperialfoundationcdc.org/sitemap.xml
