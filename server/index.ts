@@ -3922,7 +3922,7 @@ app.post("/api/barbershop/appointments/:id/send-reminder", authRequired, require
   try {
     const { id } = req.params;
 
-    // Check if Twilio is configured
+    // Check if Twilio is configured for SMS
     if (!twilioClient || !TWILIO_SMS_FROM) {
       return res.status(503).json({ error: "SMS service is not configured. Please configure Twilio credentials." });
     }
@@ -3950,8 +3950,16 @@ app.post("/api/barbershop/appointments/:id/send-reminder", authRequired, require
       { start_time: appointment.start_time }
     );
 
-    // Send SMS
-    await sendSafeSms(appointment.phone, reminderText);
+    // Send SMS directly (only requires SMS_FROM, not VOICE_FROM)
+    const phoneNorm = normalizePhone(appointment.phone);
+    if (!phoneNorm) {
+      return res.status(400).json({ error: "Invalid phone number format" });
+    }
+    await twilioClient.messages.create({
+      to: phoneNorm,
+      from: TWILIO_SMS_FROM,
+      body: reminderText,
+    });
 
     await logAudit(req, "SMS", id, "SEND_BARBERSHOP_REMINDER", {
       clientName: appointment.full_name,
@@ -3966,6 +3974,42 @@ app.post("/api/barbershop/appointments/:id/send-reminder", authRequired, require
       return res.status(503).json({ error: "SMS service is not properly configured" });
     }
     res.status(500).json({ error: "Failed to send reminder: " + (err.message || "Unknown error") });
+  }
+});
+
+// Test SMS endpoint - admin only
+app.post("/api/test-sms", authRequired, requireRole("admin", "owner", ROLES.EXEC), async (req, res) => {
+  try {
+    const { to, message } = req.body;
+
+    if (!twilioClient || !TWILIO_SMS_FROM) {
+      return res.status(503).json({ error: "SMS service is not configured. Ensure TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_SMS_FROM are set." });
+    }
+
+    if (!to) {
+      return res.status(400).json({ error: "Phone number (to) is required" });
+    }
+
+    const phoneNorm = normalizePhone(to);
+    if (!phoneNorm) {
+      return res.status(400).json({ error: "Invalid phone number format" });
+    }
+
+    const smsBody = message || "Test message from IFCDC Health System";
+
+    // Direct SMS send without requiring TWILIO_VOICE_FROM
+    await twilioClient.messages.create({
+      to: phoneNorm,
+      from: TWILIO_SMS_FROM,
+      body: smsBody,
+    });
+
+    await logAudit(req, "SMS", "test", "TEST_SMS", { to: phoneNorm });
+
+    res.json({ success: true, message: "Test SMS sent successfully to " + phoneNorm });
+  } catch (err: any) {
+    console.error("Error sending test SMS:", err);
+    res.status(500).json({ error: "Failed to send SMS: " + (err.message || "Unknown error") });
   }
 });
 
