@@ -39,12 +39,15 @@ function assignRole(email: string): string {
 }
 
 // Only initialize Twilio if credentials are properly configured (SID must start with AC)
+// Trim whitespace that may have been accidentally added
+const twilioAccountSid = TWILIO_ACCOUNT_SID?.trim();
+const twilioAuthToken = TWILIO_AUTH_TOKEN?.trim();
 const twilioClient =
-  TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_ACCOUNT_SID.startsWith("AC")
-    ? twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+  twilioAccountSid && twilioAuthToken && twilioAccountSid.startsWith("AC")
+    ? twilio(twilioAccountSid, twilioAuthToken)
     : null;
 
-if (TWILIO_ACCOUNT_SID && !TWILIO_ACCOUNT_SID.startsWith("AC")) {
+if (twilioAccountSid && !twilioAccountSid.startsWith("AC")) {
   console.warn("Warning: TWILIO_ACCOUNT_SID does not start with 'AC'. Twilio SMS disabled.");
 }
 
