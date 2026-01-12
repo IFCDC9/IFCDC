@@ -938,6 +938,7 @@ app.post('/api/auth/login', async (req, res) => {
       // Continue with login
     } else {
       const ok = await bcrypt.compare(password, user.password_hash);
+      console.log("PASSWORD CHECK:", { match: ok });
       if (!ok) {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
