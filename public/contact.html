@@ -104,42 +104,22 @@
         Use the form below to reach our team. We typically respond within 1–2 business days.
       </p>
       <div style="max-width: 500px;">
-        <form class="ifcdc-form">
+        <form class="ifcdc-form" action="mailto:service@ifcdc.org" method="POST" enctype="text/plain">
           <label>
             Name<br>
-            <input type="text" name="name" placeholder="Your full name" required />
+            <input type="text" name="name" required />
           </label>
           <label>
             Email<br>
-            <input type="email" name="email" placeholder="your@email.com" required />
-          </label>
-          <label>
-            Phone (optional)<br>
-            <input type="tel" name="phone" placeholder="(555) 555-5555" />
-          </label>
-          <label>
-            Subject<br>
-            <select name="subject" required>
-              <option value="">Select a topic</option>
-              <option value="general">General Inquiry</option>
-              <option value="programs">Programs & Services</option>
-              <option value="mental-health">Mental Health Support</option>
-              <option value="barbershop">Barbershop</option>
-              <option value="radio">Radio</option>
-              <option value="partnership">Partnership / Collaboration</option>
-              <option value="other">Other</option>
-            </select>
+            <input type="email" name="email" required />
           </label>
           <label>
             Message<br>
-            <textarea name="message" rows="5" placeholder="How can we help?" required></textarea>
+            <textarea name="message" rows="6" required></textarea>
           </label>
-          <button type="submit" class="ifcdc-btn ifcdc-btn-primary" disabled>
-            Submit (Coming Soon)
+          <button type="submit" class="ifcdc-btn ifcdc-btn-primary">
+            Send Message
           </button>
-          <p class="ifcdc-helper">
-            Online form submissions will be activated soon. In the meantime, please call or email directly.
-          </p>
         </form>
       </div>
     </section>
