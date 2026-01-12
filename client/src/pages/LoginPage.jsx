@@ -36,10 +36,16 @@ const LoginPage = () => {
       await refreshUser();
       
       const role = data.role;
-      if (role === "admin") {
+      if (role === "admin" || role === "owner" || role === "EXEC") {
         window.location.href = "/admin";
+      } else if (role === "barber") {
+        window.location.href = "/barber";
+      } else if (role === "radio_host" || role === "radio") {
+        window.location.href = "/radio";
+      } else if (role === "program_staff") {
+        window.location.href = "/programs";
       } else {
-        window.location.href = "/dashboard";
+        window.location.href = "/";
       }
     } catch (err) {
       setLoading(false);
