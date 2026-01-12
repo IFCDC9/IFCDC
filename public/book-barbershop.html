@@ -308,9 +308,14 @@
   </div>
 
   <footer class="ifcdc-footer">
-    <p>IFCDC Barbershop | Part of Imperial Foundation Community Development Center</p>
-    <p><a href="/">Return to Homepage</a></p>
+    <p>&copy; <span id="year2"></span> Imperial Foundation CDC (IFCDC). A registered 501(c)(3) nonprofit organization.</p>
+    <nav class="ifcdc-footer-nav">
+      <a href="/privacy-policy">Privacy Policy</a> |
+      <a href="/terms-of-use">Terms of Use</a> |
+      <a href="/contact">Contact</a>
+    </nav>
   </footer>
+  <script>document.getElementById('year2').textContent = new Date().getFullYear();</script>
 
   <script>
     // Set minimum date to today
