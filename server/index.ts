@@ -502,6 +502,21 @@ async function initDb() {
     }
   }
 
+  // Services table for admin-managed services
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS services (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      duration INTEGER DEFAULT 30,
+      price REAL DEFAULT 0,
+      category TEXT,
+      active INTEGER DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+
   // Logic Models table for program frameworks
   await db.exec(`
     CREATE TABLE IF NOT EXISTS logic_models (
@@ -959,6 +974,82 @@ app.post('/api/auth/logout', (req, res) => {
 // GET CURRENT USER
 app.get('/api/auth/me', authRequired, (req, res) => {
   return res.json({ user: req.user });
+});
+
+// ----- Admin Services -----
+app.get("/api/admin/services", authRequired, requireAdmin, async (req, res) => {
+  try {
+    const services = await db.all("SELECT * FROM services ORDER BY name ASC");
+    res.json(services);
+  } catch (err) {
+    console.error("Error fetching services:", err);
+    res.status(500).json({ error: "Failed to fetch services" });
+  }
+});
+
+app.post("/api/admin/services", authRequired, requireAdmin, async (req, res) => {
+  try {
+    const { name, description, duration, price, category } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: "Service name is required" });
+    }
+
+    const id = cryptoRandomId();
+    const now = new Date().toISOString();
+
+    await db.run(
+      `INSERT INTO services (id, name, description, duration, price, category, active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+      id, name, description || null, duration || 30, price || 0, category || null, now, now
+    );
+
+    await logAudit(req, "SERVICE", id, "CREATE", { name, category });
+
+    res.status(201).json({ id, name, description, duration, price, category, active: 1 });
+  } catch (err) {
+    console.error("Error creating service:", err);
+    res.status(500).json({ error: "Failed to create service" });
+  }
+});
+
+app.patch("/api/admin/services/:id", authRequired, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description, duration, price, category, active } = req.body;
+
+    const existing = await db.get("SELECT * FROM services WHERE id = ?", id);
+    if (!existing) {
+      return res.status(404).json({ error: "Service not found" });
+    }
+
+    const now = new Date().toISOString();
+    await db.run(
+      `UPDATE services SET name = ?, description = ?, duration = ?, price = ?, category = ?, active = ?, updated_at = ? WHERE id = ?`,
+      name ?? existing.name, description ?? existing.description, duration ?? existing.duration, 
+      price ?? existing.price, category ?? existing.category, active ?? existing.active, now, id
+    );
+
+    await logAudit(req, "SERVICE", id, "UPDATE", { name });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error updating service:", err);
+    res.status(500).json({ error: "Failed to update service" });
+  }
+});
+
+app.delete("/api/admin/services/:id", authRequired, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await db.run("DELETE FROM services WHERE id = ?", id);
+    await logAudit(req, "SERVICE", id, "DELETE", {});
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error deleting service:", err);
+    res.status(500).json({ error: "Failed to delete service" });
+  }
 });
 
 // ----- Programs -----
