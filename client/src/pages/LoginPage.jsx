@@ -37,13 +37,7 @@ const LoginPage = () => {
       
       const role = data.role;
       if (role === "admin") {
-        window.location.href = "/admin/dashboard";
-      } else if (role === "owner" || role === "EXEC") {
         window.location.href = "/admin";
-      } else if (role === "barber") {
-        window.location.href = "/barber";
-      } else if (role === "radio" || role === "radio_host") {
-        window.location.href = "/radio";
       } else {
         window.location.href = "/dashboard";
       }
