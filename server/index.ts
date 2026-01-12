@@ -139,6 +139,9 @@ app.get("/records-policy", (_req, res) => {
 app.get("/roi", (_req, res) => {
   res.sendFile(path.join(publicDir, "roi.html"));
 });
+app.get("/privacy-policy", (_req, res) => {
+  res.sendFile(path.join(publicDir, "privacy-policy.html"));
+});
 
 const ROLES = {
   EXEC: "EXEC",
