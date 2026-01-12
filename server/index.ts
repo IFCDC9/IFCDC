@@ -185,7 +185,7 @@ declare global {
       email?: string;
       role?: string;
       claims?: {
-        sub: string;
+        id: string;
         email?: string;
         first_name?: string;
         last_name?: string;
@@ -804,8 +804,8 @@ async function authRequired(req: express.Request, res: express.Response, next: e
   }
 
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as { sub: string; role: string; name: string };
-    const user = await db.get<User>("SELECT * FROM users WHERE id = ?", payload.sub);
+    const payload = jwt.verify(token, JWT_SECRET) as { id: string; email: string; role: string };
+    const user = await db.get<User>("SELECT * FROM users WHERE id = ?", payload.id);
     if (!user) {
       return res.status(401).json({ error: "User not found" });
     }
@@ -922,7 +922,7 @@ app.post('/api/auth/login', async (req, res) => {
       effectiveRole = "admin";
     }
 
-    const token = jwt.sign({ sub: user.id, role: effectiveRole, name: user.name }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+    const token = jwt.sign({ id: user.id, email: user.email, role: effectiveRole }, JWT_SECRET, { expiresIn: "7d" });
 
     res.cookie('ifcdc_token', token, {
       httpOnly: true,
