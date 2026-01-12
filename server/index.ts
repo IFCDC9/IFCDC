@@ -920,6 +920,13 @@ app.post('/api/auth/login', async (req, res) => {
     const lowerEmail = (email || '').toLowerCase();
 
     const user = await db.get<User>("SELECT * FROM users WHERE email = ?", lowerEmail);
+    
+    console.log("LOGIN ATTEMPT:", {
+      email: lowerEmail,
+      userFound: !!user,
+      hasPassword: !!user?.password_hash,
+    });
+
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
