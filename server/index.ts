@@ -834,6 +834,13 @@ function requireRole(...roles: (string | string[])[]) {
   };
 }
 
+function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (req.user?.role !== "admin" && req.user?.role !== "owner") {
+    return res.status(403).json({ error: "Unauthorized" });
+  }
+  next();
+}
+
 async function hasClientAccess(user: { id: string; role: string } | undefined, clientId: string): Promise<boolean> {
   if (!user) return false;
   if (user.role === "owner" || user.role === ROLES.EXEC) return true;
