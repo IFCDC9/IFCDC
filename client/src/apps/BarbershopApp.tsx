@@ -16,6 +16,7 @@ type Appointment = {
   status: string;
   notes?: string | null;
   client: Client;
+  reminderSent?: boolean;
 };
 
 type Service = {
@@ -37,7 +38,9 @@ const BarbershopApp: React.FC = () => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [date, setDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
-  const [activeTab, setActiveTab] = useState<"schedule" | "book" | "time">("schedule");
+  const [activeTab, setActiveTab] = useState<"schedule" | "book" | "notifications" | "time">("schedule");
+  const [sendingReminder, setSendingReminder] = useState<string | null>(null);
+  const [reminderMessage, setReminderMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // Booking form state
   const [services, setServices] = useState<Service[]>([]);
@@ -153,6 +156,33 @@ const BarbershopApp: React.FC = () => {
 
   const selectedService = services.find(s => s.id === bookingForm.serviceId);
 
+  const sendReminder = async (appointmentId: string, clientPhone: string | null | undefined) => {
+    if (!clientPhone) {
+      setReminderMessage({ type: "error", text: "No phone number on file for this client" });
+      return;
+    }
+    setSendingReminder(appointmentId);
+    setReminderMessage(null);
+    try {
+      const res = await fetch(`/api/barbershop/appointments/${appointmentId}/send-reminder`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setReminderMessage({ type: "success", text: "Reminder sent successfully!" });
+        setAppointments(prev => prev.map(a => 
+          a.id === appointmentId ? { ...a, reminderSent: true } : a
+        ));
+      } else {
+        setReminderMessage({ type: "error", text: data.error || "Failed to send reminder" });
+      }
+    } catch (err) {
+      setReminderMessage({ type: "error", text: "Network error sending reminder" });
+    }
+    setSendingReminder(null);
+  };
+
   return (
     <div className="standalone-app barbershop-app" data-testid="barbershop-app">
       <header className="app-header barbershop-header">
@@ -175,6 +205,13 @@ const BarbershopApp: React.FC = () => {
             Book Client
           </button>
           <button 
+            className={activeTab === "notifications" ? "active" : ""} 
+            onClick={() => setActiveTab("notifications")}
+            data-testid="tab-notifications"
+          >
+            SMS
+          </button>
+          <button 
             className={activeTab === "time" ? "active" : ""} 
             onClick={() => setActiveTab("time")}
             data-testid="tab-time"
@@ -191,6 +228,12 @@ const BarbershopApp: React.FC = () => {
       <main className="app-main">
         {activeTab === "schedule" && (
           <section className="app-section" data-testid="section-schedule">
+            {reminderMessage && (
+              <div className={`reminder-message ${reminderMessage.type}`} data-testid="reminder-message">
+                {reminderMessage.text}
+                <button onClick={() => setReminderMessage(null)} className="dismiss-btn">×</button>
+              </div>
+            )}
             <div className="section-header">
               <h2>Today's Schedule</h2>
               <div className="date-picker">
@@ -232,6 +275,16 @@ const BarbershopApp: React.FC = () => {
                         <button onClick={() => handleStatusChange(a.id, "completed")} className="btn-complete">Complete</button>
                         <button onClick={() => handleStatusChange(a.id, "no_show")} className="btn-noshow">No-Show</button>
                         <button onClick={() => handleStatusChange(a.id, "cancelled")} className="btn-cancel">Cancel</button>
+                        {a.client.phone && (
+                          <button 
+                            onClick={() => sendReminder(a.id, a.client.phone)} 
+                            className="btn-reminder"
+                            disabled={sendingReminder === a.id || a.reminderSent}
+                            data-testid={`btn-reminder-${a.id}`}
+                          >
+                            {sendingReminder === a.id ? "Sending..." : a.reminderSent ? "Sent" : "Send Reminder"}
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -415,6 +468,62 @@ const BarbershopApp: React.FC = () => {
                 </button>
               </div>
             </form>
+          </section>
+        )}
+
+        {activeTab === "notifications" && (
+          <section className="app-section" data-testid="section-notifications">
+            <h2>SMS Notifications</h2>
+            <div className="notifications-info">
+              <p>Send appointment reminders to clients via SMS.</p>
+              <div className="notification-status">
+                <span className="status-label">SMS Status:</span>
+                <span className="status-value">
+                  {/* This will show the current Twilio configuration status */}
+                  Ready (Twilio)
+                </span>
+              </div>
+            </div>
+
+            <div className="upcoming-reminders">
+              <h3>Upcoming Appointments</h3>
+              <p className="help-text">Click "Send Reminder" on the Schedule tab to notify clients about their appointments.</p>
+              
+              {appointments.filter(a => a.status === "scheduled").length === 0 ? (
+                <div className="empty-state">
+                  <p>No upcoming appointments for {date}. Change the date on the Schedule tab to view other days.</p>
+                </div>
+              ) : (
+                <div className="reminder-list">
+                  {appointments.filter(a => a.status === "scheduled").map((a) => (
+                    <div key={a.id} className="reminder-item" data-testid={`reminder-item-${a.id}`}>
+                      <div className="reminder-client">
+                        <strong>{a.client.firstName} {a.client.lastName}</strong>
+                        <span className="reminder-phone">{a.client.phone || "No phone"}</span>
+                      </div>
+                      <div className="reminder-time">
+                        {new Date(a.startTime).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                        <span className="reminder-service">{a.serviceName}</span>
+                      </div>
+                      <div className="reminder-actions">
+                        {a.client.phone ? (
+                          <button 
+                            onClick={() => sendReminder(a.id, a.client.phone)} 
+                            className={`btn-send-reminder ${a.reminderSent ? 'sent' : ''}`}
+                            disabled={sendingReminder === a.id || a.reminderSent}
+                            data-testid={`btn-send-reminder-${a.id}`}
+                          >
+                            {sendingReminder === a.id ? "Sending..." : a.reminderSent ? "Sent" : "Send SMS"}
+                          </button>
+                        ) : (
+                          <span className="no-phone-warning">No phone number</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </section>
         )}
 

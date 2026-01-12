@@ -38,10 +38,15 @@ function assignRole(email: string): string {
   return email.toLowerCase() === ADMIN_EMAIL.toLowerCase() ? "admin" : "user";
 }
 
+// Only initialize Twilio if credentials are properly configured (SID must start with AC)
 const twilioClient =
-  TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN
+  TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_ACCOUNT_SID.startsWith("AC")
     ? twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
     : null;
+
+if (TWILIO_ACCOUNT_SID && !TWILIO_ACCOUNT_SID.startsWith("AC")) {
+  console.warn("Warning: TWILIO_ACCOUNT_SID does not start with 'AC'. Twilio SMS disabled.");
+}
 
 function ensureTwilioConfigured() {
   if (!twilioClient || !TWILIO_SMS_FROM || !TWILIO_VOICE_FROM) {
@@ -3906,6 +3911,58 @@ app.post("/api/barbershop/book", authRequired, requireRole("barber", "admin", "o
   } catch (err) {
     console.error("Error creating booking:", err);
     res.status(500).json({ error: "Failed to create booking" });
+  }
+});
+
+// Send SMS reminder for a barbershop appointment
+app.post("/api/barbershop/appointments/:id/send-reminder", authRequired, requireRole("barber", "admin", "owner", ROLES.EXEC), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if Twilio is configured
+    if (!twilioClient || !TWILIO_SMS_FROM) {
+      return res.status(503).json({ error: "SMS service is not configured. Please configure Twilio credentials." });
+    }
+
+    // Get the appointment with client info
+    const appointment = await db.get<any>(
+      `SELECT a.id, a.start_time, a.end_time, a.notes, a.program, c.id as client_id, c.full_name, c.phone
+       FROM appointments a
+       JOIN clients c ON a.client_id = c.id
+       WHERE a.id = ? AND a.program = 'BARBERSHOP'`,
+      id
+    );
+
+    if (!appointment) {
+      return res.status(404).json({ error: "Appointment not found" });
+    }
+
+    if (!appointment.phone) {
+      return res.status(400).json({ error: "Client has no phone number on file" });
+    }
+
+    // Build the reminder message
+    const reminderText = buildSafeAppointmentReminderText(
+      { full_name: appointment.full_name },
+      { start_time: appointment.start_time }
+    );
+
+    // Send SMS
+    await sendSafeSms(appointment.phone, reminderText);
+
+    await logAudit(req, "SMS", id, "SEND_BARBERSHOP_REMINDER", {
+      clientName: appointment.full_name,
+      phone: appointment.phone,
+      appointmentTime: appointment.start_time,
+    });
+
+    res.json({ success: true, message: "Reminder sent successfully" });
+  } catch (err: any) {
+    console.error("Error sending reminder:", err);
+    if (err.message?.includes("Twilio is not configured")) {
+      return res.status(503).json({ error: "SMS service is not properly configured" });
+    }
+    res.status(500).json({ error: "Failed to send reminder: " + (err.message || "Unknown error") });
   }
 });
 
