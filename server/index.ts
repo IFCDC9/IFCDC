@@ -32,10 +32,10 @@ const {
   MASTER_OWNER_EMAIL,
 } = process.env;
 
-const ADMIN_EMAIL = "813786b@gmail.com";
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "";
 
 function assignRole(email: string, requestedRole?: string): string {
-  if (email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+  if (ADMIN_EMAIL && email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
     return "admin";
   }
   const allowedRoles = ['client', 'barber', 'radio', 'admin'];
@@ -918,10 +918,12 @@ app.post('/api/auth/login', async (req, res) => {
       }
     }
 
-    // Override role to "owner" if email matches MASTER_OWNER_EMAIL
+    // Override role to "owner" if email matches MASTER_OWNER_EMAIL, or "admin" if matches ADMIN_EMAIL
     let effectiveRole = user.role;
     if (MASTER_OWNER_EMAIL && lowerEmail === MASTER_OWNER_EMAIL.toLowerCase()) {
       effectiveRole = "owner";
+    } else if (ADMIN_EMAIL && lowerEmail === ADMIN_EMAIL.toLowerCase()) {
+      effectiveRole = "admin";
     }
 
     const token = jwt.sign({ sub: user.id, role: effectiveRole, name: user.name }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
