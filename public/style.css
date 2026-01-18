@@ -269,6 +269,47 @@ a:hover {
   background: rgba(255, 255, 255, 0.1);
 }
 
+/* ===== AUTH BUTTONS ===== */
+
+.auth-buttons {
+  display: flex;
+  gap: 12px;
+}
+
+.auth-buttons .btn {
+  padding: 8px 18px;
+  border-radius: 6px;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+}
+
+.auth-buttons .btn-login {
+  color: var(--ifcdc-gold);
+  background: transparent;
+  border: 1px solid var(--ifcdc-gold);
+}
+
+.auth-buttons .btn-login:hover {
+  background: rgba(212, 175, 55, 0.15);
+  text-decoration: none;
+}
+
+.auth-buttons .btn-register {
+  background: linear-gradient(135deg, #d4af37 0%, #b8972e 100%);
+  color: #000 !important;
+  border: none;
+  box-shadow: 0 2px 8px rgba(212, 175, 55, 0.3);
+}
+
+.auth-buttons .btn-register:hover {
+  background: linear-gradient(135deg, #e5c44b 0%, #d4af37 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(212, 175, 55, 0.4);
+  text-decoration: none;
+}
+
 /* ===== IFCDC BUTTONS ===== */
 
 .ifcdc-btn {
