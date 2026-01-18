@@ -239,8 +239,8 @@ async function initDb() {
       created_at TEXT NOT NULL,
       replit_id TEXT UNIQUE,
       profile_image_url TEXT,
-      totp_secret TEXT,
-      totp_enabled INTEGER DEFAULT 0
+      twofa_secret TEXT,
+      twofa_enabled INTEGER DEFAULT 0
     );
   `);
 
@@ -389,10 +389,10 @@ async function initDb() {
 
   // --- 2FA columns for users ---
   try {
-    await db.exec(`ALTER TABLE users ADD COLUMN totp_secret TEXT`);
+    await db.exec(`ALTER TABLE users ADD COLUMN twofa_secret TEXT`);
   } catch (e) {}
   try {
-    await db.exec(`ALTER TABLE users ADD COLUMN totp_enabled INTEGER DEFAULT 0`);
+    await db.exec(`ALTER TABLE users ADD COLUMN twofa_enabled INTEGER DEFAULT 0`);
   } catch (e) {}
 
   // --- Per-program reminder lead hours ---
@@ -977,13 +977,13 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     // Check if 2FA is enabled for admin/owner roles
-    if (user.totp_enabled && (effectiveRole === 'admin' || effectiveRole === 'owner' || effectiveRole === 'exec')) {
+    if (user.twofa_enabled && (effectiveRole === 'admin' || effectiveRole === 'owner' || effectiveRole === 'exec')) {
       if (!totpCode) {
         // Require 2FA code
         return res.status(200).json({ requires2FA: true, message: 'Please enter your 2FA code' });
       }
       // Verify TOTP code
-      const isValid = authenticator.verify({ token: totpCode, secret: user.totp_secret });
+      const isValid = authenticator.verify({ token: totpCode, secret: user.twofa_secret });
       if (!isValid) {
         return res.status(401).json({ error: 'Invalid 2FA code' });
       }
@@ -1040,11 +1040,11 @@ app.post('/auth/login', async (req, res) => {
     else if (ADMIN_EMAIL && lowerEmail === ADMIN_EMAIL.toLowerCase()) effectiveRole = "admin";
     
     // Check if 2FA is enabled for admin/owner roles
-    if (user.totp_enabled && (effectiveRole === 'admin' || effectiveRole === 'owner' || effectiveRole === 'exec')) {
+    if (user.twofa_enabled && (effectiveRole === 'admin' || effectiveRole === 'owner' || effectiveRole === 'exec')) {
       if (!totpCode) {
         return res.status(200).json({ requires2FA: true, message: 'Please enter your 2FA code' });
       }
-      const isValid = authenticator.verify({ token: totpCode, secret: user.totp_secret });
+      const isValid = authenticator.verify({ token: totpCode, secret: user.twofa_secret });
       if (!isValid) {
         return res.status(401).json({ error: 'Invalid 2FA code' });
       }
@@ -1105,7 +1105,7 @@ app.post('/api/auth/2fa/setup', authRequired, async (req, res) => {
     const qrCodeDataUrl = await QRCode.toDataURL(otpauthUrl);
     
     // Temporarily store secret (will be confirmed on verify)
-    await db.run("UPDATE users SET totp_secret = ? WHERE id = ?", secret, userId);
+    await db.run("UPDATE users SET twofa_secret = ? WHERE id = ?", secret, userId);
     
     res.json({ 
       secret, 
@@ -1130,18 +1130,18 @@ app.post('/api/auth/2fa/verify', authRequired, async (req, res) => {
     
     const user = await db.get<any>("SELECT * FROM users WHERE id = ?", userId);
     
-    if (!user || !user.totp_secret) {
+    if (!user || !user.twofa_secret) {
       return res.status(400).json({ error: 'Please generate a 2FA secret first' });
     }
     
-    const isValid = authenticator.verify({ token: code, secret: user.totp_secret });
+    const isValid = authenticator.verify({ token: code, secret: user.twofa_secret });
     
     if (!isValid) {
       return res.status(401).json({ error: 'Invalid code. Please try again.' });
     }
     
     // Enable 2FA
-    await db.run("UPDATE users SET totp_enabled = 1 WHERE id = ?", userId);
+    await db.run("UPDATE users SET twofa_enabled = 1 WHERE id = ?", userId);
     
     await logAudit(req, { action: "ENABLE_2FA", targetType: "USER", targetId: userId });
     
@@ -1172,7 +1172,7 @@ app.post('/api/auth/2fa/disable', authRequired, async (req, res) => {
       }
     } else if (code) {
       // Or verify with current TOTP code
-      const isValid = authenticator.verify({ token: code, secret: user.totp_secret });
+      const isValid = authenticator.verify({ token: code, secret: user.twofa_secret });
       if (!isValid) {
         return res.status(401).json({ error: 'Invalid 2FA code' });
       }
@@ -1180,7 +1180,7 @@ app.post('/api/auth/2fa/disable', authRequired, async (req, res) => {
       return res.status(400).json({ error: 'Password or 2FA code required' });
     }
     
-    await db.run("UPDATE users SET totp_enabled = 0, totp_secret = NULL WHERE id = ?", userId);
+    await db.run("UPDATE users SET twofa_enabled = 0, twofa_secret = NULL WHERE id = ?", userId);
     
     await logAudit(req, { action: "DISABLE_2FA", targetType: "USER", targetId: userId });
     
@@ -1195,9 +1195,9 @@ app.post('/api/auth/2fa/disable', authRequired, async (req, res) => {
 app.get('/api/auth/2fa/status', authRequired, async (req, res) => {
   try {
     const userId = req.user?.id;
-    const user = await db.get<any>("SELECT totp_enabled FROM users WHERE id = ?", userId);
+    const user = await db.get<any>("SELECT twofa_enabled FROM users WHERE id = ?", userId);
     
-    res.json({ enabled: !!user?.totp_enabled });
+    res.json({ enabled: !!user?.twofa_enabled });
   } catch (err) {
     console.error('2FA status error:', err);
     res.status(500).json({ error: 'Failed to get 2FA status' });
