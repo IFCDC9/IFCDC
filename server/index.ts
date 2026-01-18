@@ -972,6 +972,11 @@ app.post('/api/auth/login', async (req, res) => {
       }
     }
 
+    // Check account status
+    if (user.status !== 'active') {
+      return res.status(403).json({ message: 'Account restricted' });
+    }
+
     // Override role to "owner" if email matches MASTER_OWNER_EMAIL, or "admin" if matches ADMIN_EMAIL
     let effectiveRole = user.role;
     if (MASTER_OWNER_EMAIL && lowerEmail === MASTER_OWNER_EMAIL.toLowerCase()) {
@@ -1039,6 +1044,12 @@ app.post('/auth/login', async (req, res) => {
       const ok = await bcrypt.compare(password, user.password_hash);
       if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
     }
+    
+    // Check account status
+    if (user.status !== 'active') {
+      return res.status(403).json({ message: 'Account restricted' });
+    }
+    
     let effectiveRole = user.role;
     if (MASTER_OWNER_EMAIL && lowerEmail === MASTER_OWNER_EMAIL.toLowerCase()) effectiveRole = "owner";
     else if (ADMIN_EMAIL && lowerEmail === ADMIN_EMAIL.toLowerCase()) effectiveRole = "admin";
