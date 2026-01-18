@@ -629,16 +629,25 @@ async function initDb() {
   }
 }
 
-async function logAudit(req: express.Request, entityType: string, entityId: string | null, action: string, extra: Record<string, unknown> = {}) {
+interface AuditLogParams {
+  adminId?: string | null;
+  action: string;
+  targetType?: string | null;
+  targetId?: string | null;
+  ip?: string | null;
+  extra?: Record<string, unknown>;
+}
+
+async function logAudit(req: express.Request, params: AuditLogParams) {
   const id = cryptoRandomId();
   const timestamp = new Date().toISOString();
-  const ipAddress = req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim() || req.socket?.remoteAddress || null;
+  const ipAddress = params.ip || req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim() || req.socket?.remoteAddress || null;
 
   await db.run(
     `INSERT INTO audit_logs (id, timestamp, user_id, user_role, method, path, entity_type, entity_id, action, ip_address, extra)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    id, timestamp, req.user?.id || null, req.user?.role || null,
-    req.method, req.originalUrl, entityType, entityId, action, ipAddress, JSON.stringify(extra)
+    id, timestamp, params.adminId || req.user?.id || null, req.user?.role || null,
+    req.method, req.originalUrl, params.targetType || null, params.targetId || null, params.action, ipAddress, JSON.stringify(params.extra || {})
   );
 }
 
@@ -913,7 +922,7 @@ app.post('/api/auth/register', async (req, res) => {
 
     await logAudit(
       { method: "POST", originalUrl: "/api/auth/register" } as express.Request,
-      "USER", id, "REGISTER", { role: finalRole }
+      { action: "REGISTER", targetType: "USER", targetId: id, extra: { role: finalRole } }
     );
 
     return res.status(201).json({ message: 'User created', role: finalRole });
@@ -973,7 +982,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     await logAudit(
       { method: "POST", originalUrl: "/api/auth/login", user: { id: user.id, name: user.name, email: user.email, role: effectiveRole } } as express.Request,
-      "USER", user.id, "LOGIN", {}
+      { action: "LOGIN", targetType: "USER", targetId: user.id, extra: {} }
     );
 
     return res.json({ message: 'Logged in', role: effectiveRole, user: { id: user.id, name: user.name, email: user.email, role: effectiveRole } });
@@ -1075,7 +1084,7 @@ app.post("/api/admin/services", authRequired, requireAdmin, async (req, res) => 
       id, name, description || null, duration || 30, price || 0, category || null, now, now
     );
 
-    await logAudit(req, "SERVICE", id, "CREATE", { name, category });
+    await logAudit(req, { action: "CREATE", targetType: "SERVICE", targetId: id, extra: { name, category } });
 
     res.status(201).json({ id, name, description, duration, price, category, active: 1 });
   } catch (err) {
@@ -1101,7 +1110,7 @@ app.patch("/api/admin/services/:id", authRequired, requireAdmin, async (req, res
       price ?? existing.price, category ?? existing.category, active ?? existing.active, now, id
     );
 
-    await logAudit(req, "SERVICE", id, "UPDATE", { name });
+    await logAudit(req, { action: "UPDATE", targetType: "SERVICE", targetId: id, extra: { name } });
 
     res.json({ success: true });
   } catch (err) {
@@ -1115,7 +1124,7 @@ app.delete("/api/admin/services/:id", authRequired, requireAdmin, async (req, re
     const { id } = req.params;
 
     await db.run("DELETE FROM services WHERE id = ?", id);
-    await logAudit(req, "SERVICE", id, "DELETE", {});
+    await logAudit(req, { action: "DELETE", targetType: "SERVICE", targetId: id, extra: {} });
 
     res.json({ success: true });
   } catch (err) {
@@ -1195,14 +1204,14 @@ app.post("/api/users", authRequired, requireRole(ROLES.EXEC), async (req, res) =
     id, name, email, role, password_hash, created_at
   );
 
-  await logAudit(req, "USER", id, "CREATE_USER", { createdRole: role });
+  await logAudit(req, { action: "CREATE_USER", targetType: "USER", targetId: id, extra: { createdRole: role } });
 
   res.status(201).json({ id, name, email, role, created_at });
 });
 
 app.get("/api/users", authRequired, requireRole(ROLES.EXEC), async (req, res) => {
   const rows = await db.all("SELECT id, name, email, role, created_at FROM users ORDER BY created_at DESC");
-  await logAudit(req, "USER", null, "LIST_USERS", { count: rows.length });
+  await logAudit(req, { action: "LIST_USERS", targetType: "USER", targetId: null, extra: { count: rows.length } });
   res.json(rows);
 });
 
@@ -1228,7 +1237,7 @@ app.post("/api/clients", authRequired, requireRole(ROLES.EXEC, ROLES.CLINICIAN, 
     cryptoRandomId(), id, req.user!.id, req.user!.role, created_at
   );
 
-  await logAudit(req, "CLIENT", id, "CREATE_CLIENT", { fullName });
+  await logAudit(req, { action: "CREATE_CLIENT", targetType: "CLIENT", targetId: id, extra: { fullName } });
 
   res.status(201).json({
     id, fullName, dateOfBirth,
@@ -1265,7 +1274,7 @@ app.get("/api/clients", authRequired, requireRole(ROLES.EXEC, ROLES.CLINICIAN, R
     createdAt: c.created_at,
   }));
 
-  await logAudit(req, "CLIENT", null, "LIST_CLIENTS", { count: list.length });
+  await logAudit(req, { action: "LIST_CLIENTS", targetType: "CLIENT", targetId: null, extra: { count: list.length } });
   res.json(list);
 });
 
@@ -1279,7 +1288,7 @@ app.get("/api/clients/:id", authRequired, requireRole(ROLES.EXEC, ROLES.CLINICIA
     return res.status(403).json({ error: "Forbidden" });
   }
 
-  await logAudit(req, "CLIENT", c.id, "VIEW_CLIENT");
+  await logAudit(req, { action: "VIEW_CLIENT", targetType: "CLIENT", targetId: c.id });
 
   res.json({
     id: c.id,
@@ -1315,7 +1324,7 @@ app.post("/api/clients/:id/encounters", authRequired, requireRole(ROLES.EXEC, RO
     id, client.id, program, type, summary || "", note || "", req.user!.id, req.user!.role, created_at
   );
 
-  await logAudit(req, "ENCOUNTER", id, "CREATE_ENCOUNTER", { clientId: client.id, program, type });
+  await logAudit(req, { action: "CREATE_ENCOUNTER", targetType: "ENCOUNTER", targetId: id, extra: { clientId: client.id, program, type } });
 
   res.status(201).json({
     id,
@@ -1342,7 +1351,7 @@ app.get("/api/clients/:id/encounters", authRequired, requireRole(ROLES.EXEC, ROL
     client.id
   );
 
-  await logAudit(req, "ENCOUNTER", null, "LIST_ENCOUNTERS", { clientId: client.id, count: rows.length });
+  await logAudit(req, { action: "LIST_ENCOUNTERS", targetType: "ENCOUNTER", targetId: null, extra: { clientId: client.id, count: rows.length } });
 
   res.json(rows.map((r) => ({
     id: r.id,
@@ -1461,11 +1470,11 @@ app.get(
         count: g.count,
       }));
 
-      await logAudit(req, "CLIENT_SUMMARY", clientId, "VIEW_CLIENT_SUMMARY", {
+      await logAudit(req, { action: "VIEW_CLIENT_SUMMARY", targetType: "CLIENT_SUMMARY", targetId: clientId, extra: {
         hasRisk: !!riskSummary,
         hasNextAppt: !!nextAppointment,
         hasLastEnc: !!lastEncounter,
-      });
+      } });
 
       res.json({
         clientId: client.id,
@@ -1509,7 +1518,7 @@ app.get("/api/clients/:id/goals", authRequired, requireRole(ROLES.EXEC, ROLES.CL
     clientId
   );
 
-  await logAudit(req, "GOAL", null, "LIST_GOALS", { clientId, count: rows.length });
+  await logAudit(req, { action: "LIST_GOALS", targetType: "GOAL", targetId: null, extra: { clientId, count: rows.length } });
 
   res.json(rows.map((g) => ({
     id: g.id,
@@ -1551,7 +1560,7 @@ app.post("/api/clients/:id/goals", authRequired, requireRole(ROLES.EXEC, ROLES.C
     id, clientId, program, title, "ACTIVE", notes || "", targetDate || null, req.user!.id, created_at
   );
 
-  await logAudit(req, "GOAL", id, "CREATE_GOAL", { clientId, program });
+  await logAudit(req, { action: "CREATE_GOAL", targetType: "GOAL", targetId: id, extra: { clientId, program } });
 
   res.status(201).json({
     id,
@@ -1602,9 +1611,9 @@ app.patch(
       clientId
     );
 
-    await logAudit(req, "CLIENT", clientId, "UPDATE_NOTIFY_CHANNEL", {
+    await logAudit(req, { action: "UPDATE_NOTIFY_CHANNEL", targetType: "CLIENT", targetId: clientId, extra: {
       notifyChannel: value,
-    });
+    } });
 
     res.json({ ok: true, notifyChannel: value });
   }
@@ -1652,7 +1661,7 @@ app.patch("/api/clients/:clientId/goals/:goalId", authRequired, requireRole(ROLE
     newStatus, title || null, notes || null, targetDate || null, completed_at, goalId, clientId
   );
 
-  await logAudit(req, "GOAL", goalId, "UPDATE_GOAL", { clientId, status: newStatus });
+  await logAudit(req, { action: "UPDATE_GOAL", targetType: "GOAL", targetId: goalId, extra: { clientId, status: newStatus } });
 
   const updated = await db.get<any>(
     `SELECT id, program, title, status, notes, target_date, created_by, created_at, completed_at
@@ -1705,7 +1714,7 @@ app.post(
       id, clientId, type, JSON.stringify(data), req.user!.id, created_at
     );
 
-    await logAudit(req, "ASSESSMENT", id, "CREATE_ASSESSMENT", { type });
+    await logAudit(req, { action: "CREATE_ASSESSMENT", targetType: "ASSESSMENT", targetId: id, extra: { type } });
 
     res.status(201).json({
       id,
@@ -1741,10 +1750,10 @@ app.get(
       clientId
     );
 
-    await logAudit(req, "ASSESSMENT", null, "LIST_ASSESSMENTS", {
+    await logAudit(req, { action: "LIST_ASSESSMENTS", targetType: "ASSESSMENT", targetId: null, extra: {
       clientId,
       count: rows.length,
-    });
+    } });
 
     res.json(
       rows.map((a) => ({
@@ -1789,7 +1798,7 @@ app.post("/api/clients/:id/assignments", authRequired, requireRole(ROLES.EXEC), 
     id, clientId, userId, role, created_at
   );
 
-  await logAudit(req, "CLIENT_ASSIGNMENT", id, "CREATE_ASSIGNMENT", { clientId, userId, role });
+  await logAudit(req, { action: "CREATE_ASSIGNMENT", targetType: "CLIENT_ASSIGNMENT", targetId: id, extra: { clientId, userId, role } });
 
   res.status(201).json({
     id,
@@ -1821,7 +1830,7 @@ app.get("/api/clients/:id/assignments", authRequired, requireRole(ROLES.EXEC, RO
     ORDER BY ca.created_at DESC
   `, clientId);
 
-  await logAudit(req, "CLIENT_ASSIGNMENT", null, "LIST_ASSIGNMENTS", { clientId, count: rows.length });
+  await logAudit(req, { action: "LIST_ASSIGNMENTS", targetType: "CLIENT_ASSIGNMENT", targetId: null, extra: { clientId, count: rows.length } });
 
   res.json(rows.map((r) => ({
     id: r.id,
@@ -1850,7 +1859,7 @@ app.delete("/api/clients/:id/assignments/:assignmentId", authRequired, requireRo
 
   await db.run("DELETE FROM client_assignments WHERE id = ?", assignment.id);
 
-  await logAudit(req, "CLIENT_ASSIGNMENT", assignment.id, "REMOVE_ASSIGNMENT", { clientId: client.id, userId: assignment.user_id });
+  await logAudit(req, { action: "REMOVE_ASSIGNMENT", targetType: "CLIENT_ASSIGNMENT", targetId: assignment.id, extra: { clientId: client.id, userId: assignment.user_id } });
 
   res.json({ message: "Assignment removed" });
 });
@@ -1885,7 +1894,7 @@ app.post(
       id, clientId, program, startTime, endTime || null, location || null, notes || "", req.user!.id, created_at
     );
 
-    await logAudit(req, "APPOINTMENT", id, "CREATE_APPOINTMENT", { clientId, program, startTime });
+    await logAudit(req, { action: "CREATE_APPOINTMENT", targetType: "APPOINTMENT", targetId: id, extra: { clientId, program, startTime } });
 
     res.status(201).json({
       id,
@@ -1923,7 +1932,7 @@ app.get(
       clientId
     );
 
-    await logAudit(req, "APPOINTMENT", null, "LIST_APPOINTMENTS", { clientId, count: rows.length });
+    await logAudit(req, { action: "LIST_APPOINTMENTS", targetType: "APPOINTMENT", targetId: null, extra: { clientId, count: rows.length } });
 
     res.json(rows.map((a) => ({
       id: a.id,
@@ -1987,7 +1996,7 @@ app.get(
         );
       }
 
-      await logAudit(req, "APPOINTMENT", null, "LIST_APPOINTMENTS_BY_RANGE", { from, to, count: rows.length });
+      await logAudit(req, { action: "LIST_APPOINTMENTS_BY_RANGE", targetType: "APPOINTMENT", targetId: null, extra: { from, to, count: rows.length } });
 
       res.json(rows.map((a) => ({
         id: a.id,
@@ -2022,7 +2031,7 @@ app.get('/api/bookings/admin', authRequired, requireRole(['admin']), async (req,
        ORDER BY a.start_time DESC`
     );
 
-    await logAudit(req, "APPOINTMENT", null, "ADMIN_LIST_ALL_BOOKINGS", { count: rows.length });
+    await logAudit(req, { action: "ADMIN_LIST_ALL_BOOKINGS", targetType: "APPOINTMENT", targetId: null, extra: { count: rows.length } });
 
     res.json(rows.map((a) => ({
       id: a.id,
@@ -2057,7 +2066,7 @@ app.get('/api/bookings/barber', authRequired, requireRole(['barber', 'admin']), 
        ORDER BY a.start_time DESC`
     );
 
-    await logAudit(req, "APPOINTMENT", null, "BARBER_LIST_BOOKINGS", { count: rows.length });
+    await logAudit(req, { action: "BARBER_LIST_BOOKINGS", targetType: "APPOINTMENT", targetId: null, extra: { count: rows.length } });
 
     res.json(rows.map((a) => ({
       id: a.id,
@@ -2137,7 +2146,7 @@ app.post(
 
     try {
       await sendSafeSms(to, body);
-      await logAudit(req, "APPOINTMENT", appt.id, "SEND_APPT_REMINDER", { clientId, phone: to });
+      await logAudit(req, { action: "SEND_APPT_REMINDER", targetType: "APPOINTMENT", targetId: appt.id, extra: { clientId, phone: to } });
       res.json({ ok: true });
     } catch (err) {
       console.error("Twilio error:", err);
@@ -2212,10 +2221,10 @@ app.post(
       try {
         const sms = await sendSafeSms(appt.phone, body);
 
-        await logAudit(req, "APPOINTMENT", apptId, "SEND_SMS_REMINDER", {
+        await logAudit(req, { action: "SEND_SMS_REMINDER", targetType: "APPOINTMENT", targetId: apptId, extra: {
           to: normalizePhone(appt.phone),
           sid: sms.sid,
-        });
+        } });
       } catch (smsErr: any) {
         notifStatus = "FAILED";
         notifError = smsErr?.message || "Unknown SMS error";
@@ -2306,10 +2315,10 @@ app.post(
       try {
         const call = await sendVoiceReminderCall(appt.phone, appt.id);
 
-        await logAudit(req, "APPOINTMENT", apptId, "SEND_VOICE_REMINDER", {
+        await logAudit(req, { action: "SEND_VOICE_REMINDER", targetType: "APPOINTMENT", targetId: apptId, extra: {
           to: normalizePhone(appt.phone),
           sid: call.sid,
-        });
+        } });
       } catch (callErr: any) {
         notifStatus = "FAILED";
         notifError = callErr?.message || "Unknown voice call error";
@@ -2370,7 +2379,7 @@ app.post(
 
     try {
       await sendSafeSms(to, safeBody);
-      await logAudit(req, "NOTIFICATION", clientId, "SEND_SMS", { to });
+      await logAudit(req, { action: "SEND_SMS", targetType: "NOTIFICATION", targetId: clientId, extra: { to } });
       res.json({ ok: true });
     } catch (err) {
       console.error("Twilio error:", err);
@@ -2450,7 +2459,7 @@ app.post("/api/dashboard/widgets", authRequired, async (req, res) => {
       settings ? JSON.stringify(settings) : null, now, now
     );
 
-    await logAudit(req, "DASHBOARD_WIDGET", id, "CREATE", { widgetType });
+    await logAudit(req, { action: "CREATE", targetType: "DASHBOARD_WIDGET", targetId: id, extra: { widgetType } });
 
     res.status(201).json({
       id,
@@ -2513,7 +2522,7 @@ app.patch("/api/dashboard/widgets/:id", authRequired, async (req, res) => {
       ...params
     );
 
-    await logAudit(req, "DASHBOARD_WIDGET", id, "UPDATE", { title, layout, settings });
+    await logAudit(req, { action: "UPDATE", targetType: "DASHBOARD_WIDGET", targetId: id, extra: { title, layout, settings } });
 
     const updated = await db.get<any>(
       `SELECT * FROM dashboard_widgets WHERE id = ?`,
@@ -2555,7 +2564,7 @@ app.patch("/api/dashboard/widgets/batch-layout", authRequired, async (req, res) 
       );
     }
 
-    await logAudit(req, "DASHBOARD_WIDGET", null, "BATCH_UPDATE_LAYOUT", { count: updates.length });
+    await logAudit(req, { action: "BATCH_UPDATE_LAYOUT", targetType: "DASHBOARD_WIDGET", targetId: null, extra: { count: updates.length } });
 
     res.json({ ok: true, updated: updates.length });
   } catch (err) {
@@ -2583,7 +2592,7 @@ app.delete("/api/dashboard/widgets/:id", authRequired, async (req, res) => {
       id, req.user!.id
     );
 
-    await logAudit(req, "DASHBOARD_WIDGET", id, "DELETE", { widgetType: widget.widget_type });
+    await logAudit(req, { action: "DELETE", targetType: "DASHBOARD_WIDGET", targetId: id, extra: { widgetType: widget.widget_type } });
 
     res.json({ ok: true });
   } catch (err) {
@@ -2773,11 +2782,11 @@ app.get("/api/stats/overview", authRequired, async (req, res) => {
     }
     const openOutreachTasks = outreachRow?.count || 0;
 
-    await logAudit(req, "STATS", null, "VIEW_STATS_OVERVIEW", {
+    await logAudit(req, { action: "VIEW_STATS_OVERVIEW", targetType: "STATS", targetId: null, extra: {
       totalClients,
       appointmentsThisWeek,
       openOutreachTasks,
-    });
+    } });
 
     res.json({
       totalClients,
@@ -3174,7 +3183,7 @@ app.get(
 
       const summary = await buildGoalsSummaryForUser(req.user!, from, to);
 
-      await logAudit(req, "REPORT", null, "REPORT_GOALS_SUMMARY_JSON", { from, to });
+      await logAudit(req, { action: "REPORT_GOALS_SUMMARY_JSON", targetType: "REPORT", targetId: null, extra: { from, to } });
 
       res.json({ from, to, programs: summary });
     } catch (err) {
@@ -3204,7 +3213,7 @@ app.get(
 
       const summary = await buildGoalsSummaryForUser(req.user!, from, to);
 
-      await logAudit(req, "REPORT", null, "REPORT_GOALS_SUMMARY_CSV", { from, to });
+      await logAudit(req, { action: "REPORT_GOALS_SUMMARY_CSV", targetType: "REPORT", targetId: null, extra: { from, to } });
 
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
       res.setHeader("Content-Disposition", 'attachment; filename="ifcdc_goals_summary.csv"');
@@ -3248,7 +3257,7 @@ app.get(
 
       const report = await buildProgramDashboardForUser(req.user!, program, from, to);
 
-      await logAudit(req, "REPORT", null, "REPORT_PROGRAM_DASHBOARD_JSON", { program, from, to });
+      await logAudit(req, { action: "REPORT_PROGRAM_DASHBOARD_JSON", targetType: "REPORT", targetId: null, extra: { program, from, to } });
 
       res.json(report);
     } catch (err) {
@@ -3283,11 +3292,11 @@ app.get(
         program || null
       );
 
-      await logAudit(req, "REPORT", null, "REPORT_VOLUME_JSON", {
+      await logAudit(req, { action: "REPORT_VOLUME_JSON", targetType: "REPORT", targetId: null, extra: {
         from,
         to,
         program,
-      });
+      } });
 
       res.json(report);
     } catch (err) {
@@ -3322,11 +3331,11 @@ app.get(
         program || null
       );
 
-      await logAudit(req, "REPORT", null, "REPORT_VOLUME_CSV", {
+      await logAudit(req, { action: "REPORT_VOLUME_CSV", targetType: "REPORT", targetId: null, extra: {
         from,
         to,
         program,
-      });
+      } });
 
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
       res.setHeader(
@@ -3421,9 +3430,9 @@ app.get(
     try {
       const report = await buildRiskMixReportForUser(req.user!);
 
-      await logAudit(req, "REPORT", null, "REPORT_RISK_MIX_JSON", {
+      await logAudit(req, { action: "REPORT_RISK_MIX_JSON", targetType: "REPORT", targetId: null, extra: {
         totalWithRisk: report.totalWithRisk,
-      });
+      } });
 
       res.json(report);
     } catch (err) {
@@ -3442,9 +3451,9 @@ app.get(
     try {
       const report = await buildRiskMixReportForUser(req.user!);
 
-      await logAudit(req, "REPORT", null, "REPORT_RISK_MIX_CSV", {
+      await logAudit(req, { action: "REPORT_RISK_MIX_CSV", targetType: "REPORT", targetId: null, extra: {
         totalWithRisk: report.totalWithRisk,
-      });
+      } });
 
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
       res.setHeader(
@@ -3557,16 +3566,13 @@ app.post("/api/cron/send-upcoming-reminders", async (req, res) => {
     try {
       await logAudit(
         { user: { id: "cron", role: "SYSTEM" }, method: "POST", originalUrl: "/api/cron/send-upcoming-reminders" } as any,
-        "CRON",
-        null,
-        "AUTO_SEND_APPOINTMENT_REMINDERS",
-        {
+        { action: "AUTO_SEND_APPOINTMENT_REMINDERS", targetType: "CRON", targetId: null, extra: {
           globalFallbackHours: globalFallback,
           totalCandidates: upcoming.length,
           attempted,
           sent,
           failures: failures.length,
-        }
+        } }
       );
     } catch (e: any) {
       console.error("Failed to log cron audit:", e.message);
@@ -3683,7 +3689,7 @@ app.get(
         );
       }
 
-      await logAudit(req, "OUTREACH_TASK", null, "LIST_OUTREACH_TASKS", { status, count: rows.length });
+      await logAudit(req, { action: "LIST_OUTREACH_TASKS", targetType: "OUTREACH_TASK", targetId: null, extra: { status, count: rows.length } });
 
       const list = rows.map((t) => ({
         id: t.id,
@@ -3729,7 +3735,7 @@ app.post(
       now, id
     );
 
-    await logAudit(req, "OUTREACH_TASK", id, "COMPLETE_OUTREACH_TASK", {});
+    await logAudit(req, { action: "COMPLETE_OUTREACH_TASK", targetType: "OUTREACH_TASK", targetId: id, extra: {} });
 
     res.json({ ok: true });
   }
@@ -3787,7 +3793,7 @@ app.post("/api/hr/employees", authRequired, requireRole(ROLES.ADMIN, "owner"), a
       payRate ? Number(payRate) : null, payCurrency || "USD", payType || "hourly", now, now
     );
 
-    await logAudit(req, "EMPLOYEE", id, "CREATE_EMPLOYEE", { firstName, lastName, role });
+    await logAudit(req, { action: "CREATE_EMPLOYEE", targetType: "EMPLOYEE", targetId: id, extra: { firstName, lastName, role } });
 
     res.status(201).json({
       id, firstName, lastName, email: email.toLowerCase(), phone, role, location, startDate, status: status || "onboarding", notes
@@ -3948,13 +3954,13 @@ app.post("/api/barbershop/book", authRequired, requireRole("barber", "admin", "o
       appointmentId, client.id, "BARBERSHOP", startISO, endISO, "IFCDC Barbershop", appointmentNotes, barberId, now
     );
 
-    await logAudit(req, "APPOINTMENT", appointmentId, "CREATE_BARBERSHOP_BOOKING", { 
+    await logAudit(req, { action: "CREATE_BARBERSHOP_BOOKING", targetType: "APPOINTMENT", targetId: appointmentId, extra: { 
       clientName: fullName, 
       service: service.name,
       date, 
       startTime,
       barberId 
-    });
+    } });
 
     // Send SMS confirmation if client opted in, Twilio configured, and phone available
     const clientOptedIn = client.notify_channel === 'SMS' || !client.notify_channel;
@@ -4040,11 +4046,11 @@ app.post("/api/barbershop/appointments/:id/send-reminder", authRequired, require
       body: reminderText,
     });
 
-    await logAudit(req, "SMS", id, "SEND_BARBERSHOP_REMINDER", {
+    await logAudit(req, { action: "SEND_BARBERSHOP_REMINDER", targetType: "SMS", targetId: id, extra: {
       clientName: appointment.full_name,
       phone: appointment.phone,
       appointmentTime: appointment.start_time,
-    });
+    } });
 
     res.json({ success: true, message: "Reminder sent successfully" });
   } catch (err: any) {
@@ -4083,7 +4089,7 @@ app.post("/api/test-sms", authRequired, requireRole("admin", "owner", ROLES.EXEC
       body: smsBody,
     });
 
-    await logAudit(req, "SMS", "test", "TEST_SMS", { to: phoneNorm });
+    await logAudit(req, { action: "TEST_SMS", targetType: "SMS", targetId: "test", extra: { to: phoneNorm } });
 
     res.json({ success: true, message: "Test SMS sent successfully to " + phoneNorm });
   } catch (err: any) {
@@ -4216,7 +4222,7 @@ Be helpful, professional, and culturally sensitive. Keep responses concise and a
 
     const aiResponse = response.choices[0]?.message?.content || "I couldn't generate a response.";
     
-    await logAudit(req, "AI", "chat", "AI_CHAT", { messageLength: message.length });
+    await logAudit(req, { action: "AI_CHAT", targetType: "AI", targetId: "chat", extra: { messageLength: message.length } });
     
     res.json({ response: aiResponse });
   } catch (err) {
@@ -4262,7 +4268,7 @@ Provide a 2-3 sentence summary and 2-3 actionable recommendations for the care t
 
     const summary = response.choices[0]?.message?.content || "Unable to generate summary.";
     
-    await logAudit(req, "AI", clientId, "AI_CLIENT_SUMMARY", {});
+    await logAudit(req, { action: "AI_CLIENT_SUMMARY", targetType: "AI", targetId: clientId, extra: {} });
     
     res.json({ summary, clientName: client.full_name });
   } catch (err) {
@@ -4298,7 +4304,7 @@ app.post("/api/ai/radio-content", authRequired, requireRole(ROLES.ADMIN, "radio_
 
     const content = response.choices[0]?.message?.content || "Unable to generate content.";
     
-    await logAudit(req, "AI", "radio", "AI_RADIO_CONTENT", { topic, contentType });
+    await logAudit(req, { action: "AI_RADIO_CONTENT", targetType: "AI", targetId: "radio", extra: { topic, contentType } });
     
     res.json({ content, contentType: contentType || "announcement" });
   } catch (err) {
@@ -4330,7 +4336,7 @@ app.post("/api/ai/schedule-help", authRequired, requireRole(ROLES.ADMIN, "barber
 
     const answer = response.choices[0]?.message?.content || "Unable to help with scheduling.";
     
-    await logAudit(req, "AI", "schedule", "AI_SCHEDULE_HELP", {});
+    await logAudit(req, { action: "AI_SCHEDULE_HELP", targetType: "AI", targetId: "schedule", extra: {} });
     
     res.json({ answer });
   } catch (err) {
