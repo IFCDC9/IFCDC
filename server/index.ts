@@ -1372,9 +1372,41 @@ app.post("/api/users", authRequired, requireRole(ROLES.EXEC), async (req, res) =
 });
 
 app.get("/api/users", authRequired, requireRole(ROLES.EXEC), async (req, res) => {
-  const rows = await db.all("SELECT id, name, email, role, created_at FROM users ORDER BY created_at DESC");
+  const rows = await db.all("SELECT id, name, email, role, status, created_at FROM users ORDER BY created_at DESC");
   await logAudit(req, { action: "LIST_USERS", targetType: "USER", targetId: null, extra: { count: rows.length } });
   res.json(rows);
+});
+
+// Update user status (reinstate, suspend, etc.)
+app.patch("/api/users/:id/status", authRequired, requireRole(ROLES.EXEC, ROLES.ADMIN), async (req, res) => {
+  const { id } = req.params;
+  const { status, reason } = req.body;
+  
+  if (!status || !['active', 'suspended', 'pending_review'].includes(status)) {
+    return res.status(400).json({ error: "Valid status required: active, suspended, pending_review" });
+  }
+  
+  const user = await db.get<any>("SELECT * FROM users WHERE id = ?", id);
+  if (!user) {
+    return res.status(404).json({ error: "User not found" });
+  }
+  
+  const previousStatus = user.status || 'active';
+  await db.run("UPDATE users SET status = ? WHERE id = ?", status, id);
+  
+  await logAudit(req, { 
+    action: status === 'active' ? "REINSTATE_USER" : "UPDATE_USER_STATUS", 
+    targetType: "USER", 
+    targetId: id, 
+    extra: { previousStatus, newStatus: status, reason: reason || null } 
+  });
+  
+  res.json({ 
+    message: status === 'active' ? 'User reinstated successfully' : 'User status updated',
+    id,
+    status,
+    previousStatus
+  });
 });
 
 app.post("/api/clients", authRequired, requireRole(ROLES.EXEC, ROLES.CLINICIAN, ROLES.CASE_MANAGER), async (req, res) => {
