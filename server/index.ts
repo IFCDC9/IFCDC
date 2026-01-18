@@ -278,6 +278,7 @@ async function initDb() {
       entity_type TEXT,
       entity_id TEXT,
       action TEXT,
+      ip_address TEXT,
       extra TEXT
     );
   `);
@@ -631,12 +632,13 @@ async function initDb() {
 async function logAudit(req: express.Request, entityType: string, entityId: string | null, action: string, extra: Record<string, unknown> = {}) {
   const id = cryptoRandomId();
   const timestamp = new Date().toISOString();
+  const ipAddress = req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim() || req.socket?.remoteAddress || null;
 
   await db.run(
-    `INSERT INTO audit_logs (id, timestamp, user_id, user_role, method, path, entity_type, entity_id, action, extra)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO audit_logs (id, timestamp, user_id, user_role, method, path, entity_type, entity_id, action, ip_address, extra)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id, timestamp, req.user?.id || null, req.user?.role || null,
-    req.method, req.originalUrl, entityType, entityId, action, JSON.stringify(extra)
+    req.method, req.originalUrl, entityType, entityId, action, ipAddress, JSON.stringify(extra)
   );
 }
 
