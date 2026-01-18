@@ -992,6 +992,60 @@ app.get('/api/auth/me', authRequired, (req, res) => {
   return res.json({ user: req.user });
 });
 
+// Route aliases for /auth/* (without /api prefix)
+app.post('/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const lowerEmail = (email || '').toLowerCase();
+    const user = await db.get<User>("SELECT * FROM users WHERE email = ?", lowerEmail);
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+    if (!user.password_hash) {
+      const newHash = await bcrypt.hash(password, 10);
+      await db.run("UPDATE users SET password_hash = ? WHERE id = ?", newHash, user.id);
+    } else {
+      const ok = await bcrypt.compare(password, user.password_hash);
+      if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    let effectiveRole = user.role;
+    if (MASTER_OWNER_EMAIL && lowerEmail === MASTER_OWNER_EMAIL.toLowerCase()) effectiveRole = "owner";
+    else if (ADMIN_EMAIL && lowerEmail === ADMIN_EMAIL.toLowerCase()) effectiveRole = "admin";
+    const token = jwt.sign({ id: user.id, email: user.email, role: effectiveRole }, JWT_SECRET, { expiresIn: "7d" });
+    res.cookie('ifcdc_token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 });
+    return res.json({ message: 'Logged in', role: effectiveRole, user: { id: user.id, name: user.name, email: user.email, role: effectiveRole } });
+  } catch (err) {
+    console.error('Login error', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/auth/register', async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+    const lowerEmail = (email || '').toLowerCase();
+    const existing = await db.get("SELECT id FROM users WHERE email = ?", lowerEmail);
+    if (existing) return res.status(409).json({ error: 'Email already registered' });
+    const finalRole = assignRole(lowerEmail);
+    const id = cryptoRandomId();
+    const password_hash = await bcrypt.hash(password, 10);
+    const created_at = new Date().toISOString();
+    await db.run(`INSERT INTO users (id, name, email, role, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)`, id, name, lowerEmail, finalRole, password_hash, created_at);
+    return res.status(201).json({ message: 'User created', role: finalRole });
+  } catch (err) {
+    console.error('Register error', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/auth/logout', (req, res) => {
+  res.clearCookie('ifcdc_token');
+  return res.json({ message: 'Logged out' });
+});
+
+app.get('/auth/me', authRequired, (req, res) => {
+  return res.json({ user: req.user });
+});
+
 // ----- Admin Services -----
 app.get("/api/admin/services", authRequired, requireAdmin, async (req, res) => {
   try {
