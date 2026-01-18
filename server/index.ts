@@ -3890,7 +3890,7 @@ app.post("/api/barbershop/book", authRequired, requireRole("barber", "admin", "o
 
     // Find or create client - use correct schema with phone/email columns
     let client = await db.get<any>(
-      `SELECT id FROM clients WHERE LOWER(full_name) = LOWER(?) OR (phone = ? AND phone IS NOT NULL AND phone != '')`,
+      `SELECT id, notify_channel FROM clients WHERE LOWER(full_name) = LOWER(?) OR (phone = ? AND phone IS NOT NULL AND phone != '')`,
       [fullName, clientPhone || null]
     );
 
@@ -3898,10 +3898,10 @@ app.post("/api/barbershop/book", authRequired, requireRole("barber", "admin", "o
       const clientId = cryptoRandomId();
       const now = new Date().toISOString();
       await db.run(
-        `INSERT INTO clients (id, full_name, phone, email, programs, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-        clientId, fullName, clientPhone || null, clientEmail || null, JSON.stringify(["BARBERSHOP"]), now
+        `INSERT INTO clients (id, full_name, phone, email, programs, notify_channel, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        clientId, fullName, clientPhone || null, clientEmail || null, JSON.stringify(["BARBERSHOP"]), 'SMS', now
       );
-      client = { id: clientId };
+      client = { id: clientId, notify_channel: 'SMS' };
     }
 
     // Get service details
@@ -3954,6 +3954,24 @@ app.post("/api/barbershop/book", authRequired, requireRole("barber", "admin", "o
       barberId 
     });
 
+    // Send SMS confirmation if client opted in, Twilio configured, and phone available
+    const clientOptedIn = client.notify_channel === 'SMS' || !client.notify_channel;
+    if (clientOptedIn && twilioClient && clientPhone) {
+      try {
+        const formattedDate = new Date(date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+        const smsBody = `IFCDC Barbershop: Your ${service.name} appointment is confirmed for ${formattedDate} at ${startTime}. See you soon!`;
+        
+        await twilioClient.messages.create({
+          body: smsBody,
+          from: TWILIO_SMS_FROM,
+          to: clientPhone.startsWith('+') ? clientPhone : `+1${clientPhone.replace(/\D/g, '')}`
+        });
+        console.log(`SMS confirmation sent to ${clientPhone}`);
+      } catch (smsErr) {
+        console.error("SMS confirmation failed:", smsErr);
+      }
+    }
+
     res.status(201).json({
       id: appointmentId,
       clientId: client.id,
@@ -3981,9 +3999,9 @@ app.post("/api/barbershop/appointments/:id/send-reminder", authRequired, require
       return res.status(503).json({ error: "SMS service is not configured. Please configure Twilio credentials." });
     }
 
-    // Get the appointment with client info
+    // Get the appointment with client info including notification preferences
     const appointment = await db.get<any>(
-      `SELECT a.id, a.start_time, a.end_time, a.notes, a.program, c.id as client_id, c.full_name, c.phone
+      `SELECT a.id, a.start_time, a.end_time, a.notes, a.program, c.id as client_id, c.full_name, c.phone, c.notify_channel
        FROM appointments a
        JOIN clients c ON a.client_id = c.id
        WHERE a.id = ? AND a.program = 'BARBERSHOP'`,
@@ -3996,6 +4014,11 @@ app.post("/api/barbershop/appointments/:id/send-reminder", authRequired, require
 
     if (!appointment.phone) {
       return res.status(400).json({ error: "Client has no phone number on file" });
+    }
+
+    // Check if client opted out of SMS notifications
+    if (appointment.notify_channel === 'NONE') {
+      return res.status(400).json({ error: "Client has opted out of SMS notifications" });
     }
 
     // Build the reminder message
@@ -4070,7 +4093,7 @@ app.post("/api/test-sms", authRequired, requireRole("admin", "owner", ROLES.EXEC
 // Public booking endpoint (no auth required) - creates a booking request
 app.post("/api/public/book-barbershop", async (req, res) => {
   try {
-    const { firstName, lastName, phone, email, service, serviceName, date, time, notes } = req.body;
+    const { firstName, lastName, phone, email, service, serviceName, date, time, notes, smsOptIn } = req.body;
 
     // Validate required fields
     if (!firstName || !lastName || !phone || !service || !date || !time) {
@@ -4079,9 +4102,10 @@ app.post("/api/public/book-barbershop", async (req, res) => {
 
     const fullName = `${firstName} ${lastName}`;
 
-    // Find or create client
+    // Find or create client, storing SMS preference
+    const notifyChannel = smsOptIn !== false ? 'SMS' : 'NONE';
     let client = await db.get<any>(
-      `SELECT id FROM clients WHERE phone = ? AND phone IS NOT NULL`,
+      `SELECT id, notify_channel FROM clients WHERE phone = ? AND phone IS NOT NULL`,
       [phone]
     );
 
@@ -4089,10 +4113,14 @@ app.post("/api/public/book-barbershop", async (req, res) => {
       const clientId = cryptoRandomId();
       const now = new Date().toISOString();
       await db.run(
-        `INSERT INTO clients (id, full_name, phone, email, programs, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-        clientId, fullName, phone, email || null, JSON.stringify(["BARBERSHOP"]), now
+        `INSERT INTO clients (id, full_name, phone, email, programs, notify_channel, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        clientId, fullName, phone, email || null, JSON.stringify(["BARBERSHOP"]), notifyChannel, now
       );
-      client = { id: clientId };
+      client = { id: clientId, notify_channel: notifyChannel };
+    } else {
+      // Update existing client's notification preference
+      await db.run(`UPDATE clients SET notify_channel = ? WHERE id = ?`, notifyChannel, client.id);
+      client.notify_channel = notifyChannel;
     }
 
     // Get service details from known services or use provided serviceName
@@ -4122,6 +4150,24 @@ app.post("/api/public/book-barbershop", async (req, res) => {
       `INSERT INTO appointments (id, client_id, program, start_time, end_time, location, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       appointmentId, client.id, "BARBERSHOP", startISO, endISO, "IFCDC Barbershop", appointmentNotes, barberId, now
     );
+
+    // Send SMS confirmation if client opted in, Twilio configured, and phone provided
+    const shouldSendSms = client.notify_channel === 'SMS';
+    if (shouldSendSms && twilioClient && phone) {
+      try {
+        const formattedDate = new Date(date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+        const smsBody = `IFCDC Barbershop: Your appointment for ${displayName} on ${formattedDate} at ${time} has been received! We'll confirm shortly. Questions? Call us!`;
+        
+        await twilioClient.messages.create({
+          body: smsBody,
+          from: TWILIO_SMS_FROM,
+          to: phone.startsWith('+') ? phone : `+1${phone.replace(/\D/g, '')}`
+        });
+        console.log(`SMS confirmation sent to ${phone}`);
+      } catch (smsErr) {
+        console.error("SMS confirmation failed:", smsErr);
+      }
+    }
 
     res.status(201).json({
       success: true,

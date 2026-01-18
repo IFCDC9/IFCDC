@@ -160,6 +160,22 @@
       color: #d4af37;
       font-weight: 600;
     }
+    .notification-prefs {
+      margin-bottom: 24px;
+    }
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      color: #ccc;
+    }
+    .checkbox-label input[type="checkbox"] {
+      width: 20px;
+      height: 20px;
+      accent-color: #d4af37;
+      cursor: pointer;
+    }
     .contact-info {
       background: #1a1a1a;
       border-radius: 8px;
@@ -311,6 +327,15 @@
         </div>
       </div>
 
+      <div class="form-section">
+        <div class="form-group notification-prefs">
+          <label class="checkbox-label">
+            <input type="checkbox" id="smsOptIn" name="smsOptIn" checked>
+            <span>Send me appointment reminders via text message</span>
+          </label>
+        </div>
+      </div>
+
       <button type="submit" class="btn-book" id="submitBtn">Request Appointment</button>
     </form>
 
@@ -376,7 +401,8 @@
         serviceName: serviceInput.closest('.service-option').querySelector('.service-name').textContent,
         date: document.getElementById('date').value,
         time: document.getElementById('time').value,
-        notes: document.getElementById('notes').value.trim()
+        notes: document.getElementById('notes').value.trim(),
+        smsOptIn: document.getElementById('smsOptIn').checked
       };
 
       try {
