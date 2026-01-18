@@ -96,30 +96,30 @@
   </div>
 
   <script>
-    async function loadUser() {
-      try {
-        const res = await fetch('/auth/me', { credentials: 'include' });
-        if (!res.ok) {
-          window.location.href = '/login.html';
-          return;
-        }
-        const data = await res.json();
-        const user = data.user;
-        document.getElementById('userInfo').innerHTML = `
-          <p><strong>Welcome, ${user.name || user.email}</strong></p>
-          <p>Role: ${user.role}</p>
-        `;
-      } catch (e) {
+    (async () => {
+      const res = await fetch('/auth/me', { credentials: 'include' });
+      if (!res.ok) {
         window.location.href = '/login.html';
+        return;
       }
-    }
+
+      const data = await res.json();
+      const user = data.user;
+      if (user.role !== 'admin' && user.role !== 'owner' && user.role !== 'exec') {
+        window.location.href = '/login.html';
+        return;
+      }
+
+      document.getElementById('userInfo').innerHTML = `
+        <p><strong>Welcome, ${user.name || user.email}</strong></p>
+        <p>Role: ${user.role}</p>
+      `;
+    })();
 
     document.getElementById('logoutBtn').addEventListener('click', async () => {
       await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
       window.location.href = '/';
     });
-
-    loadUser();
   </script>
 </body>
 </html>
