@@ -12,7 +12,18 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
   });
 
   if (res.ok) {
-    window.location.href = '/dashboard.html';
+    const data = await res.json();
+    const role = (data.role || '').toLowerCase();
+
+    if (role === 'admin' || role === 'owner' || role === 'exec') {
+      window.location.href = '/admin';
+    } else if (role === 'barber') {
+      window.location.href = '/barber';
+    } else if (role === 'radio' || role === 'radio_host') {
+      window.location.href = '/radio';
+    } else {
+      window.location.href = '/dashboard.html';
+    }
   } else {
     alert('Invalid login credentials');
   }
