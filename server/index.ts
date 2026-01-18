@@ -240,7 +240,8 @@ async function initDb() {
       replit_id TEXT UNIQUE,
       profile_image_url TEXT,
       twofa_secret TEXT,
-      twofa_enabled INTEGER DEFAULT 0
+      twofa_enabled INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'active'
     );
   `);
 
@@ -393,6 +394,9 @@ async function initDb() {
   } catch (e) {}
   try {
     await db.exec(`ALTER TABLE users ADD COLUMN twofa_enabled INTEGER DEFAULT 0`);
+  } catch (e) {}
+  try {
+    await db.exec(`ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'active'`);
   } catch (e) {}
 
   // --- Per-program reminder lead hours ---
