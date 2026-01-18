@@ -36,6 +36,29 @@
     .login-page p {
       margin-top: 20px;
     }
+    .error-msg {
+      color: #e53935;
+      font-size: 0.9rem;
+      margin-top: -8px;
+    }
+    .totp-section {
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+      text-align: center;
+    }
+    .totp-section.show {
+      display: flex;
+    }
+    .totp-section input {
+      text-align: center;
+      font-size: 1.5rem;
+      letter-spacing: 8px;
+    }
+    .totp-info {
+      color: #888;
+      font-size: 0.85rem;
+    }
   </style>
 </head>
 <body class="ifcdc-body">
@@ -43,9 +66,19 @@
     <h2>Login</h2>
 
     <form id="loginForm">
-      <input type="email" name="email" placeholder="Email" required />
-      <input type="password" name="password" placeholder="Password" required />
-      <button type="submit">Login</button>
+      <div id="credentialsSection">
+        <input type="email" name="email" id="email" placeholder="Email" required style="width:100%;margin-bottom:16px" />
+        <input type="password" name="password" id="password" placeholder="Password" required style="width:100%" />
+      </div>
+      
+      <div id="totpSection" class="totp-section">
+        <p class="totp-info">Enter the 6-digit code from your authenticator app</p>
+        <input type="text" name="totpCode" id="totpCode" placeholder="000000" maxlength="6" pattern="[0-9]{6}" />
+      </div>
+      
+      <p id="errorMsg" class="error-msg" style="display:none;"></p>
+      
+      <button type="submit" id="submitBtn">Login</button>
     </form>
 
     <p>Don't have an account? <a href="/register.html">Register</a></p>

@@ -6,6 +6,9 @@ import { open, Database } from "sqlite";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import twilio from "twilio";
+import * as otplib from "otplib";
+const { authenticator } = otplib;
+import QRCode from "qrcode";
 import cookieParser from "cookie-parser";
 import { createServer as createViteServer } from "vite";
 import OpenAI from "openai";
@@ -235,7 +238,9 @@ async function initDb() {
       password_hash TEXT,
       created_at TEXT NOT NULL,
       replit_id TEXT UNIQUE,
-      profile_image_url TEXT
+      profile_image_url TEXT,
+      totp_secret TEXT,
+      totp_enabled INTEGER DEFAULT 0
     );
   `);
 
@@ -381,6 +386,14 @@ async function initDb() {
   } catch (e) {
     // column probably already exists; ignore
   }
+
+  // --- 2FA columns for users ---
+  try {
+    await db.exec(`ALTER TABLE users ADD COLUMN totp_secret TEXT`);
+  } catch (e) {}
+  try {
+    await db.exec(`ALTER TABLE users ADD COLUMN totp_enabled INTEGER DEFAULT 0`);
+  } catch (e) {}
 
   // --- Per-program reminder lead hours ---
   try {
@@ -935,17 +948,11 @@ app.post('/api/auth/register', async (req, res) => {
 // LOGIN
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, totpCode } = req.body;
     const lowerEmail = (email || '').toLowerCase();
 
-    const user = await db.get<User>("SELECT * FROM users WHERE email = ?", lowerEmail);
+    const user = await db.get<any>("SELECT * FROM users WHERE email = ?", lowerEmail);
     
-    console.log("LOGIN ATTEMPT:", {
-      email: lowerEmail,
-      userFound: !!user,
-      hasPassword: !!user?.password_hash,
-    });
-
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
@@ -954,10 +961,8 @@ app.post('/api/auth/login', async (req, res) => {
     if (!user.password_hash) {
       const newHash = await bcrypt.hash(password, 10);
       await db.run("UPDATE users SET password_hash = ? WHERE id = ?", newHash, user.id);
-      // Continue with login
     } else {
       const ok = await bcrypt.compare(password, user.password_hash);
-      console.log("PASSWORD CHECK:", { match: ok });
       if (!ok) {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
@@ -969,6 +974,19 @@ app.post('/api/auth/login', async (req, res) => {
       effectiveRole = "owner";
     } else if (ADMIN_EMAIL && lowerEmail === ADMIN_EMAIL.toLowerCase()) {
       effectiveRole = "admin";
+    }
+
+    // Check if 2FA is enabled for admin/owner roles
+    if (user.totp_enabled && (effectiveRole === 'admin' || effectiveRole === 'owner' || effectiveRole === 'exec')) {
+      if (!totpCode) {
+        // Require 2FA code
+        return res.status(200).json({ requires2FA: true, message: 'Please enter your 2FA code' });
+      }
+      // Verify TOTP code
+      const isValid = authenticator.verify({ token: totpCode, secret: user.totp_secret });
+      if (!isValid) {
+        return res.status(401).json({ error: 'Invalid 2FA code' });
+      }
     }
 
     const token = jwt.sign({ id: user.id, email: user.email, role: effectiveRole }, JWT_SECRET, { expiresIn: "7d" });
@@ -1006,9 +1024,9 @@ app.get('/api/auth/me', authRequired, (req, res) => {
 // Route aliases for /auth/* (without /api prefix)
 app.post('/auth/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, totpCode } = req.body;
     const lowerEmail = (email || '').toLowerCase();
-    const user = await db.get<User>("SELECT * FROM users WHERE email = ?", lowerEmail);
+    const user = await db.get<any>("SELECT * FROM users WHERE email = ?", lowerEmail);
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
     if (!user.password_hash) {
       const newHash = await bcrypt.hash(password, 10);
@@ -1020,6 +1038,18 @@ app.post('/auth/login', async (req, res) => {
     let effectiveRole = user.role;
     if (MASTER_OWNER_EMAIL && lowerEmail === MASTER_OWNER_EMAIL.toLowerCase()) effectiveRole = "owner";
     else if (ADMIN_EMAIL && lowerEmail === ADMIN_EMAIL.toLowerCase()) effectiveRole = "admin";
+    
+    // Check if 2FA is enabled for admin/owner roles
+    if (user.totp_enabled && (effectiveRole === 'admin' || effectiveRole === 'owner' || effectiveRole === 'exec')) {
+      if (!totpCode) {
+        return res.status(200).json({ requires2FA: true, message: 'Please enter your 2FA code' });
+      }
+      const isValid = authenticator.verify({ token: totpCode, secret: user.totp_secret });
+      if (!isValid) {
+        return res.status(401).json({ error: 'Invalid 2FA code' });
+      }
+    }
+    
     const token = jwt.sign({ id: user.id, email: user.email, role: effectiveRole }, JWT_SECRET, { expiresIn: "7d" });
     res.cookie('ifcdc_token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 });
     return res.json({ id: user.id, email: user.email, role: effectiveRole });
@@ -1055,6 +1085,123 @@ app.post('/auth/logout', (req, res) => {
 
 app.get('/auth/me', authRequired, (req, res) => {
   return res.json({ user: req.user });
+});
+
+// ----- 2FA Setup Endpoints -----
+// Generate 2FA secret and QR code
+app.post('/api/auth/2fa/setup', authRequired, async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const user = await db.get<any>("SELECT * FROM users WHERE id = ?", userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const secret = authenticator.generateSecret();
+    const otpauthUrl = authenticator.keyuri(user.email, 'IFCDC', secret);
+    
+    // Generate QR code as data URL
+    const qrCodeDataUrl = await QRCode.toDataURL(otpauthUrl);
+    
+    // Temporarily store secret (will be confirmed on verify)
+    await db.run("UPDATE users SET totp_secret = ? WHERE id = ?", secret, userId);
+    
+    res.json({ 
+      secret, 
+      qrCode: qrCodeDataUrl,
+      message: 'Scan the QR code with your authenticator app, then verify with a code'
+    });
+  } catch (err) {
+    console.error('2FA setup error:', err);
+    res.status(500).json({ error: 'Failed to setup 2FA' });
+  }
+});
+
+// Verify and enable 2FA
+app.post('/api/auth/2fa/verify', authRequired, async (req, res) => {
+  try {
+    const { code } = req.body;
+    const userId = req.user?.id;
+    
+    if (!code) {
+      return res.status(400).json({ error: '6-digit code required' });
+    }
+    
+    const user = await db.get<any>("SELECT * FROM users WHERE id = ?", userId);
+    
+    if (!user || !user.totp_secret) {
+      return res.status(400).json({ error: 'Please generate a 2FA secret first' });
+    }
+    
+    const isValid = authenticator.verify({ token: code, secret: user.totp_secret });
+    
+    if (!isValid) {
+      return res.status(401).json({ error: 'Invalid code. Please try again.' });
+    }
+    
+    // Enable 2FA
+    await db.run("UPDATE users SET totp_enabled = 1 WHERE id = ?", userId);
+    
+    await logAudit(req, { action: "ENABLE_2FA", targetType: "USER", targetId: userId });
+    
+    res.json({ success: true, message: '2FA enabled successfully' });
+  } catch (err) {
+    console.error('2FA verify error:', err);
+    res.status(500).json({ error: 'Failed to verify 2FA' });
+  }
+});
+
+// Disable 2FA
+app.post('/api/auth/2fa/disable', authRequired, async (req, res) => {
+  try {
+    const { code, password } = req.body;
+    const userId = req.user?.id;
+    
+    const user = await db.get<any>("SELECT * FROM users WHERE id = ?", userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Require password to disable 2FA
+    if (password) {
+      const ok = await bcrypt.compare(password, user.password_hash);
+      if (!ok) {
+        return res.status(401).json({ error: 'Invalid password' });
+      }
+    } else if (code) {
+      // Or verify with current TOTP code
+      const isValid = authenticator.verify({ token: code, secret: user.totp_secret });
+      if (!isValid) {
+        return res.status(401).json({ error: 'Invalid 2FA code' });
+      }
+    } else {
+      return res.status(400).json({ error: 'Password or 2FA code required' });
+    }
+    
+    await db.run("UPDATE users SET totp_enabled = 0, totp_secret = NULL WHERE id = ?", userId);
+    
+    await logAudit(req, { action: "DISABLE_2FA", targetType: "USER", targetId: userId });
+    
+    res.json({ success: true, message: '2FA disabled' });
+  } catch (err) {
+    console.error('2FA disable error:', err);
+    res.status(500).json({ error: 'Failed to disable 2FA' });
+  }
+});
+
+// Get 2FA status
+app.get('/api/auth/2fa/status', authRequired, async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const user = await db.get<any>("SELECT totp_enabled FROM users WHERE id = ?", userId);
+    
+    res.json({ enabled: !!user?.totp_enabled });
+  } catch (err) {
+    console.error('2FA status error:', err);
+    res.status(500).json({ error: 'Failed to get 2FA status' });
+  }
 });
 
 // ----- Admin Services -----
