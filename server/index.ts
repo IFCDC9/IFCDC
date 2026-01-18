@@ -13,6 +13,7 @@ import cookieParser from "cookie-parser";
 import { createServer as createViteServer } from "vite";
 import OpenAI from "openai";
 import rateLimit from "express-rate-limit";
+import * as client from "openid-client";
 
 const openai = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
@@ -81,6 +82,29 @@ function isSmsAllowedForChannel(channel: string | null | undefined): boolean {
 function isVoiceAllowedForChannel(channel: string | null | undefined): boolean {
   const v = normalizeChannel(channel);
   return v === "VOICE" || v === "BOTH";
+}
+
+// Google OAuth configuration
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+let googleOAuthConfig: Awaited<ReturnType<typeof client.discovery>> | null = null;
+
+async function initGoogleOAuth() {
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+    console.log("Google OAuth not configured (missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET)");
+    return;
+  }
+  
+  try {
+    googleOAuthConfig = await client.discovery(
+      new URL("https://accounts.google.com/.well-known/openid-configuration"),
+      GOOGLE_CLIENT_ID,
+      GOOGLE_CLIENT_SECRET
+    );
+    console.log("Google OAuth configured successfully");
+  } catch (err) {
+    console.error("Failed to initialize Google OAuth:", err);
+  }
 }
 
 function buildSafeAppointmentReminderText(client: any, appointment: any): string {
@@ -1100,6 +1124,99 @@ app.post('/auth/logout', (req, res) => {
 
 app.get('/auth/me', authRequired, (req, res) => {
   return res.json({ user: req.user });
+});
+
+// ----- Google OAuth Endpoints -----
+app.get('/auth/google', (req, res) => {
+  if (!googleOAuthConfig || !GOOGLE_CLIENT_ID) {
+    return res.status(503).json({ error: 'Google OAuth not configured' });
+  }
+  
+  const redirectUri = `${req.protocol}://${req.get('host')}/auth/google/callback`;
+  const state = Math.random().toString(36).substring(2);
+  
+  const authUrl = client.buildAuthorizationUrl(googleOAuthConfig, {
+    redirect_uri: redirectUri,
+    scope: 'openid email profile',
+    state,
+  });
+  
+  res.cookie('oauth_state', state, { httpOnly: true, maxAge: 600000 });
+  res.redirect(authUrl.href);
+});
+
+app.get('/auth/google/callback', async (req, res) => {
+  try {
+    if (!googleOAuthConfig || !GOOGLE_CLIENT_ID) {
+      return res.redirect('/login.html?error=google_not_configured');
+    }
+    
+    const redirectUri = `${req.protocol}://${req.get('host')}/auth/google/callback`;
+    const currentUrl = new URL(`${req.protocol}://${req.get('host')}${req.originalUrl}`);
+    
+    const tokens = await client.authorizationCodeGrant(googleOAuthConfig, currentUrl, {
+      expectedState: req.cookies.oauth_state,
+    });
+    
+    res.clearCookie('oauth_state');
+    
+    const claims = tokens.claims();
+    if (!claims || !claims.email) {
+      return res.redirect('/login.html?error=no_email');
+    }
+    
+    const email = (claims.email as string).toLowerCase();
+    const name = (claims.name as string) || email.split('@')[0];
+    const picture = claims.picture as string | undefined;
+    
+    let user = await db.get<any>("SELECT * FROM users WHERE email = ?", email);
+    
+    if (!user) {
+      const id = cryptoRandomId();
+      const finalRole = assignRole(email);
+      const created_at = new Date().toISOString();
+      
+      await db.run(
+        `INSERT INTO users (id, name, email, role, created_at, profile_image_url) VALUES (?, ?, ?, ?, ?, ?)`,
+        id, name, email, finalRole, created_at, picture || null
+      );
+      
+      user = await db.get<any>("SELECT * FROM users WHERE id = ?", id);
+      
+      await logAudit(
+        { method: "GET", originalUrl: "/auth/google/callback" } as express.Request,
+        { action: "GOOGLE_REGISTER", targetType: "USER", targetId: id, extra: { email } }
+      );
+    }
+    
+    if (user.status !== 'active') {
+      return res.redirect('/login.html?error=account_restricted');
+    }
+    
+    let effectiveRole = user.role;
+    if (MASTER_OWNER_EMAIL && email === MASTER_OWNER_EMAIL.toLowerCase()) effectiveRole = "owner";
+    else if (ADMIN_EMAIL && email === ADMIN_EMAIL.toLowerCase()) effectiveRole = "admin";
+    
+    const token = jwt.sign({ id: user.id, email: user.email, role: effectiveRole }, JWT_SECRET, { expiresIn: "7d" });
+    res.cookie('ifcdc_token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 });
+    
+    await logAudit(
+      { method: "GET", originalUrl: "/auth/google/callback", user: { id: user.id, name: user.name, email: user.email, role: effectiveRole } } as express.Request,
+      { action: "GOOGLE_LOGIN", targetType: "USER", targetId: user.id, extra: {} }
+    );
+    
+    if (effectiveRole === 'admin' || effectiveRole === 'owner' || effectiveRole === 'exec') {
+      return res.redirect('/admin/dashboard.html');
+    }
+    return res.redirect('/dashboard.html');
+  } catch (err) {
+    console.error('Google OAuth callback error:', err);
+    return res.redirect('/login.html?error=oauth_failed');
+  }
+});
+
+app.get('/auth/google/available', (req, res) => {
+  res.json({ available: !!googleOAuthConfig });
 });
 
 // ----- 2FA Setup Endpoints -----
@@ -4609,6 +4726,7 @@ Keep responses concise, friendly, and helpful. If you don't know something speci
 // Start server with Vite in development or static files in production
 async function startServer() {
   await initDb();
+  await initGoogleOAuth();
 
   if (isDev) {
     // In development, use Vite middleware
