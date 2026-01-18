@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Dashboard | IFCDC</title>
+  <link rel="stylesheet" href="/style.css" />
+  <style>
+    .admin-page {
+      min-height: 100vh;
+      padding: 40px 20px;
+      background: var(--ifcdc-bg);
+    }
+    .admin-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      max-width: 1100px;
+      margin: 0 auto 40px;
+    }
+    .admin-header h1 {
+      margin: 0;
+    }
+    .admin-content {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .admin-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+    }
+    .admin-card {
+      background: var(--ifcdc-card);
+      border: 1px solid var(--ifcdc-border);
+      border-radius: 12px;
+      padding: 24px;
+    }
+    .admin-card h3 {
+      margin: 0 0 12px 0;
+    }
+    .admin-card p {
+      margin: 0 0 16px 0;
+      opacity: 0.8;
+    }
+    .user-info {
+      background: var(--ifcdc-card);
+      border: 1px solid var(--ifcdc-border);
+      border-radius: 8px;
+      padding: 16px 24px;
+      margin-bottom: 30px;
+    }
+    .user-info p {
+      margin: 4px 0;
+    }
+  </style>
+</head>
+<body class="ifcdc-body">
+  <div class="admin-page">
+    <div class="admin-header">
+      <h1>Admin Dashboard</h1>
+      <button id="logoutBtn" class="ifcdc-btn ifcdc-btn-outline">Logout</button>
+    </div>
+
+    <div class="admin-content">
+      <div class="user-info" id="userInfo">
+        <p>Loading...</p>
+      </div>
+
+      <div class="admin-grid">
+        <div class="admin-card">
+          <h3>Users</h3>
+          <p>Manage staff accounts and permissions.</p>
+          <a href="/admin" class="ifcdc-btn ifcdc-btn-primary">Manage Users</a>
+        </div>
+
+        <div class="admin-card">
+          <h3>Barbershop</h3>
+          <p>View and manage barbershop appointments.</p>
+          <a href="/barber" class="ifcdc-btn ifcdc-btn-primary">Open Barbershop</a>
+        </div>
+
+        <div class="admin-card">
+          <h3>Radio</h3>
+          <p>Manage radio shows and shoutouts.</p>
+          <a href="/radio" class="ifcdc-btn ifcdc-btn-primary">Open Radio</a>
+        </div>
+
+        <div class="admin-card">
+          <h3>Programs</h3>
+          <p>Manage community programs and clients.</p>
+          <a href="/programs" class="ifcdc-btn ifcdc-btn-primary">Open Programs</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    async function loadUser() {
+      try {
+        const res = await fetch('/auth/me', { credentials: 'include' });
+        if (!res.ok) {
+          window.location.href = '/login.html';
+          return;
+        }
+        const data = await res.json();
+        const user = data.user;
+        document.getElementById('userInfo').innerHTML = `
+          <p><strong>Welcome, ${user.name || user.email}</strong></p>
+          <p>Role: ${user.role}</p>
+        `;
+      } catch (e) {
+        window.location.href = '/login.html';
+      }
+    }
+
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+      await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
+      window.location.href = '/';
+    });
+
+    loadUser();
+  </script>
+</body>
+</html>

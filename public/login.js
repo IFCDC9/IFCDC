@@ -11,20 +11,17 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
     body: JSON.stringify(payload)
   });
 
-  if (res.ok) {
-    const data = await res.json();
-    const role = (data.role || '').toLowerCase();
-
-    if (role === 'admin' || role === 'owner' || role === 'exec') {
-      window.location.href = '/admin';
-    } else if (role === 'barber') {
-      window.location.href = '/barber';
-    } else if (role === 'radio' || role === 'radio_host') {
-      window.location.href = '/radio';
-    } else {
-      window.location.href = '/dashboard.html';
-    }
-  } else {
+  if (!res.ok) {
     alert('Invalid login credentials');
+    return;
+  }
+
+  const user = await res.json();
+
+  // Role-based routing
+  if (user.role === 'admin') {
+    window.location.href = '/admin/dashboard.html';
+  } else {
+    window.location.href = '/dashboard.html';
   }
 });

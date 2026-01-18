@@ -1011,7 +1011,7 @@ app.post('/auth/login', async (req, res) => {
     else if (ADMIN_EMAIL && lowerEmail === ADMIN_EMAIL.toLowerCase()) effectiveRole = "admin";
     const token = jwt.sign({ id: user.id, email: user.email, role: effectiveRole }, JWT_SECRET, { expiresIn: "7d" });
     res.cookie('ifcdc_token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 });
-    return res.json({ message: 'Logged in', role: effectiveRole, user: { id: user.id, name: user.name, email: user.email, role: effectiveRole } });
+    return res.json({ id: user.id, email: user.email, role: effectiveRole });
   } catch (err) {
     console.error('Login error', err);
     return res.status(500).json({ error: 'Server error' });
