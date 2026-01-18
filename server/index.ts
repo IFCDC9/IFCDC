@@ -24,6 +24,10 @@ const app = express();
 const PORT = parseInt(process.env.PORT || "5000", 10);
 const isDev = process.env.NODE_ENV !== "production";
 
+if (isDev) {
+  console.log('DEV MODE ACTIVE');
+}
+
 const {
   TWILIO_ACCOUNT_SID,
   TWILIO_AUTH_TOKEN,
