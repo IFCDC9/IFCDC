@@ -4713,6 +4713,13 @@ app.post("/api/paypal/webhook-log", async (req, res) => {
     const id = cryptoRandomId();
     const now = new Date().toISOString();
     
+    // Log to funding_events table
+    await db.run(`
+      INSERT INTO funding_events (source_key, intent, amount_cents, currency, external_id, metadata)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `, "paypal", "donation", Math.round(parseFloat(amount) * 100), currency, transactionId, JSON.stringify(payload));
+    
+    // Also log to audit_logs
     await db.run(`
       INSERT INTO audit_logs (id, timestamp, user_id, user_role, method, path, entity_type, entity_id, action, ip_address, extra)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -4725,11 +4732,10 @@ app.post("/api/paypal/webhook-log", async (req, res) => {
          transaction_id: transactionId,
          intent: "donation",
          source: "paypal",
-         status: payload.status,
-         raw: payload
+         status: payload.status
        }));
     
-    res.json({ status: "logged" });
+    res.json({ logged: true });
   } catch (err) {
     console.error("PayPal webhook log error:", err);
     res.status(500).json({ error: "Failed to log donation" });
