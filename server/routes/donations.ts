@@ -1,7 +1,17 @@
 import { Router } from "express";
-import { getUncachableStripeClient } from "../stripeClient";
+import { getUncachableStripeClient, getStripePublishableKey } from "../stripeClient";
 
 const router = Router();
+
+router.get("/stripe/publishable-key", async (_req, res) => {
+  try {
+    const publishableKey = await getStripePublishableKey();
+    res.json({ publishableKey });
+  } catch (err) {
+    console.error("Error getting Stripe publishable key:", err);
+    res.status(500).json({ error: "Stripe not configured" });
+  }
+});
 
 router.post("/donate", async (req, res) => {
   try {
