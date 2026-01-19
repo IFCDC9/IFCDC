@@ -1509,6 +1509,27 @@ app.get("/api/admin/funding-sources", authRequired, requireAdmin, async (req, re
   }
 });
 
+app.post("/api/admin/ach-log", authRequired, requireAdmin, async (req, res) => {
+  try {
+    const { amount, currency, externalId, metadata } = req.body;
+
+    const id = cryptoRandomId();
+    const now = new Date().toISOString();
+
+    await db.run(
+      `INSERT INTO funding_events (id, source_key, intent, amount_cents, currency, external_id, metadata, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      id, "ach", "payment", Math.round(amount * 100), currency || "USD", externalId || null, 
+      metadata ? JSON.stringify(metadata) : null, now
+    );
+
+    res.json({ status: "logged", id });
+  } catch (err) {
+    console.error("Error logging ACH transaction:", err);
+    res.status(500).json({ error: "Failed to log ACH transaction" });
+  }
+});
+
 app.patch("/api/admin/funding-sources/:key", authRequired, requireAdmin, async (req, res) => {
   try {
     const { enabled } = req.body;
