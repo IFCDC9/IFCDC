@@ -588,6 +588,25 @@ async function initDb() {
     );
   `);
 
+  // Policy versions table for managing organizational policies
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS policy_versions (
+      id TEXT PRIMARY KEY,
+      policy_name TEXT NOT NULL,
+      version TEXT NOT NULL,
+      content TEXT NOT NULL,
+      summary TEXT,
+      effective_date TEXT,
+      status TEXT DEFAULT 'draft',
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+  `);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_policy_name ON policy_versions(policy_name);`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_policy_status ON policy_versions(status);`);
+
   // Seed Violence Prevention Logic Model if not exists
   const existingLogicModel = await db.get("SELECT 1 FROM logic_models WHERE program_code = ?", "VIOLENCE_PREVENTION");
   if (!existingLogicModel) {
@@ -4657,6 +4676,223 @@ app.post("/api/ai/schedule-help", authRequired, requireRole(ROLES.ADMIN, "barber
   } catch (err) {
     console.error("AI schedule help error:", err);
     res.status(500).json({ error: "AI service unavailable" });
+  }
+});
+
+// ----- Policy Version Management -----
+
+const POLICY_ROLES = [ROLES.ADMIN, ROLES.EXEC, "admin", "owner", "exec"];
+
+app.get("/api/policies", authRequired, requireRole(...POLICY_ROLES), async (req, res) => {
+  try {
+    const policies = await db.all(`
+      SELECT pv.*, u.name as created_by_name
+      FROM policy_versions pv
+      LEFT JOIN users u ON pv.created_by = u.id
+      ORDER BY pv.policy_name, pv.created_at DESC
+    `);
+    res.json(policies);
+  } catch (err) {
+    console.error("Error fetching policies:", err);
+    res.status(500).json({ error: "Failed to fetch policies" });
+  }
+});
+
+app.get("/api/policies/names", authRequired, requireRole(...POLICY_ROLES), async (req, res) => {
+  try {
+    const names = await db.all(`
+      SELECT DISTINCT policy_name FROM policy_versions ORDER BY policy_name
+    `);
+    res.json(names.map((n: any) => n.policy_name));
+  } catch (err) {
+    console.error("Error fetching policy names:", err);
+    res.status(500).json({ error: "Failed to fetch policy names" });
+  }
+});
+
+app.get("/api/policies/:policyName/history", authRequired, requireRole(...POLICY_ROLES), async (req, res) => {
+  try {
+    const { policyName } = req.params;
+    const history = await db.all(`
+      SELECT pv.*, u.name as created_by_name
+      FROM policy_versions pv
+      LEFT JOIN users u ON pv.created_by = u.id
+      WHERE pv.policy_name = ?
+      ORDER BY pv.created_at DESC
+    `, decodeURIComponent(policyName));
+    res.json(history);
+  } catch (err) {
+    console.error("Error fetching policy history:", err);
+    res.status(500).json({ error: "Failed to fetch policy history" });
+  }
+});
+
+app.get("/api/policies/version/:id", authRequired, requireRole(...POLICY_ROLES), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const policy = await db.get(`
+      SELECT pv.*, u.name as created_by_name
+      FROM policy_versions pv
+      LEFT JOIN users u ON pv.created_by = u.id
+      WHERE pv.id = ?
+    `, id);
+    if (!policy) {
+      return res.status(404).json({ error: "Policy version not found" });
+    }
+    res.json(policy);
+  } catch (err) {
+    console.error("Error fetching policy version:", err);
+    res.status(500).json({ error: "Failed to fetch policy version" });
+  }
+});
+
+app.post("/api/policies", authRequired, requireRole(...POLICY_ROLES), async (req, res) => {
+  try {
+    if (!req.user?.id) {
+      return res.status(401).json({ error: "User not authenticated" });
+    }
+    
+    const { policy_name, version, content, summary, effective_date, status } = req.body;
+    
+    if (!policy_name || !version || !content) {
+      return res.status(400).json({ error: "policy_name, version, and content are required" });
+    }
+
+    const existingVersion = await db.get(
+      "SELECT id FROM policy_versions WHERE policy_name = ? AND version = ?",
+      policy_name, version
+    );
+    if (existingVersion) {
+      return res.status(409).json({ error: "This version already exists for this policy" });
+    }
+
+    const id = cryptoRandomId();
+    const now = new Date().toISOString();
+
+    await db.run(`
+      INSERT INTO policy_versions (id, policy_name, version, content, summary, effective_date, status, created_by, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, id, policy_name, version, content, summary || null, effective_date || null, status || 'draft', req.user.id, now, now);
+
+    await logAudit(req, {
+      action: "create_policy_version",
+      targetType: "policy",
+      targetId: id,
+      extra: { policy_name, version }
+    });
+
+    const newPolicy = await db.get("SELECT * FROM policy_versions WHERE id = ?", id);
+    res.status(201).json(newPolicy);
+  } catch (err) {
+    console.error("Error creating policy version:", err);
+    res.status(500).json({ error: "Failed to create policy version" });
+  }
+});
+
+app.patch("/api/policies/:id", authRequired, requireRole(...POLICY_ROLES), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { content, summary, effective_date, status } = req.body;
+
+    const existing = await db.get("SELECT * FROM policy_versions WHERE id = ?", id);
+    if (!existing) {
+      return res.status(404).json({ error: "Policy version not found" });
+    }
+
+    const now = new Date().toISOString();
+    await db.run(`
+      UPDATE policy_versions
+      SET content = COALESCE(?, content),
+          summary = COALESCE(?, summary),
+          effective_date = COALESCE(?, effective_date),
+          status = COALESCE(?, status),
+          updated_at = ?
+      WHERE id = ?
+    `, content, summary, effective_date, status, now, id);
+
+    await logAudit(req, {
+      action: "update_policy_version",
+      targetType: "policy",
+      targetId: id,
+      extra: { policy_name: existing.policy_name, version: existing.version, status }
+    });
+
+    const updated = await db.get("SELECT * FROM policy_versions WHERE id = ?", id);
+    res.json(updated);
+  } catch (err) {
+    console.error("Error updating policy version:", err);
+    res.status(500).json({ error: "Failed to update policy version" });
+  }
+});
+
+app.delete("/api/policies/:id", authRequired, requireRole(...POLICY_ROLES), async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const existing = await db.get("SELECT * FROM policy_versions WHERE id = ?", id);
+    if (!existing) {
+      return res.status(404).json({ error: "Policy version not found" });
+    }
+
+    await db.run("DELETE FROM policy_versions WHERE id = ?", id);
+
+    await logAudit(req, {
+      action: "delete_policy_version",
+      targetType: "policy",
+      targetId: id,
+      extra: { policy_name: existing.policy_name, version: existing.version }
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error deleting policy version:", err);
+    res.status(500).json({ error: "Failed to delete policy version" });
+  }
+});
+
+app.patch("/api/policies/:id/publish", authRequired, requireRole(...POLICY_ROLES), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const existing = await db.get("SELECT * FROM policy_versions WHERE id = ?", id);
+    if (!existing) {
+      return res.status(404).json({ error: "Policy version not found" });
+    }
+
+    const now = new Date().toISOString();
+    
+    await db.exec("BEGIN TRANSACTION");
+    try {
+      await db.run(`
+        UPDATE policy_versions
+        SET status = 'archived'
+        WHERE policy_name = ? AND status = 'published' AND id != ?
+      `, existing.policy_name, id);
+
+      await db.run(`
+        UPDATE policy_versions
+        SET status = 'published', effective_date = COALESCE(effective_date, ?), updated_at = ?
+        WHERE id = ?
+      `, now.split('T')[0], now, id);
+      
+      await db.exec("COMMIT");
+    } catch (txErr) {
+      await db.exec("ROLLBACK");
+      throw txErr;
+    }
+
+    await logAudit(req, {
+      action: "publish_policy_version",
+      targetType: "policy",
+      targetId: id,
+      extra: { policy_name: existing.policy_name, version: existing.version }
+    });
+
+    const updated = await db.get("SELECT * FROM policy_versions WHERE id = ?", id);
+    res.json(updated);
+  } catch (err) {
+    console.error("Error publishing policy version:", err);
+    res.status(500).json({ error: "Failed to publish policy version" });
   }
 });
 

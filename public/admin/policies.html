@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Policy Management | IFCDC Admin</title>
+  <link rel="stylesheet" href="/style.css" />
+  <style>
+    .admin-page {
+      min-height: 100vh;
+      padding: 40px 20px;
+      background: var(--ifcdc-bg);
+    }
+    .admin-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      max-width: 1200px;
+      margin: 0 auto 30px;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .admin-header h1 {
+      margin: 0;
+    }
+    .header-actions {
+      display: flex;
+      gap: 12px;
+    }
+    .admin-content {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .policies-container {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      gap: 24px;
+    }
+    @media (max-width: 800px) {
+      .policies-container {
+        grid-template-columns: 1fr;
+      }
+    }
+    .sidebar {
+      background: var(--ifcdc-card);
+      border: 1px solid var(--ifcdc-border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .sidebar h3 {
+      margin: 0 0 16px 0;
+      border-bottom: 1px solid var(--ifcdc-border);
+      padding-bottom: 12px;
+    }
+    .policy-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    .policy-list li {
+      padding: 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s;
+      margin-bottom: 8px;
+    }
+    .policy-list li:hover {
+      background: rgba(212, 175, 55, 0.1);
+    }
+    .policy-list li.active {
+      background: rgba(212, 175, 55, 0.2);
+      border-left: 3px solid var(--ifcdc-gold);
+    }
+    .policy-list li .policy-name {
+      font-weight: 600;
+      display: block;
+    }
+    .policy-list li .version-count {
+      font-size: 0.85rem;
+      opacity: 0.7;
+    }
+    .main-panel {
+      background: var(--ifcdc-card);
+      border: 1px solid var(--ifcdc-border);
+      border-radius: 12px;
+      padding: 24px;
+    }
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .panel-header h2 {
+      margin: 0;
+    }
+    .version-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .version-table th, .version-table td {
+      text-align: left;
+      padding: 12px;
+      border-bottom: 1px solid var(--ifcdc-border);
+    }
+    .version-table th {
+      background: rgba(0,0,0,0.2);
+      font-weight: 600;
+    }
+    .version-table tr:hover {
+      background: rgba(212, 175, 55, 0.05);
+    }
+    .status-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 500;
+    }
+    .status-draft {
+      background: rgba(100, 100, 100, 0.3);
+      color: #aaa;
+    }
+    .status-published {
+      background: rgba(34, 197, 94, 0.2);
+      color: #22c55e;
+    }
+    .status-archived {
+      background: rgba(100, 100, 100, 0.2);
+      color: #888;
+    }
+    .action-btns {
+      display: flex;
+      gap: 8px;
+    }
+    .btn-small {
+      padding: 6px 12px;
+      font-size: 0.85rem;
+    }
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.8);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+    }
+    .modal-overlay.active {
+      display: flex;
+    }
+    .modal {
+      background: var(--ifcdc-card);
+      border: 1px solid var(--ifcdc-border);
+      border-radius: 12px;
+      padding: 30px;
+      max-width: 700px;
+      width: 90%;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+    .modal h2 {
+      margin: 0 0 20px 0;
+    }
+    .form-group {
+      margin-bottom: 20px;
+    }
+    .form-group label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+    .form-group input, .form-group textarea, .form-group select {
+      width: 100%;
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid var(--ifcdc-border);
+      background: var(--ifcdc-bg);
+      color: var(--ifcdc-text);
+      font-family: inherit;
+    }
+    .form-group textarea {
+      min-height: 200px;
+      resize: vertical;
+    }
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      margin-top: 24px;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      opacity: 0.7;
+    }
+    .empty-state h3 {
+      margin: 0 0 10px 0;
+    }
+    .content-preview {
+      background: rgba(0,0,0,0.2);
+      padding: 20px;
+      border-radius: 8px;
+      white-space: pre-wrap;
+      max-height: 300px;
+      overflow-y: auto;
+      font-size: 0.9rem;
+      line-height: 1.6;
+    }
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--ifcdc-gold);
+      text-decoration: none;
+      margin-bottom: 20px;
+    }
+    .back-link:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body class="ifcdc-body">
+  <div class="admin-page">
+    <a href="/admin/dashboard.html" class="back-link">&larr; Back to Dashboard</a>
+    
+    <div class="admin-header">
+      <h1>Policy Management</h1>
+      <div class="header-actions">
+        <button id="newPolicyBtn" class="ifcdc-btn ifcdc-btn-primary">+ New Policy Version</button>
+        <button id="logoutBtn" class="ifcdc-btn ifcdc-btn-outline">Logout</button>
+      </div>
+    </div>
+
+    <div class="admin-content">
+      <div class="policies-container">
+        <div class="sidebar">
+          <h3>Policies</h3>
+          <ul class="policy-list" id="policyList">
+            <li>Loading...</li>
+          </ul>
+        </div>
+        
+        <div class="main-panel" id="mainPanel">
+          <div class="empty-state">
+            <h3>Select a Policy</h3>
+            <p>Choose a policy from the sidebar to view its version history, or create a new policy.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="newPolicyModal">
+    <div class="modal">
+      <h2 id="modalTitle">New Policy Version</h2>
+      <form id="policyForm">
+        <input type="hidden" id="editingId" />
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label for="policyName">Policy Name *</label>
+            <input type="text" id="policyName" placeholder="e.g., Privacy Policy" required />
+          </div>
+          <div class="form-group">
+            <label for="version">Version *</label>
+            <input type="text" id="version" placeholder="e.g., 1.0, 2.1" required />
+          </div>
+        </div>
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label for="effectiveDate">Effective Date</label>
+            <input type="date" id="effectiveDate" />
+          </div>
+          <div class="form-group">
+            <label for="status">Status</label>
+            <select id="status">
+              <option value="draft">Draft</option>
+              <option value="published">Published</option>
+              <option value="archived">Archived</option>
+            </select>
+          </div>
+        </div>
+        
+        <div class="form-group">
+          <label for="summary">Summary / Change Notes</label>
+          <input type="text" id="summary" placeholder="Brief description of this version" />
+        </div>
+        
+        <div class="form-group">
+          <label for="content">Policy Content *</label>
+          <textarea id="content" placeholder="Enter the full policy text..." required></textarea>
+        </div>
+        
+        <div class="modal-actions">
+          <button type="button" id="cancelBtn" class="ifcdc-btn ifcdc-btn-outline">Cancel</button>
+          <button type="submit" class="ifcdc-btn ifcdc-btn-primary">Save Policy</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="viewModal">
+    <div class="modal">
+      <h2 id="viewTitle">Policy Details</h2>
+      <div id="viewContent"></div>
+      <div class="modal-actions">
+        <button type="button" id="closeViewBtn" class="ifcdc-btn ifcdc-btn-outline">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentUser = null;
+    let allPolicies = [];
+    let selectedPolicy = null;
+
+    async function checkAuth() {
+      const res = await fetch('/auth/me', { credentials: 'include' });
+      if (!res.ok) {
+        window.location.href = '/login.html';
+        return false;
+      }
+      const data = await res.json();
+      currentUser = data.user;
+      if (!['admin', 'owner', 'exec'].includes(currentUser.role)) {
+        window.location.href = '/login.html';
+        return false;
+      }
+      return true;
+    }
+
+    async function loadPolicies() {
+      try {
+        const res = await fetch('/api/policies', { credentials: 'include' });
+        if (!res.ok) throw new Error('Failed to load policies');
+        allPolicies = await res.json();
+        renderPolicyList();
+      } catch (err) {
+        console.error(err);
+        document.getElementById('policyList').innerHTML = '<li>Error loading policies</li>';
+      }
+    }
+
+    function renderPolicyList() {
+      const grouped = {};
+      allPolicies.forEach(p => {
+        if (!grouped[p.policy_name]) {
+          grouped[p.policy_name] = [];
+        }
+        grouped[p.policy_name].push(p);
+      });
+
+      const listEl = document.getElementById('policyList');
+      
+      if (Object.keys(grouped).length === 0) {
+        listEl.innerHTML = '<li style="opacity:0.6">No policies yet</li>';
+        return;
+      }
+
+      listEl.innerHTML = Object.entries(grouped).map(([name, versions]) => `
+        <li data-policy="${encodeURIComponent(name)}" class="${selectedPolicy === name ? 'active' : ''}">
+          <span class="policy-name">${escapeHtml(name)}</span>
+          <span class="version-count">${versions.length} version(s)</span>
+        </li>
+      `).join('');
+
+      listEl.querySelectorAll('li[data-policy]').forEach(li => {
+        li.addEventListener('click', () => {
+          selectedPolicy = decodeURIComponent(li.dataset.policy);
+          renderPolicyList();
+          renderVersionHistory();
+        });
+      });
+    }
+
+    function renderVersionHistory() {
+      const panel = document.getElementById('mainPanel');
+      const versions = allPolicies.filter(p => p.policy_name === selectedPolicy);
+
+      if (versions.length === 0) {
+        panel.innerHTML = `
+          <div class="empty-state">
+            <h3>No Versions Found</h3>
+            <p>This policy has no versions yet.</p>
+          </div>
+        `;
+        return;
+      }
+
+      panel.innerHTML = `
+        <div class="panel-header">
+          <h2>${escapeHtml(selectedPolicy)}</h2>
+          <button class="ifcdc-btn ifcdc-btn-primary btn-small" onclick="openNewVersionModal('${escapeHtml(selectedPolicy)}')">+ Add Version</button>
+        </div>
+        <table class="version-table">
+          <thead>
+            <tr>
+              <th>Version</th>
+              <th>Status</th>
+              <th>Effective Date</th>
+              <th>Created</th>
+              <th>Created By</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${versions.map(v => `
+              <tr>
+                <td><strong>${escapeHtml(v.version)}</strong></td>
+                <td><span class="status-badge status-${v.status}">${v.status}</span></td>
+                <td>${v.effective_date || '-'}</td>
+                <td>${formatDate(v.created_at)}</td>
+                <td>${escapeHtml(v.created_by_name || 'Unknown')}</td>
+                <td>
+                  <div class="action-btns">
+                    <button class="ifcdc-btn ifcdc-btn-outline btn-small" onclick="viewVersion('${v.id}')">View</button>
+                    <button class="ifcdc-btn ifcdc-btn-outline btn-small" onclick="editVersion('${v.id}')">Edit</button>
+                    ${v.status === 'draft' ? `<button class="ifcdc-btn ifcdc-btn-primary btn-small" onclick="publishVersion('${v.id}')">Publish</button>` : ''}
+                    <button class="ifcdc-btn ifcdc-btn-outline btn-small" onclick="deleteVersion('${v.id}')" style="color:#ef4444">Delete</button>
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+
+    function openNewVersionModal(policyName = '') {
+      document.getElementById('modalTitle').textContent = 'New Policy Version';
+      document.getElementById('editingId').value = '';
+      document.getElementById('policyName').value = policyName;
+      document.getElementById('policyName').disabled = !!policyName;
+      document.getElementById('version').value = '';
+      document.getElementById('effectiveDate').value = '';
+      document.getElementById('status').value = 'draft';
+      document.getElementById('summary').value = '';
+      document.getElementById('content').value = '';
+      document.getElementById('newPolicyModal').classList.add('active');
+    }
+
+    async function viewVersion(id) {
+      try {
+        const res = await fetch(`/api/policies/version/${id}`, { credentials: 'include' });
+        if (!res.ok) throw new Error('Failed to load version');
+        const v = await res.json();
+        
+        document.getElementById('viewTitle').textContent = `${v.policy_name} - v${v.version}`;
+        document.getElementById('viewContent').innerHTML = `
+          <p><strong>Status:</strong> <span class="status-badge status-${v.status}">${v.status}</span></p>
+          <p><strong>Effective Date:</strong> ${v.effective_date || 'Not set'}</p>
+          <p><strong>Summary:</strong> ${escapeHtml(v.summary || 'No summary')}</p>
+          <p><strong>Created:</strong> ${formatDate(v.created_at)} by ${escapeHtml(v.created_by_name || 'Unknown')}</p>
+          <p><strong>Last Updated:</strong> ${formatDate(v.updated_at)}</p>
+          <hr style="border-color: var(--ifcdc-border); margin: 16px 0;" />
+          <h4>Content:</h4>
+          <div class="content-preview">${escapeHtml(v.content)}</div>
+        `;
+        document.getElementById('viewModal').classList.add('active');
+      } catch (err) {
+        alert('Error loading version details');
+      }
+    }
+
+    async function editVersion(id) {
+      try {
+        const res = await fetch(`/api/policies/version/${id}`, { credentials: 'include' });
+        if (!res.ok) throw new Error('Failed to load version');
+        const v = await res.json();
+        
+        document.getElementById('modalTitle').textContent = 'Edit Policy Version';
+        document.getElementById('editingId').value = v.id;
+        document.getElementById('policyName').value = v.policy_name;
+        document.getElementById('policyName').disabled = true;
+        document.getElementById('version').value = v.version;
+        document.getElementById('version').disabled = true;
+        document.getElementById('effectiveDate').value = v.effective_date || '';
+        document.getElementById('status').value = v.status;
+        document.getElementById('summary').value = v.summary || '';
+        document.getElementById('content').value = v.content;
+        document.getElementById('newPolicyModal').classList.add('active');
+      } catch (err) {
+        alert('Error loading version for editing');
+      }
+    }
+
+    async function publishVersion(id) {
+      if (!confirm('Publish this version? This will archive any currently published version of this policy.')) return;
+      
+      try {
+        const res = await fetch(`/api/policies/${id}/publish`, {
+          method: 'PATCH',
+          credentials: 'include'
+        });
+        if (!res.ok) throw new Error('Failed to publish');
+        await loadPolicies();
+        renderVersionHistory();
+      } catch (err) {
+        alert('Error publishing version');
+      }
+    }
+
+    async function deleteVersion(id) {
+      if (!confirm('Are you sure you want to delete this version? This action cannot be undone.')) return;
+      
+      try {
+        const res = await fetch(`/api/policies/${id}`, {
+          method: 'DELETE',
+          credentials: 'include'
+        });
+        if (!res.ok) throw new Error('Failed to delete');
+        await loadPolicies();
+        renderVersionHistory();
+      } catch (err) {
+        alert('Error deleting version');
+      }
+    }
+
+    document.getElementById('policyForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const editingId = document.getElementById('editingId').value;
+      const payload = {
+        policy_name: document.getElementById('policyName').value.trim(),
+        version: document.getElementById('version').value.trim(),
+        effective_date: document.getElementById('effectiveDate').value || null,
+        status: document.getElementById('status').value,
+        summary: document.getElementById('summary').value.trim() || null,
+        content: document.getElementById('content').value
+      };
+
+      try {
+        let res;
+        if (editingId) {
+          res = await fetch(`/api/policies/${editingId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify(payload)
+          });
+        } else {
+          res = await fetch('/api/policies', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify(payload)
+          });
+        }
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || 'Failed to save');
+        }
+
+        document.getElementById('newPolicyModal').classList.remove('active');
+        document.getElementById('policyName').disabled = false;
+        document.getElementById('version').disabled = false;
+        
+        selectedPolicy = payload.policy_name;
+        await loadPolicies();
+        renderVersionHistory();
+      } catch (err) {
+        alert('Error: ' + err.message);
+      }
+    });
+
+    document.getElementById('newPolicyBtn').addEventListener('click', () => openNewVersionModal());
+    document.getElementById('cancelBtn').addEventListener('click', () => {
+      document.getElementById('newPolicyModal').classList.remove('active');
+      document.getElementById('policyName').disabled = false;
+      document.getElementById('version').disabled = false;
+    });
+    document.getElementById('closeViewBtn').addEventListener('click', () => {
+      document.getElementById('viewModal').classList.remove('active');
+    });
+
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+      await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
+      window.location.href = '/';
+    });
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[c]));
+    }
+
+    function formatDate(isoStr) {
+      if (!isoStr) return '-';
+      const d = new Date(isoStr);
+      return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+    }
+
+    (async () => {
+      if (await checkAuth()) {
+        await loadPolicies();
+      }
+    })();
+  </script>
+</body>
+</html>
