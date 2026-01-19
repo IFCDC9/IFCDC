@@ -1509,6 +1509,33 @@ app.get("/api/admin/funding-sources", authRequired, requireAdmin, async (req, re
   }
 });
 
+app.patch("/api/admin/funding-sources/:key", authRequired, requireAdmin, async (req, res) => {
+  try {
+    const { key } = req.params;
+    const { displayName, enabled, sandbox } = req.body;
+
+    const existing = await db.get<any>("SELECT * FROM funding_sources WHERE source_key = ?", key);
+    if (!existing) {
+      return res.status(404).json({ error: "Funding source not found" });
+    }
+
+    await db.run(
+      `UPDATE funding_sources SET display_name = ?, enabled = ?, sandbox = ? WHERE source_key = ?`,
+      displayName ?? existing.display_name,
+      enabled !== undefined ? (enabled ? 1 : 0) : existing.enabled,
+      sandbox !== undefined ? (sandbox ? 1 : 0) : existing.sandbox,
+      key
+    );
+
+    await logAudit(req, { action: "UPDATE", targetType: "FUNDING_SOURCE", targetId: key, extra: { displayName, enabled, sandbox } });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error updating funding source:", err);
+    res.status(500).json({ error: "Failed to update funding source" });
+  }
+});
+
 // ----- Programs -----
 app.get("/api/programs", authRequired, async (req, res) => {
   const rows = await db.all<{ id: string; code: string; name: string; description: string }[]>(
