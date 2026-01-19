@@ -52,6 +52,7 @@ integrations = ["javascript_openai_ai_integrations:1.0.0"]
 [userenv.shared]
 MASTER_OWNER_EMAIL = "813786b@gmail.com"
 ADMIN_EMAIL = "813786b@gmail.com"
+PAYPAL_ENV = "live"
 
 [userenv.production]
 NODE_ENV = "production"
