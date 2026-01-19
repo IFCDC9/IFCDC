@@ -12,8 +12,7 @@ router.post("/donate", async (req, res) => {
     }
 
     const stripe = await getUncachableStripeClient();
-    const host = req.get('host') || 'localhost:5000';
-    const protocol = req.protocol;
+    const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
@@ -26,8 +25,8 @@ router.post("/donate", async (req, res) => {
         },
         quantity: 1
       }],
-      success_url: `${protocol}://${host}/thank-you.html`,
-      cancel_url: `${protocol}://${host}/donate.html`
+      success_url: `${baseUrl}/thank-you.html`,
+      cancel_url: `${baseUrl}/donate.html`
     });
 
     res.json({ url: session.url });
