@@ -605,16 +605,16 @@ async function initDb() {
   if (fundingCount && fundingCount.cnt === 0) {
     const now = new Date().toISOString();
     const sources = [
-      { key: "paypal", name: "PayPal" },
-      { key: "stripe", name: "Stripe" },
-      { key: "venmo", name: "Venmo" },
-      { key: "ach", name: "Bank Transfer (ACH)" },
-      { key: "crypto", name: "Cryptocurrency" }
+      { key: "stripe", name: "Stripe (Cards & Wallets)", enabled: 1, sandbox: 0 },
+      { key: "paypal", name: "PayPal", enabled: 1, sandbox: 0 },
+      { key: "venmo", name: "Venmo", enabled: 0, sandbox: 0 },
+      { key: "ach", name: "ACH / Wire", enabled: 0, sandbox: 0 },
+      { key: "crypto", name: "Crypto (Sandbox)", enabled: 0, sandbox: 1 }
     ];
     for (const s of sources) {
       await db.run(
         `INSERT INTO funding_sources (id, source_key, display_name, enabled, sandbox, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-        cryptoRandomId(), s.key, s.name, s.key === "paypal" ? 1 : 0, 0, now
+        cryptoRandomId(), s.key, s.name, s.enabled, s.sandbox, now
       );
     }
     console.log("Seeded", sources.length, "funding sources.");
