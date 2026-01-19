@@ -4500,6 +4500,28 @@ app.post("/api/paypal/create-order", async (req, res) => {
   }
 });
 
+app.post("/api/paypal/webhook-log", async (req, res) => {
+  try {
+    const details = req.body;
+    console.log("PayPal donation received:", JSON.stringify(details, null, 2));
+    
+    const id = cryptoRandomId();
+    const now = new Date().toISOString();
+    
+    await db.run(`
+      INSERT INTO audit_logs (id, timestamp, user_id, user_role, method, path, entity_type, entity_id, action, ip_address, extra)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, id, now, null, null, "POST", "/api/paypal/webhook-log", "donation", details.id || null, "PAYPAL_DONATION", 
+       req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim() || req.socket?.remoteAddress || null,
+       JSON.stringify(details));
+    
+    res.json({ success: true });
+  } catch (err) {
+    console.error("PayPal webhook log error:", err);
+    res.status(500).json({ error: "Failed to log donation" });
+  }
+});
+
 app.post("/api/paypal/capture-order/:orderId", async (req, res) => {
   try {
     const { orderId } = req.params;

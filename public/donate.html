@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Donate | IFCDC</title>
+  <meta name="description" content="Support Imperial Foundation CDC with a tax-deductible donation. Help us continue serving our community." />
+  <link rel="stylesheet" href="/style.css" />
+  <style>
+    .donate-hero {
+      background: linear-gradient(135deg, #1a1a1a 0%, #000 100%);
+      padding: 80px 20px;
+      text-align: center;
+      border-bottom: 3px solid #d4af37;
+    }
+    .donate-hero h1 {
+      color: #d4af37;
+      font-size: 2.5rem;
+      margin-bottom: 16px;
+    }
+    .donate-hero p {
+      color: #ccc;
+      font-size: 1.2rem;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    .donate-container {
+      max-width: 600px;
+      margin: 50px auto;
+      padding: 0 20px;
+    }
+    .donate-card {
+      background: #111;
+      border: 1px solid #333;
+      border-radius: 12px;
+      padding: 40px;
+      text-align: center;
+    }
+    .donate-card h2 {
+      color: #d4af37;
+      margin: 0 0 20px 0;
+    }
+    .donate-card p {
+      color: #aaa;
+      margin-bottom: 30px;
+      line-height: 1.6;
+    }
+    .amount-options {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 24px;
+    }
+    .amount-btn {
+      background: #1a1a1a;
+      border: 2px solid #333;
+      color: #f5f5f5;
+      padding: 12px 24px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 1rem;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+    .amount-btn:hover {
+      border-color: #555;
+    }
+    .amount-btn.selected {
+      border-color: #d4af37;
+      background: rgba(212, 175, 55, 0.1);
+      color: #d4af37;
+    }
+    .custom-amount {
+      margin-bottom: 30px;
+    }
+    .custom-amount input {
+      background: #1a1a1a;
+      border: 2px solid #333;
+      color: #f5f5f5;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 1.1rem;
+      width: 150px;
+      text-align: center;
+    }
+    .custom-amount input:focus {
+      border-color: #d4af37;
+      outline: none;
+    }
+    #paypal-donate-button {
+      max-width: 300px;
+      margin: 0 auto;
+    }
+    .tax-info {
+      margin-top: 30px;
+      padding-top: 20px;
+      border-top: 1px solid #333;
+    }
+    .tax-info p {
+      font-size: 0.9rem;
+      color: #888;
+      margin: 0;
+    }
+  </style>
+</head>
+<body class="ifcdc-body">
+  <header class="ifcdc-brand-header">
+    <div class="ifcdc-brand-inner">
+      <img src="/ifcdc-logo.png" alt="IFCDC Logo" class="ifcdc-logo" />
+      <div class="ifcdc-brand-text">
+        <div class="ifcdc-brand-name">Imperial Foundation Community Development Center</div>
+        <div class="ifcdc-brand-tagline">IFCDC • Community • Development • Empowerment</div>
+      </div>
+    </div>
+  </header>
+  <nav class="ifcdc-header">
+    <div class="ifcdc-header-inner">
+      <div class="ifcdc-nav">
+        <a href="/">Home</a>
+        <a href="/about.html">About</a>
+        <a href="/programs.html">Programs</a>
+        <a href="/contact.html">Contact</a>
+        <a href="/login.html">Login</a>
+        <a href="/register.html">Register</a>
+      </div>
+    </div>
+  </nav>
+
+  <section class="donate-hero">
+    <h1>Support IFCDC</h1>
+    <p>Your donation helps us continue providing vital community services, mentorship programs, and support for those in need.</p>
+  </section>
+
+  <div class="donate-container">
+    <div class="donate-card">
+      <h2>Make a Donation</h2>
+      <p>Choose an amount or enter a custom donation. Every dollar makes a difference in our community.</p>
+      
+      <div class="amount-options">
+        <button class="amount-btn" data-amount="25">$25</button>
+        <button class="amount-btn selected" data-amount="50">$50</button>
+        <button class="amount-btn" data-amount="100">$100</button>
+        <button class="amount-btn" data-amount="250">$250</button>
+      </div>
+      
+      <div class="custom-amount">
+        <label style="color:#888; display:block; margin-bottom:8px;">Or enter custom amount:</label>
+        <input type="number" id="customAmount" placeholder="$50" min="1" step="1" />
+      </div>
+
+      <div id="paypal-donate-button"></div>
+
+      <div class="tax-info">
+        <p>IFCDC is a registered 501(c)(3) nonprofit organization. Your donation may be tax-deductible.</p>
+      </div>
+    </div>
+  </div>
+
+  <footer class="ifcdc-footer">
+    <p>&copy; <span id="year"></span> Imperial Foundation CDC (IFCDC). A registered 501(c)(3) nonprofit organization.</p>
+    <nav class="ifcdc-footer-nav">
+      <a href="/privacy-policy.html">Privacy Policy</a> |
+      <a href="/terms-of-use.html">Terms of Use</a> |
+      <a href="/contact.html">Contact</a>
+    </nav>
+  </footer>
+
+  <script>document.getElementById('year').textContent = new Date().getFullYear();</script>
+  
+  <script>
+    let donationAmount = 50;
+
+    document.querySelectorAll('.amount-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.amount-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        donationAmount = parseFloat(btn.dataset.amount);
+        document.getElementById('customAmount').value = '';
+      });
+    });
+
+    document.getElementById('customAmount').addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value);
+      if (val > 0) {
+        donationAmount = val;
+        document.querySelectorAll('.amount-btn').forEach(b => b.classList.remove('selected'));
+      }
+    });
+
+    async function loadPayPal() {
+      try {
+        const res = await fetch('/api/paypal/client-id');
+        if (!res.ok) return;
+        const data = await res.json();
+        
+        const script = document.createElement('script');
+        script.src = `https://www.paypal.com/sdk/js?client-id=${data.clientId}&currency=USD&intent=capture`;
+        script.onload = renderButton;
+        document.head.appendChild(script);
+      } catch (err) {
+        console.log('PayPal not available');
+      }
+    }
+
+    function renderButton() {
+      paypal.Buttons({
+        style: {
+          layout: 'vertical',
+          color: 'gold',
+          shape: 'rect',
+          label: 'donate'
+        },
+        createOrder: (data, actions) => {
+          return actions.order.create({
+            purchase_units: [{
+              description: "IFCDC Donation",
+              amount: {
+                currency_code: "USD",
+                value: donationAmount.toFixed(2)
+              }
+            }]
+          });
+        },
+        onApprove: async (data, actions) => {
+          const details = await actions.order.capture();
+
+          await fetch("/api/paypal/webhook-log", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(details)
+          });
+
+          window.location.href = "/thank-you.html";
+        }
+      }).render("#paypal-donate-button");
+    }
+
+    loadPayPal();
+  </script>
+  <script src="/chatbot.js"></script>
+</body>
+</html>
