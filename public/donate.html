@@ -149,6 +149,13 @@
         <input type="number" id="customAmount" placeholder="$50" min="1" step="1" />
       </div>
 
+      <div style="margin-bottom:24px;">
+        <label style="color:#ccc; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
+          <input type="checkbox" id="recurring" style="width:18px; height:18px; accent-color:#d4af37;" />
+          Make this a monthly donation
+        </label>
+      </div>
+
       <button id="stripe-donate-btn" class="amount-btn" style="width:100%; max-width:300px; margin:0 auto 20px; display:block; background:#d4af37; color:#000; border-color:#d4af37; font-size:1.1rem; padding:14px 24px;">
         Donate with Card
       </button>
@@ -251,10 +258,11 @@
       btn.textContent = 'Processing...';
 
       try {
+        const recurring = document.getElementById('recurring').checked;
         const res = await fetch('/api/donate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ amount: donationAmount })
+          body: JSON.stringify({ amount: donationAmount, recurring })
         });
 
         const data = await res.json();
