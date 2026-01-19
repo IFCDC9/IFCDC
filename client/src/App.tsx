@@ -9,6 +9,7 @@ import HrOnboardingPage from "./pages/HrOnboardingPage";
 import ProgramsDashboard from "./pages/ProgramsDashboard";
 import ProgramDetailPage from "./pages/ProgramDetailPage";
 import FundingSourcesAdminPage from "./pages/FundingSourcesAdminPage";
+import AdminFundingPage from "./pages/AdminFundingPage";
 import AdminTimeOverviewPage from "./pages/AdminTimeOverviewPage";
 import GrantReportPage from "./pages/GrantReportPage";
 import LogicModelPage from "./pages/LogicModelPage";
@@ -69,6 +70,15 @@ const App: React.FC = () => {
               <AdminLayout>
                 <HrOnboardingPage />
               </AdminLayout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/admin/funding"
+          element={
+            <ProtectedRoute allowedRoles={["admin", "owner", "EXEC"]}>
+              <AdminFundingPage />
             </ProtectedRoute>
           }
         />
