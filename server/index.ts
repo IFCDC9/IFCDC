@@ -1509,6 +1509,16 @@ app.get("/api/admin/funding-sources", authRequired, requireAdmin, async (req, re
   }
 });
 
+app.get("/api/admin/funding-events", authRequired, requireAdmin, async (req, res) => {
+  try {
+    const rows = await db.all<any[]>("SELECT * FROM funding_events ORDER BY created_at DESC");
+    res.json(rows);
+  } catch (err) {
+    console.error("Error fetching funding events:", err);
+    res.status(500).json({ error: "Failed to fetch funding events" });
+  }
+});
+
 app.post("/api/admin/ach-log", authRequired, requireAdmin, async (req, res) => {
   try {
     const { amount, reference } = req.body;
