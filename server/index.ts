@@ -620,6 +620,20 @@ async function initDb() {
     console.log("Seeded", sources.length, "funding sources.");
   }
 
+  // Funding events table for tracking all payment transactions
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS funding_events (
+      id TEXT PRIMARY KEY,
+      source_key TEXT NOT NULL,
+      intent TEXT NOT NULL,
+      amount_cents INTEGER NOT NULL,
+      currency TEXT DEFAULT 'USD',
+      external_id TEXT,
+      metadata TEXT,
+      created_at TEXT NOT NULL
+    );
+  `);
+
   // Policy versions table for managing organizational policies
   await db.exec(`
     CREATE TABLE IF NOT EXISTS policy_versions (
