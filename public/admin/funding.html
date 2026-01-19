@@ -58,6 +58,22 @@
     <p class="subtitle">Manage payment methods and donation sources</p>
 
     <div id="message"></div>
+    
+    <div style="margin-bottom: 1rem;">
+      <button type="button" class="btn btn-configure" onclick="toggleForm()">+ Add Funding Source</button>
+    </div>
+
+    <div id="create-form" style="display: none; background: #1a1a1a; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+        <input id="fs-name" type="text" placeholder="Name" style="padding: 0.5rem; background: #222; border: 1px solid #333; border-radius: 4px; color: #fff;">
+        <input id="fs-code" type="text" placeholder="Code" style="padding: 0.5rem; background: #222; border: 1px solid #333; border-radius: 4px; color: #fff;">
+        <input id="fs-type" type="text" placeholder="Type" style="padding: 0.5rem; background: #222; border: 1px solid #333; border-radius: 4px; color: #fff;">
+        <input id="fs-agency" type="text" placeholder="Agency" style="padding: 0.5rem; background: #222; border: 1px solid #333; border-radius: 4px; color: #fff;">
+        <textarea id="fs-notes" placeholder="Notes" style="padding: 0.5rem; background: #222; border: 1px solid #333; border-radius: 4px; color: #fff; grid-column: span 2;"></textarea>
+        <button type="button" class="btn btn-enable" onclick="createFundingSource()" style="grid-column: span 2;">Create</button>
+      </div>
+    </div>
+
     <div id="loading" class="loading">Loading funding sources...</div>
     <table id="funding-table" style="display: none;">
       <thead>
@@ -155,6 +171,50 @@
 
     function configureSource(key) {
       showMessage(`Configure ${key} in sandbox mode before enabling`, "success");
+    }
+
+    function toggleForm() {
+      const form = document.getElementById("create-form");
+      form.style.display = form.style.display === "none" ? "block" : "none";
+    }
+
+    async function createFundingSource() {
+      const name = document.getElementById("fs-name").value;
+      const code = document.getElementById("fs-code").value;
+      const type = document.getElementById("fs-type").value;
+      const agency = document.getElementById("fs-agency").value;
+      const notes = document.getElementById("fs-notes").value;
+
+      if (!name || !code) {
+        showMessage("Name and code are required", "error");
+        return;
+      }
+
+      try {
+        const res = await fetch("/api/admin/funding-sources", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + token
+          },
+          body: JSON.stringify({ name, code, type, agency, notes })
+        });
+
+        if (res.ok) {
+          showMessage("Funding source created", "success");
+          document.getElementById("fs-name").value = "";
+          document.getElementById("fs-code").value = "";
+          document.getElementById("fs-type").value = "";
+          document.getElementById("fs-agency").value = "";
+          document.getElementById("fs-notes").value = "";
+          document.getElementById("create-form").style.display = "none";
+          loadFundingSources();
+        } else {
+          showMessage("Failed to create funding source", "error");
+        }
+      } catch (err) {
+        showMessage("Failed to create funding source", "error");
+      }
     }
 
     function showMessage(text, type) {
