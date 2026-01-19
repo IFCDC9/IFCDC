@@ -1,5 +1,6 @@
 import express from "express";
 import { stripe } from "../stripe";
+import { db } from "../db";
 
 const router = express.Router();
 
@@ -46,5 +47,43 @@ router.post("/donate", async (req, res) => {
     res.status(500).json({ error: "Donation failed" });
   }
 });
+
+// Stripe webhook - must use raw body for signature verification
+router.post(
+  "/stripe/webhook",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    const sig = req.headers["stripe-signature"] as string;
+    
+    if (!process.env.STRIPE_WEBHOOK_SECRET) {
+      console.error("STRIPE_WEBHOOK_SECRET not configured");
+      return res.status(500).json({ error: "Webhook not configured" });
+    }
+
+    try {
+      const event = stripe.webhooks.constructEvent(
+        req.body,
+        sig,
+        process.env.STRIPE_WEBHOOK_SECRET
+      );
+
+      if (event.type === "checkout.session.completed") {
+        const session = event.data.object as any;
+
+        await db.run(`
+          INSERT INTO funding_events (source_key, intent, amount_cents, currency, external_id, metadata)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `, "stripe", "donation", session.amount_total, session.currency || "usd", session.id, JSON.stringify(session));
+
+        console.log("Stripe donation logged:", session.id);
+      }
+
+      res.json({ received: true });
+    } catch (err: any) {
+      console.error("Stripe webhook error:", err.message);
+      res.status(400).json({ error: `Webhook Error: ${err.message}` });
+    }
+  }
+);
 
 export default router;
