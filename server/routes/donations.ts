@@ -1,49 +1,39 @@
-import { Router } from "express";
-import { getUncachableStripeClient, getStripePublishableKey } from "../stripeClient";
+import express from "express";
+import { stripe } from "../stripe";
 
-const router = Router();
-
-router.get("/stripe/publishable-key", async (_req, res) => {
-  try {
-    const publishableKey = await getStripePublishableKey();
-    res.json({ publishableKey });
-  } catch (err) {
-    console.error("Error getting Stripe publishable key:", err);
-    res.status(500).json({ error: "Stripe not configured" });
-  }
-});
+const router = express.Router();
 
 router.post("/donate", async (req, res) => {
   try {
     const { amount } = req.body;
 
-    if (!amount) {
-      return res.status(400).json({ error: "Amount required" });
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: "Invalid donation amount" });
     }
-
-    const stripe = await getUncachableStripeClient();
-    const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
-      line_items: [{
-        price_data: {
-          currency: "usd",
-          product_data: { name: "IFCDC Donation" },
-          unit_amount: Math.round(amount * 100)
+      line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            product_data: {
+              name: "IFCDC Donation",
+            },
+            unit_amount: Math.round(amount * 100),
+          },
+          quantity: 1,
         },
-        quantity: 1
-      }],
-      success_url: `${baseUrl}/thank-you.html`,
-      cancel_url: `${baseUrl}/donate.html`
+      ],
+      success_url: `${process.env.BASE_URL}/thank-you`,
+      cancel_url: `${process.env.BASE_URL}/donate`,
     });
 
     res.json({ url: session.url });
-
   } catch (err) {
-    console.error("Donation error:", err);
-    res.status(500).json({ error: "Donation failed" });
+    console.error("DONATION ERROR:", err);
+    res.status(500).json({ error: "Failed to start donation" });
   }
 });
 
