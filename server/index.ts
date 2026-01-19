@@ -1529,6 +1529,26 @@ app.post("/api/admin/ach-log", authRequired, requireAdmin, async (req, res) => {
   }
 });
 
+app.post("/api/admin/crypto-log", authRequired, requireAdmin, async (req, res) => {
+  try {
+    const { amount, metadata } = req.body;
+
+    const id = cryptoRandomId();
+    const now = new Date().toISOString();
+
+    await db.run(
+      `INSERT INTO funding_events (id, source_key, intent, amount_cents, metadata, created_at)
+       VALUES (?, 'crypto', 'donation', ?, ?, ?)`,
+      id, amount, metadata ? JSON.stringify(metadata) : null, now
+    );
+
+    res.json({ logged: true });
+  } catch (err) {
+    console.error("Error logging crypto transaction:", err);
+    res.status(500).json({ error: "Failed to log crypto transaction" });
+  }
+});
+
 app.patch("/api/admin/funding-sources/:key", authRequired, requireAdmin, async (req, res) => {
   try {
     const { enabled } = req.body;
