@@ -1481,6 +1481,24 @@ app.delete("/api/admin/services/:id", authRequired, requireAdmin, async (req, re
   }
 });
 
+// ----- Funding Sources -----
+app.get("/api/admin/funding-sources", authRequired, requireAdmin, async (req, res) => {
+  try {
+    const rows = await db.all<any[]>("SELECT * FROM funding_sources ORDER BY source_key ASC");
+    res.json(rows.map((r) => ({
+      id: r.id,
+      sourceKey: r.source_key,
+      displayName: r.display_name,
+      enabled: !!r.enabled,
+      sandbox: !!r.sandbox,
+      createdAt: r.created_at
+    })));
+  } catch (err) {
+    console.error("Error fetching funding sources:", err);
+    res.status(500).json({ error: "Failed to fetch funding sources" });
+  }
+});
+
 // ----- Programs -----
 app.get("/api/programs", authRequired, async (req, res) => {
   const rows = await db.all<{ id: string; code: string; name: string; description: string }[]>(
