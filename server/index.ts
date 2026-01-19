@@ -588,6 +588,38 @@ async function initDb() {
     );
   `);
 
+  // Funding sources table for payment methods
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS funding_sources (
+      id TEXT PRIMARY KEY,
+      source_key TEXT UNIQUE NOT NULL,
+      display_name TEXT NOT NULL,
+      enabled INTEGER DEFAULT 1,
+      sandbox INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+  `);
+
+  // Seed default funding sources if empty
+  const fundingCount = await db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM funding_sources");
+  if (fundingCount && fundingCount.cnt === 0) {
+    const now = new Date().toISOString();
+    const sources = [
+      { key: "paypal", name: "PayPal" },
+      { key: "stripe", name: "Stripe" },
+      { key: "venmo", name: "Venmo" },
+      { key: "ach", name: "Bank Transfer (ACH)" },
+      { key: "crypto", name: "Cryptocurrency" }
+    ];
+    for (const s of sources) {
+      await db.run(
+        `INSERT INTO funding_sources (id, source_key, display_name, enabled, sandbox, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+        cryptoRandomId(), s.key, s.name, s.key === "paypal" ? 1 : 0, 0, now
+      );
+    }
+    console.log("Seeded", sources.length, "funding sources.");
+  }
+
   // Policy versions table for managing organizational policies
   await db.exec(`
     CREATE TABLE IF NOT EXISTS policy_versions (
