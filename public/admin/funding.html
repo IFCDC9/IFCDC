@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Funding Sources - IFCDC Admin</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    body { background: #000; color: #fff; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; }
+    .container { max-width: 1000px; margin: 0 auto; padding: 2rem; }
+    h1 { color: #d4af37; margin-bottom: 0.5rem; }
+    .subtitle { color: #888; margin-bottom: 2rem; }
+    .back-link { color: #d4af37; text-decoration: none; display: inline-block; margin-bottom: 1rem; }
+    .back-link:hover { text-decoration: underline; }
+    table { width: 100%; border-collapse: collapse; background: #111; border-radius: 8px; overflow: hidden; }
+    th { background: #1a1a1a; color: #d4af37; text-align: left; padding: 1rem; font-weight: 600; }
+    td { padding: 1rem; border-bottom: 1px solid #222; }
+    tr:last-child td { border-bottom: none; }
+    .status-on { color: #4ade80; font-weight: 600; }
+    .status-off { color: #888; }
+    .mode-live { color: #60a5fa; }
+    .mode-sandbox { color: #fbbf24; }
+    .btn { padding: 0.5rem 1rem; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; }
+    .btn-view { background: #333; color: #fff; }
+    .btn-view:hover { background: #444; }
+    .btn-enable { background: #065f46; color: #fff; }
+    .btn-enable:hover { background: #047857; }
+    .btn-disable { background: #7f1d1d; color: #fff; }
+    .btn-disable:hover { background: #991b1b; }
+    .btn-configure { background: #d4af37; color: #000; }
+    .btn-configure:hover { background: #b8972e; }
+    .loading { text-align: center; padding: 2rem; color: #888; }
+    .error { background: #7f1d1d; color: #fff; padding: 1rem; border-radius: 4px; margin-bottom: 1rem; }
+    .success { background: #065f46; color: #fff; padding: 1rem; border-radius: 4px; margin-bottom: 1rem; }
+    .nav { background: #111; padding: 1rem; border-bottom: 1px solid #333; }
+    .nav-inner { max-width: 1000px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; }
+    .nav-brand { color: #d4af37; font-weight: bold; font-size: 1.25rem; text-decoration: none; }
+    .nav-links a { color: #888; text-decoration: none; margin-left: 1.5rem; }
+    .nav-links a:hover { color: #d4af37; }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <div class="nav-inner">
+      <a href="/admin/dashboard.html" class="nav-brand">IFCDC Admin</a>
+      <div class="nav-links">
+        <a href="/admin/dashboard.html">Dashboard</a>
+        <a href="/admin/policies.html">Policies</a>
+        <a href="/admin/funding.html">Funding</a>
+        <a href="/">Public Site</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container">
+    <a href="/admin/dashboard.html" class="back-link">← Back to Dashboard</a>
+    <h1>Funding Sources</h1>
+    <p class="subtitle">Manage payment methods and donation sources</p>
+
+    <div id="message"></div>
+    <div id="loading" class="loading">Loading funding sources...</div>
+    <table id="funding-table" style="display: none;">
+      <thead>
+        <tr>
+          <th>Funding Source</th>
+          <th>Status</th>
+          <th>Mode</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="funding-body"></tbody>
+    </table>
+  </div>
+
+  <script>
+    const token = localStorage.getItem("token");
+    if (!token) {
+      window.location.href = "/login.html";
+    }
+
+    async function loadFundingSources() {
+      try {
+        const res = await fetch("/api/admin/funding-sources", {
+          headers: { "Authorization": "Bearer " + token }
+        });
+        if (res.status === 401 || res.status === 403) {
+          window.location.href = "/login.html";
+          return;
+        }
+        const sources = await res.json();
+        renderTable(sources);
+      } catch (err) {
+        showMessage("Failed to load funding sources", "error");
+      }
+    }
+
+    function renderTable(sources) {
+      const tbody = document.getElementById("funding-body");
+      tbody.innerHTML = "";
+
+      sources.forEach(s => {
+        const tr = document.createElement("tr");
+        const statusClass = s.enabled ? "status-on" : "status-off";
+        const statusText = s.enabled ? "ON" : "OFF";
+        const modeClass = s.sandbox ? "mode-sandbox" : "mode-live";
+        const modeText = s.sandbox ? "Sandbox" : "Live";
+
+        let actionBtn = "";
+        if (s.enabled) {
+          actionBtn = `<button class="btn btn-view" onclick="viewSource('${s.sourceKey}')">View</button>
+                       <button class="btn btn-disable" onclick="toggleSource('${s.sourceKey}', false)">Disable</button>`;
+        } else if (s.sandbox) {
+          actionBtn = `<button class="btn btn-configure" onclick="configureSource('${s.sourceKey}')">Configure</button>`;
+        } else {
+          actionBtn = `<button class="btn btn-enable" onclick="toggleSource('${s.sourceKey}', true)">Enable</button>`;
+        }
+
+        tr.innerHTML = `
+          <td>${s.displayName}</td>
+          <td class="${statusClass}">${statusText}</td>
+          <td class="${modeClass}">${modeText}</td>
+          <td>${actionBtn}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      document.getElementById("loading").style.display = "none";
+      document.getElementById("funding-table").style.display = "table";
+    }
+
+    async function toggleSource(key, enabled) {
+      try {
+        const res = await fetch(`/api/admin/funding-sources/${key}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + token
+          },
+          body: JSON.stringify({ enabled })
+        });
+        if (res.ok) {
+          showMessage(`${key} has been ${enabled ? "enabled" : "disabled"}`, "success");
+          loadFundingSources();
+        } else {
+          showMessage("Failed to update funding source", "error");
+        }
+      } catch (err) {
+        showMessage("Failed to update funding source", "error");
+      }
+    }
+
+    function viewSource(key) {
+      showMessage(`Viewing ${key} configuration...`, "success");
+    }
+
+    function configureSource(key) {
+      showMessage(`Configure ${key} in sandbox mode before enabling`, "success");
+    }
+
+    function showMessage(text, type) {
+      const msg = document.getElementById("message");
+      msg.className = type;
+      msg.textContent = text;
+      setTimeout(() => { msg.textContent = ""; msg.className = ""; }, 3000);
+    }
+
+    loadFundingSources();
+  </script>
+</body>
+</html>
