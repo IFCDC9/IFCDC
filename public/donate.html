@@ -149,6 +149,12 @@
         <input type="number" id="customAmount" placeholder="$50" min="1" step="1" />
       </div>
 
+      <button id="stripe-donate-btn" class="amount-btn" style="width:100%; max-width:300px; margin:0 auto 20px; display:block; background:#d4af37; color:#000; border-color:#d4af37; font-size:1.1rem; padding:14px 24px;">
+        Donate with Card
+      </button>
+
+      <div style="color:#666; margin-bottom:16px; font-size:0.9rem;">— or —</div>
+
       <div id="paypal-donate-button"></div>
 
       <div class="tax-info">
@@ -237,6 +243,37 @@
     }
 
     loadPayPal();
+
+    // Stripe donation handler
+    document.getElementById('stripe-donate-btn').addEventListener('click', async () => {
+      const btn = document.getElementById('stripe-donate-btn');
+      btn.disabled = true;
+      btn.textContent = 'Processing...';
+
+      try {
+        const res = await fetch('/api/donate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ amount: donationAmount })
+        });
+
+        const data = await res.json();
+
+        if (!data.url) {
+          alert('Donation could not be started.');
+          btn.disabled = false;
+          btn.textContent = 'Donate with Card';
+          return;
+        }
+
+        window.location.href = data.url;
+      } catch (err) {
+        console.error(err);
+        alert('Donation failed.');
+        btn.disabled = false;
+        btn.textContent = 'Donate with Card';
+      }
+    });
   </script>
   <script src="/chatbot.js"></script>
 </body>
