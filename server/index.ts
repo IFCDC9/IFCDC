@@ -1519,6 +1519,34 @@ app.get("/api/admin/funding-events", authRequired, requireAdmin, async (req, res
   }
 });
 
+app.get("/api/admin/funding-metrics", authRequired, requireAdmin, async (req, res) => {
+  try {
+    const totalRow = await db.get<{ total: number }>(
+      "SELECT COALESCE(SUM(amount_cents), 0) as total FROM funding_events"
+    );
+    const bySource = await db.all<any[]>(
+      "SELECT source_key, SUM(amount_cents) as total FROM funding_events GROUP BY source_key"
+    );
+    const byIntent = await db.all<any[]>(
+      "SELECT intent, SUM(amount_cents) as total FROM funding_events GROUP BY intent"
+    );
+    const countRow = await db.get<{ count: number }>(
+      "SELECT COUNT(*) as count FROM funding_events"
+    );
+
+    res.json({
+      totalCents: totalRow?.total || 0,
+      totalDollars: ((totalRow?.total || 0) / 100).toFixed(2),
+      transactionCount: countRow?.count || 0,
+      bySource: bySource.map(r => ({ source: r.source_key, totalCents: r.total })),
+      byIntent: byIntent.map(r => ({ intent: r.intent, totalCents: r.total }))
+    });
+  } catch (err) {
+    console.error("Error fetching funding metrics:", err);
+    res.status(500).json({ error: "Failed to fetch funding metrics" });
+  }
+});
+
 app.post("/api/admin/ach-log", authRequired, requireAdmin, async (req, res) => {
   try {
     const { amount, reference } = req.body;
