@@ -1511,6 +1511,46 @@ app.get("/api/admin/funding-sources", authRequired, requireAdmin, async (req, re
   }
 });
 
+app.post("/api/admin/funding-sources", authRequired, requireAdmin, async (req, res) => {
+  try {
+    const { sourceKey, displayName, enabled = false, sandbox = false } = req.body;
+
+    if (!sourceKey || !displayName) {
+      return res.status(400).json({ error: "sourceKey and displayName required" });
+    }
+
+    const id = cryptoRandomId();
+    const now = new Date().toISOString();
+
+    await db.run(
+      `INSERT INTO funding_sources (id, source_key, display_name, enabled, sandbox, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      id, sourceKey, displayName, enabled ? 1 : 0, sandbox ? 1 : 0, now
+    );
+
+    await logAudit(req, { action: "CREATE", targetType: "FUNDING_SOURCE", targetId: id, extra: { sourceKey } });
+
+    res.json({ id, sourceKey, displayName, enabled, sandbox, createdAt: now });
+  } catch (err) {
+    console.error("Error creating funding source:", err);
+    res.status(500).json({ error: "Failed to create funding source" });
+  }
+});
+
+app.delete("/api/admin/funding-sources/:id", authRequired, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await db.run("DELETE FROM funding_sources WHERE id = ?", id);
+    await logAudit(req, { action: "DELETE", targetType: "FUNDING_SOURCE", targetId: id, extra: {} });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error deleting funding source:", err);
+    res.status(500).json({ error: "Failed to delete funding source" });
+  }
+});
+
 app.get("/api/admin/funding-events", authRequired, requireAdmin, async (req, res) => {
   try {
     const rows = await db.all<any[]>("SELECT * FROM funding_events ORDER BY created_at DESC");
