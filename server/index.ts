@@ -15,6 +15,7 @@ import OpenAI from "openai";
 import rateLimit from "express-rate-limit";
 import * as client from "openid-client";
 import donationsRouter from "./routes/donations";
+import adminFundingRouter from "./routes/adminFunding";
 
 const openai = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
@@ -163,6 +164,7 @@ async function sendVoiceReminderCall(to: string, appointmentId: string) {
 app.use(express.json());
 app.use(cookieParser());
 app.use("/api", donationsRouter);
+app.use("/api/admin", adminFundingRouter);
 
 const publicDir = path.join(import.meta.dirname, "..", "public");
 // Serve static assets from public/ but don't serve index.html (let Vite handle SPA)
