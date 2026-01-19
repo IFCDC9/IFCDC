@@ -336,7 +336,15 @@
         </div>
       </div>
 
+      <div class="form-section" id="paymentSection" style="display:none;">
+        <h3>Payment (Optional)</h3>
+        <p style="color:#888; margin-bottom:16px;">Pay now with PayPal to secure your appointment, or pay at the shop.</p>
+        <div id="paypal-button-container"></div>
+        <p id="paymentStatus" style="color:#4caf50; margin-top:12px; display:none;"></p>
+      </div>
+
       <button type="submit" class="btn-book" id="submitBtn">Request Appointment</button>
+      <p style="text-align:center; color:#888; margin-top:12px; font-size:0.9rem;">You can also pay at the shop</p>
     </form>
 
     <div class="contact-info">
@@ -357,6 +365,74 @@
   <script>document.getElementById('year2').textContent = new Date().getFullYear();</script>
 
   <script>
+    let paypalClientId = null;
+    let selectedPrice = 0;
+    let paymentCompleted = false;
+    let paypalOrderId = null;
+
+    // Load PayPal client ID and SDK
+    async function initPayPal() {
+      try {
+        const res = await fetch('/api/paypal/client-id');
+        if (!res.ok) return;
+        const data = await res.json();
+        paypalClientId = data.clientId;
+        
+        // Load PayPal SDK
+        const script = document.createElement('script');
+        script.src = `https://www.paypal.com/sdk/js?client-id=${paypalClientId}&currency=USD&intent=capture`;
+        script.onload = () => {
+          if (selectedPrice > 0) renderPayPalButton();
+        };
+        document.head.appendChild(script);
+      } catch (err) {
+        console.log('PayPal not available');
+      }
+    }
+
+    function renderPayPalButton() {
+      if (!window.paypal || !paypalClientId || selectedPrice <= 0) return;
+      
+      const container = document.getElementById('paypal-button-container');
+      container.innerHTML = '';
+      
+      window.paypal.Buttons({
+        style: {
+          layout: 'horizontal',
+          color: 'gold',
+          shape: 'rect',
+          label: 'pay'
+        },
+        createOrder: async () => {
+          const res = await fetch('/api/paypal/create-order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ amount: selectedPrice.toString() })
+          });
+          const data = await res.json();
+          return data.id;
+        },
+        onApprove: async (data) => {
+          const res = await fetch(`/api/paypal/capture-order/${data.orderID}`, {
+            method: 'POST'
+          });
+          const captureData = await res.json();
+          if (captureData.status === 'COMPLETED') {
+            paymentCompleted = true;
+            paypalOrderId = data.orderID;
+            document.getElementById('paymentStatus').textContent = 'Payment successful! Complete your booking below.';
+            document.getElementById('paymentStatus').style.display = 'block';
+            document.getElementById('paypal-button-container').style.display = 'none';
+          }
+        },
+        onError: (err) => {
+          console.error('PayPal error:', err);
+        }
+      }).render('#paypal-button-container');
+    }
+
+    initPayPal();
+
     // Set minimum date to today
     const today = new Date().toISOString().split('T')[0];
     document.getElementById('date').setAttribute('min', today);
@@ -367,6 +443,14 @@
       option.addEventListener('click', () => {
         document.querySelectorAll('.service-option').forEach(o => o.classList.remove('selected'));
         option.classList.add('selected');
+        
+        // Show payment section and update price
+        const input = option.querySelector('input');
+        selectedPrice = parseFloat(input.dataset.price) || 0;
+        if (selectedPrice > 0 && paypalClientId) {
+          document.getElementById('paymentSection').style.display = 'block';
+          renderPayPalButton();
+        }
       });
     });
 
@@ -402,7 +486,9 @@
         date: document.getElementById('date').value,
         time: document.getElementById('time').value,
         notes: document.getElementById('notes').value.trim(),
-        smsOptIn: document.getElementById('smsOptIn').checked
+        smsOptIn: document.getElementById('smsOptIn').checked,
+        paymentCompleted: paymentCompleted,
+        paypalOrderId: paypalOrderId
       };
 
       try {

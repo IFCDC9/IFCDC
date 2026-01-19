@@ -4432,6 +4432,120 @@ app.post("/api/test-sms", authRequired, requireRole("admin", "owner", ROLES.EXEC
   }
 });
 
+// PayPal Integration Endpoints
+app.get("/api/paypal/client-id", async (req, res) => {
+  const clientId = process.env.PAYPAL_CLIENT_ID;
+  if (!clientId) {
+    return res.status(500).json({ error: "PayPal not configured" });
+  }
+  res.json({ clientId });
+});
+
+app.post("/api/paypal/create-order", async (req, res) => {
+  try {
+    const { amount, currency = "USD" } = req.body;
+    
+    if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+      return res.status(400).json({ error: "Invalid amount" });
+    }
+
+    const clientId = process.env.PAYPAL_CLIENT_ID;
+    const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
+    const isLive = process.env.PAYPAL_ENV === "live";
+    
+    if (!clientId || !clientSecret) {
+      return res.status(500).json({ error: "PayPal not configured" });
+    }
+
+    const baseUrl = isLive 
+      ? "https://api-m.paypal.com" 
+      : "https://api-m.sandbox.paypal.com";
+
+    const authRes = await fetch(`${baseUrl}/v1/oauth2/token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Authorization": `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`
+      },
+      body: "grant_type=client_credentials"
+    });
+    
+    const authData = await authRes.json() as { access_token?: string };
+    if (!authData.access_token) {
+      throw new Error("Failed to get PayPal access token");
+    }
+
+    const orderRes = await fetch(`${baseUrl}/v2/checkout/orders`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${authData.access_token}`
+      },
+      body: JSON.stringify({
+        intent: "CAPTURE",
+        purchase_units: [{
+          amount: {
+            currency_code: currency,
+            value: parseFloat(amount).toFixed(2)
+          }
+        }]
+      })
+    });
+
+    const orderData = await orderRes.json();
+    res.json(orderData);
+  } catch (err: any) {
+    console.error("PayPal create order error:", err);
+    res.status(500).json({ error: "Failed to create PayPal order" });
+  }
+});
+
+app.post("/api/paypal/capture-order/:orderId", async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    
+    const clientId = process.env.PAYPAL_CLIENT_ID;
+    const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
+    const isLive = process.env.PAYPAL_ENV === "live";
+    
+    if (!clientId || !clientSecret) {
+      return res.status(500).json({ error: "PayPal not configured" });
+    }
+
+    const baseUrl = isLive 
+      ? "https://api-m.paypal.com" 
+      : "https://api-m.sandbox.paypal.com";
+
+    const authRes = await fetch(`${baseUrl}/v1/oauth2/token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Authorization": `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`
+      },
+      body: "grant_type=client_credentials"
+    });
+    
+    const authData = await authRes.json() as { access_token?: string };
+    if (!authData.access_token) {
+      throw new Error("Failed to get PayPal access token");
+    }
+
+    const captureRes = await fetch(`${baseUrl}/v2/checkout/orders/${orderId}/capture`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${authData.access_token}`
+      }
+    });
+
+    const captureData = await captureRes.json();
+    res.json(captureData);
+  } catch (err: any) {
+    console.error("PayPal capture order error:", err);
+    res.status(500).json({ error: "Failed to capture PayPal order" });
+  }
+});
+
 // Public booking endpoint (no auth required) - creates a booking request
 app.post("/api/public/book-barbershop", async (req, res) => {
   try {
