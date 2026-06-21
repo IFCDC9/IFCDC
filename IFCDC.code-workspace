@@ -1,0 +1,60 @@
+{
+  "folders": [
+    {
+      "name": "IFCDC Headquarters",
+      "path": "."
+    },
+    {
+      "name": "Imperial Foundation CDC",
+      "path": "Apps/IMPERIAL-FOUNDATION-CDC"
+    },
+    {
+      "name": "CryptoCoin IFCDC",
+      "path": "Apps/CRYPTOCOIN-IFCDC/CryptoCoinIFCDC"
+    },
+    {
+      "name": "Swift-Ware",
+      "path": "Apps/IFCDC-SWIFT-WARE/Swift-Ware"
+    },
+    {
+      "name": "Tapis",
+      "path": "Apps/IFCDC-TAPIS/Tapis-Init"
+    },
+    {
+      "name": "Inclusive Community",
+      "path": "Apps/INCLUSIVE-COMMUNITY-IFCDC/InclusiveCommunity"
+    },
+    {
+      "name": "IFCDC Music App",
+      "path": "Apps/IFCDC-MUSIC-APP/IFCDC-MUSUC-APP"
+    },
+    {
+      "name": "Shared Libraries",
+      "path": "Libraries/ifcdc-packages"
+    }
+  ],
+  "settings": {
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2,
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "typescript.tsdk": "node_modules/typescript/lib",
+    "files.exclude": {
+      "**/node_modules": true,
+      "**/.DS_Store": true
+    },
+    "search.exclude": {
+      "**/node_modules": true,
+      "**/dist": true,
+      "**/IFCDC-BARBERS-APP": true
+    },
+    "terminal.integrated.cwd": "${workspaceFolder:IFCDC Headquarters}"
+  },
+  "extensions": {
+    "recommendations": [
+      "dbaeumer.vscode-eslint",
+      "esbenp.prettier-vscode",
+      "bradlc.vscode-tailwindcss",
+      "prisma.prisma"
+    ]
+  }
+}

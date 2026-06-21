@@ -1,0 +1,25 @@
+{
+  "name": "@ifcdc/aura-ai",
+  "version": "1.0.0",
+  "description": "IFCDC AURA AI library — OpenAI integration, prompts, streaming",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "openai": "^6.17.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

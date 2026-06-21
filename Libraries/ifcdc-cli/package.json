@@ -1,0 +1,15 @@
+{
+  "name": "@ifcdc/cli",
+  "version": "1.0.0",
+  "description": "IFCDC App Generator — scaffold new applications in minutes",
+  "type": "module",
+  "bin": {
+    "create-ifcdc-app": "./bin/create-ifcdc-app.mjs"
+  },
+  "scripts": {
+    "create": "node ./bin/create-ifcdc-app.mjs"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

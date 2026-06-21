@@ -1,0 +1,31 @@
+{
+  "name": "@ifcdc/notifications",
+  "version": "1.0.0",
+  "description": "IFCDC notifications library — email, SMS, push notifications",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "twilio": "^5.10.7",
+    "typescript": "^5.6.3"
+  },
+  "peerDependencies": {
+    "twilio": "^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "twilio": { "optional": true }
+  }
+}

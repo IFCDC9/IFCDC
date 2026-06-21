@@ -1,0 +1,27 @@
+{
+  "name": "@ifcdc/services",
+  "version": "1.0.0",
+  "private": true,
+  "description": "IFCDC unified backend services",
+  "type": "module",
+  "workspaces": [
+    "auth-service",
+    "aura-ai-core",
+    "notification-service",
+    "payment-service",
+    "database-service"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev:auth": "npm run dev -w auth-service",
+    "dev:aura": "npm run dev -w aura-ai-core",
+    "dev:notifications": "npm run dev -w notification-service",
+    "dev:payments": "npm run dev -w payment-service",
+    "dev:database": "npm run dev -w database-service",
+    "dev:all": "concurrently \"npm:dev:*\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "typescript": "^5.6.3"
+  }
+}

@@ -1,0 +1,80 @@
+---
+description: IFCDC frozen enterprise architecture and product development rules
+alwaysApply: true
+---
+
+# IFCDC Headquarters — Frozen Architecture
+
+**Status:** ARCHITECTURE FROZEN (June 19, 2026)  
+**Mode:** Product Development — no structural changes  
+**Workstation:** `~/Development/IFCDC/` via `IFCDC.code-workspace`
+
+## Architecture Freeze
+
+Do NOT make structural changes:
+- No new top-level folders
+- No new `@ifcdc/*` packages or backend services
+- No folder moves or project reorganization
+- No duplicated auth, payments, notifications, or AI
+
+Allowed: product features, bug fixes, App Store work, wiring apps to centralized services.
+
+## Product Priority Order
+
+1. **IFCDC Barbers App** — App Store launch (ACTIVE — production, now top priority)
+2. IFCDC Music App
+3. IFCDC Mentor (Tapis — `Apps/IFCDC-TAPIS/Tapis-Init/`)
+4. Inclusive Community
+5. Swift-Ware
+6. CryptoCoin
+
+## Mandatory: Centralized Services
+
+Every new feature MUST use:
+
+| Capability | Package | Service Port |
+|------------|---------|--------------|
+| Auth | `@ifcdc/auth` | 4100 |
+| AI / AURA | `@ifcdc/aura-ai` | 4101 |
+| Notifications | `@ifcdc/notifications` | 4102 |
+| Payments | `@ifcdc/payments` | 4103 |
+| Database | `@ifcdc/database` | 4104 |
+| HTTP client | `@ifcdc/api-client` | — |
+| UI | `@ifcdc/ui-components` | — |
+
+Client SDK: `Shared/ifcdc-services.ts`
+
+**Forbidden:** Direct OpenAI, Stripe, Twilio, or custom JWT/bcrypt in new app code.
+
+## Stack (Frozen)
+
+- React 19.2.0, Vite 7.3.0, TypeScript 5.6.3
+- Express 4/5, Drizzle ORM (Prisma 7 for Imperial Foundation only)
+- shadcn/ui + Tailwind
+
+## Documentation
+
+When shared services change, update:
+1. `Documents/SERVICE-CHANGELOG.md`
+2. Package `README.md`
+3. `Shared/ifcdc-services.ts` if SDK surface changes
+
+Product work: document in `Documents/products/<PRODUCT>.md`
+
+## Key Paths
+
+```
+Backend/ifcdc-services/     # 5 microservices
+Libraries/ifcdc-packages/   # 7 @ifcdc/* packages
+Libraries/ifcdc-cli/        # App generator (only way to create new apps)
+Shared/ifcdc-services.ts    # Client SDK
+Documents/ARCHITECTURE-FREEZE.md
+Documents/PRODUCT-ROADMAP.md
+```
+
+## Before Writing Code
+
+1. Which product priority is this? (Barbers first)
+2. Does `@ifcdc/*` already solve this? Use it.
+3. Is this a structural change? Stop — get authorization.
+4. Will shared services change? Update SERVICE-CHANGELOG.md.
