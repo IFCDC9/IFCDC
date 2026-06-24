@@ -34,6 +34,16 @@ import {
   IFCDC_FUNDING_DIVISIONS,
   ensureApplicationWorkflow,
 } from "../hq/grantFundingEngine";
+import {
+  buildV2FundingPipeline,
+  buildExecutiveFundingAnalytics,
+  buildDivisionFundingProfiles,
+  getDivisionFundingProfile,
+  listLiveGrantOpportunities,
+  matchGrantsForDivision,
+  buildAuraFundingIntelligenceV2,
+  listDocumentChecklist,
+} from "../hq/grantFundingEngineV2";
 
 const router = Router();
 
@@ -473,7 +483,7 @@ router.get("/expenditures", async (req, res) => {
 
 // ——— Documents & Approval ———
 router.post("/documents/upload", async (req: Request, res: Response) => {
-  const { fileName, base64, mimeType, opportunity_id, application_id, name, doc_type, notes } = req.body;
+  const { fileName, base64, mimeType, opportunity_id, application_id, name, doc_type, doc_category, notes } = req.body;
   if (!fileName || !base64 || !name) {
     return res.status(400).json({ error: "fileName, base64, and name are required" });
   }
@@ -483,9 +493,10 @@ router.post("/documents/upload", async (req: Request, res: Response) => {
     const now = new Date().toISOString();
     const docId = grantId();
     await db.run(
-      `INSERT INTO grant_documents (id, opportunity_id, application_id, name, doc_type, file_url, notes, status, uploaded_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+      `INSERT INTO grant_documents (id, opportunity_id, application_id, name, doc_type, doc_category, file_url, notes, status, uploaded_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
       docId, opportunity_id ?? null, application_id ?? null, name, doc_type ?? "required",
+      doc_category ?? doc_type ?? "attachment",
       saved.url, notes ?? `Uploaded ${saved.fileName} (${saved.size} bytes)`, now, now
     );
     await logGrantActivity("document", docId, "uploaded", `File uploaded: ${name}`, req.hqUser?.email);
@@ -497,15 +508,16 @@ router.post("/documents/upload", async (req: Request, res: Response) => {
 });
 
 router.post("/documents", async (req: Request, res: Response) => {
-  const { opportunity_id, application_id, name, doc_type, file_url, notes } = req.body;
+  const { opportunity_id, application_id, name, doc_type, doc_category, file_url, notes } = req.body;
   if (!name) return res.status(400).json({ error: "name required" });
   const db = await getDb();
   const now = new Date().toISOString();
   const docId = grantId();
   await db.run(
-    `INSERT INTO grant_documents (id, opportunity_id, application_id, name, doc_type, file_url, notes, status, uploaded_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+    `INSERT INTO grant_documents (id, opportunity_id, application_id, name, doc_type, doc_category, file_url, notes, status, uploaded_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
     docId, opportunity_id ?? null, application_id ?? null, name, doc_type ?? "required",
+    doc_category ?? doc_type ?? "attachment",
     file_url ?? null, notes ?? "", now, now
   );
   await logGrantActivity("document", docId, "uploaded", `Document uploaded: ${name}`, req.hqUser?.email);
@@ -791,6 +803,51 @@ router.post("/applications/:id/workflow", async (req, res) => {
   });
   if (!result.ok) return res.status(400).json(result);
   res.json(result);
+});
+
+// ——— Grant Center v2 ———
+
+router.get("/funding-engine/v2/pipeline", async (_req, res) => {
+  res.json(await buildV2FundingPipeline());
+});
+
+router.get("/funding-engine/v2/analytics", async (_req, res) => {
+  res.json(await buildExecutiveFundingAnalytics());
+});
+
+router.get("/funding-engine/v2/divisions/profiles", async (_req, res) => {
+  res.json({ profiles: await buildDivisionFundingProfiles(), generatedAt: new Date().toISOString() });
+});
+
+router.get("/funding-engine/v2/divisions/:slug/profile", async (req, res) => {
+  const profile = await getDivisionFundingProfile(req.params.slug);
+  if (!profile) return res.status(404).json({ error: "Division not found" });
+  res.json({ profile });
+});
+
+router.post("/funding-engine/v2/match", async (req, res) => {
+  const { divisionSlug } = req.body ?? {};
+  if (!divisionSlug) return res.status(400).json({ error: "divisionSlug is required" });
+  res.json(await matchGrantsForDivision(divisionSlug, { actorEmail: req.hqUser?.email }));
+});
+
+router.post("/funding-engine/v2/aura", async (req, res) => {
+  try {
+    res.json(await buildAuraFundingIntelligenceV2({ question: req.body?.question, actorEmail: req.hqUser?.email }));
+  } catch (e) {
+    console.error("AURA v2 funding intelligence error:", e);
+    res.status(500).json({ error: "Funding intelligence unavailable" });
+  }
+});
+
+router.get("/opportunities/live", async (req, res) => {
+  const limit = Number(req.query.limit ?? 50);
+  res.json({ opportunities: await listLiveGrantOpportunities(limit), generatedAt: new Date().toISOString() });
+});
+
+router.get("/documents/checklist", async (req, res) => {
+  const applicationId = req.query.application_id as string | undefined;
+  res.json(await listDocumentChecklist(applicationId));
 });
 
 export default router;
