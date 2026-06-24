@@ -26,6 +26,7 @@ export const GrantOpportunityDatabase: React.FC<{
     division: "",
     minAmount: "",
     deadlineWithinDays: "",
+    scoreDivision: "",
   });
 
   const search = useQuery({
@@ -41,13 +42,15 @@ export const GrantOpportunityDatabase: React.FC<{
   });
 
   const scoreOpp = useMutation({
-    mutationFn: (id: string) => grantsApi.scoreOpportunity(id),
+    mutationFn: (payload: { id: string; division?: string }) =>
+      grantsApi.scoreOpportunity(payload.id, payload.division),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["grant-funding-engine"] }),
   });
   const [lastScore, setLastScore] = useState<{ opportunityId: string; score: number; grade: string } | null>(null);
 
   const handleScore = async (id: string) => {
-    const result = await scoreOpp.mutateAsync(id);
+    const division = filters.scoreDivision || filters.division || undefined;
+    const result = await scoreOpp.mutateAsync({ id, division });
     setLastScore({ opportunityId: result.opportunityId, score: result.score, grade: result.grade });
   };
 
@@ -81,8 +84,28 @@ export const GrantOpportunityDatabase: React.FC<{
           placeholder="Min amount"
           value={filters.minAmount}
           onChange={(e) => setFilters({ ...filters, minAmount: e.target.value })}
-          style={{ width: 120 }}
+          style={{ width: 110 }}
         />
+        <input
+          className="hq-aura-input"
+          type="number"
+          placeholder="Due within (days)"
+          value={filters.deadlineWithinDays}
+          onChange={(e) => setFilters({ ...filters, deadlineWithinDays: e.target.value })}
+          style={{ width: 130 }}
+        />
+        <select
+          className="hq-aura-input"
+          value={filters.scoreDivision}
+          onChange={(e) => setFilters({ ...filters, scoreDivision: e.target.value })}
+          title="Division for eligibility scoring"
+        >
+          <option value="">Score for division…</option>
+          <option value="housing">Housing</option>
+          <option value="scholarships">Scholarships</option>
+          <option value="tapis">TAPIS</option>
+          <option value="community_programs">Community Programs</option>
+        </select>
         <button type="button" className="hq-btn hq-btn-secondary hq-btn-sm" onClick={() => search.refetch()}>
           <Search size={14} /> Search
         </button>

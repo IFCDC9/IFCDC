@@ -1,6 +1,6 @@
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { TrendingUp, Award, FileText, AlertTriangle, Wallet, RefreshCw } from "lucide-react";
+import { TrendingUp, Award, FileText, AlertTriangle, Wallet, RefreshCw, Calendar } from "lucide-react";
 import { grantsApi } from "../../api/grantsApi";
 import { KpiCard } from "../KpiCard";
 import { HqPanel } from "../HqPanel";
@@ -37,6 +37,8 @@ export const GrantFundingEngineOverview: React.FC = () => {
         <KpiCard label="Active Awards" value={summary?.activeAwards ?? 0} icon={Award} variant="success" />
         <KpiCard label="Open Opportunities" value={summary?.openOpportunities ?? 0} icon={FileText} />
         <KpiCard label="Win Rate" value={`${summary?.winRate ?? 0}%`} icon={TrendingUp} variant={(summary?.winRate ?? 0) >= 50 ? "success" : "warning"} />
+        <KpiCard label="Denied" value={summary?.deniedApplications ?? 0} icon={AlertTriangle} variant={(summary?.deniedApplications ?? 0) > 0 ? "warning" : "success"} />
+        <KpiCard label="Renewals Due" value={summary?.renewalsDue ?? 0} icon={Calendar} variant={(summary?.renewalsDue ?? 0) > 0 ? "warning" : "success"} />
         <KpiCard label="Compliance Due" value={summary?.complianceDue ?? 0} icon={AlertTriangle} variant={(summary?.complianceDue ?? 0) > 0 ? "warning" : "success"} />
         <KpiCard label="Grant Budgets" value={fmt(data?.budgetIntegration?.allocated ?? 0)} icon={Wallet} meta={`${fmt(data?.budgetIntegration?.spent ?? 0)} spent`} />
       </div>
