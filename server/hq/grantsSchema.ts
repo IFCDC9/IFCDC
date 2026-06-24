@@ -121,6 +121,7 @@ export async function ensureGrantTables(): Promise<void> {
 
   await migrateGrantPhase2();
   await migrateGrantPhase3();
+  await migrateGrantPhase4();
   const count = await db.get<{ c: number }>("SELECT COUNT(*) as c FROM grant_opportunities");
   if (count && count.c === 0) {
     const now = new Date().toISOString();
@@ -402,6 +403,69 @@ async function migrateGrantPhase3(): Promise<void> {
   await addCol("grant_applications", "workflow_stage", "TEXT DEFAULT 'intake'");
 
   await enrichSeedOpportunities();
+}
+
+/** Phase 4 — Grant Center v2: division profiles, live DB, document categories. */
+async function migrateGrantPhase4(): Promise<void> {
+  const db = await getDb();
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS grant_division_profiles (
+      slug TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      funding_goal REAL DEFAULT 0,
+      budget_allocated REAL DEFAULT 0,
+      budget_spent REAL DEFAULT 0,
+      pipeline_value REAL DEFAULT 0,
+      awarded_total REAL DEFAULT 0,
+      priority_level INTEGER DEFAULT 5,
+      program_areas TEXT,
+      read_only INTEGER DEFAULT 0,
+      notes TEXT,
+      updated_at TEXT NOT NULL
+    );
+  `);
+
+  const addCol = async (table: string, col: string, type: string) => {
+    try {
+      await db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+    } catch {
+      /* exists */
+    }
+  };
+  await addCol("grant_documents", "doc_category", "TEXT DEFAULT 'attachment'");
+  await addCol("grant_opportunities", "is_live", "INTEGER DEFAULT 1");
+
+  const now = new Date().toISOString();
+  const divisionSeeds = [
+    { slug: "housing", label: "Housing", programs: ["transitional_housing", "housing"], readOnly: false, goal: 500000 },
+    { slug: "anti_gang", label: "Anti-Gang", programs: ["violence_prevention", "community_safety"], readOnly: false, goal: 750000 },
+    { slug: "scholarships", label: "Scholarships", programs: ["scholarships", "education"], readOnly: false, goal: 250000 },
+    { slug: "economic_development", label: "Economic Development", programs: ["workforce", "economic_development"], readOnly: false, goal: 400000 },
+    { slug: "productions", label: "Productions & Media", programs: ["media", "productions"], readOnly: false, goal: 150000 },
+    { slug: "radio", label: "IFCDC Radio", programs: ["radio", "broadcast"], readOnly: false, goal: 100000 },
+    { slug: "music", label: "IFCDC Music", programs: ["music", "arts"], readOnly: false, goal: 150000 },
+    { slug: "barbers", label: "IFCDC Barbers", programs: ["workforce", "vocational_training"], readOnly: true, goal: 125000 },
+    { slug: "tapis", label: "TAPIS Mentorship", programs: ["mentorship", "youth"], readOnly: false, goal: 300000 },
+    { slug: "inclusive", label: "Inclusive Community", programs: ["inclusive", "mental_health"], readOnly: false, goal: 350000 },
+    { slug: "community_programs", label: "Community Programs", programs: ["community", "outreach"], readOnly: false, goal: 600000 },
+  ] as const;
+
+  for (const div of divisionSeeds) {
+    const existing = await db.get("SELECT slug FROM grant_division_profiles WHERE slug = ?", div.slug);
+    if (existing) continue;
+    await db.run(
+      `INSERT INTO grant_division_profiles (slug, label, funding_goal, program_areas, read_only, priority_level, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      div.slug,
+      div.label,
+      div.goal,
+      JSON.stringify(div.programs),
+      div.readOnly ? 1 : 0,
+      div.readOnly ? 8 : 5,
+      now
+    );
+  }
 }
 
 async function enrichSeedOpportunities(): Promise<void> {
