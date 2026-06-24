@@ -54,6 +54,7 @@ import { formatWelcomeGreeting, formatExecutiveDateLine, formatExecutiveTagline 
 import { formatCurrency } from "../../utils/safeFormat";
 import { resolveOrganizationHealth, formatHealthScore } from "../../utils/organizationHealth";
 import { intelligenceApi } from "../../api/intelligenceApi";
+import { peopleApi } from "../../api/peopleApi";
 import { HqWidgetErrorBoundary } from "../../components/hq/HqErrorBoundary";
 
 const ExecutiveWidgetDashboard = lazy(() =>
@@ -216,6 +217,13 @@ const ExecutiveDashboard: React.FC = () => {
     queryKey: ["hq-exec-people"],
     queryFn: () => analyticsApi.people().catch(() => null),
     staleTime: 120_000,
+  });
+
+  const workforceIntel = useQuery({
+    queryKey: ["hq-workforce-intelligence"],
+    queryFn: () => peopleApi.phase3Intelligence().catch(() => null),
+    staleTime: 120_000,
+    enabled: viewMode === "standard",
   });
 
   const dailyBriefing = useQuery({
@@ -604,6 +612,29 @@ const ExecutiveDashboard: React.FC = () => {
           </div>
 
           <div className="hq-grid-2" style={{ marginBottom: "1.25rem" }}>
+            <HqPanel title="Workforce Intelligence" subtitle="Phase 3 — hiring pipeline, HR compliance, staffing forecast" action={{ label: "People & HR", to: "/hq/people?tab=intelligence" }}>
+              {workforceIntel.isLoading && <div className="hq-muted-text">Loading workforce analytics…</div>}
+              {workforceIntel.data && (
+                <div className="hq-widget-stat-grid">
+                  <div className="hq-widget-stat">
+                    <span className="hq-widget-stat-val">{(workforceIntel.data as { hrComplianceScore?: { score: number } }).hrComplianceScore?.score ?? "—"}</span>
+                    <span className="hq-widget-stat-lbl">HR Compliance</span>
+                  </div>
+                  <div className="hq-widget-stat">
+                    <span className="hq-widget-stat-val">{(workforceIntel.data as { hiringPipeline?: { open: number } }).hiringPipeline?.open ?? "—"}</span>
+                    <span className="hq-widget-stat-lbl">Open Applicants</span>
+                  </div>
+                  <div className="hq-widget-stat">
+                    <span className="hq-widget-stat-val">{formatCurrency((workforceIntel.data as { payrollForecast?: { monthlyLabor: number } }).payrollForecast?.monthlyLabor ?? 0)}</span>
+                    <span className="hq-widget-stat-lbl">Monthly Labor</span>
+                  </div>
+                  <div className="hq-widget-stat">
+                    <span className="hq-widget-stat-val">{(workforceIntel.data as { staffingForecast?: { forecast?: { projectedHeadcount: number }[] } }).staffingForecast?.forecast?.[5]?.projectedHeadcount ?? (workforceIntel.data as { staffingForecast?: { currentHeadcount: number } }).staffingForecast?.currentHeadcount ?? "—"}</span>
+                    <span className="hq-widget-stat-lbl">6-Mo Headcount</span>
+                  </div>
+                </div>
+              )}
+            </HqPanel>
             {trends.data && (
               <HqPanel title="Predictive Outlook" subtitle="3-month rolling projection" action={{ label: "Trend Analysis", to: "/hq/analytics" }}>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem", marginBottom: "0.75rem" }}>

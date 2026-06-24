@@ -371,6 +371,48 @@ async function ensurePeoplePhase3Tables(db: Awaited<ReturnType<typeof getDb>>): 
       );
     }
   }
+
+  await ensurePeoplePhase3bTables(db);
+}
+
+async function ensurePeoplePhase3bTables(db: Awaited<ReturnType<typeof getDb>>): Promise<void> {
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS payroll_timesheets (
+      id TEXT PRIMARY KEY,
+      person_id TEXT NOT NULL,
+      period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL,
+      total_hours REAL DEFAULT 0,
+      status TEXT DEFAULT 'draft',
+      submitted_at TEXT,
+      approved_at TEXT,
+      approver_email TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS people_team_assignments (
+      id TEXT PRIMARY KEY,
+      person_id TEXT NOT NULL,
+      department_id TEXT,
+      team_name TEXT NOT NULL,
+      role TEXT,
+      assignment_type TEXT DEFAULT 'team',
+      start_date TEXT,
+      end_date TEXT,
+      status TEXT DEFAULT 'active',
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE,
+      FOREIGN KEY (department_id) REFERENCES departments(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_timesheets_person ON payroll_timesheets(person_id);
+    CREATE INDEX IF NOT EXISTS idx_timesheets_status ON payroll_timesheets(status);
+    CREATE INDEX IF NOT EXISTS idx_team_assign_person ON people_team_assignments(person_id);
+  `);
 }
 
 async function migrateEmployeesToPeople(db: Awaited<ReturnType<typeof getDb>>): Promise<void> {

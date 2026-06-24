@@ -19,8 +19,12 @@ import { PeopleJobApplicantsPanel } from "../../components/hq/people/PeopleJobAp
 import { PeopleOrgStructurePanel } from "../../components/hq/people/PeopleOrgStructurePanel";
 import { PeopleRolesPermissionsPanel } from "../../components/hq/people/PeopleRolesPermissionsPanel";
 import { PeoplePersonnelFilesPanel } from "../../components/hq/people/PeoplePersonnelFilesPanel";
+import { PeopleOrgChartPanel } from "../../components/hq/people/PeopleOrgChartPanel";
+import { PeopleTimesheetsPanel } from "../../components/hq/people/PeopleTimesheetsPanel";
+import { PeopleTeamAssignmentsPanel } from "../../components/hq/people/PeopleTeamAssignmentsPanel";
+import { PeopleV3WorkforceIntelligenceDashboard, PeopleV3AuraWorkforcePanel } from "../../components/hq/people/PeopleV3WorkforceIntelligenceDashboard";
 
-type Tab = "overview" | "directory" | "employees" | "volunteers" | "board" | "contractors" | "applicants" | "personnel-files" | "roles" | "org-structure" | "profile" | "departments" | "org-chart" | "scheduling" | "performance" | "incidents" | "time-clock" | "leave" | "onboarding" | "certifications";
+type Tab = "overview" | "directory" | "employees" | "volunteers" | "board" | "contractors" | "applicants" | "personnel-files" | "roles" | "org-structure" | "profile" | "departments" | "org-chart" | "scheduling" | "performance" | "incidents" | "time-clock" | "leave" | "onboarding" | "certifications" | "timesheets" | "team-assignments" | "intelligence";
 type AddModal = "document" | "training" | "certification" | "schedule" | "performance" | "department" | "background" | "signature" | "leave" | "incident" | null;
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
@@ -43,6 +47,9 @@ const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: "org-chart", label: "Org Chart", icon: Network },
   { id: "time-clock", label: "Time Clock", icon: Clock },
   { id: "leave", label: "Leave Requests", icon: Palmtree },
+  { id: "timesheets", label: "Timesheets", icon: FileText },
+  { id: "team-assignments", label: "Team Assignments", icon: Users },
+  { id: "intelligence", label: "Workforce Intel", icon: Star },
 ];
 
 const STATUS_VARIANT: Record<string, "gold" | "success" | "warning" | "danger" | "muted"> = {
@@ -114,7 +121,6 @@ const PeopleManagementCenter: React.FC = () => {
     queryFn: () => peopleApi.search(searchQ),
     enabled: searchQ.length >= 2,
   });
-  const orgChart = useQuery({ queryKey: ["people-org-chart"], queryFn: peopleApi.orgChart, enabled: tab === "org-chart" });
   const profile = useQuery({
     queryKey: ["people-profile", selectedId],
     queryFn: () => peopleApi.get(selectedId!),
@@ -694,29 +700,19 @@ const PeopleManagementCenter: React.FC = () => {
           )
         )}
 
-        {tab === "org-chart" && (
-          orgChart.isLoading ? <HqLoading /> : (
-            <div className="hq-org-chart">
-              {(orgChart.data?.departments as { id: string; name: string; code: string }[] ?? []).map((dept) => {
-                const members = (orgChart.data?.people as { id: string; name: string; role: string; departmentId: string; personType: string }[] ?? [])
-                  .filter((p) => p.departmentId === dept.id);
-                return (
-                  <div key={dept.id} className="hq-org-dept">
-                    <h3>{dept.name}</h3>
-                    <ul className="hq-org-members">
-                      {members.map((m) => (
-                        <li key={m.id} className="hq-clickable" onClick={() => openProfile(m.id)}>
-                          <strong>{m.name}</strong>
-                          <span>{m.role ?? m.personType}</span>
-                        </li>
-                      ))}
-                      {!members.length && <li className="hq-muted-text">No members assigned</li>}
-                    </ul>
-                  </div>
-                );
-              })}
+        {tab === "org-chart" && <PeopleOrgChartPanel />}
+
+        {tab === "timesheets" && <PeopleTimesheetsPanel />}
+
+        {tab === "team-assignments" && <PeopleTeamAssignmentsPanel />}
+
+        {tab === "intelligence" && (
+          <>
+            <PeopleV3WorkforceIntelligenceDashboard />
+            <div style={{ marginTop: "1.25rem" }}>
+              <PeopleV3AuraWorkforcePanel />
             </div>
-          )
+          </>
         )}
 
         {tab === "leave" && (

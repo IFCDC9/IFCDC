@@ -175,6 +175,26 @@ export const peopleApi = {
     api("/positions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
   createContractorPayment: (data: { person_id: string; description: string; amount_cents: number; payment_date?: string; grant_award_id?: string }) =>
     api("/contractor-payments", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
+
+  phase3Intelligence: () => api<Record<string, unknown>>("/operations/v3/intelligence"),
+  phase3IntelligencePlatform: () => api<Record<string, unknown>>("/operations/v3/intelligence-platform"),
+  phase3PayrollReports: () => api<{ runs: Record<string, unknown>[]; items: Record<string, unknown>[]; summary: Record<string, unknown> }>("/operations/v3/payroll-reports"),
+  phase3AuraAdvisor: (question?: string) =>
+    api<{ insight: string; offline?: boolean; executiveIntelligence: Record<string, unknown> }>(
+      "/operations/v3/aura",
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question }) }
+    ),
+  timesheets: (status?: string) => api<{ timesheets: Record<string, unknown>[] }>(`/timesheets${status ? `?status=${status}` : ""}`),
+  createTimesheet: (data: { person_id: string; period_start: string; period_end: string; notes?: string }) =>
+    api("/timesheets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
+  updateTimesheet: (id: string, status: string) =>
+    api(`/timesheets/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) }),
+  teamAssignments: (departmentId?: string) =>
+    api<{ assignments: Record<string, unknown>[] }>(`/team-assignments${departmentId ? `?department_id=${departmentId}` : ""}`),
+  createTeamAssignment: (data: { person_id: string; team_name: string; department_id?: string; role?: string }) =>
+    api("/team-assignments", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
+  updateDepartment: (id: string, data: Record<string, unknown>) =>
+    api(`/departments/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
 };
 
 export interface OrgSchedule {

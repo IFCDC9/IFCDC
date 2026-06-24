@@ -94,6 +94,37 @@ async function main() {
   const v5 = await jsonFetch(`${BASE}/api/hq/grants/funding-engine/v5/platform`, auth);
   log(v5.ok ? "pass" : "fail", "Grant Center v5 backward compatibility");
 
+  const orgChart = await jsonFetch(`${BASE}/api/hq/people/org-chart`, auth);
+  log(orgChart.ok && Array.isArray(orgChart.body?.reportingHierarchy) ? "pass" : "fail", "Organization chart hierarchy");
+
+  const intelligence = await jsonFetch(`${BASE}/api/hq/people/operations/v3/intelligence`, auth);
+  log(intelligence.ok && intelligence.body?.workforceAnalytics != null ? "pass" : "fail", "Workforce executive intelligence");
+
+  const timesheets = await jsonFetch(`${BASE}/api/hq/people/timesheets`, auth);
+  log(timesheets.ok && Array.isArray(timesheets.body?.timesheets) ? "pass" : "fail", "Timesheets module");
+
+  const teams = await jsonFetch(`${BASE}/api/hq/people/team-assignments`, auth);
+  log(teams.ok && Array.isArray(teams.body?.assignments) ? "pass" : "fail", "Team assignments");
+
+  const payrollReports = await jsonFetch(`${BASE}/api/hq/people/operations/v3/payroll-reports`, auth);
+  log(payrollReports.ok && payrollReports.body?.summary != null ? "pass" : "fail", "Payroll reports");
+
+  const opsPlatform = await jsonFetch(`${BASE}/api/hq/operations/command-center/v3/platform`, auth);
+  log(opsPlatform.ok && opsPlatform.body?.modules != null ? "pass" : "fail", "Operations command center v3");
+
+  const opsTasks = await jsonFetch(`${BASE}/api/hq/operations/tasks`, auth);
+  log(opsTasks.ok && Array.isArray(opsTasks.body?.tasks) ? "pass" : "fail", "Operations task management");
+
+  const createTask = await jsonFetch(`${BASE}/api/hq/operations/tasks`, {
+    ...auth, method: "POST", body: JSON.stringify({ title: "Phase3 readiness task", priority: "normal" }),
+  });
+  log(createTask.ok ? "pass" : "fail", "Create operations task");
+
+  const auraWorkforce = await jsonFetch(`${BASE}/api/hq/people/operations/v3/aura`, {
+    ...auth, method: "POST", body: JSON.stringify({ question: "Summarize workforce status" }),
+  });
+  log(auraWorkforce.ok && auraWorkforce.body?.insight ? "pass" : "fail", "AURA workforce advisor");
+
   console.log(`\n=== People Phase 3: ${results.pass} PASS / ${results.fail} FAIL ===\n`);
   process.exit(results.fail > 0 ? 1 : 0);
 }

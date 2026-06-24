@@ -1,6 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { PeopleTimesheetsPanel } from "./PeopleTimesheetsPanel";
 import { Clock, DollarSign, Users, Palmtree, Briefcase, Target } from "lucide-react";
 import { peopleApi } from "../../../api/peopleApi";
 import { financeApi } from "../../../api/financeApi";
@@ -15,6 +16,7 @@ const fmt = formatCurrency;
 export const PayrollTimeCenter: React.FC = () => {
   const center = useQuery({ queryKey: ["payroll-time-center"], queryFn: peopleApi.phase3PayrollTimeCenter });
   const payrollOverview = useQuery({ queryKey: ["finance-payroll-overview"], queryFn: financeApi.payrollOverview });
+  const payrollReports = useQuery({ queryKey: ["payroll-reports"], queryFn: peopleApi.phase3PayrollReports });
 
   if (center.isLoading) return <HqLoading message="Loading Payroll & Time Management Center…" />;
   const s = center.data?.summary ?? {};
@@ -114,13 +116,34 @@ export const PayrollTimeCenter: React.FC = () => {
         </HqPanel>
       </div>
 
-      {payrollOverview.data && (
-        <div style={{ marginTop: "1.25rem" }}>
-          <HqPanel title="Payroll Reporting" subtitle="Finance Center payroll run summary">
-            <p className="hq-muted-text">Active payroll staff: {payrollOverview.data.activeEmployees ?? 0} · Hours this month: {payrollOverview.data.hoursThisMonth ?? 0}</p>
-          </HqPanel>
-        </div>
-      )}
+      <div style={{ marginTop: "1.25rem" }}>
+        <PeopleTimesheetsPanel />
+      </div>
+
+      <div style={{ marginTop: "1.25rem" }}>
+        <HqPanel title="Payroll Reports" subtitle="Payroll runs, line items, and Finance Center integration">
+          <p className="hq-muted-text" style={{ marginBottom: "0.75rem" }}>
+            Active payroll staff: {payrollOverview.data?.activeEmployees ?? payrollReports.data?.summary?.activeEmployees ?? 0}
+            {" · "}Hours this month: {payrollOverview.data?.hoursThisMonth ?? payrollReports.data?.summary?.hoursThisMonth ?? 0}
+          </p>
+          <table className="hq-table">
+            <thead><tr><th>Period</th><th>Status</th><th>Net</th><th>Employees</th></tr></thead>
+            <tbody>
+              {(payrollReports.data?.runs ?? []).slice(0, 8).map((r) => (
+                <tr key={String(r.id)}>
+                  <td>{String(r.period_start ?? "—")} – {String(r.period_end ?? "—")}</td>
+                  <td><StatusBadge label={String(r.status ?? "draft")} variant={r.status === "completed" ? "success" : "muted"} /></td>
+                  <td>{fmt(Number(r.net_cents ?? 0) / 100)}</td>
+                  <td>{String(r.employee_count ?? "—")}</td>
+                </tr>
+              ))}
+              {(payrollReports.data?.runs ?? []).length === 0 && (
+                <tr><td colSpan={4} className="hq-muted-text">Payroll runs appear when processed through Finance Center.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </HqPanel>
+      </div>
     </div>
   );
 };

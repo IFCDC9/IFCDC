@@ -66,6 +66,11 @@ export const PeoplePhase3CommandCenter: React.FC<Props> = ({ onNavigateTab }) =>
             </button>
           );
         })}
+        <button type="button" className="hq-panel hq-module-card" style={{ textAlign: "left", cursor: "pointer", padding: "1rem" }} onClick={() => onNavigateTab("intelligence")}>
+          <Star size={20} style={{ color: "var(--hq-gold)", marginBottom: "0.5rem" }} />
+          <div style={{ fontWeight: 600, fontSize: "0.85rem" }}>Workforce Intelligence</div>
+          <div className="hq-muted-text" style={{ fontSize: "0.75rem", marginTop: "0.25rem" }}>AURA executive analytics</div>
+        </button>
         <button type="button" className="hq-panel hq-module-card" style={{ textAlign: "left", cursor: "pointer", padding: "1rem" }} onClick={() => onNavigateTab("org-structure")}>
           <Building2 size={20} style={{ color: "var(--hq-gold)", marginBottom: "0.5rem" }} />
           <div style={{ fontWeight: 600, fontSize: "0.85rem" }}>Organization Structure</div>

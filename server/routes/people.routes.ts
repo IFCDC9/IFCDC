@@ -26,6 +26,15 @@ import {
   listPeopleByType,
   createContractorPayment,
   ensurePtoBalance,
+  buildWorkforceIntelligencePlatform,
+  buildWorkforceExecutiveIntelligence,
+  auraWorkforceIntelligenceAdvisor,
+  buildPayrollReports,
+  listTimesheets,
+  createTimesheet,
+  updateTimesheetStatus,
+  listTeamAssignments,
+  createTeamAssignment,
 } from "../hq/peopleOperationsEngine";
 
 const router = Router();
@@ -137,22 +146,26 @@ router.post("/departments", async (req, res) => {
 });
 
 router.get("/org-chart", async (_req, res) => {
+  const structure = await buildOrganizationStructure();
+  res.json(structure);
+});
+
+router.patch("/departments/:id", async (req, res) => {
+  const { name, code, description, parent_id, head_person_id } = req.body;
   const db = await getDb();
-  const departments = await db.all("SELECT * FROM departments ORDER BY name");
-  const people = await db.all(`
-    SELECT p.id, p.first_name, p.last_name, p.person_type, p.organization_role, p.department_id, p.status
-    FROM people p WHERE p.status = 'active' ORDER BY p.last_name
-  `);
-  res.json({
-    departments,
-    people: people.map((p) => ({
-      id: (p as Record<string, unknown>).id,
-      name: `${(p as Record<string, unknown>).first_name} ${(p as Record<string, unknown>).last_name}`,
-      personType: (p as Record<string, unknown>).person_type,
-      role: (p as Record<string, unknown>).organization_role,
-      departmentId: (p as Record<string, unknown>).department_id,
-    })),
-  });
+  const now = new Date().toISOString();
+  const fields: [string, unknown][] = [];
+  if (name !== undefined) fields.push(["name", name]);
+  if (code !== undefined) fields.push(["code", code]);
+  if (description !== undefined) fields.push(["description", description]);
+  if (parent_id !== undefined) fields.push(["parent_id", parent_id]);
+  if (head_person_id !== undefined) fields.push(["head_person_id", head_person_id]);
+  if (!fields.length) return res.status(400).json({ error: "No valid fields" });
+  await db.run(
+    `UPDATE departments SET ${fields.map(([k]) => `${k} = ?`).join(", ")}, updated_at = ? WHERE id = ?`,
+    ...fields.map(([, v]) => v), now, req.params.id
+  );
+  res.json({ department: await db.get("SELECT * FROM departments WHERE id = ?", req.params.id) });
 });
 
 router.get("/", async (req, res) => {
@@ -263,6 +276,22 @@ router.patch("/leave-requests/:leaveId", async (req: Request, res: Response) => 
   );
   if (status === "approved") {
     await db.run("UPDATE people SET status = 'on_leave' WHERE id = ?", row.person_id);
+    const lr = await db.get<{ leave_type: string; hours: number | null; start_date: string; end_date: string }>(
+      "SELECT leave_type, hours, start_date, end_date FROM leave_requests WHERE id = ?", req.params.leaveId
+    );
+    if (lr) {
+      await ensurePtoBalance(row.person_id);
+      const hours = lr.hours ?? Math.max(1, Math.ceil(
+        (new Date(lr.end_date).getTime() - new Date(lr.start_date).getTime()) / 86400000
+      )) * 8;
+      if (lr.leave_type === "sick") {
+        await db.run("UPDATE pto_balances SET used_sick = used_sick + ?, updated_at = ? WHERE person_id = ?",
+          hours, now, row.person_id);
+      } else {
+        await db.run("UPDATE pto_balances SET used_pto = used_pto + ?, updated_at = ? WHERE person_id = ?",
+          hours, now, row.person_id);
+      }
+    }
   } else if (status === "denied" || status === "cancelled") {
     await db.run("UPDATE people SET status = 'active' WHERE id = ? AND status = 'on_leave'", row.person_id);
   }
@@ -430,6 +459,60 @@ router.get("/operations/v3/roles-permissions", (_req, res) => {
   res.json(getRolesPermissionsMatrix());
 });
 
+router.get("/operations/v3/intelligence", async (_req, res) => {
+  res.json(await buildWorkforceExecutiveIntelligence());
+});
+
+router.get("/operations/v3/intelligence-platform", async (_req, res) => {
+  res.json(await buildWorkforceIntelligencePlatform());
+});
+
+router.get("/operations/v3/payroll-reports", async (_req, res) => {
+  res.json(await buildPayrollReports());
+});
+
+router.post("/operations/v3/aura", async (req, res) => {
+  try {
+    const result = await auraWorkforceIntelligenceAdvisor({ question: req.body?.question });
+    res.json(result);
+  } catch (e) {
+    console.error("AURA workforce intelligence error:", e);
+    res.status(500).json({ error: "AURA advisor unavailable" });
+  }
+});
+
+router.get("/timesheets", async (req, res) => {
+  res.json({ timesheets: await listTimesheets(req.query.status as string | undefined) });
+});
+
+router.post("/timesheets", async (req: Request, res: Response) => {
+  const { person_id, period_start, period_end } = req.body;
+  if (!person_id || !period_start || !period_end) {
+    return res.status(400).json({ error: "person_id, period_start, and period_end are required" });
+  }
+  const timesheet = await createTimesheet(req.body, { email: req.hqUser?.email });
+  res.status(201).json({ timesheet });
+});
+
+router.patch("/timesheets/:id", async (req: Request, res: Response) => {
+  const { status } = req.body;
+  if (!status) return res.status(400).json({ error: "status is required" });
+  const timesheet = await updateTimesheetStatus(req.params.id, status, { email: req.hqUser?.email });
+  if (!timesheet) return res.status(404).json({ error: "Timesheet not found" });
+  res.json({ timesheet });
+});
+
+router.get("/team-assignments", async (req, res) => {
+  res.json({ assignments: await listTeamAssignments(req.query.department_id as string | undefined) });
+});
+
+router.post("/team-assignments", async (req: Request, res: Response) => {
+  const { person_id, team_name } = req.body;
+  if (!person_id || !team_name) return res.status(400).json({ error: "person_id and team_name are required" });
+  const assignment = await createTeamAssignment(req.body, { email: req.hqUser?.email });
+  res.status(201).json({ assignment });
+});
+
 router.get("/operations/v3/directory/:type", async (req, res) => {
   const people = await listPeopleByType(req.params.type, Number(req.query.limit ?? 100));
   res.json({ people, personType: req.params.type });
@@ -575,6 +658,7 @@ router.patch("/:id", async (req: Request, res: Response) => {
     "enterprise_role", "department_id", "status", "contact_address", "emergency_contact",
     "emergency_phone", "location", "start_date", "end_date", "notes", "pay_rate",
     "pay_type", "payroll_status", "person_type", "linked_external_id",
+    "reports_to_person_id", "position_id",
   ];
 
   const sets: string[] = [];
