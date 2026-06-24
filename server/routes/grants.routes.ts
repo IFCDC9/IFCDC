@@ -43,6 +43,11 @@ import {
   matchGrantsForDivision,
   buildAuraFundingIntelligenceV2,
   listDocumentChecklist,
+  buildFundingEngineDashboard,
+  buildGrantFinanceConnection,
+  scoreOpportunityDual,
+  updateOpportunityFundingStatus,
+  buildAuraFundingRecommendations,
 } from "../hq/grantFundingEngineV2";
 
 const router = Router();
@@ -779,11 +784,28 @@ router.get("/opportunities/search", async (req, res) => {
 });
 
 router.post("/opportunities/:id/score", async (req, res) => {
+  const useDual = req.body?.dual !== false;
+  if (useDual) {
+    const result = await scoreOpportunityDual(req.params.id, {
+      divisionSlug: req.body?.divisionSlug,
+      actorEmail: req.hqUser?.email,
+    });
+    if (!result) return res.status(404).json({ error: "Opportunity not found" });
+    return res.json(result);
+  }
   const result = await scoreOpportunityEligibility(req.params.id, {
     divisionSlug: req.body?.divisionSlug,
     actorEmail: req.hqUser?.email,
   });
   if (!result) return res.status(404).json({ error: "Opportunity not found" });
+  res.json(result);
+});
+
+router.patch("/opportunities/:id/funding-status", async (req, res) => {
+  const { fundingStatus } = req.body ?? {};
+  if (!fundingStatus) return res.status(400).json({ error: "fundingStatus is required" });
+  const result = await updateOpportunityFundingStatus(req.params.id, fundingStatus, req.hqUser?.email);
+  if (!result.ok) return res.status(400).json(result);
   res.json(result);
 });
 
@@ -809,6 +831,18 @@ router.post("/applications/:id/workflow", async (req, res) => {
 
 router.get("/funding-engine/v2/pipeline", async (_req, res) => {
   res.json(await buildV2FundingPipeline());
+});
+
+router.get("/funding-engine/v2/dashboard", async (_req, res) => {
+  res.json(await buildFundingEngineDashboard());
+});
+
+router.get("/funding-engine/v2/finance", async (_req, res) => {
+  res.json(await buildGrantFinanceConnection());
+});
+
+router.get("/funding-engine/v2/recommendations", async (_req, res) => {
+  res.json(await buildAuraFundingRecommendations());
 });
 
 router.get("/funding-engine/v2/analytics", async (_req, res) => {
@@ -842,7 +876,11 @@ router.post("/funding-engine/v2/aura", async (req, res) => {
 
 router.get("/opportunities/live", async (req, res) => {
   const limit = Number(req.query.limit ?? 50);
-  res.json({ opportunities: await listLiveGrantOpportunities(limit), generatedAt: new Date().toISOString() });
+  const fundingStatus = req.query.fundingStatus as string | undefined;
+  res.json({
+    opportunities: await listLiveGrantOpportunities(limit, { fundingStatus }),
+    generatedAt: new Date().toISOString(),
+  });
 });
 
 router.get("/documents/checklist", async (req, res) => {

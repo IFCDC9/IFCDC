@@ -12,14 +12,38 @@ import {
   scoreOpportunityEligibility,
 } from "./grantFundingEngine";
 
-export const V2_PIPELINE_STAGES = [
-  "Identified",
-  "In Progress",
-  "Submitted",
-  "Awarded",
-  "Declined",
-  "Renewals",
+export const GRANT_FUNDING_STATUSES = [
+  "identified",
+  "reviewing",
+  "eligible",
+  "in_progress",
+  "submitted",
+  "awarded",
+  "declined",
+  "renewal",
 ] as const;
+
+export const GRANT_FUNDING_STATUS_LABELS: Record<(typeof GRANT_FUNDING_STATUSES)[number], string> = {
+  identified: "Identified",
+  reviewing: "Reviewing",
+  eligible: "Eligible",
+  in_progress: "In Progress",
+  submitted: "Submitted",
+  awarded: "Awarded",
+  declined: "Declined",
+  renewal: "Renewal",
+};
+
+/** @deprecated Use GRANT_FUNDING_STATUSES — kept for backward compatibility */
+export const V2_PIPELINE_STAGES = GRANT_FUNDING_STATUSES.map((s) => GRANT_FUNDING_STATUS_LABELS[s]);
+
+function gradeFromScore(score: number): string {
+  if (score >= 85) return "A";
+  if (score >= 70) return "B";
+  if (score >= 55) return "C";
+  if (score >= 40) return "D";
+  return "F";
+}
 
 function parseJsonArray(raw: unknown): string[] {
   if (!raw) return [];
@@ -36,19 +60,28 @@ export async function buildV2FundingPipeline() {
   const db = await getDb();
 
   const identified = await db.get<{ c: number; t: number }>(
-    "SELECT COUNT(*) as c, COALESCE(SUM(amount_max), 0) as t FROM grant_opportunities WHERE status = 'open' AND COALESCE(is_live, 1) = 1"
+    `SELECT COUNT(*) as c, COALESCE(SUM(amount_max), 0) as t FROM grant_opportunities
+     WHERE COALESCE(is_live, 1) = 1 AND COALESCE(funding_status, 'identified') = 'identified'`
+  );
+  const reviewing = await db.get<{ c: number; t: number }>(
+    `SELECT COUNT(*) as c, COALESCE(SUM(amount_max), 0) as t FROM grant_opportunities
+     WHERE COALESCE(is_live, 1) = 1 AND funding_status = 'reviewing'`
+  );
+  const eligible = await db.get<{ c: number; t: number }>(
+    `SELECT COUNT(*) as c, COALESCE(SUM(amount_max), 0) as t FROM grant_opportunities
+     WHERE COALESCE(is_live, 1) = 1 AND funding_status = 'eligible'`
   );
   const inProgress = await db.get<{ c: number; t: number }>(
-    "SELECT COUNT(*) as c, COALESCE(SUM(amount_requested), 0) as t FROM grant_applications WHERE status = 'draft'"
+    `SELECT COUNT(*) as c, COALESCE(SUM(amount_requested), 0) as t FROM grant_applications WHERE status = 'draft'`
   );
   const submitted = await db.get<{ c: number; t: number }>(
-    "SELECT COUNT(*) as c, COALESCE(SUM(amount_requested), 0) as t FROM grant_applications WHERE status = 'submitted'"
+    `SELECT COUNT(*) as c, COALESCE(SUM(amount_requested), 0) as t FROM grant_applications WHERE status IN ('submitted', 'under_review')`
   );
   const awarded = await db.get<{ c: number; t: number }>(
-    "SELECT COUNT(*) as c, COALESCE(SUM(amount), 0) as t FROM grant_awards WHERE status = 'active'"
+    `SELECT COUNT(*) as c, COALESCE(SUM(amount), 0) as t FROM grant_awards WHERE status = 'active'`
   );
   const declined = await db.get<{ c: number; t: number }>(
-    "SELECT COUNT(*) as c, COALESCE(SUM(amount_requested), 0) as t FROM grant_applications WHERE status = 'denied'"
+    `SELECT COUNT(*) as c, COALESCE(SUM(amount_requested), 0) as t FROM grant_applications WHERE status = 'denied'`
   );
   const renewals = await db.get<{ c: number; t: number }>(`
     SELECT COUNT(*) as c, COALESCE(SUM(ga.amount), 0) as t
@@ -59,15 +92,17 @@ export async function buildV2FundingPipeline() {
 
   const stages = [
     { stage: "Identified", count: identified?.c ?? 0, value: identified?.t ?? 0, statusKey: "identified" },
+    { stage: "Reviewing", count: reviewing?.c ?? 0, value: reviewing?.t ?? 0, statusKey: "reviewing" },
+    { stage: "Eligible", count: eligible?.c ?? 0, value: eligible?.t ?? 0, statusKey: "eligible" },
     { stage: "In Progress", count: inProgress?.c ?? 0, value: inProgress?.t ?? 0, statusKey: "in_progress" },
     { stage: "Submitted", count: submitted?.c ?? 0, value: submitted?.t ?? 0, statusKey: "submitted" },
     { stage: "Awarded", count: awarded?.c ?? 0, value: awarded?.t ?? 0, statusKey: "awarded" },
     { stage: "Declined", count: declined?.c ?? 0, value: declined?.t ?? 0, statusKey: "declined" },
-    { stage: "Renewals", count: renewals?.c ?? 0, value: renewals?.t ?? 0, statusKey: "renewals" },
+    { stage: "Renewal", count: renewals?.c ?? 0, value: renewals?.t ?? 0, statusKey: "renewal" },
   ];
 
   const totalValue = stages.reduce((s, x) => s + x.value, 0);
-  return { stages, totalValue, generatedAt: new Date().toISOString() };
+  return { stages, totalValue, statuses: GRANT_FUNDING_STATUSES, generatedAt: new Date().toISOString() };
 }
 
 export async function buildExecutiveFundingAnalytics() {
@@ -120,7 +155,12 @@ export async function buildExecutiveFundingAnalytics() {
 
   const totalGap = fundingGaps.reduce((s, g) => s + g.gap, 0);
 
+  const totalOpportunities = (await db.get<{ c: number }>(
+    `SELECT COUNT(*) as c FROM grant_opportunities WHERE COALESCE(is_live, 1) = 1 AND status IN ('open', 'active', 'researching')`
+  ))?.c ?? 0;
+
   return {
+    totalOpportunities,
     totalRequested,
     totalAwarded,
     totalPending,
@@ -205,28 +245,308 @@ export async function getDivisionFundingProfile(slug: string) {
   return { ...profile, topMatches: matches.matches };
 }
 
-export async function listLiveGrantOpportunities(limit = 50) {
+export async function listLiveGrantOpportunities(limit = 50, opts?: { fundingStatus?: string }) {
   const db = await getDb();
+  const params: unknown[] = [];
+  let statusFilter = "";
+  if (opts?.fundingStatus) {
+    statusFilter = " AND COALESCE(o.funding_status, 'identified') = ?";
+    params.push(opts.fundingStatus);
+  }
+  params.push(limit);
+
   const rows = (await db.all(`
     SELECT o.*,
       (SELECT score FROM grant_opportunity_scores WHERE opportunity_id = o.id ORDER BY created_at DESC LIMIT 1) as latest_score,
-      (SELECT grade FROM grant_opportunity_scores WHERE opportunity_id = o.id ORDER BY created_at DESC LIMIT 1) as latest_grade
+      (SELECT grade FROM grant_opportunity_scores WHERE opportunity_id = o.id ORDER BY created_at DESC LIMIT 1) as latest_grade,
+      (SELECT strategic_fit_score FROM grant_opportunity_scores WHERE opportunity_id = o.id ORDER BY created_at DESC LIMIT 1) as strategic_fit_score,
+      (SELECT strategic_fit_grade FROM grant_opportunity_scores WHERE opportunity_id = o.id ORDER BY created_at DESC LIMIT 1) as strategic_fit_grade
     FROM grant_opportunities o
-    WHERE o.status IN ('open', 'active', 'researching') AND COALESCE(o.is_live, 1) = 1
+    WHERE o.status IN ('open', 'active', 'researching') AND COALESCE(o.is_live, 1) = 1${statusFilter}
     ORDER BY CASE WHEN o.deadline IS NULL THEN 1 ELSE 0 END, o.deadline ASC, o.updated_at DESC
     LIMIT ?
-  `, limit)) as Record<string, unknown>[];
+  `, ...params)) as Record<string, unknown>[];
 
   return rows.map((row) => ({
     ...(row as Record<string, unknown>),
     program_areas: parseJsonArray(row.program_areas),
     division_slugs: parseJsonArray(row.division_slugs),
     match_tags: parseJsonArray(row.match_tags),
+    fundingStatus: String(row.funding_status ?? "identified"),
     daysUntilDeadline: row.deadline
       ? Math.ceil((new Date(String(row.deadline)).getTime() - Date.now()) / 86400000)
       : null,
     isLive: Boolean(row.is_live ?? 1),
   })) as Record<string, unknown>[];
+}
+
+export async function computeStrategicFitScore(
+  opportunityId: string,
+  divisionSlug?: string
+): Promise<{ score: number; grade: string; factors: { factor: string; score: number; max: number; detail: string }[] } | null> {
+  const db = await getDb();
+  const opp = await db.get("SELECT * FROM grant_opportunities WHERE id = ?", opportunityId) as Record<string, unknown> | undefined;
+  if (!opp) return null;
+
+  const factors: { factor: string; score: number; max: number; detail: string }[] = [];
+  let total = 0;
+  const add = (factor: string, score: number, max: number, detail: string) => {
+    factors.push({ factor, score, max, detail });
+    total += score;
+  };
+
+  const divisions = parseJsonArray(opp.division_slugs);
+  const targetDivision = divisionSlug ?? divisions[0];
+  const division = IFCDC_FUNDING_DIVISIONS.find((d) => d.slug === targetDivision);
+  const profile = targetDivision
+    ? await db.get<{ funding_goal: number; awarded_total: number; pipeline_value: number; priority_level: number; program_areas: string }>(
+        "SELECT funding_goal, awarded_total, pipeline_value, priority_level, program_areas FROM grant_division_profiles WHERE slug = ?",
+        targetDivision
+      )
+    : null;
+
+  if (targetDivision && divisions.includes(targetDivision)) {
+    add("Program alignment", 25, 25, `Direct fit for ${targetDivision}`);
+  } else if (divisions.length > 0) {
+    add("Program alignment", 15, 25, `Cross-division: ${divisions.join(", ")}`);
+  } else {
+    add("Program alignment", 8, 25, "General IFCDC mission fit");
+  }
+
+  const fundingGoal = Number(profile?.funding_goal ?? 100000);
+  const awardedTotal = Number(profile?.awarded_total ?? 0);
+  const gapRatio = fundingGoal > 0 ? Math.min(1, (fundingGoal - awardedTotal) / fundingGoal) : 0.5;
+  add("Funding gap priority", Math.round(gapRatio * 30), 30, gapRatio > 0.5 ? "High unmet funding need" : "Moderate funding need");
+
+  const priorityLevel = Number(profile?.priority_level ?? 5);
+  add("Division priority", Math.max(5, 20 - priorityLevel * 2), 20, `Priority level ${priorityLevel}`);
+
+  const oppAreas = parseJsonArray(opp.program_areas);
+  const divAreas = profile?.program_areas ? parseJsonArray(profile.program_areas) : (division?.programs ?? []);
+  const overlap = oppAreas.filter((a) => divAreas.some((d) => d.includes(a) || a.includes(d))).length;
+  if (overlap > 0) add("Program area overlap", Math.min(15, overlap * 5), 15, `${overlap} shared program areas`);
+  else add("Program area overlap", 5, 15, "Review program alignment");
+
+  const capacityRatio = fundingGoal > 0 ? awardedTotal / fundingGoal : 0;
+  if (capacityRatio < 0.5) add("Capacity headroom", 10, 10, "Room to absorb new awards");
+  else if (capacityRatio < 0.85) add("Capacity headroom", 6, 10, "Moderate award capacity");
+  else add("Capacity headroom", 2, 10, "Near funding goal — prioritize renewals");
+
+  const score = Math.min(100, total);
+  return { score, grade: gradeFromScore(score), factors };
+}
+
+export async function scoreOpportunityDual(
+  opportunityId: string,
+  opts?: { divisionSlug?: string; actorEmail?: string }
+) {
+  const db = await getDb();
+
+  await db.run(
+    `UPDATE grant_opportunities SET funding_status = 'reviewing' WHERE id = ? AND funding_status IN ('identified', 'eligible')`,
+    opportunityId
+  );
+
+  const eligibility = await scoreOpportunityEligibility(opportunityId, opts);
+  if (!eligibility) return null;
+
+  const strategic = await computeStrategicFitScore(opportunityId, opts?.divisionSlug);
+  if (strategic) {
+    await db.run(
+      `UPDATE grant_opportunity_scores SET strategic_fit_score = ?, strategic_fit_grade = ?
+       WHERE id = (SELECT id FROM grant_opportunity_scores WHERE opportunity_id = ? ORDER BY created_at DESC LIMIT 1)`,
+      strategic.score,
+      strategic.grade,
+      opportunityId
+    );
+  }
+
+  if (eligibility.score >= 60 && (strategic?.score ?? 0) >= 50) {
+    await db.run(
+      `UPDATE grant_opportunities SET funding_status = 'eligible' WHERE id = ? AND funding_status IN ('identified', 'reviewing')`,
+      opportunityId
+    );
+  }
+
+  await logHqAudit({
+    action: "grant_dual_scored",
+    entityType: "grant_opportunity",
+    entityId: opportunityId,
+    detail: `Eligibility ${eligibility.score}% · Strategic fit ${strategic?.score ?? 0}%`,
+    actorEmail: opts?.actorEmail,
+  }).catch(() => undefined);
+
+  return {
+    opportunityId,
+    eligibilityScore: eligibility.score,
+    eligibilityGrade: eligibility.grade,
+    strategicFitScore: strategic?.score ?? 0,
+    strategicFitGrade: strategic?.grade ?? "—",
+    score: eligibility.score,
+    grade: eligibility.grade,
+    factors: eligibility.factors,
+    strategicFactors: strategic?.factors ?? [],
+    fundingStatus: eligibility.score >= 60 && (strategic?.score ?? 0) >= 50 ? "eligible" : "reviewing",
+  };
+}
+
+export async function updateOpportunityFundingStatus(
+  opportunityId: string,
+  fundingStatus: string,
+  actorEmail?: string
+) {
+  if (!GRANT_FUNDING_STATUSES.includes(fundingStatus as (typeof GRANT_FUNDING_STATUSES)[number])) {
+    return { ok: false, error: "Invalid funding status" };
+  }
+  const db = await getDb();
+  const opp = await db.get("SELECT id FROM grant_opportunities WHERE id = ?", opportunityId);
+  if (!opp) return { ok: false, error: "Opportunity not found" };
+
+  await db.run(
+    "UPDATE grant_opportunities SET funding_status = ?, updated_at = ? WHERE id = ?",
+    fundingStatus,
+    new Date().toISOString(),
+    opportunityId
+  );
+
+  await logHqAudit({
+    action: "grant_funding_status_updated",
+    entityType: "grant_opportunity",
+    entityId: opportunityId,
+    detail: `Status → ${fundingStatus}`,
+    actorEmail,
+  }).catch(() => undefined);
+
+  return { ok: true, fundingStatus };
+}
+
+export async function buildGrantFinanceConnection() {
+  const db = await getDb();
+
+  const budgetSummary = await db.get<{ linked: number; allocated: number; spent: number }>(`
+    SELECT COUNT(*) as linked, COALESCE(SUM(allocated), 0) as allocated, COALESCE(SUM(spent), 0) as spent
+    FROM finance_budgets WHERE category = 'grants' OR grant_id IS NOT NULL
+  `);
+
+  const complianceDue = (await db.get<{ c: number }>(
+    `SELECT COUNT(*) as c FROM grant_compliance WHERE status = 'pending' AND due_date <= date('now', '+14 days')`
+  ))?.c ?? 0;
+
+  const restrictions = (await db.all(`
+    SELECT ga.id as award_id, COALESCE(o.title, a.title, 'Grant Award') as title, ga.amount, fb.allocated, fb.spent,
+      (fb.allocated - fb.spent) as remaining, ga.finance_budget_id
+    FROM grant_awards ga
+    LEFT JOIN finance_budgets fb ON fb.id = ga.finance_budget_id
+    LEFT JOIN grant_opportunities o ON o.id = ga.opportunity_id
+    LEFT JOIN grant_applications a ON a.id = ga.application_id
+    WHERE ga.status = 'active' AND fb.id IS NOT NULL
+    ORDER BY (fb.allocated - fb.spent) ASC LIMIT 10
+  `)) as Record<string, unknown>[];
+
+  const spendingAlerts = restrictions.filter((r) => {
+    const allocated = Number(r.allocated ?? 0);
+    const spent = Number(r.spent ?? 0);
+    return allocated > 0 && spent / allocated > 0.85;
+  });
+
+  return {
+    linkedBudgets: budgetSummary?.linked ?? 0,
+    totalAllocated: budgetSummary?.allocated ?? 0,
+    totalSpent: budgetSummary?.spent ?? 0,
+    totalRemaining: (budgetSummary?.allocated ?? 0) - (budgetSummary?.spent ?? 0),
+    complianceDue,
+    spendingAlerts: spendingAlerts.length,
+    budgetRestrictions: restrictions.map((r) => ({
+      awardId: r.award_id,
+      title: r.title,
+      allocated: Number(r.allocated ?? 0),
+      spent: Number(r.spent ?? 0),
+      remaining: Number(r.remaining ?? 0),
+      financeBudgetId: r.finance_budget_id,
+    })),
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+export async function buildAuraFundingRecommendations() {
+  const [analytics, liveOpps, profiles] = await Promise.all([
+    buildExecutiveFundingAnalytics(),
+    listLiveGrantOpportunities(20),
+    buildDivisionFundingProfiles(),
+  ]);
+
+  const priorityGrants = liveOpps
+    .filter((o) => Number(o.latest_score ?? 0) >= 55 || Number(o.strategic_fit_score ?? 0) >= 55)
+    .sort((a, b) => (Number(b.latest_score ?? 0) + Number(b.strategic_fit_score ?? 0))
+      - (Number(a.latest_score ?? 0) + Number(a.strategic_fit_score ?? 0)))
+    .slice(0, 5)
+    .map((o) => ({
+      id: o.id,
+      title: String(o.title ?? ""),
+      funder: String(o.funder ?? ""),
+      amount: o.amount_max,
+      deadline: o.deadline,
+      eligibilityScore: o.latest_score,
+      strategicFitScore: o.strategic_fit_score,
+      fundingStatus: o.fundingStatus,
+    }));
+
+  const divisionPriorities = analytics.fundingGaps.slice(0, 5);
+  const actions: string[] = [];
+
+  if (analytics.upcomingDeadlines > 0) {
+    actions.push(`Review ${analytics.upcomingDeadlines} grant deadlines within 30 days`);
+  }
+  if (analytics.complianceDue > 0) {
+    actions.push(`Complete ${analytics.complianceDue} compliance reports due within 14 days`);
+  }
+  if (divisionPriorities[0]?.gap > 0) {
+    actions.push(`Prioritize ${divisionPriorities[0].label} — $${divisionPriorities[0].gap.toLocaleString()} funding gap`);
+  }
+  if (priorityGrants.length > 0) {
+    actions.push(`Pursue ${String(priorityGrants[0].title)} — strong eligibility and strategic fit`);
+  }
+  if (!actions.length) {
+    actions.push("Pipeline healthy — maintain grant discovery and division profile updates");
+  }
+
+  return {
+    priorityGrants,
+    divisionPriorities,
+    actions,
+    capacityEstimate: analytics.totalAwarded + analytics.projectedRevenue - analytics.totalPending,
+    programProfiles: profiles.length,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+export async function buildFundingEngineDashboard() {
+  const [totals, pipeline, profiles, finance, auraRecommendations] = await Promise.all([
+    buildExecutiveFundingAnalytics(),
+    buildV2FundingPipeline(),
+    buildDivisionFundingProfiles(),
+    buildGrantFinanceConnection(),
+    buildAuraFundingRecommendations(),
+  ]);
+
+  return {
+    totals: {
+      totalOpportunities: totals.totalOpportunities,
+      totalRequested: totals.totalRequested,
+      totalAwarded: totals.totalAwarded,
+      totalPending: totals.totalPending,
+      upcomingDeadlines: totals.upcomingDeadlines,
+    },
+    pipeline,
+    profiles,
+    finance,
+    auraRecommendations,
+    fundingGaps: totals.fundingGaps,
+    projectedRevenue: totals.projectedRevenue,
+    winRate: totals.winRate,
+    statuses: GRANT_FUNDING_STATUSES.map((s) => ({ key: s, label: GRANT_FUNDING_STATUS_LABELS[s] })),
+    generatedAt: new Date().toISOString(),
+  };
 }
 
 export async function matchGrantsForDivision(
@@ -245,37 +565,54 @@ export async function matchGrantsForDivision(
   const matches = await Promise.all(
     opportunities.map(async (opp) => {
       const oppId = String((opp as Record<string, unknown>).id);
-      let scoreResult: { score: number; grade: string; factors: unknown[] } | null = null;
+      let eligibilityScore = 0;
+      let eligibilityGrade = "—";
+      let strategicFitScore = 0;
+      let strategicFitGrade = "—";
+      let factors: unknown[] = [];
 
       if (opts?.persistScores !== false) {
-        scoreResult = await scoreOpportunityEligibility(oppId, {
-          divisionSlug,
-          actorEmail: opts?.actorEmail,
-        });
+        const dual = await scoreOpportunityDual(oppId, { divisionSlug, actorEmail: opts?.actorEmail });
+        if (dual) {
+          eligibilityScore = dual.eligibilityScore;
+          eligibilityGrade = dual.eligibilityGrade;
+          strategicFitScore = dual.strategicFitScore;
+          strategicFitGrade = dual.strategicFitGrade;
+          factors = dual.factors;
+        }
       } else {
-        const latest = await db.get<{ score: number; grade: string; factors_json: string }>(
-          `SELECT score, grade, factors_json FROM grant_opportunity_scores WHERE opportunity_id = ? AND division_slug = ?
-           ORDER BY created_at DESC LIMIT 1`,
+        const latest = await db.get<{ score: number; grade: string; factors_json: string; strategic_fit_score: number | null; strategic_fit_grade: string | null }>(
+          `SELECT score, grade, factors_json, strategic_fit_score, strategic_fit_grade FROM grant_opportunity_scores
+           WHERE opportunity_id = ? AND division_slug = ? ORDER BY created_at DESC LIMIT 1`,
           oppId,
           divisionSlug
         );
         if (latest) {
-          scoreResult = {
-            score: latest.score,
-            grade: latest.grade,
-            factors: JSON.parse(latest.factors_json || "[]"),
-          };
+          eligibilityScore = latest.score;
+          eligibilityGrade = latest.grade;
+          strategicFitScore = latest.strategic_fit_score ?? 0;
+          strategicFitGrade = latest.strategic_fit_grade ?? "—";
+          factors = JSON.parse(latest.factors_json || "[]");
         } else {
-          const scored = await scoreOpportunityEligibility(oppId, { divisionSlug, actorEmail: opts?.actorEmail });
-          if (scored) scoreResult = { score: scored.score, grade: scored.grade, factors: scored.factors };
+          const scored = await scoreOpportunityDual(oppId, { divisionSlug, actorEmail: opts?.actorEmail });
+          if (scored) {
+            eligibilityScore = scored.eligibilityScore;
+            eligibilityGrade = scored.eligibilityGrade;
+            strategicFitScore = scored.strategicFitScore;
+            strategicFitGrade = scored.strategicFitGrade;
+            factors = scored.factors;
+          }
         }
       }
 
       return {
         ...opp,
-        matchScore: scoreResult?.score ?? 0,
-        matchGrade: scoreResult?.grade ?? "—",
-        factors: scoreResult?.factors ?? [],
+        matchScore: eligibilityScore,
+        matchGrade: eligibilityGrade,
+        eligibilityScore,
+        strategicFitScore,
+        strategicFitGrade,
+        factors,
         divisionSlug,
         programs: division.programs,
       };

@@ -122,6 +122,7 @@ export async function ensureGrantTables(): Promise<void> {
   await migrateGrantPhase2();
   await migrateGrantPhase3();
   await migrateGrantPhase4();
+  await migrateGrantPhase5();
   const count = await db.get<{ c: number }>("SELECT COUNT(*) as c FROM grant_opportunities");
   if (count && count.c === 0) {
     const now = new Date().toISOString();
@@ -466,6 +467,54 @@ async function migrateGrantPhase4(): Promise<void> {
       now
     );
   }
+}
+
+/** Phase 5 — Funding Engine Buildout: unified statuses, strategic fit scoring. */
+async function migrateGrantPhase5(): Promise<void> {
+  const db = await getDb();
+
+  const addCol = async (table: string, col: string, type: string) => {
+    try {
+      await db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+    } catch {
+      /* exists */
+    }
+  };
+
+  await addCol("grant_opportunities", "funding_status", "TEXT DEFAULT 'identified'");
+  await addCol("grant_opportunity_scores", "strategic_fit_score", "INTEGER");
+  await addCol("grant_opportunity_scores", "strategic_fit_grade", "TEXT");
+
+  await db.run(
+    `UPDATE grant_opportunities SET funding_status = 'identified'
+     WHERE funding_status IS NULL AND status IN ('open', 'active', 'researching')`
+  );
+
+  await db.run(`
+    UPDATE grant_opportunities SET funding_status = 'in_progress'
+    WHERE id IN (SELECT opportunity_id FROM grant_applications WHERE status = 'draft')
+  `);
+  await db.run(`
+    UPDATE grant_opportunities SET funding_status = 'submitted'
+    WHERE id IN (SELECT opportunity_id FROM grant_applications WHERE status IN ('submitted', 'under_review'))
+  `);
+  await db.run(`
+    UPDATE grant_opportunities SET funding_status = 'awarded'
+    WHERE id IN (SELECT opportunity_id FROM grant_awards WHERE status = 'active')
+  `);
+  await db.run(`
+    UPDATE grant_opportunities SET funding_status = 'declined'
+    WHERE id IN (SELECT opportunity_id FROM grant_applications WHERE status = 'denied')
+  `);
+
+  await db.run(`
+    UPDATE grant_opportunities SET funding_status = 'eligible'
+    WHERE funding_status = 'identified'
+      AND id IN (
+        SELECT opportunity_id FROM grant_opportunity_scores
+        WHERE score >= 60 GROUP BY opportunity_id
+      )
+  `);
 }
 
 async function enrichSeedOpportunities(): Promise<void> {
