@@ -1,12 +1,12 @@
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { TrendingUp, Award, FileText, AlertTriangle, Wallet, RefreshCw, Calendar } from "lucide-react";
-import { grantsApi } from "../../api/grantsApi";
+import { grantsApi } from "../../../api/grantsApi";
 import { KpiCard } from "../KpiCard";
 import { HqPanel } from "../HqPanel";
 import { StatusBadge } from "../StatusBadge";
 import { HqLoading } from "../HqLoading";
-import { formatCurrency } from "../../utils/safeFormat";
+import { formatCurrency } from "../../../utils/safeFormat";
 
 const fmt = formatCurrency;
 
