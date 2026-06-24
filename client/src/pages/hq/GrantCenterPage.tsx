@@ -12,6 +12,7 @@ import { HqPanel } from "../../components/hq/HqPanel";
 import { StatusBadge } from "../../components/hq/StatusBadge";
 import { HqLoading } from "../../components/hq/HqLoading";
 import { formatCurrency } from "../../utils/safeFormat";
+import { GrantFundingEngineDashboard } from "../../components/hq/grants/GrantFundingEngineDashboard";
 import { GrantFundingEngineOverview } from "../../components/hq/grants/GrantFundingEngineOverview";
 import { GrantOpportunityDatabase } from "../../components/hq/grants/GrantOpportunityDatabase";
 import { GrantApplicationWorkflowPanel } from "../../components/hq/grants/GrantApplicationWorkflowPanel";
@@ -200,7 +201,7 @@ const GrantCenterPage: React.FC = () => {
       <div className="hq-tab-content hq-fade-in">
         {tab === "overview" && (
           <>
-            <GrantV2ExecutiveAnalytics />
+            <GrantFundingEngineDashboard />
             <div style={{ marginTop: "1.25rem" }}>
               <GrantFundingEngineOverview />
             </div>

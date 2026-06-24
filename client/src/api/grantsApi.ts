@@ -226,10 +226,26 @@ export const grantsApi = {
     return apiFetch<{ opportunities: GrantOpportunity[] }>(`/opportunities/search?${qs}`);
   },
   scoreOpportunity: (id: string, divisionSlug?: string) =>
-    apiFetch<{ opportunityId: string; score: number; grade: string; factors: { factor: string; score: number; max: number; detail: string }[] }>(
+    apiFetch<{
+      opportunityId: string;
+      eligibilityScore?: number;
+      eligibilityGrade?: string;
+      strategicFitScore?: number;
+      strategicFitGrade?: string;
+      score?: number;
+      grade?: string;
+      factors: { factor: string; score: number; max: number; detail: string }[];
+      fundingStatus?: string;
+    }>(
       `/opportunities/${id}/score`,
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ divisionSlug }) }
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ divisionSlug, dual: true }) }
     ),
+  updateFundingStatus: (id: string, fundingStatus: string) =>
+    apiFetch<{ ok: boolean; fundingStatus: string }>(`/opportunities/${id}/funding-status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fundingStatus }),
+    }),
   applicationWorkflow: (applicationId: string) =>
     apiFetch<{ applicationId: string; status: string; workflowStage: string; steps: Record<string, unknown>[] }>(
       `/applications/${applicationId}/workflow`
@@ -249,8 +265,65 @@ export const grantsApi = {
     apiFetch<{ stages: { stage: string; count: number; value: number; statusKey: string }[]; totalValue: number; generatedAt: string }>(
       "/funding-engine/v2/pipeline"
     ),
+  v2Dashboard: () =>
+    apiFetch<{
+      totals: {
+        totalOpportunities: number;
+        totalRequested: number;
+        totalAwarded: number;
+        totalPending: number;
+        upcomingDeadlines: number;
+      };
+      pipeline: { stages: { stage: string; count: number; value: number; statusKey: string }[]; totalValue: number };
+      profiles: {
+        slug: string;
+        label: string;
+        readOnly: boolean;
+        fundingGoal: number;
+        awardedTotal: number;
+        fundingGap: number;
+      }[];
+      finance: {
+        linkedBudgets: number;
+        totalAllocated: number;
+        totalSpent: number;
+        totalRemaining: number;
+        complianceDue: number;
+        spendingAlerts: number;
+        budgetRestrictions: { awardId: string; title: string; allocated: number; spent: number; remaining: number }[];
+      };
+      auraRecommendations: {
+        priorityGrants: {
+          id: string;
+          title: string;
+          funder: string;
+          amount: number;
+          deadline: string;
+          eligibilityScore: number;
+          strategicFitScore: number;
+          fundingStatus: string;
+        }[];
+        actions: string[];
+        capacityEstimate: number;
+        programProfiles: number;
+      };
+      projectedRevenue: number;
+      winRate: number;
+      generatedAt: string;
+    }>("/funding-engine/v2/dashboard"),
+  v2Finance: () =>
+    apiFetch<{
+      linkedBudgets: number;
+      totalAllocated: number;
+      totalSpent: number;
+      totalRemaining: number;
+      complianceDue: number;
+      spendingAlerts: number;
+      budgetRestrictions: { awardId: string; title: string; allocated: number; spent: number; remaining: number }[];
+    }>("/funding-engine/v2/finance"),
   v2Analytics: () =>
     apiFetch<{
+      totalOpportunities: number;
       totalRequested: number;
       totalAwarded: number;
       totalPending: number;
@@ -303,8 +376,11 @@ export const grantsApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question }),
     }),
-  liveOpportunities: (limit = 50) =>
-    apiFetch<{ opportunities: GrantOpportunity[]; generatedAt: string }>(`/opportunities/live?limit=${limit}`),
+  liveOpportunities: (limit = 50, fundingStatus?: string) => {
+    const qs = new URLSearchParams({ limit: String(limit) });
+    if (fundingStatus) qs.set("fundingStatus", fundingStatus);
+    return apiFetch<{ opportunities: GrantOpportunity[]; generatedAt: string }>(`/opportunities/live?${qs}`);
+  },
   documentChecklist: (applicationId?: string) => {
     const qs = applicationId ? `?application_id=${applicationId}` : "";
     return apiFetch<{

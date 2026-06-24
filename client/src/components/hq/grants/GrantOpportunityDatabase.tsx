@@ -51,7 +51,11 @@ export const GrantOpportunityDatabase: React.FC<{
   const handleScore = async (id: string) => {
     const division = filters.scoreDivision || filters.division || undefined;
     const result = await scoreOpp.mutateAsync({ id, division });
-    setLastScore({ opportunityId: result.opportunityId, score: result.score, grade: result.grade });
+    setLastScore({
+      opportunityId: result.opportunityId,
+      score: result.eligibilityScore ?? result.score ?? 0,
+      grade: result.eligibilityGrade ?? result.grade ?? "—",
+    });
   };
 
   const opportunities = (search.data?.opportunities ?? []) as EnrichedOpportunity[];

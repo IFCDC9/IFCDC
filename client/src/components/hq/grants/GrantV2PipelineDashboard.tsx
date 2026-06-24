@@ -10,13 +10,15 @@ import { formatCurrency } from "../../../utils/safeFormat";
 
 const fmt = formatCurrency;
 
-const STAGE_MAP: Record<string, { appStatus?: string; tab?: string }> = {
-  Identified: { tab: "opportunities" },
+const STAGE_MAP: Record<string, { appStatus?: string; tab?: string; fundingStatus?: string }> = {
+  Identified: { tab: "opportunities", fundingStatus: "identified" },
+  Reviewing: { tab: "opportunities", fundingStatus: "reviewing" },
+  Eligible: { tab: "opportunities", fundingStatus: "eligible" },
   "In Progress": { appStatus: "draft" },
   Submitted: { appStatus: "submitted" },
   Awarded: { appStatus: "awarded" },
   Declined: { appStatus: "denied" },
-  Renewals: { tab: "deadlines" },
+  Renewal: { tab: "deadlines" },
 };
 
 export const GrantV2PipelineDashboard: React.FC<{
@@ -53,7 +55,7 @@ export const GrantV2PipelineDashboard: React.FC<{
         <KpiCard label="Total Pipeline Value" value={fmt(pipeline.data?.totalValue)} icon={TrendingUp} variant="gold" />
       </div>
 
-      <HqPanel title="Funding Pipeline v2" subtitle="Identified → In Progress → Submitted → Awarded → Declined → Renewals">
+      <HqPanel title="Funding Pipeline" subtitle="Identified → Reviewing → Eligible → In Progress → Submitted → Awarded → Declined → Renewal">
         <div className="hq-pipeline">
           {stages.map((stage) => (
             <button

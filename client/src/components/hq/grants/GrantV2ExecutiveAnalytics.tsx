@@ -24,6 +24,7 @@ export const GrantV2ExecutiveAnalytics: React.FC = () => {
   return (
     <div className="hq-fade-in">
       <div className="hq-kpi-grid" style={{ marginBottom: "1.25rem" }}>
+        <KpiCard label="Total Opportunities" value={data.totalOpportunities ?? 0} icon={Target} />
         <KpiCard label="Total Requested" value={fmt(data.totalRequested)} icon={DollarSign} variant="gold" />
         <KpiCard label="Total Awarded" value={fmt(data.totalAwarded)} icon={TrendingUp} variant="success" />
         <KpiCard label="Pending Review" value={fmt(data.totalPending)} icon={Clock} variant="warning" />

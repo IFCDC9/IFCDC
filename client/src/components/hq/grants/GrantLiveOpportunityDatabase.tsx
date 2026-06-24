@@ -9,10 +9,49 @@ import { formatCurrency } from "../../../utils/safeFormat";
 
 const fmt = formatCurrency;
 
+const FUNDING_STATUSES = [
+  { key: "", label: "All statuses" },
+  { key: "identified", label: "Identified" },
+  { key: "reviewing", label: "Reviewing" },
+  { key: "eligible", label: "Eligible" },
+  { key: "in_progress", label: "In Progress" },
+  { key: "submitted", label: "Submitted" },
+  { key: "awarded", label: "Awarded" },
+  { key: "declined", label: "Declined" },
+  { key: "renewal", label: "Renewal" },
+];
+
+const DIVISIONS = [
+  { slug: "housing", label: "Housing" },
+  { slug: "anti_gang", label: "Anti-Gang" },
+  { slug: "scholarships", label: "Scholarships" },
+  { slug: "community_programs", label: "Community Programs" },
+  { slug: "economic_development", label: "Economic Development" },
+  { slug: "productions", label: "Productions" },
+  { slug: "radio", label: "Radio" },
+  { slug: "music", label: "Music" },
+  { slug: "tapis", label: "TAPIS" },
+  { slug: "barbers", label: "Barbers" },
+];
+
+const STATUS_VARIANT: Record<string, "gold" | "success" | "warning" | "danger" | "muted"> = {
+  identified: "muted",
+  reviewing: "warning",
+  eligible: "success",
+  in_progress: "gold",
+  submitted: "gold",
+  awarded: "success",
+  declined: "danger",
+  renewal: "gold",
+};
+
 type LiveOpportunity = GrantOpportunity & {
   division_slugs?: string[];
   latest_score?: number;
   latest_grade?: string;
+  strategic_fit_score?: number;
+  strategic_fit_grade?: string;
+  fundingStatus?: string;
   daysUntilDeadline?: number | null;
   isLive?: boolean;
 };
@@ -22,11 +61,18 @@ export const GrantLiveOpportunityDatabase: React.FC<{
 }> = ({ onStartApplication }) => {
   const qc = useQueryClient();
   const [scoreDivision, setScoreDivision] = useState("");
-  const [lastScore, setLastScore] = useState<{ id: string; score: number; grade: string } | null>(null);
+  const [statusFilter, setStatusFilter] = useState("");
+  const [lastScore, setLastScore] = useState<{
+    id: string;
+    eligibilityScore: number;
+    strategicFitScore: number;
+    eligibilityGrade: string;
+    strategicFitGrade: string;
+  } | null>(null);
 
   const live = useQuery({
-    queryKey: ["grant-live-opportunities"],
-    queryFn: () => grantsApi.liveOpportunities(50),
+    queryKey: ["grant-live-opportunities", statusFilter],
+    queryFn: () => grantsApi.liveOpportunities(50, statusFilter || undefined),
     staleTime: 30_000,
   });
 
@@ -40,23 +86,32 @@ export const GrantLiveOpportunityDatabase: React.FC<{
 
   const handleScore = async (id: string) => {
     const result = await scoreOpp.mutateAsync({ id, division: scoreDivision || undefined });
-    setLastScore({ id: result.opportunityId, score: result.score, grade: result.grade });
+    setLastScore({
+      id: result.opportunityId,
+      eligibilityScore: result.eligibilityScore ?? result.score ?? 0,
+      strategicFitScore: result.strategicFitScore ?? 0,
+      eligibilityGrade: result.eligibilityGrade ?? result.grade ?? "—",
+      strategicFitGrade: result.strategicFitGrade ?? "—",
+    });
   };
 
   return (
-    <HqPanel title="Live Grant Opportunity Database" subtitle="Verified open funding opportunities across IFCDC divisions">
+    <HqPanel title="Live Grant Opportunity Database" subtitle="Verified open funding opportunities across IFCDC programs">
       <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginBottom: "1rem", alignItems: "center" }}>
         <StatusBadge label="LIVE" variant="success" />
         <span className="hq-muted-text" style={{ fontSize: "0.82rem" }}>
           {opportunities.length} active opportunities · updated {live.data?.generatedAt ? new Date(live.data.generatedAt).toLocaleTimeString() : "—"}
         </span>
+        <select className="hq-aura-input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          {FUNDING_STATUSES.map((s) => (
+            <option key={s.key || "all"} value={s.key}>{s.label}</option>
+          ))}
+        </select>
         <select className="hq-aura-input" value={scoreDivision} onChange={(e) => setScoreDivision(e.target.value)} style={{ marginLeft: "auto" }}>
-          <option value="">Score for division…</option>
-          <option value="housing">Housing</option>
-          <option value="anti_gang">Anti-Gang</option>
-          <option value="scholarships">Scholarships</option>
-          <option value="tapis">TAPIS</option>
-          <option value="community_programs">Community Programs</option>
+          <option value="">Score for program…</option>
+          {DIVISIONS.map((d) => (
+            <option key={d.slug} value={d.slug}>{d.label}</option>
+          ))}
         </select>
         <button type="button" className="hq-btn hq-btn-ghost hq-btn-sm" onClick={() => live.refetch()}>
           <RefreshCw size={14} /> Refresh
@@ -77,11 +132,17 @@ export const GrantLiveOpportunityDatabase: React.FC<{
                   </div>
                   <div className="hq-muted-text" style={{ fontSize: "0.82rem" }}>{o.funder}</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", marginTop: "0.4rem" }}>
+                    {o.fundingStatus && (
+                      <StatusBadge label={o.fundingStatus.replace(/_/g, " ")} variant={STATUS_VARIANT[o.fundingStatus] ?? "muted"} />
+                    )}
                     {(o.division_slugs ?? []).map((d) => (
                       <StatusBadge key={d} label={d.replace(/_/g, " ")} variant="gold" />
                     ))}
                     {o.latest_score != null && (
-                      <StatusBadge label={`${o.latest_score}% ${o.latest_grade ?? ""}`} variant="success" />
+                      <StatusBadge label={`Eligibility ${o.latest_score}% ${o.latest_grade ?? ""}`} variant="success" />
+                    )}
+                    {o.strategic_fit_score != null && Number(o.strategic_fit_score) > 0 && (
+                      <StatusBadge label={`Strategic Fit ${o.strategic_fit_score}% ${o.strategic_fit_grade ?? ""}`} variant="gold" />
                     )}
                   </div>
                 </div>
@@ -95,7 +156,7 @@ export const GrantLiveOpportunityDatabase: React.FC<{
               </div>
               <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.65rem", flexWrap: "wrap" }}>
                 <button type="button" className="hq-btn hq-btn-secondary hq-btn-sm" disabled={scoreOpp.isPending} onClick={() => handleScore(o.id)}>
-                  <Sparkles size={14} /> Score
+                  <Sparkles size={14} /> AI Match & Score
                 </button>
                 {onStartApplication && (
                   <button type="button" className="hq-btn hq-btn-primary hq-btn-sm" onClick={() => onStartApplication(o.id)}>
@@ -105,7 +166,7 @@ export const GrantLiveOpportunityDatabase: React.FC<{
               </div>
               {lastScore?.id === o.id && (
                 <div style={{ marginTop: "0.5rem", fontSize: "0.82rem", color: "var(--hq-gold)" }}>
-                  Score: {lastScore.score}% — {lastScore.grade}
+                  Eligibility: {lastScore.eligibilityScore}% ({lastScore.eligibilityGrade}) · Strategic Fit: {lastScore.strategicFitScore}% ({lastScore.strategicFitGrade})
                 </div>
               )}
             </div>
