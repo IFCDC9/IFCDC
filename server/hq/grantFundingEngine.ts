@@ -477,12 +477,14 @@ export async function buildAuraFundingIntelligence(opts?: { question?: string })
   );
 
   let insight: string;
+  let offline = false;
   try {
     insight = await auraExecutiveChat(
       `${prompt}\n\nRespond with actionable bullet points for IFCDC leadership.`,
       `${context}\n\nGrant Funding Engine Data:\n${dataBlock}`
     );
   } catch {
+    offline = true;
     insight = [
       `Pipeline value: $${dashboard.summary.pipelineValue.toLocaleString()} across ${dashboard.summary.pendingApplications} active applications.`,
       `Win rate: ${dashboard.summary.winRate}% · ${dashboard.summary.activeAwards} active awards totaling $${dashboard.summary.totalAwarded.toLocaleString()}.`,
@@ -500,7 +502,7 @@ export async function buildAuraFundingIntelligence(opts?: { question?: string })
     dashboard: dashboard.summary,
     pipeline: dashboard.pipeline,
     divisions: dashboard.divisions,
-    offline: false,
+    offline,
     generatedAt: new Date().toISOString(),
   };
 }

@@ -32,6 +32,7 @@ import {
   advanceApplicationWorkflow,
   listGrantOutcomes,
   IFCDC_FUNDING_DIVISIONS,
+  ensureApplicationWorkflow,
 } from "../hq/grantFundingEngine";
 
 const router = Router();
@@ -90,16 +91,30 @@ router.get("/opportunities", async (_req, res) => {
 });
 
 router.post("/opportunities", async (req, res) => {
-  const { title, funder, description, amount_min, amount_max, deadline, url, requirements } = req.body;
+  const {
+    title, funder, description, amount_min, amount_max, deadline, url, requirements,
+    division_slugs, program_areas, eligibility, geography, funder_type, source_type,
+  } = req.body;
   if (!title || !funder) return res.status(400).json({ error: "title and funder are required" });
   const db = await getDb();
   const now = new Date().toISOString();
   const oppId = grantId();
+  const divisionsJson = division_slugs
+    ? JSON.stringify(Array.isArray(division_slugs) ? division_slugs : [division_slugs])
+    : "[]";
+  const programsJson = program_areas
+    ? JSON.stringify(Array.isArray(program_areas) ? program_areas : [program_areas])
+    : "[]";
   await db.run(
-    `INSERT INTO grant_opportunities (id, title, funder, description, amount_min, amount_max, status, deadline, url, requirements, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)`,
+    `INSERT INTO grant_opportunities (
+      id, title, funder, description, amount_min, amount_max, status, deadline, url, requirements,
+      division_slugs, program_areas, eligibility, geography, funder_type, source_type,
+      import_status, last_verified_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?, ?)`,
     oppId, title, funder, description ?? "", amount_min ?? null, amount_max ?? null,
-    deadline ?? null, url ?? "", requirements ? JSON.stringify(requirements) : "[]", now, now
+    deadline ?? null, url ?? "", requirements ? JSON.stringify(requirements) : "[]",
+    divisionsJson, programsJson, eligibility ?? null, geography ?? null,
+    funder_type ?? "foundation", source_type ?? "manual", now, now, now
   );
   if (deadline) {
     await db.run(
@@ -107,6 +122,7 @@ router.post("/opportunities", async (req, res) => {
       grantId(), oppId, `Application deadline: ${title}`, deadline, now
     );
   }
+  await logGrantActivity("opportunity", oppId, "created", `Opportunity added: ${title}`, actor(req).email);
   const row = await db.get("SELECT * FROM grant_opportunities WHERE id = ?", oppId);
   res.status(201).json({ opportunity: row });
 });
@@ -147,6 +163,8 @@ router.post("/applications", async (req, res) => {
      VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?)`,
     appId, opportunity_id ?? null, title, amount_requested ?? null, assigned_to ?? "", notes ?? "", now, now
   );
+  await ensureApplicationWorkflow(appId);
+  await logGrantActivity("application", appId, "created", `Application created: ${title}`, actor(req).email);
   const row = await db.get("SELECT * FROM grant_applications WHERE id = ?", appId);
   res.status(201).json({ application: row });
 });
@@ -587,13 +605,57 @@ router.get("/history", async (_req, res) => {
 });
 
 router.post("/ai/find", async (req, res) => {
-  const { keywords, minAmount, maxAmount, status } = req.body ?? {};
-  res.json({ opportunities: await findGrantOpportunities({ keywords, minAmount, maxAmount, status }) });
+  const { keywords, minAmount, maxAmount, division } = req.body ?? {};
+  const opportunities = await searchGrantOpportunities({
+    q: keywords,
+    minAmount,
+    maxAmount,
+    division,
+    limit: 25,
+  });
+  const db = await getDb();
+  const enriched = await Promise.all(
+    opportunities.map(async (o) => {
+      const oppId = String((o as Record<string, unknown>).id);
+      const latest = await db.get<{ score: number; grade: string }>(
+        `SELECT score, grade FROM grant_opportunity_scores WHERE opportunity_id = ? ORDER BY created_at DESC LIMIT 1`,
+        oppId
+      );
+      if (latest) {
+        return { ...o, eligibilityScore: latest.score, grade: latest.grade };
+      }
+      const scored = await scoreOpportunityEligibility(oppId, {
+        divisionSlug: division,
+        actorEmail: req.hqUser?.email,
+      });
+      return { ...o, eligibilityScore: scored?.score ?? 0, grade: scored?.grade ?? "—" };
+    })
+  );
+  res.json({ opportunities: enriched });
 });
 
 router.post("/ai/match", async (req, res) => {
   const { applicationId } = req.body ?? {};
   if (!applicationId) return res.status(400).json({ error: "applicationId is required" });
+  const db = await getDb();
+  const app = await db.get<{ opportunity_id: string | null }>(
+    "SELECT opportunity_id FROM grant_applications WHERE id = ?",
+    applicationId
+  );
+  if (app?.opportunity_id) {
+    const scored = await scoreOpportunityEligibility(app.opportunity_id, {
+      actorEmail: req.hqUser?.email,
+    });
+    if (scored) {
+      return res.json({
+        applicationId,
+        score: scored.score,
+        factors: scored.factors,
+        recommendation: scored.grade,
+        opportunityId: app.opportunity_id,
+      });
+    }
+  }
   const result = await matchGrantEligibility(applicationId);
   if (!result) return res.status(404).json({ error: "Application not found" });
   res.json(result);
