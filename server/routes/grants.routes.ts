@@ -59,6 +59,17 @@ import {
   buildIntelligentFundingPlatform,
   AURA_EXECUTIVE_QUESTIONS,
 } from "../hq/grantFundingEngineV3";
+import {
+  buildGrantLifecyclePipeline,
+  updateGrantLifecycleStage,
+  buildFundingOperationsCalendar,
+  buildExecutiveOperationsDashboard,
+  buildProgramIntegrationPortfolios,
+  buildOrganizationFundingForecast,
+  auraExecutiveAdvisorV4,
+  buildIntelligentFundingOperationsPlatform,
+  AURA_V4_ADVISOR_QUESTIONS,
+} from "../hq/grantFundingEngineV4";
 
 const router = Router();
 
@@ -955,6 +966,66 @@ router.post("/funding-engine/v3/aura", async (req, res) => {
   } catch (e) {
     console.error("AURA v3 executive intelligence error:", e);
     res.status(500).json({ error: "Executive funding intelligence unavailable" });
+  }
+});
+
+// ——— Grant Center v4 — Intelligent Funding Operations ———
+
+router.get("/funding-engine/v4/platform", async (_req, res) => {
+  res.json(await buildIntelligentFundingOperationsPlatform());
+});
+
+router.get("/funding-engine/v4/dashboard", async (_req, res) => {
+  res.json(await buildExecutiveOperationsDashboard());
+});
+
+router.get("/funding-engine/v4/lifecycle", async (_req, res) => {
+  res.json(await buildGrantLifecyclePipeline());
+});
+
+router.patch("/lifecycle/:entityType/:id", async (req, res) => {
+  const entityType = req.params.entityType as "opportunity" | "application" | "award";
+  if (!["opportunity", "application", "award"].includes(entityType)) {
+    return res.status(400).json({ error: "entityType must be opportunity, application, or award" });
+  }
+  const { lifecycleStage } = req.body ?? {};
+  if (!lifecycleStage) return res.status(400).json({ error: "lifecycleStage is required" });
+  const result = await updateGrantLifecycleStage({
+    entityType,
+    entityId: req.params.id,
+    lifecycleStage,
+    actorEmail: req.hqUser?.email,
+  });
+  if (!result.ok) return res.status(400).json(result);
+  res.json(result);
+});
+
+router.get("/funding-engine/v4/calendar", async (req, res) => {
+  const daysAhead = req.query.days ? Number(req.query.days) : 90;
+  res.json(await buildFundingOperationsCalendar({ daysAhead }));
+});
+
+router.get("/funding-engine/v4/programs", async (_req, res) => {
+  res.json({ programs: await buildProgramIntegrationPortfolios(), generatedAt: new Date().toISOString() });
+});
+
+router.get("/funding-engine/v4/forecast", async (_req, res) => {
+  res.json(await buildOrganizationFundingForecast());
+});
+
+router.get("/funding-engine/v4/aura/questions", (_req, res) => {
+  res.json({ questions: AURA_V4_ADVISOR_QUESTIONS });
+});
+
+router.post("/funding-engine/v4/aura", async (req, res) => {
+  try {
+    res.json(await auraExecutiveAdvisorV4({
+      question: req.body?.question,
+      actorEmail: req.hqUser?.email,
+    }));
+  } catch (e) {
+    console.error("AURA v4 advisor error:", e);
+    res.status(500).json({ error: "Executive advisor unavailable" });
   }
 });
 

@@ -124,6 +124,7 @@ export async function ensureGrantTables(): Promise<void> {
   await migrateGrantPhase4();
   await migrateGrantPhase5();
   await migrateGrantPhase6();
+  await migrateGrantPhase7();
   const count = await db.get<{ c: number }>("SELECT COUNT(*) as c FROM grant_opportunities");
   if (count && count.c === 0) {
     const now = new Date().toISOString();
@@ -537,6 +538,51 @@ async function migrateGrantPhase6(): Promise<void> {
   await db.run(`
     UPDATE grant_documents SET doc_category = 'board_approval'
     WHERE doc_category = 'attachment' AND (name LIKE '%board%' OR name LIKE '%approval%')
+  `);
+}
+
+/** Phase 7 — Grant Center v4: full grant lifecycle operations. */
+async function migrateGrantPhase7(): Promise<void> {
+  const db = await getDb();
+
+  const addCol = async (table: string, col: string, type: string) => {
+    try {
+      await db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+    } catch {
+      /* exists */
+    }
+  };
+
+  await addCol("grant_opportunities", "lifecycle_stage", "TEXT DEFAULT 'prospect'");
+  await addCol("grant_applications", "lifecycle_stage", "TEXT");
+  await addCol("grant_awards", "lifecycle_stage", "TEXT DEFAULT 'active_grant'");
+
+  await db.run(`
+    UPDATE grant_opportunities SET lifecycle_stage = 'prospect'
+    WHERE lifecycle_stage IS NULL AND status IN ('open', 'active', 'researching')
+  `);
+  await db.run(`
+    UPDATE grant_opportunities SET lifecycle_stage = 'eligibility_review'
+    WHERE funding_status IN ('reviewing', 'eligible') AND lifecycle_stage = 'prospect'
+  `);
+  await db.run(`
+    UPDATE grant_applications SET lifecycle_stage = 'application_drafting' WHERE status = 'draft' AND lifecycle_stage IS NULL
+  `);
+  await db.run(`
+    UPDATE grant_applications SET lifecycle_stage = 'submitted' WHERE status = 'submitted' AND lifecycle_stage IS NULL
+  `);
+  await db.run(`
+    UPDATE grant_applications SET lifecycle_stage = 'under_review' WHERE status = 'under_review' AND lifecycle_stage IS NULL
+  `);
+  await db.run(`
+    UPDATE grant_applications SET lifecycle_stage = 'awarded' WHERE status = 'awarded' AND lifecycle_stage IS NULL
+  `);
+  await db.run(`
+    UPDATE grant_awards SET lifecycle_stage = 'active_grant' WHERE status = 'active' AND lifecycle_stage IS NULL
+  `);
+  await db.run(`
+    UPDATE grant_awards SET lifecycle_stage = 'reporting'
+    WHERE id IN (SELECT award_id FROM grant_compliance WHERE status = 'pending')
   `);
 }
 
