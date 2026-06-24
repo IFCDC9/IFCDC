@@ -123,6 +123,7 @@ export async function ensureGrantTables(): Promise<void> {
   await migrateGrantPhase3();
   await migrateGrantPhase4();
   await migrateGrantPhase5();
+  await migrateGrantPhase6();
   const count = await db.get<{ c: number }>("SELECT COUNT(*) as c FROM grant_opportunities");
   if (count && count.c === 0) {
     const now = new Date().toISOString();
@@ -514,6 +515,28 @@ async function migrateGrantPhase5(): Promise<void> {
         SELECT opportunity_id FROM grant_opportunity_scores
         WHERE score >= 60 GROUP BY opportunity_id
       )
+  `);
+}
+
+/** Phase 6 — Grant Center v3: intelligent funding engine metadata. */
+async function migrateGrantPhase6(): Promise<void> {
+  const db = await getDb();
+
+  const addCol = async (table: string, col: string, type: string) => {
+    try {
+      await db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+    } catch {
+      /* exists */
+    }
+  };
+
+  await addCol("grant_opportunity_scores", "priority_score", "INTEGER");
+  await addCol("grant_documents", "board_approval", "INTEGER DEFAULT 0");
+  await addCol("grant_division_profiles", "outcome_summary", "TEXT");
+
+  await db.run(`
+    UPDATE grant_documents SET doc_category = 'board_approval'
+    WHERE doc_category = 'attachment' AND (name LIKE '%board%' OR name LIKE '%approval%')
   `);
 }
 

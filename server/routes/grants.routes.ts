@@ -49,6 +49,16 @@ import {
   updateOpportunityFundingStatus,
   buildAuraFundingRecommendations,
 } from "../hq/grantFundingEngineV2";
+import {
+  discoverAndRankGrants,
+  buildExecutiveIntelligentDashboardV3,
+  buildProgramFundingProfilesV3,
+  buildGrantDocumentCenter,
+  buildRenewalCalendar,
+  auraExecutiveFundingIntelligence,
+  buildIntelligentFundingPlatform,
+  AURA_EXECUTIVE_QUESTIONS,
+} from "../hq/grantFundingEngineV3";
 
 const router = Router();
 
@@ -886,6 +896,66 @@ router.get("/opportunities/live", async (req, res) => {
 router.get("/documents/checklist", async (req, res) => {
   const applicationId = req.query.application_id as string | undefined;
   res.json(await listDocumentChecklist(applicationId));
+});
+
+// ——— Grant Center v3 — Intelligent Funding Engine ———
+
+router.get("/funding-engine/v3/platform", async (_req, res) => {
+  res.json(await buildIntelligentFundingPlatform());
+});
+
+router.get("/funding-engine/v3/dashboard", async (_req, res) => {
+  res.json(await buildExecutiveIntelligentDashboardV3());
+});
+
+router.get("/funding-engine/v3/discovery", async (req, res) => {
+  const limit = Number(req.query.limit ?? 20);
+  const divisionSlug = req.query.divisionSlug as string | undefined;
+  res.json(await discoverAndRankGrants({
+    limit,
+    divisionSlug,
+    actorEmail: req.hqUser?.email,
+  }));
+});
+
+router.post("/funding-engine/v3/discovery", async (req, res) => {
+  const { limit, divisionSlug } = req.body ?? {};
+  res.json(await discoverAndRankGrants({
+    limit: limit ? Number(limit) : 20,
+    divisionSlug,
+    actorEmail: req.hqUser?.email,
+  }));
+});
+
+router.get("/funding-engine/v3/profiles", async (_req, res) => {
+  res.json({ profiles: await buildProgramFundingProfilesV3(), generatedAt: new Date().toISOString() });
+});
+
+router.get("/funding-engine/v3/renewals", async (_req, res) => {
+  res.json(await buildRenewalCalendar());
+});
+
+router.get("/funding-engine/v3/documents", async (req, res) => {
+  res.json(await buildGrantDocumentCenter({
+    applicationId: req.query.application_id as string | undefined,
+    opportunityId: req.query.opportunity_id as string | undefined,
+  }));
+});
+
+router.get("/funding-engine/v3/aura/questions", (_req, res) => {
+  res.json({ questions: AURA_EXECUTIVE_QUESTIONS });
+});
+
+router.post("/funding-engine/v3/aura", async (req, res) => {
+  try {
+    res.json(await auraExecutiveFundingIntelligence({
+      question: req.body?.question,
+      actorEmail: req.hqUser?.email,
+    }));
+  } catch (e) {
+    console.error("AURA v3 executive intelligence error:", e);
+    res.status(500).json({ error: "Executive funding intelligence unavailable" });
+  }
 });
 
 export default router;
