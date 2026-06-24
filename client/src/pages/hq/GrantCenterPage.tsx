@@ -15,18 +15,23 @@ import { formatCurrency } from "../../utils/safeFormat";
 import { GrantFundingEngineOverview } from "../../components/hq/grants/GrantFundingEngineOverview";
 import { GrantOpportunityDatabase } from "../../components/hq/grants/GrantOpportunityDatabase";
 import { GrantApplicationWorkflowPanel } from "../../components/hq/grants/GrantApplicationWorkflowPanel";
-import { GrantPipelineDashboard } from "../../components/hq/grants/GrantPipelineDashboard";
+import { GrantV2PipelineDashboard } from "../../components/hq/grants/GrantV2PipelineDashboard";
+import { GrantV2ExecutiveAnalytics } from "../../components/hq/grants/GrantV2ExecutiveAnalytics";
+import { GrantDivisionProfilesPanel } from "../../components/hq/grants/GrantDivisionProfilesPanel";
+import { GrantLiveOpportunityDatabase } from "../../components/hq/grants/GrantLiveOpportunityDatabase";
+import { GrantDocumentManagementPanel } from "../../components/hq/grants/GrantDocumentManagementPanel";
 import { GrantOutcomesPanel } from "../../components/hq/grants/GrantOutcomesPanel";
 import { GrantDeadlineRenewalPanel } from "../../components/hq/grants/GrantDeadlineRenewalPanel";
 import { GrantBudgetIntegrationPanel } from "../../components/hq/grants/GrantBudgetIntegrationPanel";
 import { GrantAuraIntelligencePanel } from "../../components/hq/grants/GrantAuraIntelligencePanel";
 
-type Tab = "overview" | "pipeline" | "funders" | "opportunities" | "applications" | "calendar" | "deadlines" | "documents"
+type Tab = "overview" | "pipeline" | "divisions" | "funders" | "opportunities" | "applications" | "calendar" | "deadlines" | "documents"
   | "budgets" | "finance" | "awards" | "compliance" | "funder-reports" | "analytics" | "history" | "notifications" | "ai-intelligence";
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: "overview", label: "Executive Dashboard", icon: ClipboardList },
   { id: "pipeline", label: "Funding Pipeline", icon: TrendingUp },
+  { id: "divisions", label: "Division Profiles", icon: Users },
   { id: "funders", label: "Funder CRM", icon: Handshake },
   { id: "opportunities", label: "Opportunities", icon: FileText },
   { id: "applications", label: "Applications", icon: ClipboardList },
@@ -195,7 +200,10 @@ const GrantCenterPage: React.FC = () => {
       <div className="hq-tab-content hq-fade-in">
         {tab === "overview" && (
           <>
-            <GrantFundingEngineOverview />
+            <GrantV2ExecutiveAnalytics />
+            <div style={{ marginTop: "1.25rem" }}>
+              <GrantFundingEngineOverview />
+            </div>
             {dashboard.isLoading ? <HqLoading /> : dash && (
               <>
                 <HqPanel title="Operational Snapshot" subtitle="Legacy dashboard metrics — see Executive Funding KPIs above">
@@ -252,13 +260,15 @@ const GrantCenterPage: React.FC = () => {
         )}
 
         {tab === "pipeline" && (
-          <GrantPipelineDashboard
+          <GrantV2PipelineDashboard
             onNavigate={(nextTab, applicationId) => {
               setTab(nextTab as Tab);
               if (applicationId) setSelectedApplicationId(applicationId);
             }}
           />
         )}
+
+        {tab === "divisions" && <GrantDivisionProfilesPanel />}
 
         {tab === "funders" && (
           <>
@@ -354,6 +364,15 @@ const GrantCenterPage: React.FC = () => {
 
         {tab === "opportunities" && (
           <>
+            <div style={{ marginBottom: "1.25rem" }}>
+              <GrantLiveOpportunityDatabase
+                onStartApplication={(opportunityId) => {
+                  setNewApp({ title: "", opportunity_id: opportunityId, amount_requested: "" });
+                  setShowNewApp(true);
+                  setTab("applications");
+                }}
+              />
+            </div>
             <div style={{ marginBottom: "1.25rem" }}>
               <GrantOpportunityDatabase
                 onStartApplication={(opportunityId) => {
@@ -551,22 +570,28 @@ const GrantCenterPage: React.FC = () => {
 
         {tab === "documents" && (
           <>
-            <div className="hq-panel" style={{ marginBottom: "1rem", padding: "1.25rem" }}>
-              <h4 style={{ fontSize: "0.85rem", color: "var(--hq-gold)", marginBottom: "0.75rem" }}>Upload Document</h4>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "0.75rem", alignItems: "end" }}>
-                <div><label style={{ fontSize: "0.72rem", color: "var(--hq-text-muted)" }}>Document Name</label>
-                  <input className="hq-aura-input" value={docForm.name} onChange={(e) => setDocForm({ ...docForm, name: e.target.value })} /></div>
-                <div><label style={{ fontSize: "0.72rem", color: "var(--hq-text-muted)" }}>File URL</label>
-                  <input className="hq-aura-input" value={docForm.file_url} onChange={(e) => setDocForm({ ...docForm, file_url: e.target.value })} placeholder="https://... or upload file below" /></div>
-                <div><label style={{ fontSize: "0.72rem", color: "var(--hq-text-muted)" }}>Upload File</label>
-                  <input type="file" className="hq-aura-input" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.xlsx"
-                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleDocFilePick(f); e.target.value = ""; }} /></div>
-                <button type="button" className="hq-btn hq-btn-primary" disabled={!docForm.name || uploadDoc.isPending || uploadDocFile.isPending} onClick={() => uploadDoc.mutate(docForm)}>
-                  <Upload size={14} /> Upload
-                </button>
-              </div>
-            </div>
-            <HqPanel title="Required Documents & Approval Workflow">
+            <GrantDocumentManagementPanel
+              applications={(applications.data?.applications ?? []).map((a) => ({ id: a.id, title: a.title }))}
+              uploadPending={uploadDocFile.isPending}
+              onUpload={({ name, application_id, doc_category, file }) => {
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                  uploadDocFile.mutate({
+                    fileName: file.name,
+                    base64: String(reader.result ?? ""),
+                    mimeType: file.type,
+                    name,
+                    application_id,
+                    doc_type: doc_category,
+                    doc_category,
+                  } as Parameters<typeof grantsApi.uploadDocumentFile>[0] & { doc_category?: string });
+                };
+                reader.readAsDataURL(file);
+              }}
+            />
+            <div style={{ marginTop: "1.25rem" }}>
+            <HqPanel title="Document Approval Queue">
               {documents.isLoading ? <HqLoading /> : (
                 <table className="hq-table">
                   <thead><tr><th>Document</th><th>Type</th><th>Status</th><th>Uploaded</th><th>Actions</th></tr></thead>
@@ -587,6 +612,7 @@ const GrantCenterPage: React.FC = () => {
                 </table>
               )}
             </HqPanel>
+            </div>
           </>
         )}
 

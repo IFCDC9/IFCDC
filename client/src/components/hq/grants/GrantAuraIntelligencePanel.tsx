@@ -15,14 +15,13 @@ export const GrantAuraIntelligencePanel: React.FC = () => {
   const [matchResult, setMatchResult] = useState<Record<string, unknown> | null>(null);
 
   const aura = useQuery({
-    queryKey: ["grant-funding-aura-panel"],
-    queryFn: () => grantsApi.fundingAura(),
+    queryKey: ["grant-funding-aura-v2-panel"],
+    queryFn: () => grantsApi.v2FundingAura(),
     staleTime: 300_000,
   });
 
   const auraAsk = useMutation({
-    mutationFn: (q: string) => grantsApi.fundingAura(q),
-    onSuccess: () => aura.refetch(),
+    mutationFn: (q: string) => grantsApi.v2FundingAura(q),
   });
 
   const aiFind = useMutation({
@@ -48,7 +47,7 @@ export const GrantAuraIntelligencePanel: React.FC = () => {
 
   return (
     <div className="hq-fade-in">
-      <HqPanel title="AURA Funding Intelligence" subtitle="Executive briefing powered by @ifcdc/aura-ai">
+      <HqPanel title="AURA Funding Intelligence v2" subtitle="Priority grants, deadlines, compliance risks, and funding capacity">
         {aura.isLoading ? (
           <HqLoading />
         ) : (
@@ -73,12 +72,32 @@ export const GrantAuraIntelligencePanel: React.FC = () => {
                 <RefreshCw size={14} /> Refresh
               </button>
             </div>
-            {(aura.data as { offline?: boolean })?.offline && (
+            {(auraAsk.data?.offline ?? aura.data?.offline) && (
               <StatusBadge label="Offline briefing" variant="warning" />
             )}
+            {auraAsk.data?.capacityEstimate != null && (
+              <div style={{ fontSize: "0.82rem", color: "var(--hq-gold)", marginBottom: "0.5rem" }}>
+                Estimated funding capacity: ${Number(auraAsk.data?.capacityEstimate ?? aura.data?.capacityEstimate ?? 0).toLocaleString()}
+              </div>
+            )}
             <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: "0.85rem", lineHeight: 1.65, color: "var(--hq-text-muted)", margin: "0.75rem 0 0" }}>
-              {(auraAsk.data as { insight?: string })?.insight ?? aura.data?.insight ?? "AURA briefing will generate on request."}
+              {auraAsk.data?.insight ?? aura.data?.insight ?? "AURA briefing will generate on request."}
             </pre>
+            {(auraAsk.data?.priorityGrants ?? aura.data?.priorityGrants ?? []).length > 0 && (
+              <div style={{ marginTop: "1rem" }}>
+                <h4 style={{ fontSize: "0.85rem", color: "var(--hq-gold)", marginBottom: "0.5rem" }}>Priority Grants</h4>
+                <ul className="hq-activity-list" style={{ margin: 0, padding: 0, listStyle: "none" }}>
+                  {(auraAsk.data?.priorityGrants ?? aura.data?.priorityGrants ?? []).slice(0, 5).map((g, i) => (
+                    <li key={i} className="hq-activity-item">
+                      <div className="hq-activity-content">
+                        <div className="hq-activity-title">{String((g as Record<string, unknown>).title ?? "—")}</div>
+                        <div className="hq-activity-detail">{String((g as Record<string, unknown>).funder ?? "")}</div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </>
         )}
       </HqPanel>

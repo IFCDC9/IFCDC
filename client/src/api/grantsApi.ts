@@ -115,7 +115,7 @@ export const grantsApi = {
   },
   uploadDocument: (data: { name: string; opportunity_id?: string; application_id?: string; file_url?: string; doc_type?: string; notes?: string }) =>
     apiFetch("/documents", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
-  uploadDocumentFile: (data: { fileName: string; base64: string; mimeType?: string; name: string; opportunity_id?: string; application_id?: string; doc_type?: string; notes?: string }) =>
+  uploadDocumentFile: (data: { fileName: string; base64: string; mimeType?: string; name: string; opportunity_id?: string; application_id?: string; doc_type?: string; doc_category?: string; notes?: string }) =>
     apiFetch("/documents/upload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
   funderReports: () => apiFetch<{
     reports: { awardId: string; grantTitle: string; funder: string; awardAmount: number; spent: number; burnRate: number; compliancePending: number; reportReady: boolean }[];
@@ -243,6 +243,77 @@ export const grantsApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }),
+
+  // Grant Center v2
+  v2Pipeline: () =>
+    apiFetch<{ stages: { stage: string; count: number; value: number; statusKey: string }[]; totalValue: number; generatedAt: string }>(
+      "/funding-engine/v2/pipeline"
+    ),
+  v2Analytics: () =>
+    apiFetch<{
+      totalRequested: number;
+      totalAwarded: number;
+      totalPending: number;
+      projectedRevenue: number;
+      identifiedValue: number;
+      winRate: number;
+      upcomingDeadlines: number;
+      complianceDue: number;
+      fundingGaps: { division: string; label: string; gap: number; fundingGoal: number; awardedTotal: number; pipelineValue: number }[];
+      totalFundingGap: number;
+      generatedAt: string;
+    }>("/funding-engine/v2/analytics"),
+  v2DivisionProfiles: () =>
+    apiFetch<{
+      profiles: {
+        slug: string;
+        label: string;
+        readOnly: boolean;
+        fundingGoal: number;
+        budgetAllocated: number;
+        budgetSpent: number;
+        pipelineValue: number;
+        awardedTotal: number;
+        openOpportunities: number;
+        activeApplications: number;
+        fundingGap: number;
+        programAreas: string[];
+      }[];
+      generatedAt: string;
+    }>("/funding-engine/v2/divisions/profiles"),
+  v2DivisionProfile: (slug: string) =>
+    apiFetch<{ profile: Record<string, unknown> }>(`/funding-engine/v2/divisions/${slug}/profile`),
+  v2MatchDivision: (divisionSlug: string) =>
+    apiFetch<{ divisionSlug: string; divisionLabel: string; matches: Record<string, unknown>[]; generatedAt: string }>(
+      "/funding-engine/v2/match",
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ divisionSlug }) }
+    ),
+  v2FundingAura: (question?: string) =>
+    apiFetch<{
+      insight: string;
+      offline?: boolean;
+      analytics: Record<string, unknown>;
+      pipeline: { stage: string; count: number; value: number }[];
+      priorityGrants: Record<string, unknown>[];
+      fundingGaps: Record<string, unknown>[];
+      capacityEstimate: number;
+      generatedAt: string;
+    }>("/funding-engine/v2/aura", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    }),
+  liveOpportunities: (limit = 50) =>
+    apiFetch<{ opportunities: GrantOpportunity[]; generatedAt: string }>(`/opportunities/live?limit=${limit}`),
+  documentChecklist: (applicationId?: string) => {
+    const qs = applicationId ? `?application_id=${applicationId}` : "";
+    return apiFetch<{
+      byCategory: { category: string; documents: Record<string, unknown>[]; uploaded: number; total: number }[];
+      totalDocuments: number;
+      approvedCount: number;
+      pendingCount: number;
+    }>(`/documents/checklist${qs}`);
+  },
 };
 
 export interface GrantFunder {
