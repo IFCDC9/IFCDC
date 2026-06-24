@@ -462,6 +462,62 @@ export const grantsApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question }),
     }),
+
+  // Grant Center v4 — Intelligent Funding Operations
+  v4Platform: () => apiFetch<Record<string, unknown>>("/funding-engine/v4/platform"),
+  v4Dashboard: () =>
+    apiFetch<{
+      executive: {
+        totalPipelineValue: number;
+        totalAwarded: number;
+        totalPending: number;
+        pendingApplications: number;
+        upcomingDeadlines: number;
+        complianceStatus: { dueWithin14Days: number; spendingAlerts: number; overall: string };
+        organizationFundingForecast: { total12MonthProjection: number; months: { month: string; projected: number }[] };
+      };
+      lifecycle: { stages: { stage: string; stageKey: string; count: number; value: number }[]; totalValue: number };
+      fundingByProgram: { slug: string; label: string; awarded: number; requested: number; gap: number }[];
+      fundingBySource: { byFunder: { source: string; total_awarded: number; total_requested: number }[] };
+      calendar: { events: { id: string; type: string; title: string; grantTitle: string; dueDate: string }[]; summary: Record<string, number> };
+      topPriorities: Record<string, unknown>[];
+      generatedAt: string;
+    }>("/funding-engine/v4/dashboard"),
+  v4Lifecycle: () =>
+    apiFetch<{ stages: { stage: string; stageKey: string; count: number; value: number }[]; totalValue: number }>(
+      "/funding-engine/v4/lifecycle"
+    ),
+  v4UpdateLifecycle: (entityType: "opportunity" | "application" | "award", id: string, lifecycleStage: string) =>
+    apiFetch<{ ok: boolean; lifecycleStage: string }>(`/lifecycle/${entityType}/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lifecycleStage }),
+    }),
+  v4Calendar: (days = 90) =>
+    apiFetch<{ events: { id: string; type: string; title: string; grantTitle: string; dueDate: string; status: string }[]; summary: Record<string, number> }>(
+      `/funding-engine/v4/calendar?days=${days}`
+    ),
+  v4Programs: () => apiFetch<{ programs: Record<string, unknown>[]; generatedAt: string }>("/funding-engine/v4/programs"),
+  v4Forecast: () =>
+    apiFetch<{ total12MonthProjection: number; months: { month: string; projected: number; awarded: number; pending: number }[] }>(
+      "/funding-engine/v4/forecast"
+    ),
+  v4AuraQuestions: () => apiFetch<{ questions: string[] }>("/funding-engine/v4/aura/questions"),
+  v4AuraAdvisor: (question?: string) =>
+    apiFetch<{
+      insight: string;
+      offline?: boolean;
+      question: string;
+      suggestedQuestions: string[];
+      topPriorities: Record<string, unknown>[];
+      forecast: { total12MonthProjection: number };
+      calendar: Record<string, number>;
+      generatedAt: string;
+    }>("/funding-engine/v4/aura", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    }),
 };
 
 export interface GrantFunder {

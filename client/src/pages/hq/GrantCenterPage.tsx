@@ -12,6 +12,11 @@ import { HqPanel } from "../../components/hq/HqPanel";
 import { StatusBadge } from "../../components/hq/StatusBadge";
 import { HqLoading } from "../../components/hq/HqLoading";
 import { formatCurrency } from "../../utils/safeFormat";
+import { GrantV4ExecutiveDashboard } from "../../components/hq/grants/GrantV4ExecutiveDashboard";
+import { GrantV4LifecyclePanel } from "../../components/hq/grants/GrantV4LifecyclePanel";
+import { GrantV4FundingCalendar } from "../../components/hq/grants/GrantV4FundingCalendar";
+import { GrantV4ProgramIntegration } from "../../components/hq/grants/GrantV4ProgramIntegration";
+import { GrantV4AuraAdvisor } from "../../components/hq/grants/GrantV4AuraAdvisor";
 import { GrantV3ExecutiveDashboard } from "../../components/hq/grants/GrantV3ExecutiveDashboard";
 import { GrantV3DiscoveryPanel } from "../../components/hq/grants/GrantV3DiscoveryPanel";
 import { GrantV3ProgramProfilesPanel } from "../../components/hq/grants/GrantV3ProgramProfilesPanel";
@@ -203,7 +208,10 @@ const GrantCenterPage: React.FC = () => {
       <div className="hq-tab-content hq-fade-in">
         {tab === "overview" && (
           <>
-            <GrantV3ExecutiveDashboard />
+            <GrantV4ExecutiveDashboard />
+            <div style={{ marginTop: "1.25rem" }}>
+              <GrantV3ExecutiveDashboard />
+            </div>
             <div style={{ marginTop: "1.25rem" }}>
               <GrantFundingEngineOverview />
             </div>
@@ -263,15 +271,27 @@ const GrantCenterPage: React.FC = () => {
         )}
 
         {tab === "pipeline" && (
-          <GrantV2PipelineDashboard
-            onNavigate={(nextTab, applicationId) => {
-              setTab(nextTab as Tab);
-              if (applicationId) setSelectedApplicationId(applicationId);
-            }}
-          />
+          <>
+            <GrantV4LifecyclePanel />
+            <div style={{ marginTop: "1.25rem" }}>
+              <GrantV2PipelineDashboard
+                onNavigate={(nextTab, applicationId) => {
+                  setTab(nextTab as Tab);
+                  if (applicationId) setSelectedApplicationId(applicationId);
+                }}
+              />
+            </div>
+          </>
         )}
 
-        {tab === "divisions" && <GrantV3ProgramProfilesPanel />}
+        {tab === "divisions" && (
+          <>
+            <GrantV4ProgramIntegration />
+            <div style={{ marginTop: "1.25rem" }}>
+              <GrantV3ProgramProfilesPanel />
+            </div>
+          </>
+        )}
 
         {tab === "funders" && (
           <>
@@ -508,6 +528,9 @@ const GrantCenterPage: React.FC = () => {
         )}
 
         {tab === "calendar" && (
+          <>
+            <GrantV4FundingCalendar />
+            <div style={{ marginTop: "1.25rem" }}>
           <HqPanel title="Grant Calendar" subtitle={calendar.data?.month ?? new Date().toISOString().slice(0, 7)}>
             {calendar.isLoading ? <HqLoading /> : (
               <>
@@ -536,6 +559,8 @@ const GrantCenterPage: React.FC = () => {
               </>
             )}
           </HqPanel>
+            </div>
+          </>
         )}
 
         {tab === "deadlines" && (
@@ -861,7 +886,10 @@ const GrantCenterPage: React.FC = () => {
 
         {tab === "ai-intelligence" && (
           <>
-            <GrantV3AuraExecutivePanel />
+            <GrantV4AuraAdvisor />
+            <div style={{ marginTop: "1.25rem" }}>
+              <GrantV3AuraExecutivePanel />
+            </div>
             <div style={{ marginTop: "1.25rem" }}>
               <GrantAuraIntelligencePanel />
             </div>
