@@ -12,13 +12,15 @@ import { HqPanel } from "../../components/hq/HqPanel";
 import { StatusBadge } from "../../components/hq/StatusBadge";
 import { HqLoading } from "../../components/hq/HqLoading";
 import { formatCurrency } from "../../utils/safeFormat";
-import { GrantFundingEngineDashboard } from "../../components/hq/grants/GrantFundingEngineDashboard";
+import { GrantV3ExecutiveDashboard } from "../../components/hq/grants/GrantV3ExecutiveDashboard";
+import { GrantV3DiscoveryPanel } from "../../components/hq/grants/GrantV3DiscoveryPanel";
+import { GrantV3ProgramProfilesPanel } from "../../components/hq/grants/GrantV3ProgramProfilesPanel";
+import { GrantV3DocumentCenter } from "../../components/hq/grants/GrantV3DocumentCenter";
+import { GrantV3AuraExecutivePanel } from "../../components/hq/grants/GrantV3AuraExecutivePanel";
 import { GrantFundingEngineOverview } from "../../components/hq/grants/GrantFundingEngineOverview";
 import { GrantOpportunityDatabase } from "../../components/hq/grants/GrantOpportunityDatabase";
 import { GrantApplicationWorkflowPanel } from "../../components/hq/grants/GrantApplicationWorkflowPanel";
 import { GrantV2PipelineDashboard } from "../../components/hq/grants/GrantV2PipelineDashboard";
-import { GrantV2ExecutiveAnalytics } from "../../components/hq/grants/GrantV2ExecutiveAnalytics";
-import { GrantDivisionProfilesPanel } from "../../components/hq/grants/GrantDivisionProfilesPanel";
 import { GrantLiveOpportunityDatabase } from "../../components/hq/grants/GrantLiveOpportunityDatabase";
 import { GrantDocumentManagementPanel } from "../../components/hq/grants/GrantDocumentManagementPanel";
 import { GrantOutcomesPanel } from "../../components/hq/grants/GrantOutcomesPanel";
@@ -201,7 +203,7 @@ const GrantCenterPage: React.FC = () => {
       <div className="hq-tab-content hq-fade-in">
         {tab === "overview" && (
           <>
-            <GrantFundingEngineDashboard />
+            <GrantV3ExecutiveDashboard />
             <div style={{ marginTop: "1.25rem" }}>
               <GrantFundingEngineOverview />
             </div>
@@ -269,7 +271,7 @@ const GrantCenterPage: React.FC = () => {
           />
         )}
 
-        {tab === "divisions" && <GrantDivisionProfilesPanel />}
+        {tab === "divisions" && <GrantV3ProgramProfilesPanel />}
 
         {tab === "funders" && (
           <>
@@ -365,6 +367,9 @@ const GrantCenterPage: React.FC = () => {
 
         {tab === "opportunities" && (
           <>
+            <div style={{ marginBottom: "1.25rem" }}>
+              <GrantV3DiscoveryPanel />
+            </div>
             <div style={{ marginBottom: "1.25rem" }}>
               <GrantLiveOpportunityDatabase
                 onStartApplication={(opportunityId) => {
@@ -570,7 +575,7 @@ const GrantCenterPage: React.FC = () => {
         )}
 
         {tab === "documents" && (
-          <>
+          <GrantV3DocumentCenter applications={(applications.data?.applications ?? []).map((a) => ({ id: a.id, title: a.title }))}>
             <GrantDocumentManagementPanel
               applications={(applications.data?.applications ?? []).map((a) => ({ id: a.id, title: a.title }))}
               uploadPending={uploadDocFile.isPending}
@@ -591,30 +596,7 @@ const GrantCenterPage: React.FC = () => {
                 reader.readAsDataURL(file);
               }}
             />
-            <div style={{ marginTop: "1.25rem" }}>
-            <HqPanel title="Document Approval Queue">
-              {documents.isLoading ? <HqLoading /> : (
-                <table className="hq-table">
-                  <thead><tr><th>Document</th><th>Type</th><th>Status</th><th>Uploaded</th><th>Actions</th></tr></thead>
-                  <tbody>
-                    {(documents.data?.documents ?? []).map((d) => (
-                      <tr key={d.id as string}>
-                        <td><strong>{d.name as string}</strong></td>
-                        <td>{d.doc_type as string}</td>
-                        <td><StatusBadge label={(d.status as string) ?? "pending"} variant={STATUS_VARIANT[(d.status as string) ?? "pending"] ?? "muted"} /></td>
-                        <td>{fmtDate(d.uploaded_at as string)}</td>
-                        <td>{(d.status as string) === "pending" && (
-                          <><button type="button" className="hq-btn hq-btn-sm" onClick={() => approveDoc.mutate({ id: d.id as string, status: "approved" })}>Approve</button>
-                          <button type="button" className="hq-btn hq-btn-sm hq-btn-secondary" style={{ marginLeft: "0.35rem" }} onClick={() => approveDoc.mutate({ id: d.id as string, status: "rejected" })}>Reject</button></>
-                        )}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </HqPanel>
-            </div>
-          </>
+          </GrantV3DocumentCenter>
         )}
 
         {tab === "budgets" && (
@@ -877,7 +859,14 @@ const GrantCenterPage: React.FC = () => {
           </HqPanel>
         )}
 
-        {tab === "ai-intelligence" && <GrantAuraIntelligencePanel />}
+        {tab === "ai-intelligence" && (
+          <>
+            <GrantV3AuraExecutivePanel />
+            <div style={{ marginTop: "1.25rem" }}>
+              <GrantAuraIntelligencePanel />
+            </div>
+          </>
+        )}
       </div>
     </HQLayout>
   );

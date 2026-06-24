@@ -390,6 +390,78 @@ export const grantsApi = {
       pendingCount: number;
     }>(`/documents/checklist${qs}`);
   },
+
+  // Grant Center v3 — Intelligent Funding Engine
+  v3Platform: () => apiFetch<Record<string, unknown>>("/funding-engine/v3/platform"),
+  v3Dashboard: () =>
+    apiFetch<{
+      executive: {
+        totalOpportunities: number;
+        totalFundingRequested: number;
+        totalFundingAwarded: number;
+        pendingApplications: number;
+        totalPendingValue: number;
+        upcomingDeadlines: number;
+        estimatedAnnualPipeline: number;
+        winRate: number;
+        complianceDue: number;
+        fundingGapByProgram: { slug: string; label: string; fundingGoal: number; gap: number; requestedFunding: number; awardedFunding: number }[];
+        renewalCalendar: { events: { type: string; date: string; title: string; amount: number; status: string }[]; upcoming90Days: number };
+      };
+      discovery: { ranked: Record<string, unknown>[]; topRecommendations: Record<string, unknown>[] };
+      profiles: Record<string, unknown>[];
+      topRecommendations: Record<string, unknown>[];
+      documents: { totalDocuments: number; narratives: number; budgets: number; boardApprovals: number; linkedGrants: number };
+      generatedAt: string;
+    }>("/funding-engine/v3/dashboard"),
+  v3Discovery: (divisionSlug?: string, limit = 20) => {
+    const qs = new URLSearchParams({ limit: String(limit) });
+    if (divisionSlug) qs.set("divisionSlug", divisionSlug);
+    return apiFetch<{ ranked: Record<string, unknown>[]; topRecommendations: Record<string, unknown>[]; totalScored: number }>(
+      `/funding-engine/v3/discovery?${qs}`
+    );
+  },
+  v3RunDiscovery: (divisionSlug?: string, limit = 20) =>
+    apiFetch<{ ranked: Record<string, unknown>[]; topRecommendations: Record<string, unknown>[] }>(
+      "/funding-engine/v3/discovery",
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ divisionSlug, limit }) }
+    ),
+  v3Profiles: () =>
+    apiFetch<{ profiles: Record<string, unknown>[]; generatedAt: string }>("/funding-engine/v3/profiles"),
+  v3Renewals: () =>
+    apiFetch<{ events: { type: string; date: string; title: string; amount: number; status: string }[]; upcoming90Days: number }>(
+      "/funding-engine/v3/renewals"
+    ),
+  v3DocumentCenter: (opts?: { applicationId?: string; opportunityId?: string }) => {
+    const qs = new URLSearchParams();
+    if (opts?.applicationId) qs.set("application_id", opts.applicationId);
+    if (opts?.opportunityId) qs.set("opportunity_id", opts.opportunityId);
+    const q = qs.toString();
+    return apiFetch<{
+      byCategory: { category: string; label: string; documents: Record<string, unknown>[] }[];
+      linkedGrants: { grantKey: string; title: string; funder: string; applicationId: string | null; opportunityId: string | null; documentCount: number }[];
+      totalDocuments: number;
+      narratives: number;
+      budgets: number;
+      boardApprovals: number;
+    }>(`/funding-engine/v3/documents${q ? `?${q}` : ""}`);
+  },
+  v3AuraQuestions: () => apiFetch<{ questions: string[] }>("/funding-engine/v3/aura/questions"),
+  v3AuraExecutive: (question?: string) =>
+    apiFetch<{
+      insight: string;
+      offline?: boolean;
+      question: string;
+      suggestedQuestions: string[];
+      topRecommendations: Record<string, unknown>[];
+      staffingAffordability: { estimatedAnnualPipeline: number; capacityAfterPending: number };
+      fundingRisks: { complianceDue: number; spendingAlerts: number; overduePrograms: string[] };
+      generatedAt: string;
+    }>("/funding-engine/v3/aura", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    }),
 };
 
 export interface GrantFunder {

@@ -12,6 +12,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   budget: "Budget Documents",
   attachment: "Supporting Attachments",
   supporting: "Additional Supporting Files",
+  board_approval: "Board Approvals",
 };
 
 export const GrantDocumentManagementPanel: React.FC<{
@@ -53,6 +54,7 @@ export const GrantDocumentManagementPanel: React.FC<{
               <option value="budget">Budget document</option>
               <option value="attachment">Supporting attachment</option>
               <option value="supporting">Additional supporting</option>
+              <option value="board_approval">Board approval</option>
             </select>
           </div>
           <div>
