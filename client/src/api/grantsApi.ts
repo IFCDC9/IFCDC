@@ -518,6 +518,58 @@ export const grantsApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question }),
     }),
+
+  // Grant Center v5 — Funding Intelligence Engine
+  v5Platform: () => apiFetch<Record<string, unknown>>("/funding-engine/v5/platform"),
+  v5NationalDatabase: (limit = 50) =>
+    apiFetch<{ opportunities: Record<string, unknown>[]; generatedAt: string }>(`/funding-engine/v5/national?limit=${limit}`),
+  v5MatchAllDivisions: (limit = 5) =>
+    apiFetch<{ divisions: Record<string, unknown>[]; totalMatches: number }>(`/funding-engine/v5/match-all?limit=${limit}`),
+  v5ScoreOpportunity: (id: string, divisionSlug?: string) =>
+    apiFetch<{ opportunityId: string; scores: Record<string, number>; grade: string }>(
+      `/opportunities/${id}/score-v5`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ divisionSlug }) }
+    ),
+  v5ApplicationWorkspace: (applicationId: string) =>
+    apiFetch<{ application: Record<string, unknown>; documentChecklist: Record<string, unknown>; proposalBudget: Record<string, unknown>; completionPct: number }>(
+      `/applications/${applicationId}/workspace`
+    ),
+  v5AiAssist: (applicationId: string, section: string, prompt?: string) =>
+    apiFetch<{ section: string; content: string }>(`/applications/${applicationId}/ai-assist`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ section, prompt }),
+    }),
+  v5ProposalBudget: (applicationId: string) =>
+    apiFetch<{ budget: Record<string, unknown> }>(`/applications/${applicationId}/proposal-budget`),
+  v5ExecutiveIntelligence: () =>
+    apiFetch<{
+      monthlyFundingForecast: { month: string; projected: number }[];
+      fundingGapAnalysis: { label: string; gap: number; gapPct: number }[];
+      cashFlowProjections: { month: string; inflow: number; outflow: number; net: number }[];
+      awardProbabilityScore: number;
+      organizationSustainabilityIndex: number;
+      multiYearProjections: { fiveYearTotal: number; years: { year: number; projectedFunding: number }[] };
+      complianceSummary: { status: string; healthScore: number };
+    }>("/funding-engine/v5/intelligence"),
+  v5Compliance: () =>
+    apiFetch<{ summary: { pending: number; overdue: number; status: string; healthScore: number }; upcoming: Record<string, unknown>[] }>(
+      "/funding-engine/v5/compliance"
+    ),
+  v5RenewalReporting: () =>
+    apiFetch<{ renewals: Record<string, unknown>[]; reporting: Record<string, unknown>[]; pendingRenewals: number; pendingReports: number }>(
+      "/funding-engine/v5/renewal-reporting"
+    ),
+  v5Projections: (years = 5) =>
+    apiFetch<{ fiveYearTotal: number; years: { year: number; projectedFunding: number; conservative: number; optimistic: number }[] }>(
+      `/funding-engine/v5/projections?years=${years}`
+    ),
+  v5Performance: () => apiFetch<Record<string, unknown>>("/funding-engine/v5/performance"),
+  v5AuraAdvisor: (question?: string) =>
+    apiFetch<{ insight: string; offline?: boolean; executiveIntelligence: Record<string, unknown> }>(
+      "/funding-engine/v5/aura",
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question }) }
+    ),
 };
 
 export interface GrantFunder {

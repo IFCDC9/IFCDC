@@ -125,6 +125,7 @@ export async function ensureGrantTables(): Promise<void> {
   await migrateGrantPhase5();
   await migrateGrantPhase6();
   await migrateGrantPhase7();
+  await migrateGrantPhase8();
   const count = await db.get<{ c: number }>("SELECT COUNT(*) as c FROM grant_opportunities");
   if (count && count.c === 0) {
     const now = new Date().toISOString();
@@ -583,6 +584,49 @@ async function migrateGrantPhase7(): Promise<void> {
   await db.run(`
     UPDATE grant_awards SET lifecycle_stage = 'reporting'
     WHERE id IN (SELECT award_id FROM grant_compliance WHERE status = 'pending')
+  `);
+}
+
+/** Phase 8 — Grant Center v5: Funding Intelligence Engine. */
+async function migrateGrantPhase8(): Promise<void> {
+  const db = await getDb();
+
+  const addCol = async (table: string, col: string, type: string) => {
+    try {
+      await db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+    } catch {
+      /* exists */
+    }
+  };
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS grant_proposal_budgets (
+      id TEXT PRIMARY KEY,
+      application_id TEXT NOT NULL UNIQUE,
+      line_items TEXT,
+      total_requested REAL DEFAULT 0,
+      direct_costs REAL DEFAULT 0,
+      indirect_costs REAL DEFAULT 0,
+      personnel REAL DEFAULT 0,
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (application_id) REFERENCES grant_applications(id)
+    );
+  `);
+
+  await addCol("grant_opportunities", "is_national", "INTEGER DEFAULT 0");
+  await addCol("grant_opportunity_scores", "best_fit_score", "INTEGER");
+  await addCol("grant_opportunity_scores", "deadline_score", "INTEGER");
+  await addCol("grant_opportunity_scores", "award_size_score", "INTEGER");
+  await addCol("grant_opportunity_scores", "competitiveness_score", "INTEGER");
+  await addCol("grant_opportunity_scores", "composite_score", "INTEGER");
+  await addCol("grant_opportunity_scores", "award_probability", "INTEGER");
+
+  await db.run(`
+    UPDATE grant_opportunities SET is_national = 1
+    WHERE funder LIKE '%Department%' OR funder LIKE '%U.S.%' OR funder LIKE '%Federal%'
+      OR funder LIKE '%SAMHSA%' OR funder LIKE '%NIH%' OR funder_type = 'federal'
   `);
 }
 

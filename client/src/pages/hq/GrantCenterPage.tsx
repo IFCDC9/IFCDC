@@ -12,6 +12,10 @@ import { HqPanel } from "../../components/hq/HqPanel";
 import { StatusBadge } from "../../components/hq/StatusBadge";
 import { HqLoading } from "../../components/hq/HqLoading";
 import { formatCurrency } from "../../utils/safeFormat";
+import { GrantV5FundingIntelligenceDashboard } from "../../components/hq/grants/GrantV5FundingIntelligenceDashboard";
+import { GrantV5NationalDatabase } from "../../components/hq/grants/GrantV5NationalDatabase";
+import { GrantV5ApplicationWorkspace } from "../../components/hq/grants/GrantV5ApplicationWorkspace";
+import { GrantV5ComplianceDashboard } from "../../components/hq/grants/GrantV5ComplianceDashboard";
 import { GrantV4ExecutiveDashboard } from "../../components/hq/grants/GrantV4ExecutiveDashboard";
 import { GrantV4LifecyclePanel } from "../../components/hq/grants/GrantV4LifecyclePanel";
 import { GrantV4FundingCalendar } from "../../components/hq/grants/GrantV4FundingCalendar";
@@ -208,7 +212,10 @@ const GrantCenterPage: React.FC = () => {
       <div className="hq-tab-content hq-fade-in">
         {tab === "overview" && (
           <>
-            <GrantV4ExecutiveDashboard />
+            <GrantV5FundingIntelligenceDashboard />
+            <div style={{ marginTop: "1.25rem" }}>
+              <GrantV4ExecutiveDashboard />
+            </div>
             <div style={{ marginTop: "1.25rem" }}>
               <GrantV3ExecutiveDashboard />
             </div>
@@ -388,6 +395,9 @@ const GrantCenterPage: React.FC = () => {
         {tab === "opportunities" && (
           <>
             <div style={{ marginBottom: "1.25rem" }}>
+              <GrantV5NationalDatabase />
+            </div>
+            <div style={{ marginBottom: "1.25rem" }}>
               <GrantV3DiscoveryPanel />
             </div>
             <div style={{ marginBottom: "1.25rem" }}>
@@ -512,6 +522,9 @@ const GrantCenterPage: React.FC = () => {
                   ))}
                 </tbody>
               </table>
+            </div>
+            <div style={{ marginTop: "1.25rem" }}>
+              <GrantV5ApplicationWorkspace applications={(applications.data?.applications ?? []).map((a) => ({ id: a.id, title: a.title }))} />
             </div>
             <div style={{ marginTop: "1.25rem" }}>
               <GrantApplicationWorkflowPanel
@@ -750,6 +763,9 @@ const GrantCenterPage: React.FC = () => {
         )}
 
         {tab === "compliance" && (
+          <>
+            <GrantV5ComplianceDashboard />
+            <div style={{ marginTop: "1.25rem" }}>
           <HqPanel title="Compliance Tracking & Reminders">
             {compliance.isLoading ? <HqLoading /> : (
               <table className="hq-table">
@@ -767,6 +783,8 @@ const GrantCenterPage: React.FC = () => {
               </table>
             )}
           </HqPanel>
+            </div>
+          </>
         )}
 
         {tab === "funder-reports" && (

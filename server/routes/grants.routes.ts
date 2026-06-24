@@ -70,6 +70,22 @@ import {
   buildIntelligentFundingOperationsPlatform,
   AURA_V4_ADVISOR_QUESTIONS,
 } from "../hq/grantFundingEngineV4";
+import {
+  buildFundingIntelligencePlatform,
+  listNationalGrantDatabase,
+  matchGrantsAllDivisions,
+  scoreGrantOpportunityV5,
+  buildApplicationWorkspace,
+  aiAssistApplicationSection,
+  getOrCreateProposalBudget,
+  updateProposalBudget,
+  buildExecutiveIntelligenceV5,
+  buildComplianceDashboard,
+  buildRenewalReportingTracker,
+  buildMultiYearProjections,
+  buildPerformanceMetrics,
+  auraFundingIntelligenceAdvisorV5,
+} from "../hq/grantFundingEngineV5";
 
 const router = Router();
 
@@ -1026,6 +1042,95 @@ router.post("/funding-engine/v4/aura", async (req, res) => {
   } catch (e) {
     console.error("AURA v4 advisor error:", e);
     res.status(500).json({ error: "Executive advisor unavailable" });
+  }
+});
+
+// ——— Grant Center v5 — Funding Intelligence Engine ———
+
+router.get("/funding-engine/v5/platform", async (_req, res) => {
+  res.json(await buildFundingIntelligencePlatform());
+});
+
+router.get("/funding-engine/v5/national", async (req, res) => {
+  const limit = Number(req.query.limit ?? 50);
+  res.json({ opportunities: await listNationalGrantDatabase(limit), generatedAt: new Date().toISOString() });
+});
+
+router.get("/funding-engine/v5/match-all", async (req, res) => {
+  res.json(await matchGrantsAllDivisions({
+    limitPerDivision: req.query.limit ? Number(req.query.limit) : 5,
+    actorEmail: req.hqUser?.email,
+  }));
+});
+
+router.post("/opportunities/:id/score-v5", async (req, res) => {
+  const result = await scoreGrantOpportunityV5(req.params.id, {
+    divisionSlug: req.body?.divisionSlug,
+    actorEmail: req.hqUser?.email,
+  });
+  if (!result) return res.status(404).json({ error: "Opportunity not found" });
+  res.json(result);
+});
+
+router.get("/applications/:id/workspace", async (req, res) => {
+  const workspace = await buildApplicationWorkspace(req.params.id, { actorEmail: req.hqUser?.email });
+  if (!workspace) return res.status(404).json({ error: "Application not found" });
+  res.json(workspace);
+});
+
+router.post("/applications/:id/ai-assist", async (req, res) => {
+  const { section, prompt } = req.body ?? {};
+  if (!section) return res.status(400).json({ error: "section is required" });
+  res.json(await aiAssistApplicationSection({
+    applicationId: req.params.id,
+    section,
+    prompt,
+    actorEmail: req.hqUser?.email,
+  }));
+});
+
+router.get("/applications/:id/proposal-budget", async (req, res) => {
+  const budget = await getOrCreateProposalBudget(req.params.id);
+  if (!budget) return res.status(404).json({ error: "Application not found" });
+  res.json({ budget });
+});
+
+router.put("/applications/:id/proposal-budget", async (req, res) => {
+  const result = await updateProposalBudget(req.params.id, req.body ?? {});
+  if (!result.ok) return res.status(400).json(result);
+  res.json(result);
+});
+
+router.get("/funding-engine/v5/intelligence", async (_req, res) => {
+  res.json(await buildExecutiveIntelligenceV5());
+});
+
+router.get("/funding-engine/v5/compliance", async (_req, res) => {
+  res.json(await buildComplianceDashboard());
+});
+
+router.get("/funding-engine/v5/renewal-reporting", async (_req, res) => {
+  res.json(await buildRenewalReportingTracker());
+});
+
+router.get("/funding-engine/v5/projections", async (req, res) => {
+  const years = req.query.years ? Number(req.query.years) : 5;
+  res.json(await buildMultiYearProjections(years));
+});
+
+router.get("/funding-engine/v5/performance", async (_req, res) => {
+  res.json(await buildPerformanceMetrics());
+});
+
+router.post("/funding-engine/v5/aura", async (req, res) => {
+  try {
+    res.json(await auraFundingIntelligenceAdvisorV5({
+      question: req.body?.question,
+      actorEmail: req.hqUser?.email,
+    }));
+  } catch (e) {
+    console.error("AURA v5 funding intelligence error:", e);
+    res.status(500).json({ error: "Funding intelligence advisor unavailable" });
   }
 });
 
