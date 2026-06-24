@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  FileText, Calendar, Award, ClipboardList, Shield, Plus, CheckCircle, ExternalLink,
+  FileText, Calendar, Award, ClipboardList, Shield, Plus, CheckCircle,
   DollarSign, Users, BarChart3, Bell, History, Upload, TrendingUp, Wallet, Sparkles, FileBarChart, Handshake,
 } from "lucide-react";
 import HQLayout from "../../layouts/HQLayout";
@@ -15,6 +15,11 @@ import { formatCurrency } from "../../utils/safeFormat";
 import { GrantFundingEngineOverview } from "../../components/hq/grants/GrantFundingEngineOverview";
 import { GrantOpportunityDatabase } from "../../components/hq/grants/GrantOpportunityDatabase";
 import { GrantApplicationWorkflowPanel } from "../../components/hq/grants/GrantApplicationWorkflowPanel";
+import { GrantPipelineDashboard } from "../../components/hq/grants/GrantPipelineDashboard";
+import { GrantOutcomesPanel } from "../../components/hq/grants/GrantOutcomesPanel";
+import { GrantDeadlineRenewalPanel } from "../../components/hq/grants/GrantDeadlineRenewalPanel";
+import { GrantBudgetIntegrationPanel } from "../../components/hq/grants/GrantBudgetIntegrationPanel";
+import { GrantAuraIntelligencePanel } from "../../components/hq/grants/GrantAuraIntelligencePanel";
 
 type Tab = "overview" | "pipeline" | "funders" | "opportunities" | "applications" | "calendar" | "deadlines" | "documents"
   | "budgets" | "finance" | "awards" | "compliance" | "funder-reports" | "analytics" | "history" | "notifications" | "ai-intelligence";
@@ -65,15 +70,13 @@ const GrantCenterPage: React.FC = () => {
   const [newFunder, setNewFunder] = useState({ name: "", contact_name: "", contact_email: "", relationship_stage: "prospect" });
   const [newInteraction, setNewInteraction] = useState({ subject: "", notes: "" });
   const [newApp, setNewApp] = useState({ title: "", opportunity_id: "", amount_requested: "" });
-  const [newOpp, setNewOpp] = useState({ title: "", funder: "", description: "", amount_min: "", amount_max: "", deadline: "", url: "" });
+  const [newOpp, setNewOpp] = useState({
+    title: "", funder: "", description: "", amount_min: "", amount_max: "", deadline: "", url: "",
+    division_slugs: [] as string[], eligibility: "", geography: "local",
+  });
   const [selectedAward, setSelectedAward] = useState("");
   const [docForm, setDocForm] = useState({ name: "", file_url: "", application_id: "" });
   const [budgetLines, setBudgetLines] = useState([{ category: "personnel", line_name: "Staff Salaries", allocated: "" }]);
-  const [aiSearch, setAiSearch] = useState({ keywords: "", minAmount: "", maxAmount: "" });
-  const [aiWrite, setAiWrite] = useState({ prompt: "", applicationId: "", opportunityId: "", section: "narrative" });
-  const [aiMatchId, setAiMatchId] = useState("");
-  const [aiNarrative, setAiNarrative] = useState<string | null>(null);
-  const [aiMatchResult, setAiMatchResult] = useState<Record<string, unknown> | null>(null);
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
   const qc = useQueryClient();
 
@@ -107,38 +110,22 @@ const GrantCenterPage: React.FC = () => {
   const expenditures = useQuery({ queryKey: ["grants-expenditures"], queryFn: () => grantsApi.expenditures(), enabled: tab === "finance" });
   const financial = useQuery({ queryKey: ["grants-financial", selectedAward], queryFn: () => grantsApi.financial(selectedAward), enabled: !!selectedAward && tab === "finance" });
   const analytics = useQuery({ queryKey: ["grants-analytics"], queryFn: grantsApi.analytics, enabled: tab === "analytics" });
-  const pipeline = useQuery({ queryKey: ["grants-pipeline"], queryFn: grantsApi.pipeline, enabled: tab === "pipeline" || tab === "overview" });
   const notifications = useQuery({ queryKey: ["grants-notifications"], queryFn: grantsApi.notifications, enabled: tab === "notifications" || tab === "overview" });
   const history = useQuery({ queryKey: ["grants-history"], queryFn: grantsApi.history, enabled: tab === "history" });
-  const renewals = useQuery({ queryKey: ["grants-renewals"], queryFn: grantsApi.renewals, enabled: tab === "history" });
   const funderDashboard = useQuery({ queryKey: ["grants-funder-dashboard"], queryFn: grantsApi.funderDashboard, enabled: tab === "funders" || tab === "overview" });
   const funders = useQuery({ queryKey: ["grants-funders", funderSearch], queryFn: () => grantsApi.funders(funderSearch ? { q: funderSearch } : undefined), enabled: tab === "funders" });
   const funderDetail = useQuery({ queryKey: ["grants-funder", selectedFunderId], queryFn: () => grantsApi.getFunder(selectedFunderId!), enabled: !!selectedFunderId && tab === "funders" });
 
-  const aiFind = useMutation({
-    mutationFn: () => grantsApi.aiFind({
-      keywords: aiSearch.keywords || undefined,
-      minAmount: aiSearch.minAmount ? Number(aiSearch.minAmount) : undefined,
-      maxAmount: aiSearch.maxAmount ? Number(aiSearch.maxAmount) : undefined,
-    }),
-  });
-  const aiWriteMut = useMutation({
-    mutationFn: () => grantsApi.aiWrite({
-      prompt: aiWrite.prompt,
-      applicationId: aiWrite.applicationId || undefined,
-      opportunityId: aiWrite.opportunityId || undefined,
-      section: aiWrite.section,
-    }),
-    onSuccess: (data) => setAiNarrative(data.narrative),
-  });
-  const aiMatchMut = useMutation({
-    mutationFn: () => grantsApi.aiMatch(aiMatchId),
-    onSuccess: (data) => setAiMatchResult(data as Record<string, unknown>),
-  });
-
   const createApp = useMutation({
     mutationFn: grantsApi.createApplication,
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["grants-applications"] }); qc.invalidateQueries({ queryKey: ["grants-dashboard"] }); setShowNewApp(false); setNewApp({ title: "", opportunity_id: "", amount_requested: "" }); },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["grants-applications"] });
+      qc.invalidateQueries({ queryKey: ["grants-dashboard"] });
+      setShowNewApp(false);
+      setNewApp({ title: "", opportunity_id: "", amount_requested: "" });
+      const appId = (data as { application?: { id: string } })?.application?.id;
+      if (appId) setSelectedApplicationId(appId);
+    },
   });
   const createOpp = useMutation({
     mutationFn: grantsApi.createOpportunity,
@@ -146,12 +133,8 @@ const GrantCenterPage: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["grants-opportunities"] });
       qc.invalidateQueries({ queryKey: ["grants-dashboard"] });
       setShowNewOpp(false);
-      setNewOpp({ title: "", funder: "", description: "", amount_min: "", amount_max: "", deadline: "", url: "" });
+      setNewOpp({ title: "", funder: "", description: "", amount_min: "", amount_max: "", deadline: "", url: "", division_slugs: [], eligibility: "", geography: "local" });
     },
-  });
-  const updateApp = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<GrantApplication> }) => grantsApi.updateApplication(id, data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["grants-applications"] }); qc.invalidateQueries({ queryKey: ["grants-dashboard"] }); qc.invalidateQueries({ queryKey: ["grants-awards"] }); qc.invalidateQueries({ queryKey: ["grants-budgets"] }); },
   });
   const completeDeadline = useMutation({ mutationFn: grantsApi.completeDeadline, onSuccess: () => qc.invalidateQueries({ queryKey: ["grants-deadlines"] }) });
   const uploadDoc = useMutation({ mutationFn: grantsApi.uploadDocument, onSuccess: () => { qc.invalidateQueries({ queryKey: ["grants-documents"] }); setDocForm({ name: "", file_url: "", application_id: "" }); } });
@@ -177,7 +160,6 @@ const GrantCenterPage: React.FC = () => {
   const approveDoc = useMutation({ mutationFn: ({ id, status }: { id: string; status: "approved" | "rejected" }) => grantsApi.approveDocument(id, status), onSuccess: () => qc.invalidateQueries({ queryKey: ["grants-documents"] }) });
   const createBudget = useMutation({ mutationFn: grantsApi.createBudgetLines, onSuccess: () => qc.invalidateQueries({ queryKey: ["grants-budgets"] }) });
   const syncLabor = useMutation({ mutationFn: grantsApi.syncLabor, onSuccess: () => qc.invalidateQueries({ queryKey: ["grants-labor"] }) });
-  const createRenewal = useMutation({ mutationFn: grantsApi.createRenewal, onSuccess: () => { qc.invalidateQueries({ queryKey: ["grants-renewals"] }); qc.invalidateQueries({ queryKey: ["grants-opportunities"] }); } });
   const markRead = useMutation({ mutationFn: grantsApi.markNotificationRead, onSuccess: () => qc.invalidateQueries({ queryKey: ["grants-notifications"] }) });
   const createFunder = useMutation({
     mutationFn: grantsApi.createFunder,
@@ -216,6 +198,7 @@ const GrantCenterPage: React.FC = () => {
             <GrantFundingEngineOverview />
             {dashboard.isLoading ? <HqLoading /> : dash && (
               <>
+                <HqPanel title="Operational Snapshot" subtitle="Legacy dashboard metrics — see Executive Funding KPIs above">
                 <div className="hq-kpi-grid">
                   <KpiCard label="Open Opportunities" value={dash.openOpportunities} variant="success" />
                   <KpiCard label="Pending Applications" value={dash.pendingApplications} variant="warning" />
@@ -230,6 +213,7 @@ const GrantCenterPage: React.FC = () => {
                   <KpiCard label="Deadlines (30d)" value={dash.upcomingDeadlines} variant={dash.upcomingDeadlines > 0 ? "warning" : "success"} />
                   <KpiCard label="Compliance Due" value={dash.complianceDue} variant={dash.complianceDue > 0 ? "danger" : "success"} />
                 </div>
+                </HqPanel>
                 <HqPanel title="Financial Center Integration" subtitle="All grant finances flow through Headquarters">
                   <p className="hq-muted-text">Grant budgets, expenditures, payroll allocations, and financial reports inherit directly from the Financial Center. No separate grant accounting system.</p>
                   <ul className="hq-feature-list">
@@ -268,25 +252,12 @@ const GrantCenterPage: React.FC = () => {
         )}
 
         {tab === "pipeline" && (
-          pipeline.isLoading ? <HqLoading /> : (
-            <>
-              <div className="hq-kpi-grid">
-                <KpiCard label="Pipeline Value" value={fmt(pipeline.data?.pipelineValue)} variant="gold" />
-                <KpiCard label="Win Rate" value={`${pipeline.data?.winRate ?? 0}%`} variant="success" />
-              </div>
-              <HqPanel title="Funding Pipeline">
-                <div className="hq-pipeline">
-                  {(pipeline.data?.pipeline ?? []).map((stage) => (
-                    <div key={stage.stage} className="hq-pipeline-stage">
-                      <div className="hq-pipeline-label">{stage.stage}</div>
-                      <div className="hq-pipeline-bar"><div style={{ width: `${Math.min(100, (stage.value / Math.max(pipeline.data?.pipelineValue ?? 1, 1)) * 100)}%` }} /></div>
-                      <div className="hq-pipeline-meta">{stage.count} grants · {fmt(stage.value)}</div>
-                    </div>
-                  ))}
-                </div>
-              </HqPanel>
-            </>
-          )
+          <GrantPipelineDashboard
+            onNavigate={(nextTab, applicationId) => {
+              setTab(nextTab as Tab);
+              if (applicationId) setSelectedApplicationId(applicationId);
+            }}
+          />
         )}
 
         {tab === "funders" && (
@@ -408,6 +379,27 @@ const GrantCenterPage: React.FC = () => {
                   <label>Deadline<input className="hq-aura-input" type="date" value={newOpp.deadline} onChange={(e) => setNewOpp({ ...newOpp, deadline: e.target.value })} /></label>
                   <label>Funder URL<input className="hq-aura-input" value={newOpp.url} onChange={(e) => setNewOpp({ ...newOpp, url: e.target.value })} placeholder="https://…" /></label>
                   <label style={{ gridColumn: "1 / -1" }}>Description<textarea className="hq-aura-input" rows={2} value={newOpp.description} onChange={(e) => setNewOpp({ ...newOpp, description: e.target.value })} /></label>
+                  <label style={{ gridColumn: "1 / -1" }}>Eligibility criteria<textarea className="hq-aura-input" rows={2} value={newOpp.eligibility} onChange={(e) => setNewOpp({ ...newOpp, eligibility: e.target.value })} placeholder="501(c)(3), geographic restrictions…" /></label>
+                  <label>IFCDC Divisions
+                    <select
+                      className="hq-aura-input"
+                      multiple
+                      value={newOpp.division_slugs}
+                      onChange={(e) => setNewOpp({ ...newOpp, division_slugs: Array.from(e.target.selectedOptions, (o) => o.value) })}
+                      style={{ minHeight: 80 }}
+                    >
+                      <option value="housing">Housing</option>
+                      <option value="anti_gang">Anti-Gang</option>
+                      <option value="scholarships">Scholarships</option>
+                      <option value="economic_development">Economic Development</option>
+                      <option value="tapis">TAPIS</option>
+                      <option value="inclusive">Inclusive Community</option>
+                      <option value="music">Music</option>
+                      <option value="radio">Radio</option>
+                      <option value="community_programs">Community Programs</option>
+                    </select>
+                  </label>
+                  <label>Geography<input className="hq-aura-input" value={newOpp.geography} onChange={(e) => setNewOpp({ ...newOpp, geography: e.target.value })} placeholder="local, state, national" /></label>
                 </div>
                 <div className="hq-modal-actions" style={{ marginTop: "1rem" }}>
                   <button type="button" className="hq-btn hq-btn-secondary" onClick={() => setShowNewOpp(false)}>Cancel</button>
@@ -424,35 +416,15 @@ const GrantCenterPage: React.FC = () => {
                       deadline: newOpp.deadline || undefined,
                       url: newOpp.url || undefined,
                       status: "open",
-                    })}
+                      division_slugs: newOpp.division_slugs,
+                      eligibility: newOpp.eligibility || undefined,
+                      geography: newOpp.geography || undefined,
+                    } as Partial<GrantOpportunity>)}
                   >
                     {createOpp.isPending ? "Saving…" : "Create Opportunity"}
                   </button>
                 </div>
               </div>
-            )}
-            {opportunities.isLoading ? <HqLoading /> : (
-            <div className="hq-app-grid">
-              {opps.map((o: GrantOpportunity) => (
-                <div key={o.id} className="hq-app-card hq-fade-in">
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem" }}>
-                    <div className="hq-app-name">{o.title}</div>
-                    <StatusBadge label={o.status} variant={STATUS_VARIANT[o.status] ?? "muted"} />
-                  </div>
-                  <div style={{ fontSize: "0.8rem", color: "var(--hq-gold)", marginBottom: "0.5rem" }}>{o.funder}</div>
-                  <p className="hq-app-desc">{o.description}</p>
-                  <div className="hq-app-meta">
-                    <span className="hq-app-meta-item">{fmt(o.amount_min)} – {fmt(o.amount_max)}</span>
-                    <span className="hq-app-meta-item">Due {fmtDate(o.deadline)}</span>
-                  </div>
-                  <button type="button" className="hq-btn hq-btn-secondary" style={{ fontSize: "0.78rem", padding: "0.4rem 0.8rem" }}
-                    onClick={() => { setNewApp({ title: o.title, opportunity_id: o.id, amount_requested: String(o.amount_max ?? "") }); setShowNewApp(true); setTab("applications"); }}>
-                    Start Application
-                  </button>
-                  {o.url && <a href={o.url} target="_blank" rel="noopener noreferrer" className="hq-app-link" style={{ marginLeft: "0.75rem" }}>Funder site <ExternalLink size={12} style={{ display: "inline" }} /></a>}
-                </div>
-              ))}
-            </div>
             )}
           </>
         )}
@@ -479,7 +451,7 @@ const GrantCenterPage: React.FC = () => {
             )}
             <div className="hq-panel">
               <table className="hq-table">
-                <thead><tr><th>Application</th><th>Funder</th><th>Status</th><th>Requested</th><th>Actions</th></tr></thead>
+                <thead><tr><th>Application</th><th>Funder</th><th>Status</th><th>Requested</th><th></th></tr></thead>
                 <tbody>
                   {(applications.data?.applications ?? []).map((a) => (
                     <tr
@@ -490,11 +462,7 @@ const GrantCenterPage: React.FC = () => {
                       <td><strong>{a.title}</strong></td><td>{a.funder ?? "—"}</td>
                       <td><StatusBadge label={a.status} variant={STATUS_VARIANT[a.status] ?? "muted"} /></td>
                       <td>{fmt(a.amount_requested)}</td>
-                      <td onClick={(e) => e.stopPropagation()}><div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
-                        {a.status === "draft" && <button type="button" className="hq-btn hq-btn-secondary" style={{ padding: "0.3rem 0.6rem", fontSize: "0.72rem" }} onClick={() => updateApp.mutate({ id: a.id, data: { status: "submitted" } })}>Submit</button>}
-                        {a.status === "submitted" && <button type="button" className="hq-btn hq-btn-secondary" style={{ padding: "0.3rem 0.6rem", fontSize: "0.72rem" }} onClick={() => updateApp.mutate({ id: a.id, data: { status: "under_review" } })}>Review</button>}
-                        {a.status === "under_review" && <button type="button" className="hq-btn hq-btn-primary" style={{ padding: "0.3rem 0.6rem", fontSize: "0.72rem" }} onClick={() => updateApp.mutate({ id: a.id, data: { status: "awarded", amount_awarded: a.amount_requested } })}>Award → FC</button>}
-                      </div></td>
+                      <td className="hq-muted-text" style={{ fontSize: "0.78rem" }}>{selectedApplicationId === a.id ? "Selected" : "Click for workflow"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -503,7 +471,12 @@ const GrantCenterPage: React.FC = () => {
             <div style={{ marginTop: "1.25rem" }}>
               <GrantApplicationWorkflowPanel
                 applicationId={selectedApplicationId}
-                onUpdated={() => qc.invalidateQueries({ queryKey: ["grants-applications"] })}
+                onUpdated={() => {
+                  qc.invalidateQueries({ queryKey: ["grants-applications"] });
+                  qc.invalidateQueries({ queryKey: ["grants-awards"] });
+                  qc.invalidateQueries({ queryKey: ["grant-funding-outcomes"] });
+                  qc.invalidateQueries({ queryKey: ["grant-funding-engine"] });
+                }}
               />
             </div>
           </>
@@ -541,7 +514,11 @@ const GrantCenterPage: React.FC = () => {
         )}
 
         {tab === "deadlines" && (
-          <HqPanel title="Grant Deadlines" subtitle="Submission deadlines, compliance reports, and action items">
+          <>
+            <div style={{ marginBottom: "1.25rem" }}>
+              <GrantDeadlineRenewalPanel />
+            </div>
+            <HqPanel title="All Grant Deadlines" subtitle="Submission deadlines, compliance reports, and action items">
             {allDeadlines.isLoading ? <HqLoading /> : (
               <table className="hq-table">
                 <thead><tr><th>Deadline</th><th>Type</th><th>Grant</th><th>Due</th><th>Status</th><th></th></tr></thead>
@@ -569,6 +546,7 @@ const GrantCenterPage: React.FC = () => {
               </table>
             )}
           </HqPanel>
+          </>
         )}
 
         {tab === "documents" && (
@@ -614,7 +592,8 @@ const GrantCenterPage: React.FC = () => {
 
         {tab === "budgets" && (
           <>
-            <div className="hq-panel" style={{ marginBottom: "1rem", padding: "1.25rem" }}>
+            <GrantBudgetIntegrationPanel />
+            <div className="hq-panel" style={{ marginTop: "1.25rem", marginBottom: "1rem", padding: "1.25rem" }}>
               <h4 style={{ fontSize: "0.85rem", color: "var(--hq-gold)", marginBottom: "0.75rem" }}>Budget Builder — Connected to Financial Center</h4>
               <div style={{ display: "flex", gap: "0.75rem", alignItems: "end", flexWrap: "wrap" }}>
                 <div><label style={{ fontSize: "0.72rem", color: "var(--hq-text-muted)" }}>Award</label>
@@ -830,8 +809,11 @@ const GrantCenterPage: React.FC = () => {
         )}
 
         {tab === "history" && (
-          <div className="hq-grid-2">
-            <HqPanel title="Grant History">
+          <>
+            <div style={{ marginBottom: "1.25rem" }}>
+              <GrantOutcomesPanel />
+            </div>
+            <HqPanel title="Grant Activity Log">
               {history.isLoading ? <HqLoading /> : (
                 <ul className="hq-activity-list">
                   {(history.data?.activity ?? []).map((a) => (
@@ -843,25 +825,7 @@ const GrantCenterPage: React.FC = () => {
                 </ul>
               )}
             </HqPanel>
-            <HqPanel title="Renewal Tracking">
-              {renewals.isLoading ? <HqLoading /> : (
-                <>
-                  {(renewals.data?.renewals ?? []).map((r) => (
-                    <div key={r.id as string} className="hq-activity-item" style={{ marginBottom: "0.75rem" }}>
-                      <div><strong>{r.original_grant as string}</strong> — {fmt(r.original_amount as number)}</div>
-                      <div className="hq-muted-text">Renewal {fmtDate(r.renewal_date as string)} · <StatusBadge label={r.status as string} variant={STATUS_VARIANT[r.status as string] ?? "muted"} /></div>
-                    </div>
-                  ))}
-                  {awardList.length > 0 && (
-                    <button type="button" className="hq-btn hq-btn-secondary" style={{ marginTop: "0.75rem" }}
-                      onClick={() => createRenewal.mutate({ original_award_id: awardList[0].id, renewal_date: new Date().toISOString().slice(0, 10), notes: "Renewal initiated from Grant Center" })}>
-                      Plan Renewal for Latest Award
-                    </button>
-                  )}
-                </>
-              )}
-            </HqPanel>
-          </div>
+          </>
         )}
 
         {tab === "notifications" && (
@@ -886,80 +850,7 @@ const GrantCenterPage: React.FC = () => {
           </HqPanel>
         )}
 
-        {tab === "ai-intelligence" && (
-          <div className="hq-grid-2">
-            <HqPanel title="AI Grant Finder" subtitle="Search opportunities with eligibility scoring">
-              <div className="hq-form-grid">
-                <label>Keywords<input className="hq-input" value={aiSearch.keywords} onChange={(e) => setAiSearch({ ...aiSearch, keywords: e.target.value })} placeholder="community development, youth…" /></label>
-                <label>Min Amount<input className="hq-input" type="number" value={aiSearch.minAmount} onChange={(e) => setAiSearch({ ...aiSearch, minAmount: e.target.value })} /></label>
-                <label>Max Amount<input className="hq-input" type="number" value={aiSearch.maxAmount} onChange={(e) => setAiSearch({ ...aiSearch, maxAmount: e.target.value })} /></label>
-              </div>
-              <button type="button" className="hq-btn hq-btn-primary" style={{ marginTop: "0.75rem" }} disabled={aiFind.isPending} onClick={() => aiFind.mutate()}>
-                {aiFind.isPending ? "Searching…" : "Find Opportunities"}
-              </button>
-              <table className="hq-table" style={{ marginTop: "1rem" }}>
-                <thead><tr><th>Opportunity</th><th>Score</th><th>Deadline</th></tr></thead>
-                <tbody>
-                  {(aiFind.data?.opportunities ?? []).map((o) => (
-                    <tr key={o.id as string}>
-                      <td><strong>{o.title as string}</strong><div className="hq-muted-text">{o.funder as string}</div></td>
-                      <td><StatusBadge label={`${o.eligibilityScore}%`} variant={(o.eligibilityScore as number) >= 70 ? "success" : "warning"} /></td>
-                      <td>{o.daysUntilDeadline != null ? `${o.daysUntilDeadline}d` : "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </HqPanel>
-            <HqPanel title="Eligibility Matching">
-              <label>Application ID
-                <select className="hq-input" value={aiMatchId} onChange={(e) => setAiMatchId(e.target.value)}>
-                  <option value="">Select application…</option>
-                  {(applications.data?.applications ?? []).map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}
-                </select>
-              </label>
-              <button type="button" className="hq-btn hq-btn-secondary" style={{ marginTop: "0.75rem" }} disabled={!aiMatchId || aiMatchMut.isPending} onClick={() => aiMatchMut.mutate()}>
-                Score Eligibility
-              </button>
-              {aiMatchResult && (
-                <div style={{ marginTop: "1rem", fontSize: "0.85rem" }}>
-                  <div>Score: <strong style={{ color: "var(--hq-gold)" }}>{aiMatchResult.score as number}%</strong> — {aiMatchResult.recommendation as string}</div>
-                  <ul style={{ marginTop: "0.5rem", paddingLeft: "1.1rem" }}>
-                    {((aiMatchResult.factors as { factor: string; match: boolean; detail: string }[]) ?? []).map((f) => (
-                      <li key={f.factor}>{f.factor}: {f.detail}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </HqPanel>
-            <div style={{ gridColumn: "1 / -1" }}>
-            <HqPanel title="Grant Writing Assistant" subtitle="AURA-powered narrative generation">
-              <div className="hq-form-grid">
-                <label>Application
-                  <select className="hq-input" value={aiWrite.applicationId} onChange={(e) => setAiWrite({ ...aiWrite, applicationId: e.target.value })}>
-                    <option value="">Optional…</option>
-                    {(applications.data?.applications ?? []).map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}
-                  </select>
-                </label>
-                <label>Section
-                  <select className="hq-input" value={aiWrite.section} onChange={(e) => setAiWrite({ ...aiWrite, section: e.target.value })}>
-                    <option value="narrative">Project Narrative</option>
-                    <option value="need">Statement of Need</option>
-                    <option value="outcomes">Outcomes & Evaluation</option>
-                    <option value="budget">Budget Justification</option>
-                  </select>
-                </label>
-                <label style={{ gridColumn: "1 / -1" }}>Prompt<textarea className="hq-input" rows={3} value={aiWrite.prompt} onChange={(e) => setAiWrite({ ...aiWrite, prompt: e.target.value })} placeholder="Describe the program impact and community need…" /></label>
-              </div>
-              <button type="button" className="hq-btn hq-btn-primary" style={{ marginTop: "0.75rem" }} disabled={!aiWrite.prompt || aiWriteMut.isPending} onClick={() => aiWriteMut.mutate()}>
-                {aiWriteMut.isPending ? "Writing…" : "Generate Narrative"}
-              </button>
-              {aiNarrative && (
-                <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", marginTop: "1rem", fontSize: "0.85rem", lineHeight: 1.6, color: "var(--hq-text-muted)" }}>{aiNarrative}</pre>
-              )}
-            </HqPanel>
-            </div>
-          </div>
-        )}
+        {tab === "ai-intelligence" && <GrantAuraIntelligencePanel />}
       </div>
     </HQLayout>
   );

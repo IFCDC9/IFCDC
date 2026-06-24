@@ -35,6 +35,12 @@ export interface GrantOpportunity {
   deadline: string | null;
   url: string;
   requirements: string;
+  division_slugs?: string[];
+  program_areas?: string[];
+  eligibility?: string;
+  geography?: string;
+  funder_type?: string;
+  source_type?: string;
 }
 
 export interface GrantApplication {
@@ -140,7 +146,7 @@ export const grantsApi = {
 
   history: () => apiFetch<{ activity: Record<string, unknown>[]; awards: Record<string, unknown>[] }>("/history"),
 
-  aiFind: (criteria: { keywords?: string; minAmount?: number; maxAmount?: number; status?: string }) =>
+  aiFind: (criteria: { keywords?: string; minAmount?: number; maxAmount?: number; status?: string; division?: string }) =>
     apiFetch<{ opportunities: Record<string, unknown>[] }>("/ai/find", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(criteria),
     }),
