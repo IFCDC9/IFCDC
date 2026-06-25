@@ -18,6 +18,8 @@
     "grants:qa": "node script/grant-center-qa.mjs",
     "grants:release": "npm run check && npm run build && npm run grants:qa",
     "grants:deploy-verify": "node script/grant-center-deploy-verify.mjs",
+    "deploy:parity": "node script/host-parity-verify.mjs",
+    "start:render": "node script/render-prestart.mjs && npm run start",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {

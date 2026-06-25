@@ -1,0 +1,40 @@
+# IFCDC Headquarters — Render Blueprint (Staging → Production)
+# Runbook: Documents/HQ-DEPLOY-RUNBOOK.md
+#
+# Production Web Service for IFCDC HQ (long-term host).
+# During initial rollout, verify against Replit before DNS cutover (see HQ-DEPLOY-RUNBOOK.md).
+#
+# IMPORTANT: Requires full monorepo clone (file: deps → Libraries/ifcdc-packages).
+
+services:
+  - type: web
+    name: ifcdc-hq
+    runtime: node
+    region: ohio
+    plan: starter
+    rootDir: Apps/IMPERIAL-FOUNDATION-CDC
+    buildCommand: npm install && npm run build
+    startCommand: node script/render-prestart.mjs && npm run start
+    healthCheckPath: /api/health
+    autoDeploy: false
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        sync: false
+      - key: MASTER_OWNER_EMAIL
+        sync: false
+      - key: FOUNDER_SEED_PASSWORD
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: PUBLIC_APP_URL
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
+
+    disk:
+      name: ifcdc-hq-data
+      mountPath: /opt/render/project/src/Apps/IMPERIAL-FOUNDATION-CDC/data
+      sizeGB: 1
