@@ -1,8 +1,8 @@
-import React from "react";
+import React, { useState } from "react";
 import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { PeopleTimesheetsPanel } from "./PeopleTimesheetsPanel";
-import { Clock, DollarSign, Users, Palmtree, Briefcase, Target } from "lucide-react";
+import { Clock, DollarSign, Users, Palmtree, Briefcase, Target, Plus } from "lucide-react";
 import { peopleApi } from "../../../api/peopleApi";
 import { financeApi } from "../../../api/financeApi";
 import { KpiCard } from "../KpiCard";
@@ -14,9 +14,23 @@ import { formatCurrency } from "../../../utils/safeFormat";
 const fmt = formatCurrency;
 
 export const PayrollTimeCenter: React.FC = () => {
+  const qc = useQueryClient();
   const center = useQuery({ queryKey: ["payroll-time-center"], queryFn: peopleApi.phase3PayrollTimeCenter });
   const payrollOverview = useQuery({ queryKey: ["finance-payroll-overview"], queryFn: financeApi.payrollOverview });
   const payrollReports = useQuery({ queryKey: ["payroll-reports"], queryFn: peopleApi.phase3PayrollReports });
+  const contractors = useQuery({ queryKey: ["people-contractors-pay"], queryFn: () => peopleApi.list({ type: "contractor" }) });
+  const [cpForm, setCpForm] = useState({ person_id: "", description: "", amount: "" });
+  const createPayment = useMutation({
+    mutationFn: () => peopleApi.createContractorPayment({
+      person_id: cpForm.person_id,
+      description: cpForm.description,
+      amount_cents: Math.round(Number(cpForm.amount) * 100),
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["payroll-time-center"] });
+      setCpForm({ person_id: "", description: "", amount: "" });
+    },
+  });
 
   if (center.isLoading) return <HqLoading message="Loading Payroll & Time Management Center…" />;
   const s = center.data?.summary ?? {};
@@ -78,6 +92,17 @@ export const PayrollTimeCenter: React.FC = () => {
         </HqPanel>
 
         <HqPanel title="Contractor Payments" subtitle="Consultant and contractor disbursements">
+          <div className="hq-form-grid" style={{ marginBottom: "0.75rem" }}>
+            <select className="hq-input" value={cpForm.person_id} onChange={(e) => setCpForm({ ...cpForm, person_id: e.target.value })}>
+              <option value="">Select contractor</option>
+              {(contractors.data?.people ?? []).map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
+            </select>
+            <input className="hq-input" placeholder="Description" value={cpForm.description} onChange={(e) => setCpForm({ ...cpForm, description: e.target.value })} />
+            <input className="hq-input" type="number" step="0.01" placeholder="Amount ($)" value={cpForm.amount} onChange={(e) => setCpForm({ ...cpForm, amount: e.target.value })} />
+            <button type="button" className="hq-btn hq-btn-primary" disabled={!cpForm.person_id || !cpForm.description || !cpForm.amount || createPayment.isPending} onClick={() => createPayment.mutate()}>
+              <Plus size={14} /> Record Payment
+            </button>
+          </div>
           <table className="hq-table">
             <thead><tr><th>Contractor</th><th>Description</th><th>Amount</th><th>Status</th></tr></thead>
             <tbody>

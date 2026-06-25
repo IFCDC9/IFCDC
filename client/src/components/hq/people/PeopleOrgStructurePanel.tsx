@@ -1,13 +1,29 @@
-import React from "react";
-import { useQuery } from "@tanstack/react-query";
+import React, { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Building2, Network, Briefcase, Users, Plus } from "lucide-react";
 import { peopleApi } from "../../../api/peopleApi";
 import { HqPanel } from "../HqPanel";
 import { KpiCard } from "../KpiCard";
-import { Building2, Network, Briefcase, Users } from "lucide-react";
 import { HqLoading } from "../HqLoading";
 
 export const PeopleOrgStructurePanel: React.FC = () => {
+  const qc = useQueryClient();
   const org = useQuery({ queryKey: ["people-org-structure"], queryFn: peopleApi.phase3OrganizationStructure });
+  const departments = useQuery({ queryKey: ["people-departments"], queryFn: peopleApi.departments });
+  const [posForm, setPosForm] = useState({ title: "", department_id: "", level: "3", description: "" });
+
+  const createPosition = useMutation({
+    mutationFn: () => peopleApi.createPosition({
+      title: posForm.title,
+      department_id: posForm.department_id || undefined,
+      level: Number(posForm.level),
+      description: posForm.description || undefined,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["people-org-structure"] });
+      setPosForm({ title: "", department_id: "", level: "3", description: "" });
+    },
+  });
 
   if (org.isLoading) return <HqLoading message="Loading organization structure…" />;
   const summary = org.data?.summary ?? {};
@@ -47,7 +63,18 @@ export const PeopleOrgStructurePanel: React.FC = () => {
           </table>
         </HqPanel>
 
-        <HqPanel title="Position Management" subtitle="Defined roles and fill status">
+        <HqPanel title="Position Management" subtitle="Define roles and track fill status">
+          <div className="hq-form-grid" style={{ marginBottom: "0.75rem" }}>
+            <input className="hq-input" placeholder="Position title" value={posForm.title} onChange={(e) => setPosForm({ ...posForm, title: e.target.value })} />
+            <select className="hq-input" value={posForm.department_id} onChange={(e) => setPosForm({ ...posForm, department_id: e.target.value })}>
+              <option value="">Department</option>
+              {(departments.data?.departments ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+            <input className="hq-input" type="number" min={1} max={5} placeholder="Level" value={posForm.level} onChange={(e) => setPosForm({ ...posForm, level: e.target.value })} />
+            <button type="button" className="hq-btn hq-btn-primary" disabled={!posForm.title || createPosition.isPending} onClick={() => createPosition.mutate()}>
+              <Plus size={14} /> Add Position
+            </button>
+          </div>
           <table className="hq-table">
             <thead><tr><th>Position</th><th>Level</th><th>Filled</th></tr></thead>
             <tbody>
@@ -67,7 +94,7 @@ export const PeopleOrgStructurePanel: React.FC = () => {
         <HqPanel title="Reporting Hierarchy" subtitle="Manager chain and direct reports">
           {renderTree((org.data?.reportingHierarchy ?? []) as Record<string, unknown>[])}
           {(org.data?.reportingHierarchy ?? []).length === 0 && (
-            <p className="hq-muted-text">Assign managers via reports-to on employee profiles to build hierarchy.</p>
+            <p className="hq-muted-text">Assign managers on employee profiles to build the reporting hierarchy.</p>
           )}
         </HqPanel>
       </div>

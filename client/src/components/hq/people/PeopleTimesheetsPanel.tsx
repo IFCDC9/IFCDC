@@ -17,6 +17,11 @@ export const PeopleTimesheetsPanel: React.FC = () => {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["payroll-timesheets"] }); setForm({ person_id: "", period_start: "", period_end: "" }); },
   });
 
+  const submit = useMutation({
+    mutationFn: (id: string) => peopleApi.updateTimesheet(id, "submitted"),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["payroll-timesheets"] }),
+  });
+
   const approve = useMutation({
     mutationFn: (id: string) => peopleApi.updateTimesheet(id, "approved"),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["payroll-timesheets"] }),
@@ -45,7 +50,16 @@ export const PeopleTimesheetsPanel: React.FC = () => {
                 <td>{String(t.period_start)} – {String(t.period_end)}</td>
                 <td><Clock size={12} style={{ display: "inline", marginRight: 4 }} />{String(t.total_hours ?? 0)}</td>
                 <td><StatusBadge label={String(t.status)} variant={t.status === "approved" ? "success" : "muted"} /></td>
-                <td>{t.status === "submitted" && <button type="button" className="hq-btn hq-btn-sm" onClick={() => approve.mutate(String(t.id))}>Approve</button>}</td>
+                <td>
+                  <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                    {t.status === "draft" && (
+                      <button type="button" className="hq-btn hq-btn-sm" onClick={() => submit.mutate(String(t.id))}>Submit</button>
+                    )}
+                    {t.status === "submitted" && (
+                      <button type="button" className="hq-btn hq-btn-sm hq-btn-primary" onClick={() => approve.mutate(String(t.id))}>Approve</button>
+                    )}
+                  </div>
+                </td>
               </tr>
             ))}
             {(timesheets.data?.timesheets ?? []).length === 0 && <tr><td colSpan={5} className="hq-muted-text">No timesheets yet — generate from time clock data.</td></tr>}

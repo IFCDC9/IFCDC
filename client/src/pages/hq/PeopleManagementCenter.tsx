@@ -19,6 +19,7 @@ import { PeopleJobApplicantsPanel } from "../../components/hq/people/PeopleJobAp
 import { PeopleOrgStructurePanel } from "../../components/hq/people/PeopleOrgStructurePanel";
 import { PeopleRolesPermissionsPanel } from "../../components/hq/people/PeopleRolesPermissionsPanel";
 import { PeoplePersonnelFilesPanel } from "../../components/hq/people/PeoplePersonnelFilesPanel";
+import { PeopleProfileEditPanel } from "../../components/hq/people/PeopleProfileEditPanel";
 import { PeopleOrgChartPanel } from "../../components/hq/people/PeopleOrgChartPanel";
 import { PeopleTimesheetsPanel } from "../../components/hq/people/PeopleTimesheetsPanel";
 import { PeopleTeamAssignmentsPanel } from "../../components/hq/people/PeopleTeamAssignmentsPanel";
@@ -524,6 +525,8 @@ const PeopleManagementCenter: React.FC = () => {
                   </button>
                 </div>
               </div>
+
+              <PeopleProfileEditPanel person={profile.data.person} personId={selectedId} />
 
               <div className="hq-grid-2">
                 <HqPanel title="Contact & Role">

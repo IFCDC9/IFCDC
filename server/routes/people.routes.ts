@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { Request, Response } from "express";
 import { getDb } from "../db";
-import { hqAuthRequired, requireHQModule } from "../middleware/hqAuth";
+import { hqAuthRequired, requireHQModule, requireHQPermission } from "../middleware/hqAuth";
 import {
   ensurePeopleTables,
   peopleId,
@@ -40,6 +40,17 @@ import {
 const router = Router();
 
 router.use(hqAuthRequired, requireHQModule("hr"));
+
+router.use((req, res, next) => {
+  if (!["POST", "PATCH", "PUT", "DELETE"].includes(req.method)) return next();
+  const path = req.path;
+  const isApproval =
+    (path.includes("/leave-requests/") || path.includes("/timesheets/")) && req.method === "PATCH";
+  if (isApproval) {
+    return requireHQPermission("hq.hr.manage", "hq.hr.approve")(req, res, next);
+  }
+  return requireHQPermission("hq.hr.manage")(req, res, next);
+});
 
 router.use(async (_req, _res, next) => {
   try {
@@ -313,6 +324,20 @@ router.get("/onboarding", async (req, res) => {
     ${incompleteOnly ? "HAVING SUM(CASE WHEN oi.completed = 0 THEN 1 ELSE 0 END) > 0" : ""}
     ORDER BY p.last_name
   `);
+  const personIds = summaries.map((s: { person_id: string }) => s.person_id);
+  const allItems = personIds.length
+    ? await db.all(
+        `SELECT id, person_id, task_name, completed, sort_order FROM people_onboarding_items
+         WHERE person_id IN (${personIds.map(() => "?").join(",")}) ORDER BY sort_order`,
+        ...personIds
+      )
+    : [];
+  const tasksByPerson = new Map<string, unknown[]>();
+  for (const item of allItems as { person_id: string }[]) {
+    const list = tasksByPerson.get(item.person_id) ?? [];
+    list.push(item);
+    tasksByPerson.set(item.person_id, list);
+  }
   res.json({
     onboarding: summaries.map((s: Record<string, unknown>) => ({
       personId: s.person_id,
@@ -323,7 +348,7 @@ router.get("/onboarding", async (req, res) => {
       startDate: s.start_date,
       totalCount: s.total_count,
       completedCount: s.completed_count,
-      tasks: [],
+      tasks: tasksByPerson.get(String(s.person_id)) ?? [],
     })),
   });
 });
@@ -536,7 +561,7 @@ router.patch("/job-applicants/:id", async (req: Request, res: Response) => {
 });
 
 router.post("/job-applicants/:id/hire", async (req: Request, res: Response) => {
-  const result = await hireJobApplicant(req.params.id, { id: req.hqUser?.id, email: req.hqUser?.email });
+  const result = await hireJobApplicant(req.params.id, { id: req.hqUser?.id, email: req.hqUser?.email }, req.body);
   if (!result) return res.status(404).json({ error: "Applicant not found" });
   res.json(result);
 });

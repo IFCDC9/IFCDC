@@ -21,6 +21,9 @@ export interface Person {
   enterpriseRole: string | null;
   departmentId: string | null;
   departmentName: string | null;
+  reportsToPersonId?: string | null;
+  positionId?: string | null;
+  payType?: string | null;
   status: string;
   location: string | null;
   startDate: string | null;

@@ -98,7 +98,11 @@ export async function updateJobApplicant(id: string, data: Record<string, unknow
   return db.get("SELECT * FROM job_applicants WHERE id = ?", id);
 }
 
-export async function hireJobApplicant(applicantId: string, actor?: { id?: string; email?: string }) {
+export async function hireJobApplicant(
+  applicantId: string,
+  actor?: { id?: string; email?: string },
+  opts?: { position_id?: string; department_id?: string; enterprise_role?: string; pay_rate?: number; reports_to_person_id?: string }
+) {
   const db = await getDb();
   const app = await db.get<Record<string, unknown>>("SELECT * FROM job_applicants WHERE id = ?", applicantId);
   if (!app) return null;
@@ -106,22 +110,42 @@ export async function hireJobApplicant(applicantId: string, actor?: { id?: strin
 
   const now = new Date().toISOString();
   const personId = peopleId();
+  const departmentId = opts?.department_id ?? app.department_id ?? null;
+
+  let positionId = opts?.position_id ?? null;
+  if (!positionId && app.position_applied) {
+    const pos = await db.get<{ id: string }>(
+      "SELECT id FROM org_positions WHERE title = ? AND status = 'active' LIMIT 1",
+      app.position_applied
+    );
+    positionId = pos?.id ?? null;
+  }
+
+  const enterpriseRole = opts?.enterprise_role ?? "employee";
+  const payRate = opts?.pay_rate ?? null;
+
   await db.run(
     `INSERT INTO people (id, person_type, first_name, last_name, email, phone, department_id, organization_role,
-     status, start_date, source_app, created_at, updated_at)
-     VALUES (?, 'employee', ?, ?, ?, ?, ?, ?, 'active', ?, 'hq', ?, ?)`,
+     enterprise_role, position_id, reports_to_person_id, status, start_date, pay_rate, pay_type, payroll_status,
+     source_app, created_at, updated_at)
+     VALUES (?, 'employee', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, 'hourly', 'active', 'hq', ?, ?)`,
     personId,
     app.first_name,
     app.last_name,
     app.email ?? null,
     app.phone ?? null,
-    app.department_id ?? null,
+    departmentId,
     app.position_applied ?? "New Hire",
+    enterpriseRole,
+    positionId,
+    opts?.reports_to_person_id ?? null,
     now.slice(0, 10),
+    payRate,
     now,
     now
   );
   await seedOnboardingForPerson(personId);
+  await ensurePtoBalance(personId);
   await db.run(
     "UPDATE job_applicants SET status = 'hired', hired_person_id = ?, reviewed_at = ?, updated_at = ? WHERE id = ?",
     personId, now, now, applicantId

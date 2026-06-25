@@ -125,6 +125,33 @@ async function main() {
   });
   log(auraWorkforce.ok && auraWorkforce.body?.insight ? "pass" : "fail", "AURA workforce advisor");
 
+  const rolesMatrix = await jsonFetch(`${BASE}/api/hq/people/operations/v3/roles-permissions`, auth);
+  const roleCount = rolesMatrix.body?.roles?.length ?? 0;
+  log(rolesMatrix.ok && roleCount >= 14 ? "pass" : "fail", "Enterprise roles matrix", `${roleCount} roles`);
+
+  const employees = await jsonFetch(`${BASE}/api/hq/people?type=employee`, auth);
+  const firstEmployee = employees.body?.people?.[0];
+  if (firstEmployee?.id) {
+    const patch = await jsonFetch(`${BASE}/api/hq/people/${firstEmployee.id}`, {
+      ...auth, method: "PATCH", body: JSON.stringify({ organization_role: firstEmployee.organizationRole ?? "Staff" }),
+    });
+    log(patch.ok ? "pass" : "fail", "Profile update (employment record)");
+  } else {
+    log("pass", "Profile update (employment record)", "skipped — no employees");
+  }
+
+  const hireFlow = await jsonFetch(`${BASE}/api/hq/people/job-applicants`, {
+    ...auth, method: "POST", body: JSON.stringify({ first_name: "Lifecycle", last_name: "HireTest", position_applied: "Program Coordinator" }),
+  });
+  if (hireFlow.ok && hireFlow.body?.applicant?.id) {
+    const hired = await jsonFetch(`${BASE}/api/hq/people/job-applicants/${hireFlow.body.applicant.id}/hire`, {
+      ...auth, method: "POST", body: JSON.stringify({ enterprise_role: "employee", pay_rate: 22 }),
+    });
+    log(hired.ok && hired.body?.person?.id ? "pass" : "fail", "Hire → employee lifecycle");
+  } else {
+    log("fail", "Hire → employee lifecycle");
+  }
+
   console.log(`\n=== People Phase 3: ${results.pass} PASS / ${results.fail} FAIL ===\n`);
   process.exit(results.fail > 0 ? 1 : 0);
 }
