@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { Request, Response } from "express";
 import { getDb } from "../db";
 import { hqAuthRequired, requireHQModule } from "../middleware/hqAuth";
+import { hasPermission } from "../hq/enterpriseRoles";
 import { ensureGrantTables, grantId, logGrantActivity } from "../hq/grantsSchema";
 import { buildGrantExecutiveDashboard, buildGrantAnalytics, generateGrantNotifications, buildFunderReports } from "../hq/grantReporting";
 import { saveHqFileBase64 } from "../hq/hqFileStorage";
@@ -86,6 +87,19 @@ import {
   buildPerformanceMetrics,
   auraFundingIntelligenceAdvisorV5,
 } from "../hq/grantFundingEngineV5";
+import {
+  buildGrantCenterPlatform,
+  buildGrantCenterExecutiveSummary,
+  listGrantTemplates,
+  getGrantTemplate,
+  createGrantTemplate,
+  buildWriterStudio,
+  updateWriterSection,
+  assistWriterSection,
+  buildOpportunityFinder,
+  buildFundingAnalyticsDashboard,
+  ensureGrantCenterTables,
+} from "../hq/grantCenterEngine";
 
 const router = Router();
 
@@ -95,10 +109,20 @@ router.use(async (_req, _res, next) => {
   try {
     await ensureGrantTables();
     await ensureFinanceTables();
+    await ensureGrantCenterTables();
     next();
   } catch (e) {
     next(e);
   }
+});
+
+/** Grant mutations require hq.grants.manage (board members are read-only). */
+router.use((req, res, next) => {
+  if (!["POST", "PATCH", "PUT", "DELETE"].includes(req.method)) return next();
+  const role = req.hqUser?.role;
+  if (role === "founder" || role === "owner") return next();
+  if (hasPermission(role!, "hq.grants.manage")) return next();
+  return res.status(403).json({ error: "Grant manage permission required for this action" });
 });
 
 function actor(req: Request) {
@@ -134,6 +158,66 @@ router.get("/integrations", async (_req, res) => {
 
 router.get("/overview", async (_req, res) => {
   res.json(await buildGrantExecutiveDashboard());
+});
+
+// ——— Grant Center Enterprise Platform ———
+router.get("/center/platform", async (_req, res) => {
+  res.json(await buildGrantCenterPlatform());
+});
+
+router.get("/center/executive-summary", async (_req, res) => {
+  res.json(await buildGrantCenterExecutiveSummary());
+});
+
+router.get("/center/opportunity-finder", async (req, res) => {
+  const { category, geography, q } = req.query;
+  res.json(await buildOpportunityFinder({
+    category: category ? String(category) : undefined,
+    geography: geography ? String(geography) : undefined,
+    q: q ? String(q) : undefined,
+  }));
+});
+
+router.get("/center/analytics", async (_req, res) => {
+  res.json(await buildFundingAnalyticsDashboard());
+});
+
+router.get("/library/templates", async (req, res) => {
+  res.json(await listGrantTemplates(req.query.category ? String(req.query.category) : undefined));
+});
+
+router.get("/library/templates/:id", async (req, res) => {
+  const template = await getGrantTemplate(req.params.id);
+  if (!template) return res.status(404).json({ error: "Template not found" });
+  res.json({ template });
+});
+
+router.post("/library/templates", async (req: Request, res: Response) => {
+  const { title, category, funder_type, description, content } = req.body ?? {};
+  if (!title || !category) return res.status(400).json({ error: "title and category required" });
+  const template = await createGrantTemplate({ title, category, funder_type, description, content }, { email: req.hqUser?.email });
+  res.status(201).json({ template });
+});
+
+router.get("/writer-studio/:applicationId", async (req, res) => {
+  const studio = await buildWriterStudio(req.params.applicationId, {
+    templateId: req.query.templateId ? String(req.query.templateId) : undefined,
+    actorEmail: req.hqUser?.email,
+  });
+  if (!studio) return res.status(404).json({ error: "Application not found" });
+  res.json(studio);
+});
+
+router.patch("/writer-studio/:applicationId/sections/:sectionKey", async (req: Request, res: Response) => {
+  const { content } = req.body ?? {};
+  if (content === undefined) return res.status(400).json({ error: "content required" });
+  const section = await updateWriterSection(req.params.applicationId, req.params.sectionKey, String(content), { email: req.hqUser?.email });
+  res.json({ section });
+});
+
+router.post("/writer-studio/:applicationId/sections/:sectionKey/ai-assist", async (req: Request, res: Response) => {
+  const result = await assistWriterSection(req.params.applicationId, req.params.sectionKey, req.body?.prompt);
+  res.json(result);
 });
 
 router.get("/opportunities", async (_req, res) => {

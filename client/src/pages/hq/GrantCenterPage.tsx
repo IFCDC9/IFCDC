@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   FileText, Calendar, Award, ClipboardList, Shield, Plus, CheckCircle,
-  DollarSign, Users, BarChart3, Bell, History, Upload, TrendingUp, Wallet, Sparkles, FileBarChart, Handshake,
+  DollarSign, Users, BarChart3, Bell, History, Upload, TrendingUp, Wallet, Sparkles, FileBarChart, Handshake, BookOpen, PenLine,
 } from "lucide-react";
 import HQLayout from "../../layouts/HQLayout";
 import { grantsApi, type GrantOpportunity, type GrantApplication, type GrantFunder } from "../../api/grantsApi";
@@ -16,17 +16,14 @@ import { GrantV5FundingIntelligenceDashboard } from "../../components/hq/grants/
 import { GrantV5NationalDatabase } from "../../components/hq/grants/GrantV5NationalDatabase";
 import { GrantV5ApplicationWorkspace } from "../../components/hq/grants/GrantV5ApplicationWorkspace";
 import { GrantV5ComplianceDashboard } from "../../components/hq/grants/GrantV5ComplianceDashboard";
-import { GrantV4ExecutiveDashboard } from "../../components/hq/grants/GrantV4ExecutiveDashboard";
 import { GrantV4LifecyclePanel } from "../../components/hq/grants/GrantV4LifecyclePanel";
 import { GrantV4FundingCalendar } from "../../components/hq/grants/GrantV4FundingCalendar";
 import { GrantV4ProgramIntegration } from "../../components/hq/grants/GrantV4ProgramIntegration";
 import { GrantV4AuraAdvisor } from "../../components/hq/grants/GrantV4AuraAdvisor";
-import { GrantV3ExecutiveDashboard } from "../../components/hq/grants/GrantV3ExecutiveDashboard";
 import { GrantV3DiscoveryPanel } from "../../components/hq/grants/GrantV3DiscoveryPanel";
 import { GrantV3ProgramProfilesPanel } from "../../components/hq/grants/GrantV3ProgramProfilesPanel";
 import { GrantV3DocumentCenter } from "../../components/hq/grants/GrantV3DocumentCenter";
 import { GrantV3AuraExecutivePanel } from "../../components/hq/grants/GrantV3AuraExecutivePanel";
-import { GrantFundingEngineOverview } from "../../components/hq/grants/GrantFundingEngineOverview";
 import { GrantOpportunityDatabase } from "../../components/hq/grants/GrantOpportunityDatabase";
 import { GrantApplicationWorkflowPanel } from "../../components/hq/grants/GrantApplicationWorkflowPanel";
 import { GrantV2PipelineDashboard } from "../../components/hq/grants/GrantV2PipelineDashboard";
@@ -36,29 +33,33 @@ import { GrantOutcomesPanel } from "../../components/hq/grants/GrantOutcomesPane
 import { GrantDeadlineRenewalPanel } from "../../components/hq/grants/GrantDeadlineRenewalPanel";
 import { GrantBudgetIntegrationPanel } from "../../components/hq/grants/GrantBudgetIntegrationPanel";
 import { GrantAuraIntelligencePanel } from "../../components/hq/grants/GrantAuraIntelligencePanel";
+import { GrantV2ExecutiveAnalytics } from "../../components/hq/grants/GrantV2ExecutiveAnalytics";
+import { GrantLibraryPanel, GrantWriterStudioPanel, GrantOpportunityFinderPanel } from "../../components/hq/grants/GrantCenterEnterprisePanels";
 
-type Tab = "overview" | "pipeline" | "divisions" | "funders" | "opportunities" | "applications" | "calendar" | "deadlines" | "documents"
+type Tab = "overview" | "pipeline" | "divisions" | "funders" | "opportunities" | "writer-studio" | "library" | "applications" | "calendar" | "deadlines" | "documents"
   | "budgets" | "finance" | "awards" | "compliance" | "funder-reports" | "analytics" | "history" | "notifications" | "ai-intelligence";
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: "overview", label: "Executive Dashboard", icon: ClipboardList },
+  { id: "opportunities", label: "Opportunity Finder", icon: FileText },
+  { id: "writer-studio", label: "Writer Studio", icon: PenLine },
+  { id: "library", label: "Grant Library", icon: BookOpen },
   { id: "pipeline", label: "Funding Pipeline", icon: TrendingUp },
-  { id: "divisions", label: "Division Profiles", icon: Users },
-  { id: "funders", label: "Funder CRM", icon: Handshake },
-  { id: "opportunities", label: "Opportunities", icon: FileText },
   { id: "applications", label: "Applications", icon: ClipboardList },
-  { id: "calendar", label: "Calendar", icon: Calendar },
+  { id: "calendar", label: "Grant Calendar", icon: Calendar },
   { id: "deadlines", label: "Deadlines", icon: Bell },
-  { id: "documents", label: "Documents", icon: Upload },
+  { id: "documents", label: "Documents Vault", icon: Upload },
+  { id: "funders", label: "Partner CRM", icon: Handshake },
+  { id: "awards", label: "Awards & Budget", icon: Award },
   { id: "budgets", label: "Budget Builder", icon: DollarSign },
   { id: "finance", label: "Financial Reporting", icon: Wallet },
-  { id: "awards", label: "Awards", icon: Award },
   { id: "compliance", label: "Compliance", icon: Shield },
   { id: "funder-reports", label: "Funder Reports", icon: FileBarChart },
+  { id: "analytics", label: "Funding Analytics", icon: BarChart3 },
   { id: "ai-intelligence", label: "AI Intelligence", icon: Sparkles },
-  { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "history", label: "History & Renewals", icon: History },
   { id: "notifications", label: "Notifications", icon: Bell },
+  { id: "divisions", label: "Division Profiles", icon: Users },
 ];
 
 const STATUS_VARIANT: Record<string, "gold" | "success" | "warning" | "danger" | "muted"> = {
@@ -113,6 +114,9 @@ const GrantCenterPage: React.FC = () => {
   }, [searchParams]);
 
   const dashboard = useQuery({ queryKey: ["grants-dashboard"], queryFn: grantsApi.dashboard });
+  const grantPlatform = useQuery({ queryKey: ["grant-center-platform"], queryFn: grantsApi.grantCenterPlatform, enabled: tab === "overview" });
+  const executiveSummary = useQuery({ queryKey: ["grant-executive-summary"], queryFn: grantsApi.grantExecutiveSummary, enabled: tab === "overview" });
+  const fundingAnalytics = useQuery({ queryKey: ["grant-funding-analytics"], queryFn: grantsApi.fundingAnalytics, enabled: tab === "analytics" });
   const opportunities = useQuery({ queryKey: ["grants-opportunities"], queryFn: grantsApi.opportunities });
   const applications = useQuery({ queryKey: ["grants-applications"], queryFn: grantsApi.applications });
   const deadlines = useQuery({ queryKey: ["grants-deadlines"], queryFn: () => grantsApi.deadlines(true) });
@@ -126,7 +130,6 @@ const GrantCenterPage: React.FC = () => {
   const labor = useQuery({ queryKey: ["grants-labor", selectedAward], queryFn: () => grantsApi.labor(selectedAward || undefined), enabled: tab === "finance" });
   const expenditures = useQuery({ queryKey: ["grants-expenditures"], queryFn: () => grantsApi.expenditures(), enabled: tab === "finance" });
   const financial = useQuery({ queryKey: ["grants-financial", selectedAward], queryFn: () => grantsApi.financial(selectedAward), enabled: !!selectedAward && tab === "finance" });
-  const analytics = useQuery({ queryKey: ["grants-analytics"], queryFn: grantsApi.analytics, enabled: tab === "analytics" });
   const notifications = useQuery({ queryKey: ["grants-notifications"], queryFn: grantsApi.notifications, enabled: tab === "notifications" || tab === "overview" });
   const history = useQuery({ queryKey: ["grants-history"], queryFn: grantsApi.history, enabled: tab === "history" });
   const funderDashboard = useQuery({ queryKey: ["grants-funder-dashboard"], queryFn: grantsApi.funderDashboard, enabled: tab === "funders" || tab === "overview" });
@@ -200,7 +203,7 @@ const GrantCenterPage: React.FC = () => {
   const dash = dashboard.data;
 
   return (
-    <HQLayout title="Grant Center" subtitle="Grant lifecycle management integrated with the Headquarters Financial Center — one source of truth for all grant finances">
+    <HQLayout title="Grant Center" subtitle="Enterprise funding command hub — opportunities, writer studio, library, compliance, and financial integration">
       <nav className="hq-tabs">
         {TABS.map((t) => (
           <button key={t.id} type="button" className={`hq-tab ${tab === t.id ? "active" : ""}`} onClick={() => setTab(t.id)}>
@@ -213,18 +216,46 @@ const GrantCenterPage: React.FC = () => {
         {tab === "overview" && (
           <>
             <GrantV5FundingIntelligenceDashboard />
-            <div style={{ marginTop: "1.25rem" }}>
-              <GrantV4ExecutiveDashboard />
-            </div>
-            <div style={{ marginTop: "1.25rem" }}>
-              <GrantV3ExecutiveDashboard />
-            </div>
-            <div style={{ marginTop: "1.25rem" }}>
-              <GrantFundingEngineOverview />
-            </div>
+            {grantPlatform.data && (
+              <div style={{ marginTop: "1.25rem" }}>
+              <HqPanel title="Grant Center Modules" subtitle={`Platform ${grantPlatform.data.version} — modular command hub`}>
+                <div className="hq-app-grid">
+                  {(grantPlatform.data.modules ?? []).map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      className="hq-app-card"
+                      style={{ textAlign: "left", cursor: "pointer" }}
+                      onClick={() => setTab(m.tab as Tab)}
+                    >
+                      <div className="hq-app-name">{m.label}</div>
+                      <StatusBadge label={m.status} variant="success" />
+                    </button>
+                  ))}
+                </div>
+                <p className="hq-muted-text" style={{ marginTop: "0.75rem", fontSize: "0.75rem" }}>
+                  External feeds (Grants.gov, SAM.gov, Foundation Directory, Corporate CSR): placeholder — local database active.
+                </p>
+              </HqPanel>
+              </div>
+            )}
+            {executiveSummary.data?.kpis && (
+              <div style={{ marginTop: "1.25rem" }}>
+              <HqPanel title="Executive Funding KPIs" subtitle="Unified executive summary across pipeline, compliance, and CRM">
+                <div className="hq-kpi-grid">
+                  <KpiCard label="Open Opportunities" value={Number(executiveSummary.data.kpis.openOpportunities ?? 0)} variant="success" />
+                  <KpiCard label="Pending Applications" value={Number(executiveSummary.data.kpis.pendingApplications ?? 0)} variant="warning" />
+                  <KpiCard label="Total Awarded" value={fmt(Number(executiveSummary.data.kpis.totalAwarded ?? 0))} variant="gold" />
+                  <KpiCard label="Pipeline Value" value={fmt(Number(executiveSummary.data.kpis.pipelineValue ?? 0))} />
+                  <KpiCard label="Win Rate" value={`${executiveSummary.data.kpis.winRate ?? 0}%`} variant="gold" />
+                  <KpiCard label="Sustainability Index" value={executiveSummary.data.kpis.sustainabilityIndex != null ? String(executiveSummary.data.kpis.sustainabilityIndex) : "—"} />
+                </div>
+              </HqPanel>
+              </div>
+            )}
             {dashboard.isLoading ? <HqLoading /> : dash && (
               <>
-                <HqPanel title="Operational Snapshot" subtitle="Legacy dashboard metrics — see Executive Funding KPIs above">
+                <HqPanel title="Operational Snapshot" subtitle="Live grant operations metrics">
                 <div className="hq-kpi-grid">
                   <KpiCard label="Open Opportunities" value={dash.openOpportunities} variant="success" />
                   <KpiCard label="Pending Applications" value={dash.pendingApplications} variant="warning" />
@@ -395,6 +426,9 @@ const GrantCenterPage: React.FC = () => {
         {tab === "opportunities" && (
           <>
             <div style={{ marginBottom: "1.25rem" }}>
+              <GrantOpportunityFinderPanel />
+            </div>
+            <div style={{ marginBottom: "1.25rem" }}>
               <GrantV5NationalDatabase />
             </div>
             <div style={{ marginBottom: "1.25rem" }}>
@@ -482,6 +516,29 @@ const GrantCenterPage: React.FC = () => {
               </div>
             )}
           </>
+        )}
+
+        {tab === "writer-studio" && (
+          <GrantWriterStudioPanel
+            applications={(applications.data?.applications ?? []).map((a) => ({ id: a.id, title: a.title }))}
+            selectedApplicationId={selectedApplicationId}
+            onSelectApplication={(id) => setSelectedApplicationId(id || null)}
+          />
+        )}
+
+        {tab === "library" && (
+          <GrantLibraryPanel
+            onApplyTemplate={(templateId) => {
+              if (selectedApplicationId) {
+                grantsApi.writerStudio(selectedApplicationId, templateId).then(() => {
+                  qc.invalidateQueries({ queryKey: ["grant-writer-studio", selectedApplicationId] });
+                  setTab("writer-studio");
+                });
+              } else {
+                setTab("applications");
+              }
+            }}
+          />
         )}
 
         {tab === "applications" && (
@@ -834,30 +891,33 @@ const GrantCenterPage: React.FC = () => {
         )}
 
         {tab === "analytics" && (
-          analytics.isLoading ? <HqLoading /> : (
-            <div className="hq-grid-2">
-              <HqPanel title="Awards by Funder">
-                <table className="hq-table">
-                  <thead><tr><th>Funder</th><th>Awards</th><th>Total</th></tr></thead>
-                  <tbody>
-                    {(analytics.data?.byFunder ?? []).map((f) => (
-                      <tr key={f.funder}><td>{f.funder}</td><td>{f.awards}</td><td>{fmt(f.total)}</td></tr>
-                    ))}
-                  </tbody>
-                </table>
-              </HqPanel>
-              <HqPanel title="Awards by Program">
-                <table className="hq-table">
-                  <thead><tr><th>Program</th><th>Awards</th><th>Total</th></tr></thead>
-                  <tbody>
-                    {(analytics.data?.byProgram ?? []).map((p) => (
-                      <tr key={p.program}><td>{p.program}</td><td>{p.awards}</td><td>{fmt(p.total)}</td></tr>
-                    ))}
-                  </tbody>
-                </table>
-              </HqPanel>
-            </div>
-          )
+          <>
+            <GrantV2ExecutiveAnalytics />
+            {fundingAnalytics.isLoading ? <HqLoading /> : fundingAnalytics.data && (
+              <div className="hq-grid-2" style={{ marginTop: "1.25rem" }}>
+                <HqPanel title="Awards by Funder">
+                  <table className="hq-table">
+                    <thead><tr><th>Funder</th><th>Awards</th><th>Total</th></tr></thead>
+                    <tbody>
+                      {(fundingAnalytics.data.analytics?.byFunder ?? []).map((f) => (
+                        <tr key={f.funder}><td>{f.funder}</td><td>{f.awards}</td><td>{fmt(f.total)}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </HqPanel>
+                <HqPanel title="Awards by Program">
+                  <table className="hq-table">
+                    <thead><tr><th>Program</th><th>Awards</th><th>Total</th></tr></thead>
+                    <tbody>
+                      {(fundingAnalytics.data.analytics?.byProgram ?? []).map((p) => (
+                        <tr key={p.program}><td>{p.program}</td><td>{p.awards}</td><td>{fmt(p.total)}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </HqPanel>
+              </div>
+            )}
+          </>
         )}
 
         {tab === "history" && (

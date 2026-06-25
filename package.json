@@ -13,6 +13,7 @@
     "check": "tsc",
     "people:readiness": "node script/people-phase3-readiness.mjs",
     "finance:readiness": "node script/finance-phase4-readiness.mjs",
+    "grants:readiness": "node script/grant-center-readiness.mjs",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {

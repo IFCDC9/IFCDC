@@ -570,6 +570,47 @@ export const grantsApi = {
       "/funding-engine/v5/aura",
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question }) }
     ),
+
+  // Grant Center Enterprise Platform
+  grantCenterPlatform: () =>
+    apiFetch<{ version: string; modules: { id: string; label: string; tab: string; status: string }[]; integrations: Record<string, unknown>; counts: Record<string, number> }>(
+      "/center/platform"
+    ),
+  grantExecutiveSummary: () =>
+    apiFetch<{ dashboard: GrantOverview; kpis: Record<string, unknown>; compliance: Record<string, unknown> | null; crm: { totalFunders: number; activePartners: number } }>(
+      "/center/executive-summary"
+    ),
+  opportunityFinder: (params?: { category?: string; geography?: string; q?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.category) qs.set("category", params.category);
+    if (params?.geography) qs.set("geography", params.geography);
+    if (params?.q) qs.set("q", params.q);
+    const q = qs.toString();
+    return apiFetch<{ opportunities: GrantOpportunity[]; categorized?: Record<string, GrantOpportunity[]>; ranked?: Record<string, unknown>[]; integrations?: string }>(
+      `/center/opportunity-finder${q ? `?${q}` : ""}`
+    );
+  },
+  fundingAnalytics: () =>
+    apiFetch<{ analytics: { byFunder: { funder: string; awards: number; total: number }[]; byProgram: { program: string; awards: number; total: number }[] }; intelligence: Record<string, unknown> | null; calendarPreview: Record<string, unknown>[] }>(
+      "/center/analytics"
+    ),
+  grantLibrary: (category?: string) =>
+    apiFetch<{ templates: Record<string, unknown>[]; categories: string[] }>(`/library/templates${category ? `?category=${category}` : ""}`),
+  grantTemplate: (id: string) => apiFetch<{ template: Record<string, unknown> }>(`/library/templates/${id}`),
+  createGrantTemplate: (data: { title: string; category: string; funder_type?: string; description?: string; content?: string }) =>
+    apiFetch("/library/templates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
+  writerStudio: (applicationId: string, templateId?: string) =>
+    apiFetch<{ writerSections: { sections: Record<string, unknown>[]; completionPct: number }; application: GrantApplication; templates: Record<string, unknown>[] }>(
+      `/writer-studio/${applicationId}${templateId ? `?templateId=${templateId}` : ""}`
+    ),
+  saveWriterSection: (applicationId: string, sectionKey: string, content: string) =>
+    apiFetch(`/writer-studio/${applicationId}/sections/${sectionKey}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content }),
+    }),
+  writerAiAssist: (applicationId: string, sectionKey: string, prompt?: string) =>
+    apiFetch<{ content?: string; narrative?: string }>(`/writer-studio/${applicationId}/sections/${sectionKey}/ai-assist`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt }),
+    }),
 };
 
 export interface GrantFunder {
