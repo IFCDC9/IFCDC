@@ -122,7 +122,7 @@ export const ROLE_PERMISSIONS: Record<EnterpriseRole, Permission[]> = {
   ],
   executive: [
     "hq.executive", "hq.hr", "hq.hr.manage", "hq.hr.approve", "hq.payroll", "hq.grants", "hq.grants.manage",
-    "hq.finance", "hq.finance.manage", "hq.donations", "hq.programs", "hq.software", "hq.aura",
+    "hq.finance", "hq.donations", "hq.programs", "hq.software", "hq.aura",
     "hq.analytics", "hq.notifications", "hq.settings",
     "app.barbers", "app.music", "app.radio", "app.tapis", "app.inclusive", "app.swiftware", "app.cryptocoin",
   ],

@@ -12,6 +12,7 @@
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "people:readiness": "node script/people-phase3-readiness.mjs",
+    "finance:readiness": "node script/finance-phase4-readiness.mjs",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
