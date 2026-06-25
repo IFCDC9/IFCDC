@@ -8,7 +8,7 @@ export type EnterpriseRole =
   | "board_member" | "grant_manager" | "employee" | "volunteer" | "barber" | "client" | "donor";
 
 export type Permission =
-  | "hq.executive" | "hq.hr" | "hq.hr.manage" | "hq.hr.approve" | "hq.payroll"
+  | "hq.executive" | "hq.hr" | "hq.hr.manage" | "hq.hr.approve" | "hq.hr.self" | "hq.payroll"
   | "hq.grants" | "hq.grants.manage" | "hq.finance" | "hq.finance.manage"
   | "hq.donations" | "hq.programs" | "hq.software" | "hq.aura"
   | "hq.analytics" | "hq.notifications" | "hq.settings" | "hq.settings.manage"
@@ -29,6 +29,8 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   "/hq/sso": "hq.software",
   "/hq/hr": "hq.hr",
   "/hq/people": "hq.hr",
+  "/hq/my-workspace": "hq.hr.self",
+  "/hq/manager": "hq.hr.approve",
   "/hq/payroll": "hq.payroll",
   "/hq/volunteers": "hq.hr",
   "/hq/finance": "hq.finance",

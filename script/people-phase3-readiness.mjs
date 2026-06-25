@@ -30,7 +30,7 @@ async function login() {
 }
 
 async function main() {
-  console.log("\n=== IFCDC People & Operations Phase 3 Readiness ===\n");
+  console.log("\n=== IFCDC People & Operations Phase 3.1 Readiness ===\n");
   const cookie = await login();
   log("pass", "Founder login");
   const auth = { credentials: "include", headers: { Cookie: cookie } };
@@ -152,7 +152,24 @@ async function main() {
     log("fail", "Hire → employee lifecycle");
   }
 
-  console.log(`\n=== People Phase 3: ${results.pass} PASS / ${results.fail} FAIL ===\n`);
+  const staffing = await jsonFetch(`${BASE}/api/hq/people/staffing-overview`, auth);
+  log(staffing.ok && staffing.body?.summary != null ? "pass" : "fail", "Staffing overview (Phase 3.1)");
+
+  const selfService = await jsonFetch(`${BASE}/api/hq/people/self-service/me`, auth);
+  log(selfService.ok || selfService.res.status === 404 ? "pass" : "fail", "Staff self-service API", selfService.ok ? "linked" : "no employee link");
+
+  const managerDash = await jsonFetch(`${BASE}/api/hq/people/manager/dashboard`, auth);
+  log(managerDash.ok || managerDash.res.status === 404 ? "pass" : "fail", "Manager portal API");
+
+  const payrollPrep = await jsonFetch(`${BASE}/api/hq/people/operations/v3/payroll-prepare`, {
+    ...auth, method: "POST", body: JSON.stringify({}),
+  });
+  log(payrollPrep.ok ? "pass" : "fail", "Payroll batch preparation");
+
+  const legacyHr = await jsonFetch(`${BASE}/api/hr/employees`, auth);
+  log(legacyHr.res.status === 410 ? "pass" : "fail", "Legacy /api/hr deprecated (410)");
+
+  console.log(`\n=== People Phase 3.1: ${results.pass} PASS / ${results.fail} FAIL ===\n`);
   process.exit(results.fail > 0 ? 1 : 0);
 }
 

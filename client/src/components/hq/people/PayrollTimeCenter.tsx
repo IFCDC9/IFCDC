@@ -31,6 +31,13 @@ export const PayrollTimeCenter: React.FC = () => {
       setCpForm({ person_id: "", description: "", amount: "" });
     },
   });
+  const preparePayroll = useMutation({
+    mutationFn: () => peopleApi.preparePayrollBatch(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["payroll-reports"] });
+      qc.invalidateQueries({ queryKey: ["finance-payroll-overview"] });
+    },
+  });
 
   if (center.isLoading) return <HqLoading message="Loading Payroll & Time Management Center…" />;
   const s = center.data?.summary ?? {};
@@ -53,6 +60,8 @@ export const PayrollTimeCenter: React.FC = () => {
       <div className="hq-founder-command-strip hq-fade-in" style={{ margin: "1.25rem 0" }}>
         <Link to="/hq/people?tab=time-clock"><Clock size={14} /> Time Clock</Link>
         <Link to="/hq/people?tab=leave" className="primary"><Palmtree size={14} /> PTO & Leave</Link>
+        <Link to="/hq/my-workspace"><Users size={14} /> Staff Self-Service</Link>
+        <Link to="/hq/manager"><Users size={14} /> Manager Portal</Link>
         <Link to="/hq/finance"><DollarSign size={14} /> Finance Center → Payroll Runs</Link>
       </div>
 
@@ -147,6 +156,16 @@ export const PayrollTimeCenter: React.FC = () => {
 
       <div style={{ marginTop: "1.25rem" }}>
         <HqPanel title="Payroll Reports" subtitle="Payroll runs, line items, and Finance Center integration">
+          <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem", flexWrap: "wrap" }}>
+            <button type="button" className="hq-btn hq-btn-primary" disabled={preparePayroll.isPending} onClick={() => preparePayroll.mutate()}>
+              <DollarSign size={14} /> Prepare Batch from Approved Timesheets
+            </button>
+            {preparePayroll.data && (
+              <span className="hq-muted-text" style={{ alignSelf: "center" }}>
+                Prepared {(preparePayroll.data as { prepared?: number }).prepared ?? 0} item(s) → Finance Center draft run
+              </span>
+            )}
+          </div>
           <p className="hq-muted-text" style={{ marginBottom: "0.75rem" }}>
             Active payroll staff: {payrollOverview.data?.activeEmployees ?? payrollReports.data?.summary?.activeEmployees ?? 0}
             {" · "}Hours this month: {payrollOverview.data?.hoursThisMonth ?? payrollReports.data?.summary?.hoursThisMonth ?? 0}

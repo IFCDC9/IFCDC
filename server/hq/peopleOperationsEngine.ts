@@ -15,6 +15,7 @@ import {
   HQ_MODULE_PERMISSIONS,
   ROUTE_PERMISSIONS,
 } from "./enterpriseRoles";
+import { upsertPayrollItemFromTimesheet } from "./payrollPreparation";
 
 export const HR_COMMAND_MODULES = [
   { id: "employees", label: "Employee Directory", personType: "employee", tab: "employees" },
@@ -570,6 +571,9 @@ export async function updateTimesheetStatus(id: string, status: string, actor?: 
     status, status, now, status, now, status, actor?.email ?? null, now, id
   );
   await logPeopleActivity(row.person_id, "timesheet_" + status, `Timesheet ${status}`, actor);
+  if (status === "approved") {
+    await upsertPayrollItemFromTimesheet(id, actor?.email).catch(() => null);
+  }
   return db.get("SELECT * FROM payroll_timesheets WHERE id = ?", id);
 }
 

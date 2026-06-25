@@ -36,10 +36,91 @@ import {
   listTeamAssignments,
   createTeamAssignment,
 } from "../hq/peopleOperationsEngine";
+import {
+  resolvePersonForUser,
+  buildSelfServiceDashboard,
+  selfClockIn,
+  selfClockOut,
+  selfCreateLeaveRequest,
+  selfUpdateProfile,
+  uploadPersonnelDocument,
+  buildManagerDashboard,
+  buildStaffingOverview,
+} from "../hq/peopleSelfServiceEngine";
+import { preparePayrollBatchFromApprovedTimesheets } from "../hq/payrollPreparation";
 
 const router = Router();
 
-router.use(hqAuthRequired, requireHQModule("hr"));
+router.use(hqAuthRequired);
+
+// ——— Phase 3.1: Staff self-service (no full HR module required) ———
+router.get("/self-service/me", requireHQPermission("hq.hr.self"), async (req, res) => {
+  const person = await resolvePersonForUser({ id: req.hqUser!.id, email: req.hqUser!.email });
+  if (!person) return res.status(404).json({ error: "No employee record linked to your account. Contact HR." });
+  const dashboard = await buildSelfServiceDashboard(String(person.id));
+  res.json(dashboard);
+});
+
+router.post("/self-service/clock-in", requireHQPermission("hq.hr.self"), async (req, res) => {
+  const person = await resolvePersonForUser({ id: req.hqUser!.id, email: req.hqUser!.email });
+  if (!person) return res.status(404).json({ error: "Employee record not found" });
+  res.json(await selfClockIn(String(person.id), { email: req.hqUser?.email }));
+});
+
+router.post("/self-service/clock-out", requireHQPermission("hq.hr.self"), async (req, res) => {
+  const person = await resolvePersonForUser({ id: req.hqUser!.id, email: req.hqUser!.email });
+  if (!person) return res.status(404).json({ error: "Employee record not found" });
+  res.json(await selfClockOut(String(person.id), { email: req.hqUser?.email }));
+});
+
+router.post("/self-service/leave-requests", requireHQPermission("hq.hr.self"), async (req, res) => {
+  const person = await resolvePersonForUser({ id: req.hqUser!.id, email: req.hqUser!.email });
+  if (!person) return res.status(404).json({ error: "Employee record not found" });
+  const { leave_type, start_date, end_date, reason } = req.body;
+  if (!start_date || !end_date) return res.status(400).json({ error: "start_date and end_date required" });
+  const row = await selfCreateLeaveRequest(String(person.id), { leave_type, start_date, end_date, reason }, { email: req.hqUser?.email });
+  res.status(201).json({ leaveRequest: row });
+});
+
+router.patch("/self-service/profile", requireHQPermission("hq.hr.self"), async (req, res) => {
+  const person = await resolvePersonForUser({ id: req.hqUser!.id, email: req.hqUser!.email });
+  if (!person) return res.status(404).json({ error: "Employee record not found" });
+  const updated = await selfUpdateProfile(String(person.id), req.body, { email: req.hqUser?.email });
+  if (!updated) return res.status(400).json({ error: "No valid profile fields" });
+  res.json({ person: updated });
+});
+
+router.post("/self-service/documents/upload", requireHQPermission("hq.hr.self"), async (req, res) => {
+  const person = await resolvePersonForUser({ id: req.hqUser!.id, email: req.hqUser!.email });
+  if (!person) return res.status(404).json({ error: "Employee record not found" });
+  const { fileName, base64, mimeType, name, doc_type, notes } = req.body;
+  if (!fileName || !base64 || !name) return res.status(400).json({ error: "fileName, base64, and name required" });
+  try {
+    const result = await uploadPersonnelDocument(String(person.id), { fileName, base64, mimeType, name, doc_type, notes }, { email: req.hqUser?.email });
+    res.status(201).json(result);
+  } catch (e) {
+    console.error("Self-service document upload:", e);
+    res.status(500).json({ error: "Upload failed" });
+  }
+});
+
+// ——— Phase 3.1: Manager portal (department-scoped) ———
+router.get("/manager/dashboard", requireHQPermission("hq.hr.approve", "hq.hr.manage"), async (req, res) => {
+  const manager = await resolvePersonForUser({ id: req.hqUser!.id, email: req.hqUser!.email });
+  if (!manager) return res.status(404).json({ error: "Manager employee record not linked" });
+  res.json(await buildManagerDashboard(String(manager.id)));
+});
+
+router.get("/staffing-overview", requireHQPermission("hq.hr", "hq.hr.manage", "hq.hr.approve"), async (_req, res) => {
+  res.json(await buildStaffingOverview());
+});
+
+router.post("/operations/v3/payroll-prepare", requireHQPermission("hq.hr.manage", "hq.payroll"), async (req, res) => {
+  const { period_start, period_end } = req.body ?? {};
+  res.json(await preparePayrollBatchFromApprovedTimesheets(period_start, period_end));
+});
+
+router.use(requireHQModule("hr"));
 
 router.use((req, res, next) => {
   if (!["POST", "PATCH", "PUT", "DELETE"].includes(req.method)) return next();
@@ -327,7 +408,7 @@ router.get("/onboarding", async (req, res) => {
   const personIds = summaries.map((s: { person_id: string }) => s.person_id);
   const allItems = personIds.length
     ? await db.all(
-        `SELECT id, person_id, task_name, completed, sort_order FROM people_onboarding_items
+        `SELECT id, person_id, task_label, task_key, completed, sort_order FROM people_onboarding_items
          WHERE person_id IN (${personIds.map(() => "?").join(",")}) ORDER BY sort_order`,
         ...personIds
       )
@@ -715,6 +796,18 @@ router.patch("/:id", async (req: Request, res: Response) => {
 });
 
 // Sub-resources
+router.post("/:id/documents/upload", async (req: Request, res: Response) => {
+  const { fileName, base64, mimeType, name, doc_type, notes } = req.body;
+  if (!fileName || !base64 || !name) return res.status(400).json({ error: "fileName, base64, and name are required" });
+  try {
+    const result = await uploadPersonnelDocument(req.params.id, { fileName, base64, mimeType, name, doc_type, notes }, { email: req.hqUser?.email });
+    res.status(201).json(result);
+  } catch (e) {
+    console.error("Personnel document upload:", e);
+    res.status(500).json({ error: "Upload failed" });
+  }
+});
+
 router.post("/:id/documents", async (req, res) => {
   const { name, doc_type, file_url, notes } = req.body;
   if (!name) return res.status(400).json({ error: "name is required" });

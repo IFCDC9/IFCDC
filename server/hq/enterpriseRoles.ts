@@ -91,6 +91,7 @@ export type Permission =
   | "hq.hr"
   | "hq.hr.manage"
   | "hq.hr.approve"
+  | "hq.hr.self"
   | "hq.payroll"
   | "hq.grants"
   | "hq.grants.manage"
@@ -114,7 +115,7 @@ export type Permission =
 
 export const ROLE_PERMISSIONS: Record<EnterpriseRole, Permission[]> = {
   founder: [
-    "hq.executive", "hq.hr", "hq.hr.manage", "hq.hr.approve", "hq.payroll", "hq.grants", "hq.grants.manage",
+    "hq.executive", "hq.hr", "hq.hr.manage", "hq.hr.approve", "hq.hr.self", "hq.payroll", "hq.grants", "hq.grants.manage",
     "hq.finance", "hq.finance.manage", "hq.donations", "hq.programs", "hq.software", "hq.aura",
     "hq.analytics", "hq.notifications", "hq.settings", "hq.settings.manage",
     "app.barbers", "app.music", "app.radio", "app.tapis", "app.inclusive", "app.swiftware", "app.cryptocoin",
@@ -151,13 +152,13 @@ export const ROLE_PERMISSIONS: Record<EnterpriseRole, Permission[]> = {
     "hq.analytics", "hq.notifications",
   ],
   employee: [
-    "hq.programs", "hq.aura", "hq.notifications", "app.barbers", "app.music", "app.radio",
+    "hq.hr.self", "hq.programs", "hq.aura", "hq.notifications", "app.barbers", "app.music", "app.radio",
   ],
   volunteer: [
-    "hq.programs", "hq.aura", "hq.notifications",
+    "hq.hr.self", "hq.programs", "hq.aura", "hq.notifications",
   ],
   barber: [
-    "hq.aura", "app.barbers",
+    "hq.hr.self", "hq.aura", "app.barbers",
   ],
   client: [
     "hq.aura",
@@ -195,6 +196,8 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   "/hq/developer": "hq.software",
   "/hq/sso": "hq.software",
   "/hq/people": "hq.hr",
+  "/hq/my-workspace": "hq.hr.self",
+  "/hq/manager": "hq.hr.approve",
   "/hq/hr": "hq.hr",
   "/hq/payroll": "hq.payroll",
   "/hq/volunteers": "hq.hr",
@@ -231,8 +234,8 @@ export const DEFAULT_ROUTES: Record<EnterpriseRole, string> = {
   manager: "/hq/people",
   board_member: "/hq",
   grant_manager: "/hq/grants",
-  employee: "/hq/programs",
-  volunteer: "/hq/programs",
+  employee: "/hq/my-workspace",
+  volunteer: "/hq/my-workspace",
   barber: "/barber",
   client: "/",
   donor: "/hq/donations",

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { peopleApi } from "../api/peopleApi";
 
 interface StaffingRole {
   id: string;
@@ -28,19 +29,12 @@ export default function StaffingOverviewWidget({ onRemove }: Props) {
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    fetch("/api/hr/staffing-overview", { credentials: "include" })
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
+    peopleApi.staffingOverview()
       .then((data) => {
-        setOverview(data.overview || []);
-        setSummary(data.summary || null);
+        setOverview((data.overview ?? []) as StaffingRole[]);
+        setSummary((data.summary ?? null) as StaffingSummary | null);
       })
-      .catch((err) => {
-        console.error("Staffing overview error:", err);
-        setError(true);
-      })
+      .catch(() => setError(true))
       .finally(() => setLoading(false));
   }, []);
 
@@ -74,8 +68,8 @@ export default function StaffingOverviewWidget({ onRemove }: Props) {
           )}
           <div className="staffing-roles-list">
             {overview.map((role) => (
-              <div 
-                key={role.id} 
+              <div
+                key={role.id}
                 className={`staffing-role-row ${role.openCount > 0 ? "has-openings" : ""}`}
                 data-testid={`staffing-role-${role.roleKey}`}
               >
@@ -89,8 +83,8 @@ export default function StaffingOverviewWidget({ onRemove }: Props) {
               </div>
             ))}
           </div>
-          <a href="/admin/hr" className="staffing-hire-link" data-testid="link-hire-staff">
-            Go to HR to Hire Staff
+          <a href="/hq/people" className="staffing-hire-link" data-testid="link-hire-staff">
+            Go to People & HR
           </a>
         </div>
       )}

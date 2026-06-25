@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import path from "path";
 import fs from "fs";
@@ -6,8 +7,7 @@ import { open, Database } from "sqlite";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import twilio from "twilio";
-import * as otplib from "otplib";
-const { authenticator } = otplib;
+import { authenticator } from "./otplib-compat";
 import QRCode from "qrcode";
 import cookieParser from "cookie-parser";
 import { createServer as createViteServer } from "vite";
@@ -16,11 +16,37 @@ import rateLimit from "express-rate-limit";
 import * as client from "openid-client";
 import donationsRouter from "./routes/donations";
 import adminFundingRouter from "./routes/adminFunding";
+import hqRouter from "./routes/hq.routes";
+import enterpriseApiRouter from "./routes/enterpriseApi.routes";
+import { ensureGrantTables } from "./hq/grantsSchema";
+import { ensurePeopleTables } from "./hq/peopleSchema";
+import { ensureFinanceTables } from "./hq/financeSchema";
+import { ensureOperationsTables } from "./hq/operationsSchema";
+import { ensureDashboardTables } from "./hq/dashboardSchema";
+import { ensureSoftwareDivisionTables } from "./hq/softwareDivisionSchema";
+import { ensureDeveloperAuditTables } from "./hq/hqDeveloperAudit";
+import { ensureExecutiveBriefingsTable, getOrGenerateDailyBriefing } from "./hq/executiveBriefings";
+import { ensureBoardPortalTables } from "./hq/boardPortalSchema";
+import { ensureHqAuditTables } from "./hq/hqAuditLog";
+import { ensureWarehouseTables } from "./hq/analyticsWarehouseSchema";
+import { ensureWorkflowTables } from "./hq/workflowEngineSchema";
+import { ensureBackupTables } from "./hq/hqBackupService";
+import { ensureSecuritySessionTables } from "./hq/hqSecuritySessions";
+import { ensureProgramModuleTables } from "./hq/programsSchema";
+import { ensureEnterpriseReadinessSeed } from "./hq/enterpriseReadinessSeed";
+import { ensureNotificationQueueTables } from "./hq/notificationQueue";
+import { recordLoginAttempt, recordActiveSession, roleRequiresMfa } from "./hq/hqSecuritySessions";
+import { attachHqRealtimeHub } from "./hq/hqRealtimeHub";
+import http from "http";
 
-const openai = new OpenAI({
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-});
+function getOpenAI(): OpenAI | null {
+  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+  return new OpenAI({
+    baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+    apiKey,
+  });
+}
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "5000", 10);
@@ -43,9 +69,15 @@ const {
 } = process.env;
 
 const ADMIN_EMAIL = "813786b@gmail.com";
+const FOUNDER_EMAIL = (process.env.MASTER_OWNER_EMAIL || "service@ifcdc.org").toLowerCase();
+const FOUNDER_SEED_PASSWORD = process.env.FOUNDER_SEED_PASSWORD || "IFCDC@2026Secure";
+const FOUNDER_NAME = process.env.FOUNDER_NAME || "Mr. Fahreal Allah";
 
 function assignRole(email: string): string {
-  return email.toLowerCase() === ADMIN_EMAIL.toLowerCase() ? "admin" : "user";
+  const lower = email.toLowerCase();
+  if (lower === FOUNDER_EMAIL) return "owner";
+  if (lower === ADMIN_EMAIL.toLowerCase()) return "admin";
+  return "user";
 }
 
 // Only initialize Twilio if credentials are properly configured (SID must start with AC)
@@ -165,6 +197,17 @@ app.use(express.json());
 app.use(cookieParser());
 app.use("/api", donationsRouter);
 app.use("/api/admin", adminFundingRouter);
+app.use("/api/hq", hqRouter);
+app.use("/api/hq/v1", enterpriseApiRouter);
+
+app.get("/api/health", (_req, res) => {
+  res.json({
+    app: "ifcdc-headquarters",
+    status: "healthy",
+    version: "1.0.0",
+    platform: "IFCDC Enterprise Operating System",
+  });
+});
 
 const publicDir = path.join(import.meta.dirname, "..", "public");
 // Serve static assets from public/ but don't serve index.html (let Vite handle SPA)
@@ -223,10 +266,10 @@ interface User {
 declare global {
   namespace Express {
     interface User {
-      id?: string;
+      id: string;
       name?: string;
       email?: string;
-      role?: string;
+      role: string;
       claims?: {
         id: string;
         email?: string;
@@ -320,6 +363,11 @@ async function initDb() {
       extra TEXT
     );
   `);
+
+  const auditCols = await db.all("PRAGMA table_info(audit_logs)") as { name: string }[];
+  if (!auditCols.some((c: { name: string }) => c.name === "ip_address")) {
+    await db.exec("ALTER TABLE audit_logs ADD COLUMN ip_address TEXT");
+  }
 
   await db.exec(`
     CREATE TABLE IF NOT EXISTS client_assignments (
@@ -741,6 +789,46 @@ async function initDb() {
     console.log("Log in via /auth/login to generate a JWT.");
     console.log("===============================================");
   }
+
+  await ensureFounderAccount();
+}
+
+async function ensureFounderAccount() {
+  const email = FOUNDER_EMAIL;
+  const password_hash = await bcrypt.hash(FOUNDER_SEED_PASSWORD, 10);
+  const created_at = new Date().toISOString();
+  const existing = await db.get<User>("SELECT * FROM users WHERE email = ?", email);
+
+  if (existing) {
+    await db.run(
+      `UPDATE users SET name = ?, role = ?, password_hash = ?, status = 'active', twofa_enabled = 0 WHERE email = ?`,
+      FOUNDER_NAME, "owner", password_hash, email
+    );
+    console.log("Founder / Super Admin account ready:", email);
+  } else {
+    await db.run(
+      `INSERT INTO users (id, name, email, role, password_hash, created_at, status, twofa_enabled) VALUES (?, ?, ?, ?, ?, ?, 'active', 0)`,
+      cryptoRandomId(), FOUNDER_NAME, email, "owner", password_hash, created_at
+    );
+    console.log("Founder / Super Admin account created:", email);
+  }
+
+  const emp = await db.get("SELECT id FROM employees WHERE email = ?", email);
+  if (!emp) {
+    const empId = cryptoRandomId();
+    const now = new Date().toISOString();
+    await db.run(
+      `INSERT INTO employees (id, first_name, last_name, email, phone, role, location, start_date, status, notes, pay_rate, pay_currency, pay_type, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 0, 'USD', 'salary', ?, ?)`,
+      empId, "Fahreal", "Allah", email, null, "Executive Director", "Asbury Park, NJ", now.slice(0, 10),
+      "IFCDC Founder — Headquarters executive profile", now, now
+    );
+  } else {
+    await db.run(
+      `UPDATE employees SET first_name = ?, last_name = ?, role = ?, status = 'active', updated_at = ? WHERE email = ?`,
+      "Fahreal", "Allah", "Executive Director", new Date().toISOString(), email
+    );
+  }
 }
 
 interface AuditLogParams {
@@ -755,13 +843,13 @@ interface AuditLogParams {
 async function logAudit(req: express.Request, params: AuditLogParams) {
   const id = cryptoRandomId();
   const timestamp = new Date().toISOString();
-  const ipAddress = params.ip || req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim() || req.socket?.remoteAddress || null;
+  const ipAddress = params.ip || req?.headers?.["x-forwarded-for"]?.toString().split(",")[0]?.trim() || req?.socket?.remoteAddress || null;
 
   await db.run(
     `INSERT INTO audit_logs (id, timestamp, user_id, user_role, method, path, entity_type, entity_id, action, ip_address, extra)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    id, timestamp, params.adminId || req.user?.id || null, req.user?.role || null,
-    req.method, req.originalUrl, params.targetType || null, params.targetId || null, params.action, ipAddress, JSON.stringify(params.extra || {})
+    id, timestamp, params.adminId || req?.user?.id || null, req?.user?.role || null,
+    req?.method ?? null, req?.originalUrl ?? null, params.targetType || null, params.targetId || null, params.action, ipAddress, JSON.stringify(params.extra || {})
   );
 }
 
@@ -975,7 +1063,7 @@ function requireRole(...roles: (string | string[])[]) {
     if (req.user.role === "owner") {
       return next();
     }
-    if (!allowedRoles.includes(req.user.role)) {
+    if (!req.user?.role || !allowedRoles.includes(req.user.role)) {
       return res.status(403).json({ error: "Forbidden" });
     }
     next();
@@ -989,8 +1077,8 @@ function requireAdmin(req: express.Request, res: express.Response, next: express
   next();
 }
 
-async function hasClientAccess(user: { id: string; role: string } | undefined, clientId: string): Promise<boolean> {
-  if (!user) return false;
+async function hasClientAccess(user: { id?: string; role?: string } | undefined, clientId: string): Promise<boolean> {
+  if (!user?.id || !user?.role) return false;
   if (user.role === "owner" || user.role === ROLES.EXEC) return true;
   const assignment = await db.get(
     "SELECT 1 FROM client_assignments WHERE client_id = ? AND user_id = ?",
@@ -1055,6 +1143,7 @@ app.post('/api/auth/login', async (req, res) => {
     const user = await db.get<any>("SELECT * FROM users WHERE email = ?", lowerEmail);
     
     if (!user) {
+      await recordLoginAttempt({ email: lowerEmail, success: false, ipAddress: req.ip, userAgent: req.get("user-agent"), failureReason: "user_not_found" });
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
@@ -1065,6 +1154,7 @@ app.post('/api/auth/login', async (req, res) => {
     } else {
       const ok = await bcrypt.compare(password, user.password_hash);
       if (!ok) {
+        await recordLoginAttempt({ userId: user.id, email: lowerEmail, success: false, ipAddress: req.ip, userAgent: req.get("user-agent"), failureReason: "invalid_password" });
         return res.status(401).json({ error: 'Invalid credentials' });
       }
     }
@@ -1082,15 +1172,14 @@ app.post('/api/auth/login', async (req, res) => {
       effectiveRole = "admin";
     }
 
-    // Check if 2FA is enabled for admin/owner roles
-    if (user.twofa_enabled && (effectiveRole === 'admin' || effectiveRole === 'owner' || effectiveRole === 'exec')) {
+    // MFA for Founder, Executive, and Administrator accounts
+    if (user.twofa_enabled && roleRequiresMfa(effectiveRole)) {
       if (!totpCode) {
-        // Require 2FA code
         return res.status(200).json({ requires2FA: true, message: 'Please enter your 2FA code' });
       }
-      // Verify TOTP code
       const isValid = authenticator.verify({ token: totpCode, secret: user.twofa_secret });
       if (!isValid) {
+        await recordLoginAttempt({ userId: user.id, email: lowerEmail, success: false, ipAddress: req.ip, userAgent: req.get("user-agent"), failureReason: "invalid_2fa" });
         return res.status(401).json({ error: 'Invalid 2FA code' });
       }
     }
@@ -1108,6 +1197,9 @@ app.post('/api/auth/login', async (req, res) => {
       { method: "POST", originalUrl: "/api/auth/login", user: { id: user.id, name: user.name, email: user.email, role: effectiveRole } } as express.Request,
       { action: "LOGIN", targetType: "USER", targetId: user.id, extra: {} }
     );
+
+    await recordLoginAttempt({ userId: user.id, email: lowerEmail, success: true, ipAddress: req.ip, userAgent: req.get("user-agent") });
+    await recordActiveSession({ userId: user.id, email: lowerEmail, ipAddress: req.ip, userAgent: req.get("user-agent") });
 
     return res.json({ message: 'Logged in', role: effectiveRole, user: { id: user.id, name: user.name, email: user.email, role: effectiveRole } });
   } catch (err) {
@@ -1152,7 +1244,7 @@ app.post('/auth/login', async (req, res) => {
     else if (ADMIN_EMAIL && lowerEmail === ADMIN_EMAIL.toLowerCase()) effectiveRole = "admin";
     
     // Check if 2FA is enabled for admin/owner roles
-    if (user.twofa_enabled && (effectiveRole === 'admin' || effectiveRole === 'owner' || effectiveRole === 'exec')) {
+    if (user.twofa_enabled && roleRequiresMfa(effectiveRole)) {
       if (!totpCode) {
         return res.status(200).json({ requires2FA: true, message: 'Please enter your 2FA code' });
       }
@@ -4274,113 +4366,14 @@ app.post(
   }
 );
 
-// ----- HR Employee Endpoints -----
+// ----- Legacy HR (deprecated Phase 3.1 — use /api/hq/people) -----
 
-app.get("/api/hr/employees", authRequired, requireRole(ROLES.ADMIN, "owner"), async (_req, res) => {
-  try {
-    const employees = await db.all<any[]>(
-      "SELECT * FROM employees ORDER BY created_at DESC"
-    );
-    res.json(employees.map(e => ({
-      id: e.id,
-      firstName: e.first_name,
-      lastName: e.last_name,
-      email: e.email,
-      phone: e.phone,
-      role: e.role,
-      location: e.location,
-      startDate: e.start_date,
-      status: e.status,
-      notes: e.notes,
-      payRate: e.pay_rate,
-      payCurrency: e.pay_currency,
-      payType: e.pay_type,
-    })));
-  } catch (err) {
-    console.error("Error fetching employees", err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+app.all("/api/hr/employees", (_req, res) => {
+  res.status(410).json({ error: "Deprecated. Use GET/POST /api/hq/people", migration: "phase3.1" });
 });
 
-app.post("/api/hr/employees", authRequired, requireRole(ROLES.ADMIN, "owner"), async (req, res) => {
-  try {
-    const { firstName, lastName, email, phone, role, location, startDate, status, notes, payRate, payCurrency, payType } = req.body;
-
-    if (!firstName || !lastName || !email || !role) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-
-    const existing = await db.get("SELECT 1 FROM employees WHERE email = ?", email.toLowerCase());
-    if (existing) {
-      return res.status(409).json({ error: "Email already exists for another employee" });
-    }
-
-    const id = cryptoRandomId();
-    const now = new Date().toISOString();
-
-    await db.run(
-      `INSERT INTO employees (id, first_name, last_name, email, phone, role, location, start_date, status, notes, pay_rate, pay_currency, pay_type, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      id, firstName, lastName, email.toLowerCase(), phone || null, role, location || null, 
-      startDate || null, status || "onboarding", notes || null, 
-      payRate ? Number(payRate) : null, payCurrency || "USD", payType || "hourly", now, now
-    );
-
-    await logAudit(req, { action: "CREATE_EMPLOYEE", targetType: "EMPLOYEE", targetId: id, extra: { firstName, lastName, role } });
-
-    res.status(201).json({
-      id, firstName, lastName, email: email.toLowerCase(), phone, role, location, startDate, status: status || "onboarding", notes
-    });
-  } catch (err) {
-    console.error("Error creating employee", err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-app.get("/api/hr/staffing-overview", authRequired, requireRole(ROLES.ADMIN, "admin", "owner", ROLES.EXEC), async (_req, res) => {
-  try {
-    const staffingPlan = await db.all<any[]>(
-      "SELECT * FROM staffing_plan ORDER BY priority ASC"
-    );
-
-    const employees = await db.all<any[]>(
-      "SELECT role, status, COUNT(*) as cnt FROM employees GROUP BY role, status"
-    );
-
-    const overview = staffingPlan.map((plan) => {
-      const activeCount = employees
-        .filter((e) => e.role === plan.role_key && e.status === "active")
-        .reduce((sum, e) => sum + e.cnt, 0);
-      const onboardingCount = employees
-        .filter((e) => e.role === plan.role_key && e.status === "onboarding")
-        .reduce((sum, e) => sum + e.cnt, 0);
-      const openCount = Math.max(0, plan.target_count - activeCount);
-
-      return {
-        id: plan.id,
-        roleKey: plan.role_key,
-        roleName: plan.role_name,
-        targetCount: plan.target_count,
-        activeCount,
-        onboardingCount,
-        openCount,
-        priority: plan.priority,
-        notes: plan.notes,
-      };
-    });
-
-    const summary = {
-      totalTarget: overview.reduce((sum, o) => sum + o.targetCount, 0),
-      totalActive: overview.reduce((sum, o) => sum + o.activeCount, 0),
-      totalOnboarding: overview.reduce((sum, o) => sum + o.onboardingCount, 0),
-      totalOpen: overview.reduce((sum, o) => sum + o.openCount, 0),
-    };
-
-    res.json({ overview, summary });
-  } catch (err) {
-    console.error("Error fetching staffing overview", err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+app.all("/api/hr/staffing-overview", (_req, res) => {
+  res.status(410).json({ error: "Deprecated. Use GET /api/hq/people/staffing-overview", migration: "phase3.1" });
 });
 
 // ----- Barbershop Booking Endpoints -----
@@ -4892,6 +4885,11 @@ app.post("/api/ai/chat", authRequired, async (req, res) => {
       return res.status(400).json({ error: "Message is required" });
     }
 
+    const openai = getOpenAI();
+    if (!openai) {
+      return res.status(503).json({ error: "AI service not configured. Set OPENAI_API_KEY in .env" });
+    }
+
     const systemPrompt = `You are an AI assistant for IFCDC (Imperial Foundation Community Development Center), a community health organization. You help staff with:
 - Client care and case management insights
 - Barbershop appointment scheduling
@@ -4939,6 +4937,11 @@ app.post("/api/ai/client-summary", authRequired, requireRole(ROLES.EXEC, ROLES.C
       clientId
     );
 
+    const openai = getOpenAI();
+    if (!openai) {
+      return res.status(503).json({ error: "AI service not configured. Set OPENAI_API_KEY in .env" });
+    }
+
     const prompt = `Based on this client information, provide a brief care summary and recommendations:
 Client: ${client.full_name}
 Programs: ${client.programs || "None specified"}
@@ -4983,6 +4986,11 @@ app.post("/api/ai/radio-content", authRequired, requireRole(ROLES.ADMIN, "radio_
 
     const typePrompt = typePrompts[contentType] || typePrompts.announcement;
 
+    const openai = getOpenAI();
+    if (!openai) {
+      return res.status(503).json({ error: "AI service not configured. Set OPENAI_API_KEY in .env" });
+    }
+
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -5014,6 +5022,11 @@ app.post("/api/ai/schedule-help", authRequired, requireRole(ROLES.ADMIN, "barber
     const appointmentContext = appointments?.length 
       ? `Current appointments today: ${appointments.map((a: any) => `${a.time} - ${a.service}`).join(", ")}`
       : "No current appointments provided.";
+
+    const openai = getOpenAI();
+    if (!openai) {
+      return res.status(503).json({ error: "AI service not configured. Set OPENAI_API_KEY in .env" });
+    }
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -5274,6 +5287,11 @@ app.post("/api/public/chatbot", chatbotLimiter, async (req, res) => {
       return res.status(400).json({ error: "Message too long (max 500 characters)" });
     }
 
+    const openai = getOpenAI();
+    if (!openai) {
+      return res.status(503).json({ error: "AI service not configured. Set OPENAI_API_KEY in .env" });
+    }
+
     const systemPrompt = `You are a helpful assistant for Imperial Foundation CDC (IFCDC), a 501(c)(3) nonprofit organization in Asbury Park, NJ dedicated to community development, mentorship, and economic empowerment.
 
 You can answer questions about:
@@ -5322,12 +5340,35 @@ Keep responses concise, friendly, and helpful. If you don't know something speci
 // Start server with Vite in development or static files in production
 async function startServer() {
   await initDb();
+  await ensureGrantTables();
+  await ensurePeopleTables();
+  await ensureFinanceTables();
+  await ensureOperationsTables();
+  await ensureDashboardTables();
+  await ensureSoftwareDivisionTables();
+  await ensureDeveloperAuditTables();
+  await ensureExecutiveBriefingsTable();
+  await ensureBoardPortalTables();
+  await ensureHqAuditTables();
+  await ensureWarehouseTables();
+  await ensureWorkflowTables();
+  await ensureProgramModuleTables();
+  await ensureEnterpriseReadinessSeed();
+  await ensureNotificationQueueTables();
+  await ensureBackupTables();
+  await ensureSecuritySessionTables();
+  getOrGenerateDailyBriefing().catch((e) => console.warn("Morning briefing generation skipped:", e?.message));
   await initGoogleOAuth();
 
+  const server = http.createServer(app);
+
   if (isDev) {
-    // In development, use Vite middleware
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      configFile: path.join(import.meta.dirname, "..", "vite.config.ts"),
+      server: {
+        middlewareMode: true,
+        hmr: { server, port: 24678, clientPort: 24678 },
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -5347,8 +5388,21 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  attachHqRealtimeHub(server);
+
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      console.error(`\nPort ${PORT} is already in use.`);
+      console.error(`Stop the existing server: lsof -ti :${PORT} | xargs kill -9`);
+      console.error(`Or use a different port: PORT=5002 npm run dev\n`);
+      process.exit(1);
+    }
+    throw err;
+  });
+
+  server.listen(PORT, "0.0.0.0", () => {
     console.log(`IFCDC Health System API live on port ${PORT}`);
+    import("./hq/warehouseScheduler").then(({ startHqScheduler }) => startHqScheduler()).catch(() => undefined);
   });
 }
 

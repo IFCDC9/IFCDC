@@ -82,6 +82,7 @@ const PeopleManagementCenter: React.FC = () => {
     person_type: "employee", first_name: "", last_name: "", email: "", phone: "", organization_role: "", department_id: "",
   });
   const [newDoc, setNewDoc] = useState({ name: "", doc_type: "personnel", file_url: "" });
+  const [docFile, setDocFile] = useState<File | null>(null);
   const [newTraining, setNewTraining] = useState({ title: "", provider: "", status: "scheduled" });
   const [newCert, setNewCert] = useState({ name: "", issuer: "", expiry_date: "" });
   const [newSchedule, setNewSchedule] = useState({ title: "", schedule_date: "", start_time: "09:00", end_time: "17:00", location: "" });
@@ -162,8 +163,25 @@ const PeopleManagementCenter: React.FC = () => {
   };
 
   const addDocument = useMutation({
-    mutationFn: () => peopleApi.addDocument(selectedId!, newDoc),
-    onSuccess: () => { invalidateProfile(); setAddModal(null); setNewDoc({ name: "", doc_type: "personnel", file_url: "" }); },
+    mutationFn: async () => {
+      if (docFile && selectedId) {
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result ?? "").split(",")[1] ?? "");
+          reader.onerror = reject;
+          reader.readAsDataURL(docFile);
+        });
+        return peopleApi.uploadPersonDocument(selectedId, {
+          fileName: docFile.name,
+          base64,
+          mimeType: docFile.type,
+          name: newDoc.name || docFile.name,
+          doc_type: newDoc.doc_type,
+        });
+      }
+      return peopleApi.addDocument(selectedId!, newDoc);
+    },
+    onSuccess: () => { invalidateProfile(); setAddModal(null); setNewDoc({ name: "", doc_type: "personnel", file_url: "" }); setDocFile(null); },
   });
   const addTraining = useMutation({
     mutationFn: () => peopleApi.addTraining(selectedId!, newTraining),
@@ -1072,11 +1090,13 @@ const PeopleManagementCenter: React.FC = () => {
                       <option value="other">Other</option>
                     </select>
                   </label>
-                  <label>File URL<input value={newDoc.file_url} onChange={(e) => setNewDoc({ ...newDoc, file_url: e.target.value })} placeholder="https://… or /uploads/…" /></label>
+                  <label>Upload File<input type="file" onChange={(e) => setDocFile(e.target.files?.[0] ?? null)} /></label>
+                  <label className="hq-muted-text" style={{ fontSize: "0.75rem" }}>Or paste URL below for external links</label>
+                  <label>File URL<input value={newDoc.file_url} onChange={(e) => setNewDoc({ ...newDoc, file_url: e.target.value })} placeholder="Optional external URL" /></label>
                 </div>
                 <div className="hq-modal-actions">
                   <button type="button" className="hq-btn hq-btn-secondary" onClick={() => setAddModal(null)}>Cancel</button>
-                  <button type="button" className="hq-btn hq-btn-primary" disabled={!newDoc.name || addDocument.isPending} onClick={() => addDocument.mutate()}>{addDocument.isPending ? "Saving…" : "Save Document"}</button>
+                  <button type="button" className="hq-btn hq-btn-primary" disabled={(!newDoc.name && !docFile) || addDocument.isPending} onClick={() => addDocument.mutate()}>{addDocument.isPending ? "Uploading…" : "Save Document"}</button>
                 </div>
               </>
             )}

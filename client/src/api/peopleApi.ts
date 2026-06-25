@@ -198,6 +198,25 @@ export const peopleApi = {
     api("/team-assignments", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
   updateDepartment: (id: string, data: Record<string, unknown>) =>
     api(`/departments/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
+
+  // Phase 3.1 — Staff self-service
+  selfServiceMe: () => api<Record<string, unknown>>("/self-service/me"),
+  selfClockIn: () => api("/self-service/clock-in", { method: "POST" }),
+  selfClockOut: () => api("/self-service/clock-out", { method: "POST" }),
+  selfCreateLeave: (data: { leave_type: string; start_date: string; end_date: string; reason?: string }) =>
+    api("/self-service/leave-requests", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
+  selfUpdateProfile: (data: Record<string, unknown>) =>
+    api("/self-service/profile", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
+  selfUploadDocument: (data: { fileName: string; base64: string; mimeType?: string; name: string; doc_type?: string }) =>
+    api("/self-service/documents/upload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
+  uploadPersonDocument: (personId: string, data: { fileName: string; base64: string; mimeType?: string; name: string; doc_type?: string }) =>
+    api(`/${personId}/documents/upload`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
+
+  // Phase 3.1 — Manager portal
+  managerDashboard: () => api<Record<string, unknown>>("/manager/dashboard"),
+  staffingOverview: () => api<{ overview: Record<string, unknown>[]; summary: Record<string, unknown> }>("/staffing-overview"),
+  preparePayrollBatch: (period_start?: string, period_end?: string) =>
+    api("/operations/v3/payroll-prepare", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ period_start, period_end }) }),
 };
 
 export interface OrgSchedule {
