@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { build as esbuild } from "esbuild";
 import { rm, readFile, writeFile } from "fs/promises";
 
@@ -66,6 +67,13 @@ child.on('exit', (code) => process.exit(code));
 `;
   await writeFile("dist/index.cjs", startScript);
   console.log("Created dist/index.cjs wrapper");
+
+  console.log("building client...");
+  const vite = spawnSync("npx", ["vite", "build"], { stdio: "inherit" });
+  if (vite.status !== 0) {
+    throw new Error("Vite client build failed");
+  }
+  console.log("client build complete");
 }
 
 buildAll().catch((err) => {

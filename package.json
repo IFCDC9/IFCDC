@@ -16,7 +16,8 @@
     "finance:readiness": "node script/finance-phase4-readiness.mjs",
     "grants:readiness": "node script/grant-center-readiness.mjs",
     "grants:qa": "node script/grant-center-qa.mjs",
-    "grants:release": "npm run check && npm run build && npm run build:client && npm run grants:qa",
+    "grants:release": "npm run check && npm run build && npm run grants:qa",
+    "grants:deploy-verify": "node script/grant-center-deploy-verify.mjs",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
