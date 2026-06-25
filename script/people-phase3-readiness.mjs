@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * IFCDC Headquarters — People & Operations Phase 3 readiness gate
+ * IFCDC Headquarters — People & Operations Phase 3.1 readiness gate (polish milestone)
  */
 const BASE = process.env.IFCDC_BASE_URL || "http://127.0.0.1:5001";
 const FOUNDER_EMAIL = "service@ifcdc.org";
@@ -168,6 +168,18 @@ async function main() {
 
   const legacyHr = await jsonFetch(`${BASE}/api/hr/employees`, auth);
   log(legacyHr.res.status === 410 ? "pass" : "fail", "Legacy /api/hr deprecated (410)");
+
+  const complianceDash = await jsonFetch(`${BASE}/api/hq/people/compliance/dashboard`, auth);
+  log(complianceDash.ok && complianceDash.body?.score != null ? "pass" : "fail", "HR compliance dashboard", `${complianceDash.body?.score?.score ?? "?"}%`);
+
+  const hrBriefing = await jsonFetch(`${BASE}/api/hq/people/operations/v3/hr-briefing`, auth);
+  log(hrBriefing.ok && (hrBriefing.body?.insight || hrBriefing.body?.auraInsight) ? "pass" : "fail", "AURA staff/HR briefing");
+
+  const selfBriefing = await jsonFetch(`${BASE}/api/hq/people/self-service/briefing`, auth);
+  log(selfBriefing.ok || selfBriefing.res.status === 404 ? "pass" : "fail", "Staff self-service briefing");
+
+  const managerBriefing = await jsonFetch(`${BASE}/api/hq/people/manager/briefing`, auth);
+  log(managerBriefing.ok || managerBriefing.res.status === 404 ? "pass" : "fail", "Manager portal briefing");
 
   console.log(`\n=== People Phase 3.1: ${results.pass} PASS / ${results.fail} FAIL ===\n`);
   process.exit(results.fail > 0 ? 1 : 0);

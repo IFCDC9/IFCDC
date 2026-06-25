@@ -209,11 +209,27 @@ export const peopleApi = {
     api("/self-service/profile", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
   selfUploadDocument: (data: { fileName: string; base64: string; mimeType?: string; name: string; doc_type?: string }) =>
     api("/self-service/documents/upload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
+  selfSubmitTimesheet: () => api("/self-service/timesheets/submit", { method: "POST" }),
+  selfCompleteOnboarding: (itemId: string) =>
+    api(`/self-service/onboarding/${itemId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ completed: true }) }),
+  selfBriefing: (question?: string) =>
+    api<Record<string, unknown>>(`/self-service/briefing${question ? `?question=${encodeURIComponent(question)}` : ""}`),
   uploadPersonDocument: (personId: string, data: { fileName: string; base64: string; mimeType?: string; name: string; doc_type?: string }) =>
     api(`/${personId}/documents/upload`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
 
   // Phase 3.1 — Manager portal
   managerDashboard: () => api<Record<string, unknown>>("/manager/dashboard"),
+  managerBriefing: (question?: string) =>
+    api<Record<string, unknown>>(`/manager/briefing${question ? `?question=${encodeURIComponent(question)}` : ""}`),
+  managerReviewLeave: (id: string, data: { status: string; notes?: string }) =>
+    api(`/manager/leave-requests/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
+  managerReviewTimesheet: (id: string, status: string) =>
+    api(`/manager/timesheets/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) }),
+  managerCompleteOnboarding: (personId: string, itemId: string) =>
+    api(`/manager/onboarding/${personId}/${itemId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ completed: true }) }),
+  hrComplianceDashboard: () => api<Record<string, unknown>>("/compliance/dashboard"),
+  hrBriefing: (question?: string) =>
+    api<Record<string, unknown>>(`/operations/v3/hr-briefing${question ? `?question=${encodeURIComponent(question)}` : ""}`),
   staffingOverview: () => api<{ overview: Record<string, unknown>[]; summary: Record<string, unknown> }>("/staffing-overview"),
   preparePayrollBatch: (period_start?: string, period_end?: string) =>
     api("/operations/v3/payroll-prepare", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ period_start, period_end }) }),

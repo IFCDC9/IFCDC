@@ -5,6 +5,7 @@ import { getDb } from "../db";
 import { peopleId, formatPerson, logPeopleActivity } from "./peopleSchema";
 import { saveHqFileBase64 } from "./hqFileStorage";
 import { ensureDocumentTables } from "./documentsSchema";
+import { buildHrComplianceScore, updateTimesheetStatus } from "./peopleOperationsEngine";
 
 export async function resolvePersonForUser(user: { id: string; email: string }) {
   const db = await getDb();
@@ -89,6 +90,10 @@ export async function buildSelfServiceDashboard(personId: string) {
     "SELECT * FROM payroll_timesheets WHERE person_id = ? ORDER BY period_end DESC LIMIT 10",
     personId
   );
+  const documents = await db.all(
+    "SELECT id, name, doc_type, file_url, uploaded_at FROM people_documents WHERE person_id = ? ORDER BY uploaded_at DESC LIMIT 20",
+    personId
+  );
 
   return {
     person: formatPerson(person as Record<string, unknown>),
@@ -100,6 +105,7 @@ export async function buildSelfServiceDashboard(personId: string) {
     ptoBalance,
     payHistory,
     timesheets,
+    documents,
     summary: {
       onboardingComplete: (onboarding as { completed: number }[]).filter((o) => o.completed).length,
       onboardingTotal: onboarding.length,
@@ -167,6 +173,306 @@ export async function selfUpdateProfile(personId: string, data: Record<string, u
     personId
   );
   return formatPerson(row as Record<string, unknown>);
+}
+
+export async function assertManagerCanAccessPerson(managerPersonId: string, targetPersonId: string) {
+  if (managerPersonId === targetPersonId) return true;
+  const db = await getDb();
+  const scope = await getManagerScope(managerPersonId);
+  const { sql, params } = deptFilterSql(scope.departmentIds, managerPersonId);
+  const row = await db.get(
+    `SELECT p.id FROM people p WHERE p.id = ? AND p.status != 'archived' ${sql}`,
+    targetPersonId,
+    ...params
+  );
+  return !!row;
+}
+
+export async function selfSubmitTimesheet(personId: string, actor?: { email?: string }) {
+  const db = await getDb();
+  const now = new Date();
+  const periodEnd = now.toISOString().slice(0, 10);
+  const periodStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+  const existing = await db.get(
+    `SELECT id FROM payroll_timesheets WHERE person_id = ? AND period_start = ? AND period_end = ? AND status IN ('draft', 'submitted')`,
+    personId, periodStart, periodEnd
+  );
+  if (existing) return { alreadySubmitted: true, timesheet: existing };
+
+  const hours = (await db.get<{ h: number }>(
+    `SELECT COALESCE(SUM(hours), 0) as h FROM time_clock_entries
+     WHERE person_id = ? AND clock_in >= ? AND clock_in <= ?`,
+    personId, periodStart, periodEnd + "T23:59:59"
+  ))?.h ?? 0;
+
+  const id = peopleId();
+  const ts = new Date().toISOString();
+  await db.run(
+    `INSERT INTO payroll_timesheets (id, person_id, period_start, period_end, total_hours, status, notes, submitted_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'submitted', ?, ?, ?, ?)`,
+    id, personId, periodStart, periodEnd, hours, "Self-service monthly submission", ts, ts, ts
+  );
+  await logPeopleActivity(personId, "timesheet_submitted", `Timesheet ${periodStart}–${periodEnd}`, actor);
+  return { timesheet: await db.get("SELECT * FROM payroll_timesheets WHERE id = ?", id) };
+}
+
+export async function selfCompleteOnboardingItem(personId: string, itemId: string, actor?: { email?: string }) {
+  const db = await getDb();
+  const item = await db.get<{ id: string; task_label: string }>(
+    "SELECT id, task_label FROM people_onboarding_items WHERE id = ? AND person_id = ?",
+    itemId, personId
+  );
+  if (!item) return null;
+  const now = new Date().toISOString();
+  await db.run(
+    "UPDATE people_onboarding_items SET completed = 1, completed_at = ?, completed_by = ? WHERE id = ?",
+    now, actor?.email ?? "self", itemId
+  );
+  await logPeopleActivity(personId, "onboarding_item_complete", item.task_label, actor);
+  const remaining = (await db.get<{ c: number }>(
+    "SELECT COUNT(*) as c FROM people_onboarding_items WHERE person_id = ? AND completed = 0", personId
+  ))?.c ?? 0;
+  if (remaining === 0) {
+    await db.run("UPDATE people SET status = 'active', updated_at = ? WHERE id = ? AND status = 'onboarding'", now, personId);
+    await logPeopleActivity(personId, "onboarding_complete", "All onboarding tasks completed", actor);
+  }
+  return db.get("SELECT * FROM people_onboarding_items WHERE id = ?", itemId);
+}
+
+export async function managerReviewLeave(
+  managerPersonId: string,
+  leaveId: string,
+  status: string,
+  notes?: string,
+  actor?: { email?: string }
+) {
+  const db = await getDb();
+  const leave = await db.get<{ person_id: string }>("SELECT person_id FROM leave_requests WHERE id = ?", leaveId);
+  if (!leave) return { error: "not_found" as const };
+  if (!(await assertManagerCanAccessPerson(managerPersonId, leave.person_id))) {
+    return { error: "forbidden" as const };
+  }
+  const now = new Date().toISOString();
+  await db.run(
+    `UPDATE leave_requests SET status = ?, notes = COALESCE(?, notes), reviewer_email = ?, reviewed_at = ?, updated_at = ? WHERE id = ?`,
+    status, notes ?? null, actor?.email ?? null, now, now, leaveId
+  );
+  if (status === "approved") {
+    await db.run("UPDATE people SET status = 'on_leave' WHERE id = ?", leave.person_id);
+  } else if (status === "denied" || status === "cancelled") {
+    await db.run("UPDATE people SET status = 'active' WHERE id = ? AND status = 'on_leave'", leave.person_id);
+  }
+  await logPeopleActivity(leave.person_id, "leave_review", `Leave ${status} (manager)`, actor);
+  return { leaveRequest: await db.get("SELECT * FROM leave_requests WHERE id = ?", leaveId) };
+}
+
+export async function managerReviewTimesheet(
+  managerPersonId: string,
+  timesheetId: string,
+  status: string,
+  actor?: { email?: string }
+) {
+  const db = await getDb();
+  const ts = await db.get<{ person_id: string }>("SELECT person_id FROM payroll_timesheets WHERE id = ?", timesheetId);
+  if (!ts) return { error: "not_found" as const };
+  if (!(await assertManagerCanAccessPerson(managerPersonId, ts.person_id))) {
+    return { error: "forbidden" as const };
+  }
+  const updated = await updateTimesheetStatus(timesheetId, status, actor);
+  return { timesheet: updated };
+}
+
+export async function managerCompleteOnboarding(
+  managerPersonId: string,
+  personId: string,
+  itemId: string,
+  actor?: { email?: string }
+) {
+  if (!(await assertManagerCanAccessPerson(managerPersonId, personId))) {
+    return { error: "forbidden" as const };
+  }
+  const db = await getDb();
+  const item = await db.get("SELECT id FROM people_onboarding_items WHERE id = ? AND person_id = ?", itemId, personId);
+  if (!item) return { error: "not_found" as const };
+  const now = new Date().toISOString();
+  await db.run(
+    "UPDATE people_onboarding_items SET completed = 1, completed_at = ?, completed_by = ? WHERE id = ?",
+    now, actor?.email ?? "manager", itemId
+  );
+  await logPeopleActivity(personId, "onboarding_manager_approve", "Manager verified onboarding item", actor);
+  return { item: await db.get("SELECT * FROM people_onboarding_items WHERE id = ?", itemId) };
+}
+
+export async function buildHrComplianceDashboard(departmentIds?: string[]) {
+  const db = await getDb();
+  const score = await buildHrComplianceScore();
+  const deptFilter = departmentIds?.length
+    ? ` AND p.department_id IN (${departmentIds.map(() => "?").join(",")})`
+    : "";
+  const deptParams = departmentIds ?? [];
+
+  const expiredCerts = await db.all(
+    `SELECT pc.*, p.first_name, p.last_name, d.name as department_name
+     FROM people_certifications pc JOIN people p ON p.id = pc.person_id
+     LEFT JOIN departments d ON d.id = p.department_id
+     WHERE p.status = 'active' AND pc.expiry_date IS NOT NULL AND pc.expiry_date < date('now')${deptFilter}
+     ORDER BY pc.expiry_date LIMIT 50`,
+    ...deptParams
+  );
+  const expiringCerts = await db.all(
+    `SELECT pc.*, p.first_name, p.last_name, d.name as department_name
+     FROM people_certifications pc JOIN people p ON p.id = pc.person_id
+     LEFT JOIN departments d ON d.id = p.department_id
+     WHERE p.status = 'active' AND pc.expiry_date BETWEEN date('now') AND date('now', '+60 days')${deptFilter}
+     ORDER BY pc.expiry_date LIMIT 50`,
+    ...deptParams
+  );
+  const pendingBg = await db.all(
+    `SELECT bc.*, p.first_name, p.last_name, d.name as department_name
+     FROM background_checks bc JOIN people p ON p.id = bc.person_id
+     LEFT JOIN departments d ON d.id = p.department_id
+     WHERE bc.status IN ('pending', 'in_progress')${deptFilter}
+     ORDER BY bc.created_at DESC LIMIT 50`,
+    ...deptParams
+  );
+  const incompleteOnboarding = await db.all(
+    `SELECT p.id as person_id, p.first_name, p.last_name, d.name as department_name,
+      COUNT(oi.id) as total_count,
+      SUM(CASE WHEN oi.completed = 0 THEN 1 ELSE 0 END) as incomplete_count
+     FROM people p
+     JOIN people_onboarding_items oi ON oi.person_id = p.id
+     LEFT JOIN departments d ON d.id = p.department_id
+     WHERE p.status IN ('active', 'onboarding')${deptFilter}
+     GROUP BY p.id HAVING incomplete_count > 0
+     ORDER BY incomplete_count DESC LIMIT 50`,
+    ...deptParams
+  );
+  const overdueTraining = await db.all(
+    `SELECT pt.*, p.first_name, p.last_name, d.name as department_name
+     FROM people_training pt JOIN people p ON p.id = pt.person_id
+     LEFT JOIN departments d ON d.id = p.department_id
+     WHERE pt.status IN ('assigned', 'in_progress', 'scheduled') AND pt.completed_date IS NULL${deptFilter}
+     ORDER BY pt.created_at LIMIT 50`,
+    ...deptParams
+  );
+
+  return {
+    score,
+    alerts: {
+      expiredCerts,
+      expiringCerts,
+      pendingBackgroundChecks: pendingBg,
+      incompleteOnboarding,
+      overdueTraining,
+    },
+    summary: {
+      expiredCerts: expiredCerts.length,
+      expiringCerts: expiringCerts.length,
+      pendingBackgroundChecks: pendingBg.length,
+      incompleteOnboarding: incompleteOnboarding.length,
+      overdueTraining: overdueTraining.length,
+      totalAlerts: expiredCerts.length + expiringCerts.length + pendingBg.length + incompleteOnboarding.length + overdueTraining.length,
+    },
+  };
+}
+
+export async function buildStaffHrBriefing(opts: { personId?: string; managerPersonId?: string }) {
+  const db = await getDb();
+  const priorities: string[] = [];
+  const actions: { label: string; category: string }[] = [];
+
+  if (opts.personId) {
+    const dash = await buildSelfServiceDashboard(opts.personId);
+    if (!dash) return { audience: "staff", priorities: [], actions: [], insight: "" };
+    const incomplete = (dash.onboarding as { completed: number; task_label: string }[]).filter((o) => !o.completed);
+    if (incomplete.length) {
+      priorities.push(`${incomplete.length} onboarding step(s) remaining`);
+      actions.push({ label: "Complete onboarding checklist", category: "onboarding" });
+    }
+    if (dash.summary.pendingLeave) {
+      priorities.push(`${dash.summary.pendingLeave} leave request(s) pending approval`);
+    }
+    const expiring = (dash.certifications as { name: string; expiry_date?: string }[]).filter((c) => {
+      if (!c.expiry_date) return false;
+      const diff = (new Date(c.expiry_date).getTime() - Date.now()) / 86400000;
+      return diff >= 0 && diff <= 60;
+    });
+    if (expiring.length) {
+      priorities.push(`${expiring.length} certification(s) expiring within 60 days`);
+      actions.push({ label: "Renew certifications", category: "compliance" });
+    }
+    const draftTs = (dash.timesheets as { status: string }[]).filter((t) => t.status === "draft");
+    if (draftTs.length || Number(dash.clock.hoursThisMonth) > 0) {
+      actions.push({ label: "Submit monthly timesheet", category: "payroll" });
+    }
+    const insight = [
+      `Staff briefing for ${(dash.person as { fullName: string }).fullName}`,
+      `Hours this month: ${Number(dash.clock.hoursThisMonth).toFixed(1)}`,
+      `Onboarding: ${dash.summary.onboardingComplete}/${dash.summary.onboardingTotal} complete`,
+      priorities.length ? `Priorities: ${priorities.join("; ")}` : "No urgent personal HR items.",
+    ].join("\n");
+    return { audience: "staff", priorities, actions, insight, dashboard: { hoursThisMonth: dash.clock.hoursThisMonth, pendingLeave: dash.summary.pendingLeave } };
+  }
+
+  if (opts.managerPersonId) {
+    const dash = await buildManagerDashboard(opts.managerPersonId);
+    const compliance = await buildHrComplianceDashboard(dash.scope.departmentIds);
+    if (dash.summary.pendingLeave) {
+      priorities.push(`${dash.summary.pendingLeave} leave request(s) awaiting approval`);
+      actions.push({ label: "Review leave requests", category: "approvals" });
+    }
+    if (dash.summary.pendingTimesheets) {
+      priorities.push(`${dash.summary.pendingTimesheets} timesheet(s) awaiting approval`);
+      actions.push({ label: "Approve timesheets", category: "approvals" });
+    }
+    if (compliance.summary.incompleteOnboarding) {
+      priorities.push(`${compliance.summary.incompleteOnboarding} team member(s) with incomplete onboarding`);
+      actions.push({ label: "Monitor onboarding progress", category: "onboarding" });
+    }
+    if (compliance.summary.expiredCerts + compliance.summary.pendingBackgroundChecks > 0) {
+      priorities.push(`${compliance.summary.expiredCerts} expired cert(s), ${compliance.summary.pendingBackgroundChecks} pending background check(s)`);
+      actions.push({ label: "Address compliance gaps", category: "compliance" });
+    }
+    const insight = [
+      `Manager briefing — ${dash.summary.teamCount} team member(s) in scope`,
+      `Pending leave: ${dash.summary.pendingLeave}, timesheets: ${dash.summary.pendingTimesheets}`,
+      `HR compliance score: ${compliance.score.score}/100 (${compliance.score.grade})`,
+      priorities.length ? `Priorities: ${priorities.join("; ")}` : "Team operations are current.",
+    ].join("\n");
+    return { audience: "manager", priorities, actions, insight, compliance: compliance.score, summary: dash.summary };
+  }
+
+  const orgCompliance = await buildHrComplianceDashboard();
+  const pendingLeave = (await db.get<{ c: number }>("SELECT COUNT(*) as c FROM leave_requests WHERE status = 'pending'"))?.c ?? 0;
+  const pendingTs = (await db.get<{ c: number }>("SELECT COUNT(*) as c FROM payroll_timesheets WHERE status = 'submitted'"))?.c ?? 0;
+  priorities.push(`Organization HR compliance: ${orgCompliance.score.score}/100`);
+  if (pendingLeave) priorities.push(`${pendingLeave} organization-wide leave requests pending`);
+  if (pendingTs) priorities.push(`${pendingTs} timesheets awaiting approval`);
+  const insight = [
+    "IFCDC HR & Staff briefing",
+    `Compliance score: ${orgCompliance.score.score}/100 (${orgCompliance.score.grade})`,
+    `Active alerts: ${orgCompliance.summary.totalAlerts}`,
+    `Pending leave: ${pendingLeave}, timesheets: ${pendingTs}`,
+  ].join("\n");
+  return { audience: "hr", priorities, actions, insight, compliance: orgCompliance.score, summary: orgCompliance.summary };
+}
+
+export async function auraStaffHrBriefing(opts: { personId?: string; managerPersonId?: string; question?: string }) {
+  const briefing = await buildStaffHrBriefing(opts);
+  const question = opts.question?.trim() ?? "Summarize HR priorities for staff and managers today.";
+  let auraInsight = briefing.insight;
+  let offline = true;
+  try {
+    const { auraExecutiveChat } = await import("../lib/ifcdc");
+    auraInsight = await auraExecutiveChat(
+      `${question}\n\nRespond as IFCDC Staff & HR briefing advisor (concise, actionable).`,
+      JSON.stringify(briefing, null, 2)
+    );
+    offline = false;
+  } catch {
+    // keep offline briefing
+  }
+  return { ...briefing, auraInsight, offline };
 }
 
 export async function uploadPersonnelDocument(
@@ -252,18 +558,47 @@ export async function buildManagerDashboard(managerPersonId: string) {
     ? await db.all(`SELECT * FROM departments WHERE id IN (${scope.departmentIds.map(() => "?").join(",")})`, ...scope.departmentIds)
     : [];
 
+  const pendingOnboarding = await db.all(
+    `SELECT oi.id, oi.person_id, oi.task_label, oi.task_key, oi.completed, p.first_name, p.last_name, d.name as department_name
+     FROM people_onboarding_items oi
+     JOIN people p ON p.id = oi.person_id
+     LEFT JOIN departments d ON d.id = p.department_id
+     WHERE oi.completed = 0 AND p.status IN ('active', 'onboarding') ${sql}
+     ORDER BY p.last_name, oi.sort_order LIMIT 50`,
+    ...params
+  );
+
+  const complianceAlerts = await db.all(
+    `SELECT pc.id, pc.name, pc.expiry_date, p.id as person_id, p.first_name, p.last_name, 'expired_cert' as alert_type
+     FROM people_certifications pc JOIN people p ON p.id = pc.person_id
+     WHERE p.status = 'active' AND pc.expiry_date IS NOT NULL AND pc.expiry_date < date('now') ${sql}
+     UNION ALL
+     SELECT bc.id, bc.check_type as name, bc.expiry_date, p.id as person_id, p.first_name, p.last_name, 'pending_bg' as alert_type
+     FROM background_checks bc JOIN people p ON p.id = bc.person_id
+     WHERE bc.status IN ('pending', 'in_progress') ${sql}
+     LIMIT 30`,
+    ...params, ...params
+  );
+
+  const compliance = await buildHrComplianceScore();
+
   return {
     scope: { departmentIds: scope.departmentIds, teamCount: team.length },
     departments,
     team,
     pendingLeave,
     pendingTimesheets,
+    pendingOnboarding,
+    complianceAlerts,
+    complianceScore: compliance,
     attendance,
     performance,
     summary: {
       teamCount: team.length,
       pendingLeave: pendingLeave.length,
       pendingTimesheets: pendingTimesheets.length,
+      pendingOnboarding: pendingOnboarding.length,
+      complianceAlerts: complianceAlerts.length,
       hoursThisMonth: (attendance as { hours_this_month: number }[]).reduce((s, a) => s + Number(a.hours_this_month ?? 0), 0),
     },
   };

@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { Request, Response } from "express";
 import { getDb } from "../db";
 import { hqAuthRequired, requireHQModule, requireHQPermission } from "../middleware/hqAuth";
+import { hasPermission } from "../hq/enterpriseRoles";
 import {
   ensurePeopleTables,
   peopleId,
@@ -46,6 +47,14 @@ import {
   uploadPersonnelDocument,
   buildManagerDashboard,
   buildStaffingOverview,
+  selfSubmitTimesheet,
+  selfCompleteOnboardingItem,
+  managerReviewLeave,
+  managerReviewTimesheet,
+  managerCompleteOnboarding,
+  buildHrComplianceDashboard,
+  buildStaffHrBriefing,
+  auraStaffHrBriefing,
 } from "../hq/peopleSelfServiceEngine";
 import { preparePayrollBatchFromApprovedTimesheets } from "../hq/payrollPreparation";
 
@@ -104,11 +113,90 @@ router.post("/self-service/documents/upload", requireHQPermission("hq.hr.self"),
   }
 });
 
+router.post("/self-service/timesheets/submit", requireHQPermission("hq.hr.self"), async (req, res) => {
+  const person = await resolvePersonForUser({ id: req.hqUser!.id, email: req.hqUser!.email });
+  if (!person) return res.status(404).json({ error: "Employee record not found" });
+  res.json(await selfSubmitTimesheet(String(person.id), { email: req.hqUser?.email }));
+});
+
+router.patch("/self-service/onboarding/:itemId", requireHQPermission("hq.hr.self"), async (req, res) => {
+  const person = await resolvePersonForUser({ id: req.hqUser!.id, email: req.hqUser!.email });
+  if (!person) return res.status(404).json({ error: "Employee record not found" });
+  const item = await selfCompleteOnboardingItem(String(person.id), req.params.itemId, { email: req.hqUser?.email });
+  if (!item) return res.status(404).json({ error: "Onboarding item not found" });
+  res.json({ item });
+});
+
+router.get("/self-service/briefing", requireHQPermission("hq.hr.self"), async (req, res) => {
+  const person = await resolvePersonForUser({ id: req.hqUser!.id, email: req.hqUser!.email });
+  if (!person) return res.status(404).json({ error: "Employee record not found" });
+  const question = typeof req.query.question === "string" ? req.query.question : undefined;
+  res.json(await auraStaffHrBriefing({ personId: String(person.id), question }));
+});
+
 // ——— Phase 3.1: Manager portal (department-scoped) ———
 router.get("/manager/dashboard", requireHQPermission("hq.hr.approve", "hq.hr.manage"), async (req, res) => {
   const manager = await resolvePersonForUser({ id: req.hqUser!.id, email: req.hqUser!.email });
   if (!manager) return res.status(404).json({ error: "Manager employee record not linked" });
   res.json(await buildManagerDashboard(String(manager.id)));
+});
+
+router.get("/manager/briefing", requireHQPermission("hq.hr.approve", "hq.hr.manage"), async (req, res) => {
+  const manager = await resolvePersonForUser({ id: req.hqUser!.id, email: req.hqUser!.email });
+  if (!manager) return res.status(404).json({ error: "Manager employee record not linked" });
+  const question = typeof req.query.question === "string" ? req.query.question : undefined;
+  res.json(await auraStaffHrBriefing({ managerPersonId: String(manager.id), question }));
+});
+
+router.patch("/manager/leave-requests/:leaveId", requireHQPermission("hq.hr.approve", "hq.hr.manage"), async (req, res) => {
+  const manager = await resolvePersonForUser({ id: req.hqUser!.id, email: req.hqUser!.email });
+  if (!manager) return res.status(404).json({ error: "Manager employee record not linked" });
+  const { status, notes } = req.body ?? {};
+  if (!status) return res.status(400).json({ error: "status required" });
+  const result = await managerReviewLeave(String(manager.id), req.params.leaveId, status, notes, { email: req.hqUser?.email });
+  if (result.error === "not_found") return res.status(404).json({ error: "Leave request not found" });
+  if (result.error === "forbidden") return res.status(403).json({ error: "Outside your department scope" });
+  res.json(result);
+});
+
+router.patch("/manager/timesheets/:id", requireHQPermission("hq.hr.approve", "hq.hr.manage"), async (req, res) => {
+  const manager = await resolvePersonForUser({ id: req.hqUser!.id, email: req.hqUser!.email });
+  if (!manager) return res.status(404).json({ error: "Manager employee record not linked" });
+  const { status } = req.body ?? {};
+  if (!status) return res.status(400).json({ error: "status required" });
+  const result = await managerReviewTimesheet(String(manager.id), req.params.id, status, { email: req.hqUser?.email });
+  if (result.error === "not_found") return res.status(404).json({ error: "Timesheet not found" });
+  if (result.error === "forbidden") return res.status(403).json({ error: "Outside your department scope" });
+  res.json(result);
+});
+
+router.patch("/manager/onboarding/:personId/:itemId", requireHQPermission("hq.hr.approve", "hq.hr.manage"), async (req, res) => {
+  const manager = await resolvePersonForUser({ id: req.hqUser!.id, email: req.hqUser!.email });
+  if (!manager) return res.status(404).json({ error: "Manager employee record not linked" });
+  const result = await managerCompleteOnboarding(String(manager.id), req.params.personId, req.params.itemId, { email: req.hqUser?.email });
+  if (result.error === "not_found") return res.status(404).json({ error: "Onboarding item not found" });
+  if (result.error === "forbidden") return res.status(403).json({ error: "Outside your department scope" });
+  res.json(result);
+});
+
+router.get("/compliance/dashboard", requireHQPermission("hq.hr", "hq.hr.manage", "hq.hr.approve"), async (req, res) => {
+  const manager = await resolvePersonForUser({ id: req.hqUser!.id, email: req.hqUser!.email });
+  const scope = manager ? (await buildManagerDashboard(String(manager.id))).scope.departmentIds : undefined;
+  const hasManage = hasPermission(req.hqUser!.role, "hq.hr.manage") || req.hqUser!.role === "founder" || req.hqUser!.role === "owner";
+  res.json(await buildHrComplianceDashboard(hasManage ? undefined : scope));
+});
+
+router.get("/operations/v3/hr-briefing", requireHQPermission("hq.hr", "hq.hr.manage", "hq.hr.approve", "hq.hr.self"), async (req, res) => {
+  const question = typeof req.query.question === "string" ? req.query.question : undefined;
+  const person = await resolvePersonForUser({ id: req.hqUser!.id, email: req.hqUser!.email });
+  const role = req.hqUser!.role;
+  if (person && hasPermission(role, "hq.hr.approve") && !hasPermission(role, "hq.hr.manage") && role !== "founder" && role !== "owner") {
+    return res.json(await auraStaffHrBriefing({ managerPersonId: String(person.id), question }));
+  }
+  if (person && hasPermission(role, "hq.hr.self") && !hasPermission(role, "hq.hr.manage") && !hasPermission(role, "hq.hr.approve")) {
+    return res.json(await auraStaffHrBriefing({ personId: String(person.id), question }));
+  }
+  res.json(await auraStaffHrBriefing({ question }));
 });
 
 router.get("/staffing-overview", requireHQPermission("hq.hr", "hq.hr.manage", "hq.hr.approve"), async (_req, res) => {

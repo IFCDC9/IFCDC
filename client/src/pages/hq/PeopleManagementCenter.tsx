@@ -24,8 +24,9 @@ import { PeopleOrgChartPanel } from "../../components/hq/people/PeopleOrgChartPa
 import { PeopleTimesheetsPanel } from "../../components/hq/people/PeopleTimesheetsPanel";
 import { PeopleTeamAssignmentsPanel } from "../../components/hq/people/PeopleTeamAssignmentsPanel";
 import { PeopleV3WorkforceIntelligenceDashboard, PeopleV3AuraWorkforcePanel } from "../../components/hq/people/PeopleV3WorkforceIntelligenceDashboard";
+import { PeopleHrComplianceDashboard, PeopleHrAuraBriefingPanel } from "../../components/hq/people/PeopleHrComplianceDashboard";
 
-type Tab = "overview" | "directory" | "employees" | "volunteers" | "board" | "contractors" | "applicants" | "personnel-files" | "roles" | "org-structure" | "profile" | "departments" | "org-chart" | "scheduling" | "performance" | "incidents" | "time-clock" | "leave" | "onboarding" | "certifications" | "timesheets" | "team-assignments" | "intelligence";
+type Tab = "overview" | "directory" | "employees" | "volunteers" | "board" | "contractors" | "applicants" | "personnel-files" | "roles" | "org-structure" | "profile" | "departments" | "org-chart" | "scheduling" | "performance" | "incidents" | "time-clock" | "leave" | "onboarding" | "certifications" | "timesheets" | "team-assignments" | "intelligence" | "compliance";
 type AddModal = "document" | "training" | "certification" | "schedule" | "performance" | "department" | "background" | "signature" | "leave" | "incident" | null;
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
@@ -50,6 +51,7 @@ const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: "leave", label: "Leave Requests", icon: Palmtree },
   { id: "timesheets", label: "Timesheets", icon: FileText },
   { id: "team-assignments", label: "Team Assignments", icon: Users },
+  { id: "compliance", label: "HR Compliance", icon: ShieldCheck },
   { id: "intelligence", label: "Workforce Intel", icon: Star },
 ];
 
@@ -726,6 +728,15 @@ const PeopleManagementCenter: React.FC = () => {
         {tab === "timesheets" && <PeopleTimesheetsPanel />}
 
         {tab === "team-assignments" && <PeopleTeamAssignmentsPanel />}
+
+        {tab === "compliance" && (
+          <>
+            <PeopleHrComplianceDashboard />
+            <div style={{ marginTop: "1.25rem" }}>
+              <PeopleHrAuraBriefingPanel audience="hr" />
+            </div>
+          </>
+        )}
 
         {tab === "intelligence" && (
           <>
