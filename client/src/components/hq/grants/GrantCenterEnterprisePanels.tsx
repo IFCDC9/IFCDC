@@ -1,15 +1,23 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, Sparkles, FileText } from "lucide-react";
+import { BookOpen, Sparkles, FileText, AlertTriangle } from "lucide-react";
 import { grantsApi } from "../../../api/grantsApi";
 import { HqPanel } from "../HqPanel";
 import { StatusBadge } from "../StatusBadge";
 import { HqLoading } from "../HqLoading";
 
+function QueryError({ message }: { message: string }) {
+  return (
+    <div className="hq-empty" style={{ display: "flex", alignItems: "center", gap: "0.5rem", justifyContent: "center" }}>
+      <AlertTriangle size={16} /> {message}
+    </div>
+  );
+}
+
 export const GrantLibraryPanel: React.FC<{ onApplyTemplate?: (templateId: string) => void }> = ({ onApplyTemplate }) => {
   const [category, setCategory] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
-  const library = useQuery({ queryKey: ["grant-library", category], queryFn: () => grantsApi.grantLibrary(category || undefined) });
+  const library = useQuery({ queryKey: ["grant-library", category], queryFn: () => grantsApi.grantLibrary(category || undefined), staleTime: 60_000 });
   const detail = useQuery({
     queryKey: ["grant-template", selected],
     queryFn: () => grantsApi.grantTemplate(String(selected)),
@@ -29,7 +37,9 @@ export const GrantLibraryPanel: React.FC<{ onApplyTemplate?: (templateId: string
             </button>
           ))}
         </div>
-        {library.isLoading ? <HqLoading /> : (
+        {library.isLoading ? <HqLoading /> : library.isError ? (
+          <QueryError message="Unable to load grant templates. Refresh to retry." />
+        ) : (
           <div className="hq-grid-2">
             <div>
               <table className="hq-table">
@@ -49,6 +59,7 @@ export const GrantLibraryPanel: React.FC<{ onApplyTemplate?: (templateId: string
             </div>
             <div>
               {selected && detail.isLoading && <HqLoading />}
+              {selected && detail.isError && <QueryError message="Template preview unavailable." />}
               {detail.data?.template && (
                 <div className="hq-panel" style={{ padding: "1rem" }}>
                   <h4 style={{ color: "var(--hq-gold)", marginBottom: "0.5rem" }}><BookOpen size={14} style={{ display: "inline" }} /> {(detail.data.template as { title: string }).title}</h4>
@@ -75,6 +86,7 @@ export const GrantWriterStudioPanel: React.FC<{
   const qc = useQueryClient();
   const [activeSection, setActiveSection] = useState("executive_summary");
   const [draft, setDraft] = useState<Record<string, string>>({});
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const studio = useQuery({
     queryKey: ["grant-writer-studio", selectedApplicationId],
@@ -85,15 +97,20 @@ export const GrantWriterStudioPanel: React.FC<{
   const saveSection = useMutation({
     mutationFn: ({ sectionKey, content }: { sectionKey: string; content: string }) =>
       grantsApi.saveWriterSection(String(selectedApplicationId), sectionKey, content),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["grant-writer-studio", selectedApplicationId] }),
+    onSuccess: () => {
+      setSaveError(null);
+      qc.invalidateQueries({ queryKey: ["grant-writer-studio", selectedApplicationId] });
+    },
+    onError: (err: Error) => setSaveError(err.message),
   });
 
   const aiAssist = useMutation({
     mutationFn: (sectionKey: string) => grantsApi.writerAiAssist(String(selectedApplicationId), sectionKey),
     onSuccess: (data, sectionKey) => {
       const content = String((data as { content?: string; narrative?: string }).content ?? (data as { narrative?: string }).narrative ?? "");
-      setDraft((d) => ({ ...d, [sectionKey]: content }));
+      if (content) setDraft((d) => ({ ...d, [sectionKey]: content }));
     },
+    onError: (err: Error) => setSaveError(err.message),
   });
 
   const sections = (studio.data?.writerSections?.sections ?? []) as { section_key: string; section_label: string; content: string }[];
@@ -111,7 +128,9 @@ export const GrantWriterStudioPanel: React.FC<{
         </div>
         {!selectedApplicationId ? (
           <p className="hq-muted-text">Choose an application to open the writer workspace.</p>
-        ) : studio.isLoading ? <HqLoading /> : (
+        ) : studio.isLoading ? <HqLoading /> : studio.isError ? (
+          <QueryError message="Writer studio failed to load. Verify the application still exists." />
+        ) : (
           <>
             <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
               <StatusBadge label={`${studio.data?.writerSections?.completionPct ?? 0}% complete`} variant="gold" />
@@ -129,12 +148,13 @@ export const GrantWriterStudioPanel: React.FC<{
               onChange={(e) => setDraft({ ...draft, [activeSection]: e.target.value })}
               placeholder={`Write ${current?.section_label ?? activeSection}…`}
             />
+            {saveError && <p className="hq-muted-text" style={{ color: "var(--hq-danger)", marginTop: "0.5rem", fontSize: "0.8rem" }}>{saveError}</p>}
             <div className="hq-founder-command-strip" style={{ marginTop: "0.75rem" }}>
               <button type="button" className="hq-btn hq-btn-primary" disabled={saveSection.isPending} onClick={() => saveSection.mutate({ sectionKey: activeSection, content })}>
-                <FileText size={14} /> Save Section
+                <FileText size={14} /> {saveSection.isPending ? "Saving…" : "Save Section"}
               </button>
               <button type="button" className="hq-btn hq-btn-secondary" disabled={aiAssist.isPending} onClick={() => aiAssist.mutate(activeSection)}>
-                <Sparkles size={14} /> AURA Draft
+                <Sparkles size={14} /> {aiAssist.isPending ? "Drafting…" : "AURA Draft"}
               </button>
             </div>
             {studio.data?.application && (
@@ -155,6 +175,7 @@ export const GrantOpportunityFinderPanel: React.FC = () => {
   const finder = useQuery({
     queryKey: ["grant-opportunity-finder", category, q],
     queryFn: () => grantsApi.opportunityFinder({ category: category || undefined, q: q || undefined }),
+    staleTime: 30_000,
   });
 
   const data = finder.data as { categorized?: Record<string, unknown[]>; opportunities?: unknown[]; integrations?: string } | undefined;
@@ -166,18 +187,22 @@ export const GrantOpportunityFinderPanel: React.FC = () => {
         {["federal", "state", "foundation", "corporate"].map((c) => (
           <button key={c} type="button" className={`hq-btn hq-btn-sm ${category === c ? "hq-btn-primary" : "hq-btn-secondary"}`} onClick={() => setCategory(category === c ? "" : c)}>{c}</button>
         ))}
-        <input className="hq-input" placeholder="Search opportunities…" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 200 }} />
+        <input className="hq-input" placeholder="Search opportunities…" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 200, flex: "1 1 160px" }} />
       </div>
-      {finder.isLoading ? <HqLoading /> : (
-        <table className="hq-table">
-          <thead><tr><th>Title</th><th>Funder</th><th>Deadline</th><th>Max Award</th></tr></thead>
-          <tbody>
-            {(list as { id: string; title: string; funder: string; deadline?: string; amount_max?: number }[]).map((o) => (
-              <tr key={String(o.id)}><td>{o.title}</td><td>{o.funder}</td><td>{o.deadline ?? "—"}</td><td>{o.amount_max ? `$${o.amount_max.toLocaleString()}` : "—"}</td></tr>
-            ))}
-            {(list as unknown[]).length === 0 && <tr><td colSpan={4} className="hq-muted-text">No opportunities match. Add grants or connect external feeds.</td></tr>}
-          </tbody>
-        </table>
+      {finder.isLoading ? <HqLoading /> : finder.isError ? (
+        <QueryError message="Opportunity finder unavailable. Check your connection and retry." />
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table className="hq-table">
+            <thead><tr><th>Title</th><th>Funder</th><th>Deadline</th><th>Max Award</th></tr></thead>
+            <tbody>
+              {(list as { id: string; title: string; funder: string; deadline?: string; amount_max?: number }[]).map((o) => (
+                <tr key={String(o.id)}><td>{o.title}</td><td>{o.funder}</td><td>{o.deadline ?? "—"}</td><td>{o.amount_max ? `$${o.amount_max.toLocaleString()}` : "—"}</td></tr>
+              ))}
+              {(list as unknown[]).length === 0 && <tr><td colSpan={4} className="hq-muted-text">No opportunities match. Add grants or connect external feeds.</td></tr>}
+            </tbody>
+          </table>
+        </div>
       )}
       <p className="hq-muted-text" style={{ marginTop: "0.75rem", fontSize: "0.75rem" }}>Grants.gov and SAM.gov integrations: placeholder — local database active.</p>
     </HqPanel>

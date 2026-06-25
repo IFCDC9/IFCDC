@@ -60,7 +60,7 @@ export const GrantV4AuraAdvisor: React.FC = () => {
                 onChange={(e) => setQuestion(e.target.value)}
                 style={{ flex: "1 1 280px" }}
               />
-              <button type="button" className="hq-btn hq-btn-primary hq-btn-sm" disabled={ask.isPending} onClick={() => ask.mutate(question || suggested[0] ?? "")}>
+              <button type="button" className="hq-btn hq-btn-primary hq-btn-sm" disabled={ask.isPending} onClick={() => ask.mutate(question || (suggested[0] ?? ""))}>
                 <Sparkles size={14} /> Ask AURA
               </button>
               <button type="button" className="hq-btn hq-btn-ghost hq-btn-sm" onClick={() => briefing.refetch()}>

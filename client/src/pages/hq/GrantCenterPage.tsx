@@ -6,7 +6,7 @@ import {
   DollarSign, Users, BarChart3, Bell, History, Upload, TrendingUp, Wallet, Sparkles, FileBarChart, Handshake, BookOpen, PenLine,
 } from "lucide-react";
 import HQLayout from "../../layouts/HQLayout";
-import { grantsApi, type GrantOpportunity, type GrantApplication, type GrantFunder } from "../../api/grantsApi";
+import { grantsApi, type GrantOpportunity, type GrantFunder } from "../../api/grantsApi";
 import { KpiCard } from "../../components/hq/KpiCard";
 import { HqPanel } from "../../components/hq/HqPanel";
 import { StatusBadge } from "../../components/hq/StatusBadge";
@@ -20,14 +20,11 @@ import { GrantV4LifecyclePanel } from "../../components/hq/grants/GrantV4Lifecyc
 import { GrantV4FundingCalendar } from "../../components/hq/grants/GrantV4FundingCalendar";
 import { GrantV4ProgramIntegration } from "../../components/hq/grants/GrantV4ProgramIntegration";
 import { GrantV4AuraAdvisor } from "../../components/hq/grants/GrantV4AuraAdvisor";
-import { GrantV3DiscoveryPanel } from "../../components/hq/grants/GrantV3DiscoveryPanel";
 import { GrantV3ProgramProfilesPanel } from "../../components/hq/grants/GrantV3ProgramProfilesPanel";
 import { GrantV3DocumentCenter } from "../../components/hq/grants/GrantV3DocumentCenter";
 import { GrantV3AuraExecutivePanel } from "../../components/hq/grants/GrantV3AuraExecutivePanel";
-import { GrantOpportunityDatabase } from "../../components/hq/grants/GrantOpportunityDatabase";
 import { GrantApplicationWorkflowPanel } from "../../components/hq/grants/GrantApplicationWorkflowPanel";
 import { GrantV2PipelineDashboard } from "../../components/hq/grants/GrantV2PipelineDashboard";
-import { GrantLiveOpportunityDatabase } from "../../components/hq/grants/GrantLiveOpportunityDatabase";
 import { GrantDocumentManagementPanel } from "../../components/hq/grants/GrantDocumentManagementPanel";
 import { GrantOutcomesPanel } from "../../components/hq/grants/GrantOutcomesPanel";
 import { GrantDeadlineRenewalPanel } from "../../components/hq/grants/GrantDeadlineRenewalPanel";
@@ -113,12 +110,19 @@ const GrantCenterPage: React.FC = () => {
     }
   }, [searchParams]);
 
+  const selectTab = (next: Tab) => {
+    setTab(next);
+    const params = new URLSearchParams(searchParams);
+    params.set("tab", next);
+    window.history.replaceState(null, "", `/hq/grants?${params.toString()}`);
+  };
+
   const dashboard = useQuery({ queryKey: ["grants-dashboard"], queryFn: grantsApi.dashboard });
   const grantPlatform = useQuery({ queryKey: ["grant-center-platform"], queryFn: grantsApi.grantCenterPlatform, enabled: tab === "overview" });
   const executiveSummary = useQuery({ queryKey: ["grant-executive-summary"], queryFn: grantsApi.grantExecutiveSummary, enabled: tab === "overview" });
   const fundingAnalytics = useQuery({ queryKey: ["grant-funding-analytics"], queryFn: grantsApi.fundingAnalytics, enabled: tab === "analytics" });
-  const opportunities = useQuery({ queryKey: ["grants-opportunities"], queryFn: grantsApi.opportunities });
-  const applications = useQuery({ queryKey: ["grants-applications"], queryFn: grantsApi.applications });
+  const opportunities = useQuery({ queryKey: ["grants-opportunities"], queryFn: grantsApi.opportunities, enabled: ["opportunities", "applications", "overview"].includes(tab) || showNewApp });
+  const applications = useQuery({ queryKey: ["grants-applications"], queryFn: grantsApi.applications, enabled: ["applications", "writer-studio", "library", "documents", "pipeline", "overview"].includes(tab) || showNewApp });
   const deadlines = useQuery({ queryKey: ["grants-deadlines"], queryFn: () => grantsApi.deadlines(true) });
   const allDeadlines = useQuery({ queryKey: ["grants-deadlines-all"], queryFn: () => grantsApi.deadlines(false), enabled: tab === "deadlines" });
   const awards = useQuery({ queryKey: ["grants-awards"], queryFn: grantsApi.awards });
@@ -206,7 +210,7 @@ const GrantCenterPage: React.FC = () => {
     <HQLayout title="Grant Center" subtitle="Enterprise funding command hub — opportunities, writer studio, library, compliance, and financial integration">
       <nav className="hq-tabs">
         {TABS.map((t) => (
-          <button key={t.id} type="button" className={`hq-tab ${tab === t.id ? "active" : ""}`} onClick={() => setTab(t.id)}>
+          <button key={t.id} type="button" className={`hq-tab ${tab === t.id ? "active" : ""}`} onClick={() => selectTab(t.id)}>
             <t.icon size={16} /> {t.label}
           </button>
         ))}
@@ -226,7 +230,7 @@ const GrantCenterPage: React.FC = () => {
                       type="button"
                       className="hq-app-card"
                       style={{ textAlign: "left", cursor: "pointer" }}
-                      onClick={() => setTab(m.tab as Tab)}
+                      onClick={() => selectTab(m.tab as Tab)}
                     >
                       <div className="hq-app-name">{m.label}</div>
                       <StatusBadge label={m.status} variant="success" />
@@ -314,7 +318,7 @@ const GrantCenterPage: React.FC = () => {
             <div style={{ marginTop: "1.25rem" }}>
               <GrantV2PipelineDashboard
                 onNavigate={(nextTab, applicationId) => {
-                  setTab(nextTab as Tab);
+                  selectTab(nextTab as Tab);
                   if (applicationId) setSelectedApplicationId(applicationId);
                 }}
               />
@@ -431,27 +435,6 @@ const GrantCenterPage: React.FC = () => {
             <div style={{ marginBottom: "1.25rem" }}>
               <GrantV5NationalDatabase />
             </div>
-            <div style={{ marginBottom: "1.25rem" }}>
-              <GrantV3DiscoveryPanel />
-            </div>
-            <div style={{ marginBottom: "1.25rem" }}>
-              <GrantLiveOpportunityDatabase
-                onStartApplication={(opportunityId) => {
-                  setNewApp({ title: "", opportunity_id: opportunityId, amount_requested: "" });
-                  setShowNewApp(true);
-                  setTab("applications");
-                }}
-              />
-            </div>
-            <div style={{ marginBottom: "1.25rem" }}>
-              <GrantOpportunityDatabase
-                onStartApplication={(opportunityId) => {
-                  setNewApp({ title: "", opportunity_id: opportunityId, amount_requested: "" });
-                  setShowNewApp(true);
-                  setTab("applications");
-                }}
-              />
-            </div>
             <div style={{ marginBottom: "1rem", display: "flex", justifyContent: "flex-end" }}>
               <button type="button" className="hq-btn hq-btn-primary" onClick={() => setShowNewOpp(!showNewOpp)}>
                 <Plus size={16} /> New Opportunity
@@ -532,10 +515,12 @@ const GrantCenterPage: React.FC = () => {
               if (selectedApplicationId) {
                 grantsApi.writerStudio(selectedApplicationId, templateId).then(() => {
                   qc.invalidateQueries({ queryKey: ["grant-writer-studio", selectedApplicationId] });
-                  setTab("writer-studio");
+                  selectTab("writer-studio");
+                }).catch(() => {
+                  window.alert("Could not apply template. Select an application first.");
                 });
               } else {
-                setTab("applications");
+                selectTab("applications");
               }
             }}
           />
@@ -577,6 +562,9 @@ const GrantCenterPage: React.FC = () => {
                       <td className="hq-muted-text" style={{ fontSize: "0.78rem" }}>{selectedApplicationId === a.id ? "Selected" : "Click for workflow"}</td>
                     </tr>
                   ))}
+                  {!(applications.data?.applications ?? []).length && (
+                    <tr><td colSpan={5} className="hq-empty-cell">No applications yet — create one to open the Writer Studio.</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>

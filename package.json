@@ -11,9 +11,12 @@
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
+    "build:client": "vite build",
     "people:readiness": "node script/people-phase3-readiness.mjs",
     "finance:readiness": "node script/finance-phase4-readiness.mjs",
     "grants:readiness": "node script/grant-center-readiness.mjs",
+    "grants:qa": "node script/grant-center-qa.mjs",
+    "grants:release": "npm run check && npm run build && npm run build:client && npm run grants:qa",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { peopleApi } from "../api/peopleApi";
+import { peopleApi } from "../../api/peopleApi";
 
 interface StaffingRole {
   id: string;
