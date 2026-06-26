@@ -1,5 +1,7 @@
 # IFCDC Headquarters — Render Blueprint
-# Runbook: Documents/HQ-DEPLOY-RUNBOOK.md
+# GitHub: IFCDC9/IFCDC · Branch: hq/phase3-people-operations
+# NOTE: This repo branch contains the app at repository root (not monorepo Apps/ path).
+# Render Root Directory must be blank (.) — NOT Apps/IMPERIAL-FOUNDATION-CDC.
 
 services:
   - type: web
@@ -7,7 +9,6 @@ services:
     runtime: node
     region: ohio
     plan: starter
-    rootDir: Apps/IMPERIAL-FOUNDATION-CDC
     buildCommand: npm ci --include=dev && npm run build && node script/render-postbuild.mjs
     startCommand: node script/render-prestart.mjs && npm run start
     healthCheckPath: /api/health
@@ -33,5 +34,5 @@ services:
 
     disk:
       name: ifcdc-hq-data
-      mountPath: /opt/render/project/src/Apps/IMPERIAL-FOUNDATION-CDC/data
+      mountPath: /opt/render/project/src/data
       sizeGB: 1

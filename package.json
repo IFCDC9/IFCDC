@@ -23,11 +23,11 @@
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
-    "@ifcdc/headquarters-sdk": "file:../../Libraries/ifcdc-packages/packages/headquarters-sdk",
-    "@ifcdc/aura-ai": "file:../../Libraries/ifcdc-packages/packages/aura-ai",
-    "@ifcdc/auth": "file:../../Libraries/ifcdc-packages/packages/auth",
-    "@ifcdc/notifications": "file:../../Libraries/ifcdc-packages/packages/notifications",
-    "@ifcdc/payments": "file:../../Libraries/ifcdc-packages/packages/payments",
+    "@ifcdc/headquarters-sdk": "file:./Libraries/ifcdc-packages/packages/headquarters-sdk",
+    "@ifcdc/aura-ai": "file:./Libraries/ifcdc-packages/packages/aura-ai",
+    "@ifcdc/auth": "file:./Libraries/ifcdc-packages/packages/auth",
+    "@ifcdc/notifications": "file:./Libraries/ifcdc-packages/packages/notifications",
+    "@ifcdc/payments": "file:./Libraries/ifcdc-packages/packages/payments",
     "@hookform/resolvers": "^3.10.0",
     "@jridgewell/trace-mapping": "^0.3.25",
     "@neondatabase/serverless": "^0.10.4",
