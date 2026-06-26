@@ -10,7 +10,6 @@ import twilio from "twilio";
 import { authenticator } from "./otplib-compat";
 import QRCode from "qrcode";
 import cookieParser from "cookie-parser";
-import { createServer as createViteServer } from "vite";
 import OpenAI from "openai";
 import rateLimit from "express-rate-limit";
 import * as client from "openid-client";
@@ -37,6 +36,7 @@ import { ensureEnterpriseReadinessSeed } from "./hq/enterpriseReadinessSeed";
 import { ensureNotificationQueueTables } from "./hq/notificationQueue";
 import { recordLoginAttempt, recordActiveSession, roleRequiresMfa } from "./hq/hqSecuritySessions";
 import { attachHqRealtimeHub } from "./hq/hqRealtimeHub";
+import { getAppRoot, getDistPublicDir, getPublicDir, getSpaIndexPath } from "./appPaths";
 import http from "http";
 
 function getOpenAI(): OpenAI | null {
@@ -51,6 +51,10 @@ function getOpenAI(): OpenAI | null {
 const app = express();
 const PORT = parseInt(process.env.PORT || "5000", 10);
 const isDev = process.env.NODE_ENV !== "production";
+
+if (!isDev) {
+  app.set("trust proxy", 1);
+}
 
 if (isDev) {
   console.log('DEV MODE ACTIVE');
@@ -209,7 +213,7 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-const publicDir = path.join(import.meta.dirname, "..", "public");
+const publicDir = getPublicDir();
 // Serve static assets from public/ but don't serve index.html (let Vite handle SPA)
 app.use(express.static(publicDir, { index: false }));
 
@@ -5339,32 +5343,12 @@ Keep responses concise, friendly, and helpful. If you don't know something speci
 
 // Start server with Vite in development or static files in production
 async function startServer() {
-  await initDb();
-  await ensureGrantTables();
-  await ensurePeopleTables();
-  await ensureFinanceTables();
-  await ensureOperationsTables();
-  await ensureDashboardTables();
-  await ensureSoftwareDivisionTables();
-  await ensureDeveloperAuditTables();
-  await ensureExecutiveBriefingsTable();
-  await ensureBoardPortalTables();
-  await ensureHqAuditTables();
-  await ensureWarehouseTables();
-  await ensureWorkflowTables();
-  await ensureProgramModuleTables();
-  await ensureEnterpriseReadinessSeed();
-  await ensureNotificationQueueTables();
-  await ensureBackupTables();
-  await ensureSecuritySessionTables();
-  getOrGenerateDailyBriefing().catch((e) => console.warn("Morning briefing generation skipped:", e?.message));
-  await initGoogleOAuth();
-
   const server = http.createServer(app);
 
   if (isDev) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
-      configFile: path.join(import.meta.dirname, "..", "vite.config.ts"),
+      configFile: path.join(getAppRoot(), "vite.config.ts"),
       server: {
         middlewareMode: true,
         hmr: { server, port: 24678, clientPort: 24678 },
@@ -5373,9 +5357,19 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    // In production, serve built static files
-    const spaIndexPath = path.join(import.meta.dirname, "..", "dist", "public", "index.html");
-    app.use(express.static(path.join(import.meta.dirname, "..", "dist", "public")));
+    const distPublic = getDistPublicDir();
+    const spaIndexPath = getSpaIndexPath();
+    console.log(`Production static root: ${distPublic}`);
+    console.log(`SPA index exists: ${fs.existsSync(spaIndexPath)}`);
+
+    app.use(express.static(distPublic));
+
+    app.get("/", (_req, res) => {
+      if (fs.existsSync(spaIndexPath)) {
+        return res.sendFile(spaIndexPath);
+      }
+      return res.redirect("/hq/grants");
+    });
 
     app.get("*", (req, res, next) => {
       if (req.path.startsWith("/api") || req.path.startsWith("/twilio")) {
@@ -5384,7 +5378,11 @@ async function startServer() {
       if (fs.existsSync(spaIndexPath)) {
         return res.sendFile(spaIndexPath);
       }
-      return res.sendFile(path.join(publicDir, "index.html"));
+      const legacyIndex = path.join(publicDir, "index.html");
+      if (fs.existsSync(legacyIndex)) {
+        return res.sendFile(legacyIndex);
+      }
+      return res.status(404).send("IFCDC HQ frontend not built. Run npm run build.");
     });
   }
 
@@ -5400,10 +5398,41 @@ async function startServer() {
     throw err;
   });
 
-  server.listen(PORT, "0.0.0.0", () => {
-    console.log(`IFCDC Health System API live on port ${PORT}`);
-    import("./hq/warehouseScheduler").then(({ startHqScheduler }) => startHqScheduler()).catch(() => undefined);
+  await new Promise<void>((resolve, reject) => {
+    server.listen(PORT, "0.0.0.0", () => {
+      console.log(`IFCDC Health System API live on port ${PORT}`);
+      resolve();
+    });
+    server.once("error", reject);
   });
+
+  try {
+    await initDb();
+    await ensureGrantTables();
+    await ensurePeopleTables();
+    await ensureFinanceTables();
+    await ensureOperationsTables();
+    await ensureDashboardTables();
+    await ensureSoftwareDivisionTables();
+    await ensureDeveloperAuditTables();
+    await ensureExecutiveBriefingsTable();
+    await ensureBoardPortalTables();
+    await ensureHqAuditTables();
+    await ensureWarehouseTables();
+    await ensureWorkflowTables();
+    await ensureProgramModuleTables();
+    await ensureEnterpriseReadinessSeed();
+    await ensureNotificationQueueTables();
+    await ensureBackupTables();
+    await ensureSecuritySessionTables();
+    getOrGenerateDailyBriefing().catch((e) => console.warn("Morning briefing generation skipped:", e?.message));
+    await initGoogleOAuth();
+    import("./hq/warehouseScheduler").then(({ startHqScheduler }) => startHqScheduler()).catch(() => undefined);
+    console.log("IFCDC HQ database and modules initialized");
+  } catch (err) {
+    console.error("Failed to initialize IFCDC HQ:", err);
+    process.exit(1);
+  }
 }
 
 startServer().catch((err) => {
