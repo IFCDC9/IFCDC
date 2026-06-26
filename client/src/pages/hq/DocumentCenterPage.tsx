@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { FolderOpen, Search, Plus, History, FileText, Check, X, PenLine, ScanText } from "lucide-react";
 import HQLayout from "../../layouts/HQLayout";
 import { documentsApi, type HQDocument } from "../../api/documentsApi";
+import { filesApi } from "../../api/filesApi";
 import { KpiCard } from "../../components/hq/KpiCard";
 import { HqPanel } from "../../components/hq/HqPanel";
 import { StatusBadge } from "../../components/hq/StatusBadge";
@@ -10,13 +11,34 @@ import { HqLoading } from "../../components/hq/HqLoading";
 
 const CATEGORIES = ["general", "contract", "policy", "board", "personnel", "grant", "financial"];
 
+async function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result.includes(",") ? result.split(",")[1]! : result);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 const DocumentCenterPage: React.FC = () => {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [selected, setSelected] = useState<HQDocument | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [showVersion, setShowVersion] = useState(false);
-  const [newDoc, setNewDoc] = useState({ title: "", category: "general", file_url: "", access_level: "internal" });
+  const [newDoc, setNewDoc] = useState({
+    title: "",
+    category: "general",
+    file_url: "",
+    access_level: "internal",
+    grant_id: "",
+    person_id: "",
+  });
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [versionFile, setVersionFile] = useState<File | null>(null);
   const [versionForm, setVersionForm] = useState({ file_url: "", change_notes: "" });
   const [ocrText, setOcrText] = useState("");
   const [showOcr, setShowOcr] = useState(false);
@@ -34,22 +56,60 @@ const DocumentCenterPage: React.FC = () => {
   });
 
   const createDoc = useMutation({
-    mutationFn: documentsApi.create,
+    mutationFn: async () => {
+      if (uploadFile) {
+        const base64 = await fileToBase64(uploadFile);
+        return documentsApi.upload({
+          fileName: uploadFile.name,
+          base64,
+          mimeType: uploadFile.type || undefined,
+          title: newDoc.title,
+          category: newDoc.category,
+          access_level: newDoc.access_level,
+          grant_id: newDoc.grant_id || undefined,
+          person_id: newDoc.person_id || undefined,
+        });
+      }
+      return documentsApi.create({
+        title: newDoc.title,
+        category: newDoc.category,
+        file_url: newDoc.file_url || undefined,
+        access_level: newDoc.access_level,
+        grant_id: newDoc.grant_id || undefined,
+        person_id: newDoc.person_id || undefined,
+      });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["docs-list"] });
       qc.invalidateQueries({ queryKey: ["docs-overview"] });
       setShowAdd(false);
-      setNewDoc({ title: "", category: "general", file_url: "", access_level: "internal" });
+      setUploadFile(null);
+      setNewDoc({ title: "", category: "general", file_url: "", access_level: "internal", grant_id: "", person_id: "" });
     },
   });
 
   const addVersion = useMutation({
-    mutationFn: () => documentsApi.addVersion(selected!.id, versionForm),
+    mutationFn: async () => {
+      if (versionFile) {
+        const base64 = await fileToBase64(versionFile);
+        const uploaded = await filesApi.upload({
+          fileName: versionFile.name,
+          base64,
+          mimeType: versionFile.type || undefined,
+        });
+        return documentsApi.addVersion(selected!.id, {
+          file_url: uploaded.file.url,
+          change_notes: versionForm.change_notes || `Uploaded ${versionFile.name}`,
+        });
+      }
+      return documentsApi.addVersion(selected!.id, versionForm);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["docs-detail", selected?.id] });
       qc.invalidateQueries({ queryKey: ["docs-list"] });
       setShowVersion(false);
       setVersionForm({ file_url: "", change_notes: "" });
+      setVersionFile(null);
     },
   });
 
@@ -81,6 +141,9 @@ const DocumentCenterPage: React.FC = () => {
       {overview.data && (
         <div className="hq-kpi-grid hq-fade-in" style={{ marginBottom: "1.25rem" }}>
           <KpiCard label="Total Documents" value={overview.data.total} icon={FolderOpen} variant="gold" />
+          {overview.data.pendingApprovals != null && overview.data.pendingApprovals > 0 && (
+            <KpiCard label="Pending Approvals" value={overview.data.pendingApprovals} icon={Check} variant="warning" />
+          )}
           {(overview.data.byCategory ?? []).slice(0, 3).map((c) => (
             <KpiCard key={c.category} label={c.category} value={c.count} icon={FileText} />
           ))}
@@ -208,7 +271,12 @@ const DocumentCenterPage: React.FC = () => {
                   {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </label>
-              <label>File URL<input value={newDoc.file_url} onChange={(e) => setNewDoc({ ...newDoc, file_url: e.target.value })} placeholder="https://…" /></label>
+              <label>Upload File
+                <input type="file" onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)} />
+              </label>
+              <label>Or File URL<input value={newDoc.file_url} onChange={(e) => setNewDoc({ ...newDoc, file_url: e.target.value })} placeholder="https://… (optional if file selected)" disabled={!!uploadFile} /></label>
+              <label>Grant ID (optional)<input value={newDoc.grant_id} onChange={(e) => setNewDoc({ ...newDoc, grant_id: e.target.value })} placeholder="Links to Grant Center" /></label>
+              <label>Person ID (optional)<input value={newDoc.person_id} onChange={(e) => setNewDoc({ ...newDoc, person_id: e.target.value })} placeholder="Links to People & HR" /></label>
               <label>Access Level
                 <select value={newDoc.access_level} onChange={(e) => setNewDoc({ ...newDoc, access_level: e.target.value })}>
                   <option value="internal">Internal</option>
@@ -219,7 +287,7 @@ const DocumentCenterPage: React.FC = () => {
             </div>
             <div className="hq-modal-actions">
               <button type="button" className="hq-btn hq-btn-secondary" onClick={() => setShowAdd(false)}>Cancel</button>
-              <button type="button" className="hq-btn hq-btn-primary" disabled={!newDoc.title || createDoc.isPending} onClick={() => createDoc.mutate(newDoc)}>
+              <button type="button" className="hq-btn hq-btn-primary" disabled={!newDoc.title || (!uploadFile && !newDoc.file_url) || createDoc.isPending} onClick={() => createDoc.mutate()}>
                 {createDoc.isPending ? "Saving…" : "Save Document"}
               </button>
             </div>
@@ -232,12 +300,13 @@ const DocumentCenterPage: React.FC = () => {
           <div className="hq-modal" onClick={(e) => e.stopPropagation()}>
             <h3>Upload New Version — {selected.title}</h3>
             <div className="hq-form-grid">
-              <label>New File URL<input value={versionForm.file_url} onChange={(e) => setVersionForm({ ...versionForm, file_url: e.target.value })} /></label>
+              <label>Upload New File<input type="file" onChange={(e) => setVersionFile(e.target.files?.[0] ?? null)} /></label>
+              <label>Or File URL<input value={versionForm.file_url} onChange={(e) => setVersionForm({ ...versionForm, file_url: e.target.value })} disabled={!!versionFile} /></label>
               <label>Change Notes<input value={versionForm.change_notes} onChange={(e) => setVersionForm({ ...versionForm, change_notes: e.target.value })} placeholder="What changed in this version?" /></label>
             </div>
             <div className="hq-modal-actions">
               <button type="button" className="hq-btn hq-btn-secondary" onClick={() => setShowVersion(false)}>Cancel</button>
-              <button type="button" className="hq-btn hq-btn-primary" disabled={!versionForm.file_url || addVersion.isPending} onClick={() => addVersion.mutate()}>
+              <button type="button" className="hq-btn hq-btn-primary" disabled={(!versionFile && !versionForm.file_url) || addVersion.isPending} onClick={() => addVersion.mutate()}>
                 {addVersion.isPending ? "Saving…" : "Save Version"}
               </button>
             </div>

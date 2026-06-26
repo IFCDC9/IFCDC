@@ -90,6 +90,20 @@ const UnauthorizedPage: React.FC = () => (
   </div>
 );
 
+const HqNotFoundPage: React.FC = () => (
+  <HqRoute path="/hq">
+    <div className="hq-shell" style={{ alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
+      <div className="hq-panel" style={{ maxWidth: 420, textAlign: "center", padding: "2rem" }}>
+        <h2 style={{ color: "var(--hq-gold)", marginBottom: "0.5rem" }}>Module Not Found</h2>
+        <p style={{ color: "var(--hq-text-muted)", fontSize: "0.9rem" }}>
+          This headquarters route is not registered. Use the sidebar navigation or return to the executive dashboard.
+        </p>
+        <a href="/hq" className="hq-btn hq-btn-primary" style={{ marginTop: "1.25rem" }}>Return to Headquarters</a>
+      </div>
+    </div>
+  </HqRoute>
+);
+
 const App: React.FC = () => (
   <QueryClientProvider client={queryClient}>
     <BrowserRouter>
@@ -114,6 +128,7 @@ const App: React.FC = () => (
           <Route path="/hq/founder" element={<HqRoute path="/hq/founder"><FounderCommandCenterPage /></HqRoute>} />
           <Route path="/hq/reports" element={<HqRoute path="/hq/reports"><EnterpriseReportingPage /></HqRoute>} />
           <Route path="/hq/operations" element={<HqRoute path="/hq/operations"><OperationsCenterPage /></HqRoute>} />
+          <Route path="/hq/software" element={<HqRoute path="/hq/software"><SoftwareDivisionPage /></HqRoute>} />
           <Route path="/hq/sso" element={<HqRoute path="/hq/sso"><SsoGatewayPage /></HqRoute>} />
           <Route path="/hq/developer" element={<HqRoute path="/hq/developer"><DeveloperPortalPage /></HqRoute>} />
           <Route path="/hq/aura" element={<HqRoute path="/hq/aura"><AuraCommandCenterPage /></HqRoute>} />
@@ -134,7 +149,7 @@ const App: React.FC = () => (
           <Route path="/hq/housing" element={<HqRoute path="/hq/housing"><EnterpriseOperationsPage moduleKey="housing" /></HqRoute>} />
           <Route path="/hq/scholarships" element={<HqRoute path="/hq/scholarships"><EnterpriseOperationsPage moduleKey="scholarships" /></HqRoute>} />
           <Route path="/hq/media" element={<HqRoute path="/hq/media"><EnterpriseOperationsPage moduleKey="media" /></HqRoute>} />
-          <Route path="/hq/communications" element={<HqRoute path="/hq/notifications"><CommunicationsCenterPage /></HqRoute>} />
+          <Route path="/hq/communications" element={<HqRoute path="/hq/communications"><CommunicationsCenterPage /></HqRoute>} />
           <Route path="/hq/intelligence" element={<HqRoute path="/hq/intelligence"><EnterpriseIntelligencePage /></HqRoute>} />
           <Route path="/hq/phase10" element={<HqRoute path="/hq/phase10"><Phase10ExecutivePlatformPage /></HqRoute>} />
           <Route path="/hq/phase9" element={<HqRoute path="/hq/phase9"><Phase9OperatingSystemPage /></HqRoute>} />
@@ -168,6 +183,9 @@ const App: React.FC = () => (
           <Route path="/app/barbershop" element={<ProtectedRoute requiredRoute="/app/barbershop"><BarbershopApp /></ProtectedRoute>} />
           <Route path="/app/radio" element={<ProtectedRoute allowedRoles={["radio_host", "radio", "admin", "owner"]}><RadioApp /></ProtectedRoute>} />
           <Route path="/app/programs" element={<ProtectedRoute requiredRoute="/hq/programs"><ProgramsApp /></ProtectedRoute>} />
+
+          <Route path="/hq/*" element={<HqNotFoundPage />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </Suspense>
     </BrowserRouter>

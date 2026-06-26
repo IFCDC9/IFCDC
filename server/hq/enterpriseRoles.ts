@@ -189,8 +189,12 @@ export const HQ_MODULE_PERMISSIONS: Record<string, EnterpriseRole[]> = {
 /** Route path → required permission */
 export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   "/hq": "hq.executive",
+  "/hq/founder": "hq.executive",
+  "/hq/reports": "hq.analytics",
+  "/hq/operations": "hq.settings",
   "/hq/analytics": "hq.analytics",
   "/hq/notifications": "hq.notifications",
+  "/hq/communications": "hq.notifications",
   "/hq/aura": "hq.aura",
   "/hq/software": "hq.software",
   "/hq/developer": "hq.software",
@@ -210,6 +214,8 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   "/hq/media": "hq.programs",
   "/hq/documents": "hq.settings",
   "/hq/intelligence": "hq.analytics",
+  "/hq/phase9": "hq.executive",
+  "/hq/phase10": "hq.executive",
   "/hq/workflows": "hq.executive",
   "/hq/integrations": "hq.software",
   "/hq/security": "hq.settings",

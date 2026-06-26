@@ -1,7 +1,10 @@
-import express from "express";
+import { Router } from "express";
 import { getDb } from "../db";
+import { hqAuthRequired, requireHQPermission } from "../middleware/hqAuth";
 
-const router = express.Router();
+const router = Router();
+
+router.use(hqAuthRequired, requireHQPermission("hq.finance", "hq.finance.manage", "hq.executive"));
 
 function cryptoRandomId() {
   return "id_" + Math.random().toString(36).substring(2, 10) + "_" + Date.now().toString(36);
@@ -51,7 +54,7 @@ router.patch("/funding-sources/:id", async (req, res) => {
     const db = await getDb();
 
     const updates: string[] = [];
-    const values: any[] = [];
+    const values: unknown[] = [];
 
     if (name !== undefined) { updates.push("display_name = ?"); values.push(name); }
     if (code !== undefined) { updates.push("source_key = ?"); values.push(code); }

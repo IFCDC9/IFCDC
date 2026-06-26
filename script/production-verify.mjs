@@ -68,6 +68,9 @@ async function main() {
     ["/hq/people", "People & HR"],
     ["/hq/grants", "Grant Center"],
     ["/hq/finance", "Finance Command Center"],
+    ["/hq/communications", "Communications Center"],
+    ["/hq/documents", "Document Center"],
+    ["/hq/software", "Software Division"],
   ];
   for (const [route, label] of spaRoutes) {
     const page = await jsonFetch(`${BASE}${route}`);
@@ -106,6 +109,21 @@ async function main() {
   const people = runNodeScript("script/people-phase3-readiness.mjs");
   if (people.out) console.log(people.out);
   log(people.status === 0 ? "pass" : "fail", "People & HR readiness suite");
+
+  console.log("\n--- HQ navigation audit ---\n");
+  const navAudit = runNodeScript("script/hq-nav-audit.mjs");
+  if (navAudit.out) console.log(navAudit.out);
+  log(navAudit.status === 0 ? "pass" : "fail", "HQ navigation audit");
+
+  console.log("\n--- Communications readiness ---\n");
+  const comms = runNodeScript("script/communications-readiness.mjs");
+  if (comms.out) console.log(comms.out);
+  log(comms.status === 0 ? "pass" : "fail", "Communications readiness suite");
+
+  console.log("\n--- Documents readiness ---\n");
+  const docs = runNodeScript("script/documents-readiness.mjs");
+  if (docs.out) console.log(docs.out);
+  log(docs.status === 0 ? "pass" : "fail", "Documents readiness suite");
 
   console.log(`\n=== Production Verification: ${results.pass} PASS / ${results.fail} FAIL / ${results.skip} SKIP ===\n`);
   process.exit(results.fail > 0 ? 1 : 0);

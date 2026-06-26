@@ -36,18 +36,47 @@ export interface DocumentVersion {
   created_at: string;
 }
 
+export interface DocumentUploadPayload {
+  fileName: string;
+  base64: string;
+  mimeType?: string;
+  title: string;
+  category?: string;
+  access_level?: string;
+  grant_id?: string;
+  person_id?: string;
+  requires_approval?: boolean;
+}
+
 export const documentsApi = {
-  overview: () => api<{ total: number; byCategory: { category: string; count: number }[] }>("/overview"),
-  list: (params?: { q?: string; category?: string }) => {
+  overview: () =>
+    api<{ total: number; byCategory: { category: string; count: number }[]; pendingApprovals?: number }>("/overview"),
+  list: (params?: { q?: string; category?: string; grant_id?: string; person_id?: string }) => {
     const qs = new URLSearchParams();
     if (params?.q) qs.set("q", params.q);
     if (params?.category) qs.set("category", params.category);
+    if (params?.grant_id) qs.set("grant_id", params.grant_id);
+    if (params?.person_id) qs.set("person_id", params.person_id);
     const q = qs.toString();
     return api<{ documents: HQDocument[] }>(q ? `?${q}` : "");
   },
   get: (id: string) => api<{ document: HQDocument; versions: DocumentVersion[] }>(`/${id}`),
-  create: (data: { title: string; category?: string; file_url?: string; access_level?: string }) =>
+  create: (data: {
+    title: string;
+    category?: string;
+    file_url?: string;
+    access_level?: string;
+    grant_id?: string;
+    person_id?: string;
+    requires_approval?: boolean;
+  }) =>
     api("/", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
+  upload: (data: DocumentUploadPayload) =>
+    api<{ document: HQDocument; file: { url: string; path: string } }>("/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }),
   addVersion: (id: string, data: { title?: string; file_url?: string; change_notes?: string }) =>
     api(`/${id}/versions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
   update: (id: string, data: Partial<HQDocument>) =>

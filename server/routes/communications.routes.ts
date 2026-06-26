@@ -2,20 +2,13 @@ import { Router } from "express";
 import type { Request, Response } from "express";
 import { getDb } from "../db";
 import { hqAuthRequired, requireHQModule } from "../middleware/hqAuth";
-import { ensureCommunicationsTables, commId } from "../hq/communicationsSchema";
+import { commId } from "../hq/communicationsSchema";
 import { ifcdc } from "../lib/ifcdc";
+import { enqueueNotification } from "../hq/notificationQueue";
 
 const router = Router();
 
 router.use(hqAuthRequired, requireHQModule("notifications"));
-router.use(async (_req, _res, next) => {
-  try {
-    await ensureCommunicationsTables();
-    next();
-  } catch (e) {
-    next(e);
-  }
-});
 
 router.get("/overview", async (_req, res) => {
   const db = await getDb();
@@ -44,6 +37,15 @@ router.post("/announcements", async (req: Request, res: Response) => {
     id, title, body, priority ?? "normal", req.hqUser?.email ?? "", req.hqUser?.name ?? "HQ Admin",
     now, expires_at ?? null, now
   );
+  await enqueueNotification({
+    type: "announcement",
+    title: `Announcement: ${title}`,
+    message: body.slice(0, 500),
+    priority: priority === "high" ? "high" : "normal",
+    channel: "in_app",
+    path: "/hq/communications",
+    payload: { announcementId: id },
+  });
   res.status(201).json({ announcement: await db.get("SELECT * FROM hq_announcements WHERE id = ?", id) });
 });
 
@@ -151,6 +153,15 @@ router.post("/broadcast-segment", async (req: Request, res: Response) => {
         subject,
         body: body.replace(/\{name\}/g, `${r.first_name} ${r.last_name}`.trim()),
         channel: channel || "email",
+      });
+      await enqueueNotification({
+        type: "campaign",
+        title: subject,
+        message: body.slice(0, 300),
+        priority: "normal",
+        channel: "in_app",
+        targetEmail: r.email,
+        path: "/hq/communications",
       });
       results.push({ email: r.email, ok: true, result });
     } catch {

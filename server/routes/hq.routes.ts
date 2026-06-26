@@ -447,7 +447,7 @@ router.post("/aura/navigate", hqAuthRequired, requireHQModule("aura"), async (re
   res.json(await auraNavigate(query));
 });
 
-router.post("/notifications/broadcast", hqAuthRequired, requireHQModule("executive"), async (req, res) => {
+router.post("/notifications/broadcast", hqAuthRequired, requireHQModule("notifications"), async (req, res) => {
   const { to, subject, body, channel } = req.body;
   if (!to || !subject || !body) {
     return res.status(400).json({ error: "to, subject, and body are required" });

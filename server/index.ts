@@ -34,6 +34,8 @@ import { ensureSecuritySessionTables } from "./hq/hqSecuritySessions";
 import { ensureProgramModuleTables } from "./hq/programsSchema";
 import { ensureEnterpriseReadinessSeed } from "./hq/enterpriseReadinessSeed";
 import { ensureNotificationQueueTables } from "./hq/notificationQueue";
+import { ensureCommunicationsTables } from "./hq/communicationsSchema";
+import { ensureDocumentTables } from "./hq/documentsSchema";
 import { recordLoginAttempt, recordActiveSession, roleRequiresMfa } from "./hq/hqSecuritySessions";
 import { attachHqRealtimeHub } from "./hq/hqRealtimeHub";
 import { getAppRoot, getDistPublicDir, getPublicDir, getSpaIndexPath } from "./appPaths";
@@ -5423,6 +5425,8 @@ async function startServer() {
     await ensureProgramModuleTables();
     await ensureEnterpriseReadinessSeed();
     await ensureNotificationQueueTables();
+    await ensureCommunicationsTables();
+    await ensureDocumentTables();
     await ensureBackupTables();
     await ensureSecuritySessionTables();
     getOrGenerateDailyBriefing().catch((e) => console.warn("Morning briefing generation skipped:", e?.message));

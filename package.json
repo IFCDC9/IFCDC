@@ -22,6 +22,9 @@
     "grants:deploy-verify": "node script/grant-center-deploy-verify.mjs",
     "deploy:parity": "node script/host-parity-verify.mjs",
     "production:verify": "node script/production-verify.mjs",
+    "hq:nav-audit": "node script/hq-nav-audit.mjs",
+    "comms:readiness": "node script/communications-readiness.mjs",
+    "docs:readiness": "node script/documents-readiness.mjs",
     "start:render": "node script/render-prestart.mjs && npm run start",
     "db:push": "drizzle-kit push"
   },
