@@ -7,7 +7,8 @@ import { filesApi } from "../../api/filesApi";
 import { KpiCard } from "../../components/hq/KpiCard";
 import { HqPanel } from "../../components/hq/HqPanel";
 import { StatusBadge } from "../../components/hq/StatusBadge";
-import { HqLoading } from "../../components/hq/HqLoading";
+import { grantsApi } from "../../api/grantsApi";
+import { peopleApi } from "../../api/peopleApi";
 
 const CATEGORIES = ["general", "contract", "policy", "board", "personnel", "grant", "financial"];
 
@@ -53,6 +54,16 @@ const DocumentCenterPage: React.FC = () => {
     queryKey: ["docs-detail", selected?.id],
     queryFn: () => documentsApi.get(selected!.id),
     enabled: !!selected,
+  });
+  const grantOptions = useQuery({
+    queryKey: ["docs-grant-options"],
+    queryFn: grantsApi.opportunities,
+    enabled: showAdd,
+  });
+  const peopleOptions = useQuery({
+    queryKey: ["docs-people-options"],
+    queryFn: () => peopleApi.list({ status: "active" }),
+    enabled: showAdd,
   });
 
   const createDoc = useMutation({
@@ -275,8 +286,22 @@ const DocumentCenterPage: React.FC = () => {
                 <input type="file" onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)} />
               </label>
               <label>Or File URL<input value={newDoc.file_url} onChange={(e) => setNewDoc({ ...newDoc, file_url: e.target.value })} placeholder="https://… (optional if file selected)" disabled={!!uploadFile} /></label>
-              <label>Grant ID (optional)<input value={newDoc.grant_id} onChange={(e) => setNewDoc({ ...newDoc, grant_id: e.target.value })} placeholder="Links to Grant Center" /></label>
-              <label>Person ID (optional)<input value={newDoc.person_id} onChange={(e) => setNewDoc({ ...newDoc, person_id: e.target.value })} placeholder="Links to People & HR" /></label>
+              <label>Link to Grant (optional)
+                <select value={newDoc.grant_id} onChange={(e) => setNewDoc({ ...newDoc, grant_id: e.target.value })}>
+                  <option value="">— No grant link —</option>
+                  {(grantOptions.data?.opportunities ?? []).map((g) => (
+                    <option key={g.id} value={g.id}>{g.title} ({g.funder})</option>
+                  ))}
+                </select>
+              </label>
+              <label>Link to Person (optional)
+                <select value={newDoc.person_id} onChange={(e) => setNewDoc({ ...newDoc, person_id: e.target.value })}>
+                  <option value="">— No person link —</option>
+                  {(peopleOptions.data?.people ?? []).slice(0, 200).map((p) => (
+                    <option key={p.id} value={p.id}>{p.fullName ?? `${p.firstName} ${p.lastName}`} — {p.personTypeLabel ?? p.personType}</option>
+                  ))}
+                </select>
+              </label>
               <label>Access Level
                 <select value={newDoc.access_level} onChange={(e) => setNewDoc({ ...newDoc, access_level: e.target.value })}>
                   <option value="internal">Internal</option>

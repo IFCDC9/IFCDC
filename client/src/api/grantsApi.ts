@@ -573,9 +573,15 @@ export const grantsApi = {
 
   // Grant Center Enterprise Platform
   grantCenterPlatform: () =>
-    apiFetch<{ version: string; modules: { id: string; label: string; tab: string; status: string }[]; integrations: Record<string, unknown>; counts: Record<string, number> }>(
+    apiFetch<{ version: string; modules: { id: string; label: string; tab: string; status: string }[]; integrations: Record<string, { status: string; label: string; note: string }>; externalFeedCount?: number; counts: Record<string, number> }>(
       "/center/platform"
     ),
+  feedsSync: () =>
+    apiFetch<{ results: { provider: string; status: string; imported: number }[]; integrations: Record<string, unknown> }>(
+      "/feeds/sync",
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }
+    ),
+  feedStatus: () => apiFetch<{ integrations: Record<string, unknown> }>("/feeds/status"),
   grantExecutiveSummary: () =>
     apiFetch<{ dashboard: GrantOverview; kpis: Record<string, unknown>; compliance: Record<string, unknown> | null; crm: { totalFunders: number; activePartners: number } }>(
       "/center/executive-summary"

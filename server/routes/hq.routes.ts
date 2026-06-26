@@ -5,7 +5,8 @@ import { SOFTWARE_DIVISION_APPS, pollAllApps, getSoftwareDivisionApps } from "..
 import { toHQRole, HQ_MODULE_PERMISSIONS } from "../hq/enterpriseRoles";
 import peopleRouter from "./people.routes";
 import enterpriseAuthRouter from "./enterpriseAuth.routes";
-import { checkIfcdcServices, auraExecutiveChat, ifcdc } from "../lib/ifcdc";
+import { checkIfcdcServices, auraExecutiveChat } from "../lib/ifcdc";
+import { sendHqNotification } from "../lib/notifications";
 import { getOrganizationMetrics, getRecentActivity, getMonthlyTrend } from "../hq/metrics";
 import grantsRouter from "./grants.routes";
 import financeRouter from "./finance.routes";
@@ -452,7 +453,7 @@ router.post("/notifications/broadcast", hqAuthRequired, requireHQModule("notific
   if (!to || !subject || !body) {
     return res.status(400).json({ error: "to, subject, and body are required" });
   }
-  const result = await ifcdc.notifications.send({
+  const result = await sendHqNotification({
     to,
     subject,
     body,

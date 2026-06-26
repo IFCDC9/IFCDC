@@ -63,7 +63,7 @@ export const INTEGRATION_CATALOG: {
     name: "Grant Databases",
     category: "Grants",
     description: "Grants.gov, Foundation Directory, and SAM.gov opportunity feeds",
-    status: "coming_soon",
+    status: "available",
     configFields: ["api_key", "search_keywords"],
   },
   {

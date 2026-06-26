@@ -204,7 +204,9 @@ export const GrantOpportunityFinderPanel: React.FC = () => {
           </table>
         </div>
       )}
-      <p className="hq-muted-text" style={{ marginTop: "0.75rem", fontSize: "0.75rem" }}>Grants.gov and SAM.gov integrations: placeholder — local database active.</p>
+      <p className="hq-muted-text" style={{ marginTop: "0.75rem", fontSize: "0.75rem" }}>
+        Live feeds: Grants.gov, Foundation Directory, and Corporate CSR sync into the opportunity database. Use Sync feeds on the overview tab to refresh.
+      </p>
     </HqPanel>
   );
 };

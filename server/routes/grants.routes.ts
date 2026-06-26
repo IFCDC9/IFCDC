@@ -100,6 +100,7 @@ import {
   buildFundingAnalyticsDashboard,
   ensureGrantCenterTables,
 } from "../hq/grantCenterEngine";
+import { syncGrantFeeds, getGrantFeedIntegrationStatus } from "../hq/grantFeedConnectors";
 
 const router = Router();
 
@@ -163,6 +164,16 @@ router.get("/overview", async (_req, res) => {
 // ——— Grant Center Enterprise Platform ———
 router.get("/center/platform", async (_req, res) => {
   res.json(await buildGrantCenterPlatform());
+});
+
+router.get("/feeds/status", async (_req, res) => {
+  res.json({ integrations: await getGrantFeedIntegrationStatus() });
+});
+
+router.post("/feeds/sync", async (req, res) => {
+  const providers = req.body?.providers;
+  const results = await syncGrantFeeds(Array.isArray(providers) ? { providers } : undefined);
+  res.json({ results, integrations: await getGrantFeedIntegrationStatus() });
 });
 
 router.get("/center/executive-summary", async (_req, res) => {

@@ -9,7 +9,7 @@ import { buildEnterpriseNotifications } from "./enterpriseHub";
 import { answerEnterpriseQuestion } from "./auraEnterpriseIntelligence";
 import { askOperationsCopilot } from "./auraOperationsCopilot";
 import { auraExecutiveChat } from "../lib/ifcdc";
-import { ifcdc } from "../lib/ifcdc";
+import { sendHqNotification } from "../lib/notifications";
 
 const MODULE_KEYWORDS: Record<string, string[]> = {
   finance: ["finance", "financial", "budget", "cash", "invoice", "expense", "payroll", "ledger"],
@@ -168,7 +168,7 @@ export async function executeCopilotAutomation(
     case "executive_notification": {
       const briefing = await buildMorningBriefingForFounder();
       try {
-        await ifcdc.notifications.send({
+        await sendHqNotification({
           to: "service@ifcdc.org",
           subject: opts?.title ?? "IFCDC Executive Alert — AURA Copilot",
           body: briefing.priorities.join("\n") || "Review Headquarters dashboard for updates.",

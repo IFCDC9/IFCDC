@@ -3,7 +3,7 @@ import type { Request, Response } from "express";
 import { getDb } from "../db";
 import { hqAuthRequired, requireHQModule } from "../middleware/hqAuth";
 import { commId } from "../hq/communicationsSchema";
-import { ifcdc } from "../lib/ifcdc";
+import { sendHqNotification } from "../lib/notifications";
 import { enqueueNotification } from "../hq/notificationQueue";
 
 const router = Router();
@@ -148,7 +148,7 @@ router.post("/broadcast-segment", async (req: Request, res: Response) => {
   const results = [];
   for (const r of recipients) {
     try {
-      const result = await ifcdc.notifications.send({
+      const result = await sendHqNotification({
         to: r.email,
         subject,
         body: body.replace(/\{name\}/g, `${r.first_name} ${r.last_name}`.trim()),

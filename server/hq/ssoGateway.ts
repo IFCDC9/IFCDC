@@ -11,6 +11,31 @@ export interface SsoAppDefinition {
   permission: string;
   status: "production" | "production-locked" | "beta" | "development";
   icon?: string;
+  externalUrl?: string;
+  healthUrl?: string;
+}
+
+function divisionApp(appId: string) {
+  return SOFTWARE_DIVISION_APPS.find((a) => a.id === appId);
+}
+
+function divisionLaunch(appId: string, fallback: string): string {
+  const app = divisionApp(appId);
+  return app?.launchUrl ?? fallback;
+}
+
+function mapDivisionStatus(appId: string): SsoAppDefinition["status"] {
+  const app = divisionApp(appId);
+  if (!app) return "development";
+  if (app.locked || app.status === "locked") return "production-locked";
+  if (app.status === "production") return "production";
+  if (app.status === "mvp") return "beta";
+  if (app.status === "development" || app.status === "planned") return "development";
+  return "beta";
+}
+
+function isExternalLaunch(path: string): boolean {
+  return path.startsWith("http://") || path.startsWith("https://");
 }
 
 export const SSO_REGISTERED_APPS: SsoAppDefinition[] = [
@@ -49,26 +74,32 @@ export const SSO_REGISTERED_APPS: SsoAppDefinition[] = [
   {
     id: "music",
     name: "IFCDC Music",
-    description: "Music division platform (coming soon)",
-    launchPath: "/hq/media",
+    description: divisionApp("music")?.description ?? "Music division — DJ library, AURA AI, crates, and bookings",
+    launchPath: divisionLaunch("music", "/hq/media"),
     permission: "app.music",
-    status: "development",
+    status: mapDivisionStatus("music"),
+    externalUrl: isExternalLaunch(divisionLaunch("music", "")) ? divisionLaunch("music", "") : undefined,
+    healthUrl: divisionApp("music")?.healthUrl,
   },
   {
     id: "tapis",
-    name: "TapIs",
-    description: "TapIs application (coming soon)",
-    launchPath: "/hq/software",
+    name: "IFCDC Tapis",
+    description: divisionApp("tapis")?.description ?? "Mentorship circles and community reflection platform",
+    launchPath: divisionLaunch("tapis", "/hq/programs"),
     permission: "app.tapis",
-    status: "development",
+    status: mapDivisionStatus("tapis"),
+    externalUrl: isExternalLaunch(divisionLaunch("tapis", "")) ? divisionLaunch("tapis", "") : undefined,
+    healthUrl: divisionApp("tapis")?.healthUrl,
   },
   {
-    id: "inclusive-community",
+    id: "inclusive",
     name: "Inclusive Community",
-    description: "Inclusive Community platform (coming soon)",
-    launchPath: "/hq/programs/outreach",
-    permission: "hq.programs",
-    status: "development",
+    description: divisionApp("inclusive")?.description ?? "Autism support platform with AURA communication assistance",
+    launchPath: divisionLaunch("inclusive", "/hq/programs"),
+    permission: "app.inclusive",
+    status: mapDivisionStatus("inclusive"),
+    externalUrl: isExternalLaunch(divisionLaunch("inclusive", "")) ? divisionLaunch("inclusive", "") : undefined,
+    healthUrl: divisionApp("inclusive")?.healthUrl,
   },
   {
     id: "community-portal",
@@ -103,22 +134,32 @@ export const SSO_REGISTERED_APPS: SsoAppDefinition[] = [
     status: "production",
   },
   {
-    id: "swift-ware",
+    id: "swiftware",
     name: "Swift-Ware",
-    description: "Swift-Ware division (coming soon)",
-    launchPath: "/hq/software",
+    description: divisionApp("swiftware")?.description ?? "Business management for IFCDC organizations",
+    launchPath: divisionLaunch("swiftware", "/hq/integrations"),
     permission: "app.swiftware",
-    status: "development",
+    status: mapDivisionStatus("swiftware"),
+    externalUrl: isExternalLaunch(divisionLaunch("swiftware", "")) ? divisionLaunch("swiftware", "") : undefined,
+    healthUrl: divisionApp("swiftware")?.healthUrl,
   },
   {
     id: "cryptocoin",
-    name: "CryptoCoin",
-    description: "CryptoCoin platform (coming soon)",
-    launchPath: "/hq/finance",
-    permission: "hq.finance",
-    status: "development",
+    name: "CryptoCoin IFCDC",
+    description: divisionApp("cryptocoin")?.description ?? "ERC-20 token platform with liquidity pools",
+    launchPath: divisionLaunch("cryptocoin", "/hq/finance"),
+    permission: "app.cryptocoin",
+    status: mapDivisionStatus("cryptocoin"),
+    externalUrl: isExternalLaunch(divisionLaunch("cryptocoin", "")) ? divisionLaunch("cryptocoin", "") : undefined,
+    healthUrl: divisionApp("cryptocoin")?.healthUrl,
   },
 ];
+
+export function canLaunchSsoApp(app: SsoAppDefinition): boolean {
+  if (app.status === "production-locked") return false;
+  if (app.status === "development" && !app.externalUrl) return false;
+  return true;
+}
 
 export function listSsoAppsForRole(role: string): SsoAppDefinition[] {
   return SSO_REGISTERED_APPS.filter((app) => hasPermission(role, app.permission as never));
@@ -149,13 +190,13 @@ export function createHqSessionToken(user: { id: string; email: string; role: st
 }
 
 export function getSsoApp(appId: string): SsoAppDefinition | undefined {
-  return SSO_REGISTERED_APPS.find((a) => a.id === appId);
+  return SSO_REGISTERED_APPS.find((a) => a.id === appId || a.id === appId.replace(/-/g, ""));
 }
 
 export function buildSoftwareDivisionSsoManifest() {
   return {
     gateway: "IFCDC Headquarters SSO",
-    version: "1.0",
+    version: "1.1",
     endpoints: {
       verify: "/api/hq/auth/verify",
       session: "/api/hq/auth/session",
@@ -169,6 +210,7 @@ export function buildSoftwareDivisionSsoManifest() {
       name: a.name,
       status: a.status,
       healthUrl: a.healthUrl,
+      launchUrl: a.launchUrl,
     })),
   };
 }

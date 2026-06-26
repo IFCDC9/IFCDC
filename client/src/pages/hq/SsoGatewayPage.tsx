@@ -15,6 +15,12 @@ const STATUS_VARIANT: Record<SsoApp["status"], "locked" | "success" | "warning" 
   development: "warning",
 };
 
+function canLaunchApp(app: SsoApp): boolean {
+  if (app.status === "production-locked") return false;
+  if (app.status === "development" && !app.launchPath.startsWith("http")) return false;
+  return true;
+}
+
 const SsoGatewayPage: React.FC = () => {
   const { connected } = useHqRealtime();
   const [launching, setLaunching] = useState<string | null>(null);
@@ -31,6 +37,7 @@ const SsoGatewayPage: React.FC = () => {
   });
 
   const handleLaunch = (app: SsoApp) => {
+    if (!canLaunchApp(app)) return;
     setLaunching(app.id);
     launch.mutate(app.id);
   };
@@ -54,7 +61,9 @@ const SsoGatewayPage: React.FC = () => {
       <HqPanel title="Connected Applications" subtitle="Launch any IFCDC application with your Headquarters credentials">
         {apps.isLoading ? <HqLoading /> : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "1rem" }}>
-            {(apps.data?.apps ?? []).map((app) => (
+            {(apps.data?.apps ?? []).map((app) => {
+              const launchable = canLaunchApp(app);
+              return (
               <div key={app.id} className="hq-panel" style={{ padding: "1.25rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.5rem" }}>
                   <div>
@@ -64,24 +73,29 @@ const SsoGatewayPage: React.FC = () => {
                     </p>
                   </div>
                   <StatusBadge
-                    label={app.status === "production-locked" ? "Locked" : app.status.replace(/-/g, " ")}
+                    label={app.status === "production-locked" ? "Locked" : app.status === "beta" ? "Beta" : app.status.replace(/-/g, " ")}
                     variant={STATUS_VARIANT[app.status]}
                   />
                 </div>
-                <div style={{ marginTop: "auto", display: "flex", gap: "0.5rem" }}>
+                <div style={{ marginTop: "auto", display: "flex", gap: "0.5rem", alignItems: "center" }}>
                   <button
                     type="button"
                     className="hq-btn hq-btn-primary hq-btn-sm"
-                    disabled={launching === app.id || launch.isPending}
+                    disabled={!launchable || launching === app.id || launch.isPending}
                     onClick={() => handleLaunch(app)}
                   >
                     {app.status === "production-locked" ? <Lock size={14} /> : <Rocket size={14} />}
-                    {launching === app.id ? "Launching…" : "Launch App"}
+                    {launching === app.id ? "Launching…" : launchable ? "Launch App" : "Configure URL"}
                   </button>
-                  <span className="hq-muted-text" style={{ fontSize: "0.72rem", alignSelf: "center" }}>{app.launchPath}</span>
+                  {app.launchPath.startsWith("http") && (
+                    <a href={app.launchPath} target="_blank" rel="noopener noreferrer" className="hq-btn hq-btn-ghost hq-btn-sm" title="Open app URL">
+                      <ExternalLink size={14} />
+                    </a>
+                  )}
+                  <span className="hq-muted-text" style={{ fontSize: "0.72rem" }}>{app.launchPath}</span>
                 </div>
               </div>
-            ))}
+            );})}
             {!apps.data?.apps.length && (
               <p className="hq-muted-text">No applications available for your role.</p>
             )}
@@ -109,9 +123,8 @@ const SsoGatewayPage: React.FC = () => {
               </tbody>
             </table>
             <p className="hq-muted-text" style={{ marginTop: "1rem" }}>
-              Future IFCDC apps authenticate through Headquarters. On launch, HQ appends <code>?sso_token=…</code> to the URL.
-              Apps should call <code>POST /api/hq/auth/sso/exchange</code> to establish a session cookie, or verify via <code>POST /api/hq/auth/verify</code>.
-              Use <code>client/src/lib/ssoConsumer.ts</code> — <code>bootstrapSsoFromUrl()</code> runs automatically in AuthProvider.
+              IFCDC division apps authenticate through Headquarters SSO. On launch, HQ appends <code>?sso_token=…</code> to the target URL.
+              External apps should set <code>HQ_*_LAUNCH_URL</code> environment variables on Render. Apps call <code>POST /api/hq/auth/sso/exchange</code> to establish a session.
             </p>
             <p className="hq-muted-text" style={{ marginTop: "0.5rem" }}>
               <strong>Barbers App</strong> remains production-locked and is not modified by HQ SSO changes.

@@ -9,10 +9,11 @@ import { buildFunderCrmDashboard } from "./grantFunderCrm";
 import { buildApplicationWorkspace, aiAssistApplicationSection } from "./grantFundingEngineV5";
 import { discoverAndRankGrants } from "./grantFundingEngineV3";
 import { buildFundingOperationsCalendar } from "./grantFundingEngineV4";
+import { getGrantFeedIntegrationStatus, countExternalFeedOpportunities } from "./grantFeedConnectors";
 
 export const GRANT_CENTER_MODULES = [
   { id: "executive-dashboard", label: "Executive Funding Dashboard", tab: "overview", status: "live" },
-  { id: "opportunity-finder", label: "Grant Opportunity Finder", tab: "opportunities", status: "live", integrations: ["grants_gov:placeholder", "sam_gov:placeholder"] },
+  { id: "opportunity-finder", label: "Grant Opportunity Finder", tab: "opportunities", status: "live", integrations: ["grants_gov", "sam_gov", "foundation_directory", "corporate_csr"] },
   { id: "writer-studio", label: "Grant Writer Studio", tab: "writer-studio", status: "live" },
   { id: "grant-library", label: "Grant Library", tab: "library", status: "live" },
   { id: "grant-calendar", label: "Grant Calendar", tab: "calendar", status: "live" },
@@ -109,15 +110,14 @@ export async function buildGrantCenterPlatform() {
     notifications: (await db.get<{ c: number }>("SELECT COUNT(*) as c FROM grant_notifications WHERE read = 0"))?.c ?? 0,
   };
 
+  const integrations = await getGrantFeedIntegrationStatus();
+  const externalCount = await countExternalFeedOpportunities();
+
   return {
     version: "grant-center-v1",
     modules: GRANT_CENTER_MODULES,
-    integrations: {
-      grantsGov: { status: "placeholder", label: "Grants.gov", note: "Live feed connector planned" },
-      samGov: { status: "placeholder", label: "SAM.gov", note: "Entity verification planned" },
-      foundationDirectory: { status: "placeholder", label: "Foundation Directory", note: "Foundation search planned" },
-      corporateGrants: { status: "placeholder", label: "Corporate CSR Portal", note: "Corporate feed planned" },
-    },
+    integrations,
+    externalFeedCount: externalCount,
     counts,
     generatedAt: new Date().toISOString(),
   };
@@ -289,10 +289,18 @@ export async function buildOpportunityFinder(filters?: { category?: string; geog
     foundation: local.filter((o) => o.funder_category === "foundation"),
     corporate: local.filter((o) => o.funder_category === "corporate"),
   };
+  const externalCount = await countExternalFeedOpportunities();
+  const integrations = await getGrantFeedIntegrationStatus();
+  const source = externalCount > 0 ? "live" : "local";
+  const integrationState = integrationsStatus(integrations);
   if (filters?.category && categorized[filters.category as keyof typeof categorized]) {
-    return { opportunities: categorized[filters.category as keyof typeof categorized], source: "local", integrations: "placeholder" };
+    return { opportunities: categorized[filters.category as keyof typeof categorized], source, integrations: integrationState, externalFeedCount: externalCount };
   }
-  return { opportunities: local, categorized, ranked: discovery.ranked ?? [], source: "local", integrations: "placeholder" };
+  return { opportunities: local, categorized, ranked: discovery.ranked ?? [], source, integrations: integrationState, externalFeedCount: externalCount };
+}
+
+function integrationsStatus(integrations: Awaited<ReturnType<typeof getGrantFeedIntegrationStatus>>) {
+  return Object.values(integrations).filter((i) => i.status === "connected").length >= 2 ? "connected" : "partial";
 }
 
 export async function buildFundingAnalyticsDashboard() {

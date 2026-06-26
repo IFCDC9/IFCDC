@@ -98,7 +98,9 @@ async function main() {
 
   const integrations = platform.body?.integrations ?? {};
   const placeholderCount = Object.values(integrations).filter((i) => i?.status === "placeholder").length;
-  log(placeholderCount >= 4 ? "pass" : "fail", "Placeholder integrations", `${placeholderCount} feeds`);
+  const connectedCount = Object.values(integrations).filter((i) => i?.status === "connected").length;
+  log(connectedCount >= 1 ? "pass" : "fail", "Live grant feed integrations", `${connectedCount} connected`);
+  log(placeholderCount === 0 ? "pass" : "skip", "Legacy placeholder feeds", `${placeholderCount} remaining`);
 
   const v5 = await jsonFetch(`${BASE}/api/hq/grants/funding-engine/v5/platform`, auth);
   log(v5.ok ? "pass" : "fail", "v5 funding engine backward compatibility");

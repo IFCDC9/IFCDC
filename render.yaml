@@ -1,6 +1,5 @@
 # IFCDC Headquarters — Render Blueprint
 # GitHub: IFCDC9/IFCDC · Branch: main (production)
-# Legacy branch: hq/phase3-people-operations (same tip as main after history unify)
 # NOTE: App lives at repository root (not monorepo Apps/ path).
 # Render Root Directory must be blank (.) — NOT Apps/IMPERIAL-FOUNDATION-CDC.
 
@@ -32,8 +31,30 @@ services:
         sync: false
       - key: PUBLIC_BASE_URL
         sync: false
+      - key: IFCDC_NOTIFICATIONS_URL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: GRANTS_GOV_API_KEY
+        sync: false
+      - key: SAM_GOV_API_KEY
+        sync: false
+      - key: SAM_GOV_UEI
+        sync: false
+      - key: HQ_MUSIC_LAUNCH_URL
+        sync: false
+      - key: HQ_TAPIS_LAUNCH_URL
+        sync: false
+      - key: HQ_INCLUSIVE_LAUNCH_URL
+        sync: false
+      - key: HQ_SWIFTWARE_LAUNCH_URL
+        sync: false
+      - key: HQ_CRYPTO_LAUNCH_URL
+        sync: false
 
     disk:
       name: ifcdc-hq-data
       mountPath: /opt/render/project/src/data
-      sizeGB: 1
+      sizeGB: 5

@@ -25,6 +25,7 @@
     "hq:nav-audit": "node script/hq-nav-audit.mjs",
     "comms:readiness": "node script/communications-readiness.mjs",
     "docs:readiness": "node script/documents-readiness.mjs",
+    "platform:audit": "node script/platform-audit.mjs",
     "start:render": "node script/render-prestart.mjs && npm run start",
     "db:push": "drizzle-kit push"
   },

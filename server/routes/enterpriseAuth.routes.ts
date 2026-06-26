@@ -20,6 +20,7 @@ import {
   createHqSessionToken,
   buildSoftwareDivisionSsoManifest,
   getSsoApp,
+  canLaunchSsoApp,
 } from "../hq/ssoGateway";
 import { buildWelcomeGreeting } from "../hq/welcomeGreeting";
 import { COOKIE_NAME } from "../config/auth";
@@ -163,6 +164,9 @@ router.post("/sso/launch", hqAuthRequired, async (req: Request, res: Response) =
   if (!app) return res.status(404).json({ error: "Application not found" });
   if (!hasPermission(req.hqUser!.role, app.permission as never)) {
     return res.status(403).json({ error: "You do not have access to this application" });
+  }
+  if (!canLaunchSsoApp(app)) {
+    return res.status(403).json({ error: "This application is not yet available for launch. Configure HQ_*_LAUNCH_URL for external apps." });
   }
 
   const db = await getDb();

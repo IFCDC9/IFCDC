@@ -7,6 +7,7 @@ import {
   listDashboardTemplates,
   resolveDashboardTemplateKey,
   getDashboardTemplate,
+  canApplyDashboardTemplate,
   type DashboardTemplateKey,
 } from "../hq/dashboardTemplates";
 import { toEnterpriseRole } from "../hq/enterpriseRoles";
@@ -28,14 +29,17 @@ function defaultWidgets() {
   });
 }
 
-router.get("/templates", hqAuthRequired, (_req, res) => {
-  res.json({ templates: listDashboardTemplates() });
+router.get("/templates", hqAuthRequired, (req, res) => {
+  res.json({ templates: listDashboardTemplates(req.hqUser!.role) });
 });
 
 router.post("/dashboard/apply-template", hqAuthRequired, async (req, res) => {
   try {
     const { templateKey } = req.body as { templateKey?: DashboardTemplateKey };
     const key = templateKey ?? resolveDashboardTemplateKey(req.hqUser!.role);
+    if (templateKey && !canApplyDashboardTemplate(req.hqUser!.role, templateKey)) {
+      return res.status(403).json({ error: "Your role cannot apply this dashboard template" });
+    }
     const template = getDashboardTemplate(key);
     const widgets = buildTemplateWidgets(key);
 

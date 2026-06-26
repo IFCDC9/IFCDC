@@ -36,6 +36,8 @@ import { ensureEnterpriseReadinessSeed } from "./hq/enterpriseReadinessSeed";
 import { ensureNotificationQueueTables } from "./hq/notificationQueue";
 import { ensureCommunicationsTables } from "./hq/communicationsSchema";
 import { ensureDocumentTables } from "./hq/documentsSchema";
+import { ensureHqFileRegistry } from "./hq/hqFileStorage";
+import { syncGrantFeeds } from "./hq/grantFeedConnectors";
 import { recordLoginAttempt, recordActiveSession, roleRequiresMfa } from "./hq/hqSecuritySessions";
 import { attachHqRealtimeHub } from "./hq/hqRealtimeHub";
 import { getAppRoot, getDistPublicDir, getPublicDir, getSpaIndexPath } from "./appPaths";
@@ -5427,11 +5429,16 @@ async function startServer() {
     await ensureNotificationQueueTables();
     await ensureCommunicationsTables();
     await ensureDocumentTables();
+    await ensureHqFileRegistry();
     await ensureBackupTables();
     await ensureSecuritySessionTables();
     getOrGenerateDailyBriefing().catch((e) => console.warn("Morning briefing generation skipped:", e?.message));
     await initGoogleOAuth();
     import("./hq/warehouseScheduler").then(({ startHqScheduler }) => startHqScheduler()).catch(() => undefined);
+    syncGrantFeeds().then((results) => {
+      const connected = results.filter((r) => r.status === "connected").length;
+      console.log(`Grant feed sync complete: ${connected}/${results.length} feeds connected`);
+    }).catch((e) => console.warn("Grant feed sync skipped:", e?.message));
     console.log("IFCDC HQ database and modules initialized");
   } catch (err) {
     console.error("Failed to initialize IFCDC HQ:", err);

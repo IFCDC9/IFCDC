@@ -105,7 +105,7 @@ router.post("/upload", async (req: Request, res: Response) => {
     return res.status(400).json({ error: "fileName, base64, and title are required" });
   }
   try {
-    const saved = await saveHqFileBase64(String(fileName), String(base64), mimeType ? String(mimeType) : undefined);
+    const saved = await saveHqFileBase64(String(fileName), String(base64), mimeType ? String(mimeType) : undefined, req.hqUser?.email ?? "", access_level ?? "internal");
     const db = await getDb();
     const now = new Date().toISOString();
     const id = docId();

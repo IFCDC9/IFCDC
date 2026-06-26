@@ -3,7 +3,7 @@ import path from "path";
 import crypto from "crypto";
 import { getOrGenerateDailyBriefing } from "./executiveBriefings";
 import { generateExecutiveBoardReport } from "./executiveIntelligenceEngine";
-import { ifcdc } from "../lib/ifcdc";
+import { sendHqNotification } from "../lib/notifications";
 
 function reportsDir(): string {
   const dir = path.join(import.meta.dirname, "..", "..", "data", "reports");
@@ -128,7 +128,7 @@ export async function deliverExecutiveDocument(
   if (opts?.sendEmail !== false) {
     try {
       const excerpt = fs.readFileSync(doc.htmlPath, "utf8").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 1500);
-      await ifcdc.notifications.send({
+      await sendHqNotification({
         to,
         subject: doc.title,
         body: `Your ${type === "briefing" ? "executive briefing" : "board report"} is ready.\n\n${excerpt}\n\nDownload PDF: /api/hq/intelligence/reports/${path.basename(doc.pdfPath)}?format=pdf`,

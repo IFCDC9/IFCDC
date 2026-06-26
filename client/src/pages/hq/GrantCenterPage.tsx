@@ -119,6 +119,13 @@ const GrantCenterPage: React.FC = () => {
 
   const dashboard = useQuery({ queryKey: ["grants-dashboard"], queryFn: grantsApi.dashboard });
   const grantPlatform = useQuery({ queryKey: ["grant-center-platform"], queryFn: grantsApi.grantCenterPlatform, enabled: tab === "overview" });
+  const syncFeeds = useMutation({
+    mutationFn: grantsApi.feedsSync,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["grant-center-platform"] });
+      qc.invalidateQueries({ queryKey: ["grants-opportunities"] });
+    },
+  });
   const executiveSummary = useQuery({ queryKey: ["grant-executive-summary"], queryFn: grantsApi.grantExecutiveSummary, enabled: tab === "overview" });
   const fundingAnalytics = useQuery({ queryKey: ["grant-funding-analytics"], queryFn: grantsApi.fundingAnalytics, enabled: tab === "analytics" });
   const opportunities = useQuery({ queryKey: ["grants-opportunities"], queryFn: grantsApi.opportunities, enabled: ["opportunities", "applications", "overview"].includes(tab) || showNewApp });
@@ -238,7 +245,14 @@ const GrantCenterPage: React.FC = () => {
                   ))}
                 </div>
                 <p className="hq-muted-text" style={{ marginTop: "0.75rem", fontSize: "0.75rem" }}>
-                  External feeds (Grants.gov, SAM.gov, Foundation Directory, Corporate CSR): placeholder — local database active.
+                  External feeds:{" "}
+                  {Object.values(grantPlatform.data.integrations ?? {}).filter((i: { status?: string }) => i.status === "connected").length} connected
+                  {" · "}
+                  {grantPlatform.data.externalFeedCount ?? 0} imported opportunities
+                  {" · "}
+                  <button type="button" className="hq-btn hq-btn-ghost hq-btn-sm" disabled={syncFeeds.isPending} onClick={() => syncFeeds.mutate()}>
+                    {syncFeeds.isPending ? "Syncing…" : "Sync feeds"}
+                  </button>
                 </p>
               </HqPanel>
               </div>

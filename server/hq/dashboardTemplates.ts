@@ -145,12 +145,25 @@ export function resolveDashboardTemplateKey(role: string): DashboardTemplateKey 
   return directMap[enterprise] ?? "department_manager";
 }
 
-export function listDashboardTemplates() {
-  return DASHBOARD_TEMPLATES.map((t) => ({
+export function listDashboardTemplates(role?: string) {
+  const templates = DASHBOARD_TEMPLATES.map((t) => ({
     key: t.key,
     name: t.name,
     description: t.description,
     dashboardMode: t.dashboardMode,
     widgetCount: t.widgetIds.length,
   }));
+  if (!role) return templates;
+  return templates.filter((t) => canApplyDashboardTemplate(role, t.key));
+}
+
+export function canApplyDashboardTemplate(role: string, templateKey: DashboardTemplateKey): boolean {
+  if (role === "owner") return true;
+  const resolved = resolveDashboardTemplateKey(role);
+  if (templateKey === resolved) return true;
+  if (hasPermission(role, "hq.executive")) {
+    if (templateKey === "founder") return toEnterpriseRole(role) === "founder";
+    return ["executive", "board_member", "grant_manager", "hr", "finance", "department_manager", "donor", "volunteer"].includes(templateKey);
+  }
+  return false;
 }
