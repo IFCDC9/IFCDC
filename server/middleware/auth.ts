@@ -1,20 +1,18 @@
-import { Request, Response, NextFunction } from "express";
+import { Request, Response, NextFunction, type RequestHandler } from "express";
 import jwt from "jsonwebtoken";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
 
 export interface AuthedUser {
   id: string;
-  name: string;
+  name?: string;
   role: string;
-  email: string;
+  email?: string;
 }
 
-export interface AuthedRequest extends Request {
-  user?: AuthedUser;
-}
+export type AuthedRequest = Request;
 
-export function authMiddleware(req: AuthedRequest, _res: Response, next: NextFunction) {
+export function authMiddleware(req: Request, _res: Response, next: NextFunction) {
   const cookieToken = req.cookies?.ifcdc_token;
   const authHeader = req.headers.authorization || "";
   const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
@@ -41,8 +39,8 @@ export function authMiddleware(req: AuthedRequest, _res: Response, next: NextFun
   return next();
 }
 
-export function requireAuth(allowedRoles?: string[]) {
-  return (req: AuthedRequest, res: Response, next: NextFunction) => {
+export function requireAuth(allowedRoles?: string[]): RequestHandler {
+  return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({ error: "Not authenticated" });
     }

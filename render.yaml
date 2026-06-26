@@ -1,6 +1,7 @@
 # IFCDC Headquarters — Render Blueprint
-# GitHub: IFCDC9/IFCDC · Branch: hq/phase3-people-operations
-# NOTE: This repo branch contains the app at repository root (not monorepo Apps/ path).
+# GitHub: IFCDC9/IFCDC · Branch: main (production)
+# Legacy branch: hq/phase3-people-operations (same tip as main after history unify)
+# NOTE: App lives at repository root (not monorepo Apps/ path).
 # Render Root Directory must be blank (.) — NOT Apps/IMPERIAL-FOUNDATION-CDC.
 
 services:
@@ -9,7 +10,7 @@ services:
     runtime: node
     region: ohio
     plan: starter
-    buildCommand: npm ci --include=dev && npm run build && node script/render-postbuild.mjs
+    buildCommand: npm ci && npm run build && node script/render-postbuild.mjs
     startCommand: node script/render-prestart.mjs && npm run start
     healthCheckPath: /api/health
     autoDeploy: false

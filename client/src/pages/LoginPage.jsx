@@ -1,17 +1,30 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import Header from "../components/IFCDCHeader";
+import { buildFounderSessionFromLogin, isFounderRole } from "../auth/founderSession";
+import { saveDashboardModeLocal } from "../config/executiveWidgets";
+import { fetchWithTimeout } from "../api/safeFetch";
 
 const LoginPage = () => {
-  const { refreshUser } = useAuth();
+  const { user, loading, applySessionUser } = useAuth();
+  const navigate = useNavigate();
+  const redirected = useRef(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [totpCode, setTotpCode] = useState("");
+  const [requires2FA, setRequires2FA] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState({ type: "", text: "" });
+
+  useEffect(() => {
+    if (redirected.current || loading || !user) return;
+    redirected.current = true;
+    navigate(user.defaultRoute && user.defaultRoute !== "/login" ? user.defaultRoute : "/hq", { replace: true });
+  }, [loading, user, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
+    setSubmitting(true);
     setMessage({ type: "", text: "" });
 
     try {
@@ -19,96 +32,143 @@ const LoginPage = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ email: email.trim(), password: password.trim() }),
+        body: JSON.stringify({ email: email.trim(), password: password.trim(), totpCode: totpCode.trim() || undefined }),
       });
 
       const data = await res.json();
-      setLoading(false);
+
+      if (data.requires2FA) {
+        setRequires2FA(true);
+        setSubmitting(false);
+        setMessage({ type: "", text: data.message || "Enter your authenticator code to continue." });
+        return;
+      }
 
       if (!res.ok) {
+        setSubmitting(false);
         setMessage({ type: "error", text: data.error || "Login failed" });
         return;
       }
 
-      setMessage({ type: "success", text: "Login successful. Redirecting…" });
+      setMessage({ type: "success", text: "Welcome to Headquarters. Redirecting…" });
+      saveDashboardModeLocal("standard");
 
-      // Refresh user context then redirect
-      await refreshUser();
-      
-      const role = data.role;
-      if (role === "admin" || role === "owner" || role === "EXEC") {
-        window.location.href = "/admin";
-      } else if (role === "barber") {
-        window.location.href = "/barber";
-      } else if (role === "radio_host" || role === "radio") {
-        window.location.href = "/radio";
-      } else if (role === "program_staff") {
-        window.location.href = "/programs";
-      } else {
-        window.location.href = "/";
+      const role = data.role ?? data.user?.role;
+      let sessionUser = null;
+
+      try {
+        const sessionRes = await fetchWithTimeout("/api/hq/auth/session", { credentials: "include" }, 8000);
+        if (sessionRes.ok) {
+          const session = await sessionRes.json();
+          sessionUser = session.user ?? null;
+        }
+      } catch {
+        // fall through to founder bootstrap below
       }
-    } catch (err) {
-      setLoading(false);
+
+      if (!sessionUser && isFounderRole(role)) {
+        sessionUser = buildFounderSessionFromLogin(data);
+      }
+
+      if (sessionUser) {
+        applySessionUser(sessionUser);
+        navigate(sessionUser.defaultRoute || "/hq", { replace: true });
+        return;
+      }
+
+      setSubmitting(false);
+      if (role === "barber") {
+        navigate("/barber", { replace: true });
+      } else if (role === "radio_host" || role === "radio") {
+        navigate("/radio", { replace: true });
+      } else if (role === "program_staff") {
+        navigate("/hq/programs", { replace: true });
+      } else {
+        setMessage({ type: "error", text: "Logged in but Headquarters session unavailable. Try again." });
+      }
+    } catch {
+      setSubmitting(false);
       setMessage({ type: "error", text: "Network error. Try again." });
     }
   };
 
   return (
-    <>
-      <Header />
+    <div className="hq-login-shell">
+      <div className="hq-login-bg" aria-hidden="true" />
+      <div className="hq-login-card hq-fade-in">
+        <div className="hq-login-brand">
+          <div className="hq-login-logo">IFCDC</div>
+          <div className="hq-login-tagline">Headquarters</div>
+          <p className="hq-login-subtitle">Enterprise Operating System</p>
+        </div>
 
-      <main>
-        <section className="auth-wrapper">
-          <h1 className="auth-title">Login</h1>
-          <p className="auth-subtitle">Access your IFCDC dashboard with your credentials.</p>
+        {message.text && (
+          <p className={message.type === "error" ? "hq-login-error" : "hq-login-success"} data-testid="message-login">
+            {message.text}
+          </p>
+        )}
 
-          {message.text && (
-            <p className={message.type === "error" ? "auth-error" : "auth-success"} data-testid="message-login">
-              {message.text}
-            </p>
+        <form id="login-form" className="hq-login-form" onSubmit={handleSubmit}>
+          <label className="hq-field">
+            <span>Email</span>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              className="hq-input"
+              required
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="service@ifcdc.org"
+              data-testid="input-email"
+            />
+          </label>
+
+          <label className="hq-field">
+            <span>Password</span>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              className="hq-input"
+              required
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              data-testid="input-password"
+            />
+          </label>
+
+          {requires2FA && (
+            <label className="hq-field">
+              <span>Authenticator Code</span>
+              <input
+                id="totp"
+                name="totp"
+                type="text"
+                className="hq-input"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={totpCode}
+                onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ""))}
+                placeholder="6-digit code"
+                data-testid="input-totp"
+              />
+            </label>
           )}
 
-          <form id="login-form" onSubmit={handleSubmit}>
-            <div className="auth-form-group">
-              <label htmlFor="email">Email</label>
-              <input
-                id="email"
-                name="email"
-                type="email"
-                required
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                data-testid="input-email"
-              />
-            </div>
+          <button type="submit" className="hq-btn hq-btn-primary hq-login-submit" disabled={submitting} data-testid="button-submit">
+            {submitting ? "Signing in…" : "Enter Headquarters"}
+          </button>
+        </form>
 
-            <div className="auth-form-group">
-              <label htmlFor="password">Password</label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                required
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                data-testid="input-password"
-              />
-            </div>
-
-            <button type="submit" className="nav-button gold-3d auth-submit" disabled={loading} data-testid="button-submit">
-              {loading ? "Signing In..." : "Sign In"}
-            </button>
-          </form>
-
-          <div className="auth-footer">
-            Don't have an account yet?{" "}
-            <a href="/register">Register now</a>
-          </div>
-        </section>
-      </main>
-    </>
+        <div className="hq-login-footer">
+          Don&apos;t have an account? <a href="/register">Register</a>
+        </div>
+      </div>
+    </div>
   );
 };
 

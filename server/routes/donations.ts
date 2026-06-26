@@ -1,11 +1,16 @@
 import express from "express";
-import { stripe } from "../stripe";
-import { db } from "../db";
+import { getStripe } from "../stripe";
+import { getDb } from "../db";
 
 const router = express.Router();
 
 router.post("/donate", async (req, res) => {
   try {
+    const stripe = getStripe();
+    if (!stripe) {
+      return res.status(503).json({ error: "Donations are not configured. Set STRIPE_SECRET_KEY in .env" });
+    }
+
     const { amount, recurring } = req.body;
 
     if (!amount || amount <= 0) {
@@ -60,6 +65,11 @@ router.post(
       return res.status(500).json({ error: "Webhook not configured" });
     }
 
+    const stripe = getStripe();
+    if (!stripe) {
+      return res.status(503).json({ error: "Stripe is not configured" });
+    }
+
     try {
       const event = stripe.webhooks.constructEvent(
         req.body,
@@ -69,8 +79,9 @@ router.post(
 
       if (event.type === "checkout.session.completed") {
         const session = event.data.object as any;
+        const database = await getDb();
 
-        await db.run(`
+        await database.run(`
           INSERT INTO funding_events (source_key, intent, amount_cents, currency, external_id, metadata)
           VALUES (?, ?, ?, ?, ?, ?)
         `, "stripe", "donation", session.amount_total, session.currency || "usd", session.id, JSON.stringify(session));

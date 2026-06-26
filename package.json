@@ -8,7 +8,7 @@
     "dev:kill": "lsof -ti :5001 2>/dev/null | xargs kill -9 2>/dev/null; lsof -ti :24678 2>/dev/null | xargs kill -9 2>/dev/null; true",
     "dev": "NODE_ENV=development tsx server/index.ts",
     "predev": "npm run dev:kill",
-    "build": "tsx script/build.ts",
+    "build": "node ./node_modules/tsx/dist/cli.mjs script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "build:client": "vite build",
@@ -149,5 +149,8 @@
   },
   "optionalDependencies": {
     "bufferutil": "^4.0.8"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   }
 }

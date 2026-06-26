@@ -19,6 +19,26 @@ const AdminDashboard: React.FC = () => {
         </div>
 
         <div className="admin-quick-links">
+          <h2 className="quick-links-title">IFCDC Headquarters</h2>
+          <div className="quick-links-grid">
+            <a href="/hq" className="quick-link-card" data-testid="link-hq-executive">
+              <h3>Executive Dashboard</h3>
+              <p>Organization health, platform services, and module access.</p>
+            </a>
+
+            <a href="/hq/software" className="quick-link-card" data-testid="link-hq-software">
+              <h3>Software Division</h3>
+              <p>Monitor all IFCDC applications — Barbers, Music, Tapis, and more.</p>
+            </a>
+
+            <a href="/hq/aura" className="quick-link-card" data-testid="link-hq-aura">
+              <h3>AURA Command Center</h3>
+              <p>Enterprise AI for reports, HR, grants, finance, and operations.</p>
+            </a>
+          </div>
+        </div>
+
+        <div className="admin-quick-links">
           <h2 className="quick-links-title">Standalone Apps</h2>
           <div className="quick-links-grid">
             <a href="/app/barbershop" className="quick-link-card app-link-barbershop" data-testid="link-app-barbershop">

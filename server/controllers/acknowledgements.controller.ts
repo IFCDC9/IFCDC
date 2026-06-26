@@ -15,11 +15,11 @@ export const getStats = async (req: Request, res: Response) => {
 
 export const getByUserId = async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
-    if (isNaN(userId)) {
+    const userId = req.params.userId;
+    if (!userId) {
       return res.status(400).json({ message: "Invalid user ID" });
     }
-    
+
     const acks = await storage.getUserAcknowledgements(userId);
     res.json(acks);
   } catch (error) {
@@ -33,7 +33,7 @@ export const getByChapterId = async (req: Request, res: Response) => {
     if (isNaN(chapterId)) {
       return res.status(400).json({ message: "Invalid chapter ID" });
     }
-    
+
     const acks = await storage.getChapterAcknowledgements(chapterId);
     res.json(acks);
   } catch (error) {
@@ -43,22 +43,19 @@ export const getByChapterId = async (req: Request, res: Response) => {
 
 export const create = async (req: Request, res: Response) => {
   try {
-    const data = insertAcknowledgementSchema.parse(req.body);
-    
-    const chapter = await storage.getChapter(data.chapterId);
-    if (!chapter) {
-      return res.status(404).json({ message: "Chapter not found" });
+    const result = insertAcknowledgementSchema.safeParse(req.body);
+    if (!result.success) {
+      const validationError = fromError(result.error);
+      return res.status(400).json({ message: validationError.toString() });
     }
-    
+
     const ack = await storage.createAcknowledgement({
-      ...data,
-      version: chapter.version,
+      userId: String(result.data.userId),
+      chapterId: result.data.chapterId,
+      version: result.data.version,
     });
     res.status(201).json(ack);
-  } catch (error: any) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ message: fromError(error).toString() });
-    }
+  } catch (error) {
     res.status(500).json({ message: "Failed to create acknowledgement" });
   }
 };
