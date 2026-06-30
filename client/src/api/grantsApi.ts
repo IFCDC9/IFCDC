@@ -519,8 +519,42 @@ export const grantsApi = {
       body: JSON.stringify({ question }),
     }),
 
-  // Grant Center v5 — Funding Intelligence Engine
+  // Grant Center v5 — Funding Intelligence Engine (canonical pipeline surface)
   v5Platform: () => apiFetch<Record<string, unknown>>("/funding-engine/v5/platform"),
+  v5Lifecycle: () =>
+    apiFetch<{ stages: { stage: string; stageKey: string; count: number; value: number }[]; totalValue: number; generatedAt: string }>(
+      "/funding-engine/v5/lifecycle",
+    ),
+  v5Pipeline: () =>
+    apiFetch<{ stages: { stage: string; count: number; value: number; statusKey: string }[]; totalValue: number; generatedAt: string }>(
+      "/funding-engine/v5/pipeline",
+    ),
+  v5Calendar: (days = 90) =>
+    apiFetch<{ events: Record<string, unknown>[]; generatedAt: string }>(`/funding-engine/v5/calendar?days=${days}`),
+  v5Profiles: () =>
+    apiFetch<{ profiles: Record<string, unknown>[]; generatedAt: string }>("/funding-engine/v5/profiles"),
+  v5Programs: () =>
+    apiFetch<{ programs: Record<string, unknown>[]; generatedAt: string }>("/funding-engine/v5/programs"),
+  v5Analytics: () =>
+    apiFetch<{
+      totalOpportunities: number;
+      totalRequested: number;
+      totalAwarded: number;
+      totalPending: number;
+      upcomingDeadlines: number;
+      winRate: number;
+      projectedRevenue: number;
+      generatedAt: string;
+    }>("/funding-engine/v5/analytics"),
+  v5DocumentCenter: (params?: { applicationId?: string; opportunityId?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.applicationId) qs.set("applicationId", params.applicationId);
+    if (params?.opportunityId) qs.set("opportunityId", params.opportunityId);
+    const q = qs.toString();
+    return apiFetch<{ documents: Record<string, unknown>[]; checklist: Record<string, unknown>[]; generatedAt: string }>(
+      `/funding-engine/v5/documents${q ? `?${q}` : ""}`,
+    );
+  },
   v5NationalDatabase: (limit = 50) =>
     apiFetch<{ opportunities: Record<string, unknown>[]; generatedAt: string }>(`/funding-engine/v5/national?limit=${limit}`),
   v5MatchAllDivisions: (limit = 5) =>

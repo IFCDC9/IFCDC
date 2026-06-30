@@ -25,7 +25,7 @@ export const GrantV3DocumentCenter: React.FC<{
 
   const center = useQuery({
     queryKey: ["grant-v3-document-center", selectedGrant],
-    queryFn: () => grantsApi.v3DocumentCenter({ applicationId: selectedGrant || undefined }),
+    queryFn: () => grantsApi.v5DocumentCenter({ applicationId: selectedGrant || undefined }),
     staleTime: 30_000,
   });
 

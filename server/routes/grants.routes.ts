@@ -86,6 +86,13 @@ import {
   buildMultiYearProjections,
   buildPerformanceMetrics,
   auraFundingIntelligenceAdvisorV5,
+  getV5LifecyclePipeline,
+  getV5OperationsCalendar,
+  getV5ProgramProfiles,
+  getV5ProgramIntegration,
+  getV5FundingPipeline,
+  getV5ExecutiveAnalytics,
+  getV5DocumentCenter,
 } from "../hq/grantFundingEngineV5";
 import {
   buildGrantCenterPlatform,
@@ -1144,6 +1151,40 @@ router.post("/funding-engine/v4/aura", async (req, res) => {
 
 router.get("/funding-engine/v5/platform", async (_req, res) => {
   res.json(await buildFundingIntelligencePlatform());
+});
+
+router.get("/funding-engine/v5/lifecycle", async (_req, res) => {
+  res.json(await getV5LifecyclePipeline());
+});
+
+router.get("/funding-engine/v5/pipeline", async (_req, res) => {
+  res.json(await getV5FundingPipeline());
+});
+
+router.get("/funding-engine/v5/calendar", async (req, res) => {
+  const days = req.query.days ? Number(req.query.days) : 90;
+  res.json(await getV5OperationsCalendar({ daysAhead: days }));
+});
+
+router.get("/funding-engine/v5/profiles", async (_req, res) => {
+  res.json(await getV5ProgramProfiles());
+});
+
+router.get("/funding-engine/v5/programs", async (_req, res) => {
+  res.json(await getV5ProgramIntegration());
+});
+
+router.get("/funding-engine/v5/analytics", async (_req, res) => {
+  res.json(await getV5ExecutiveAnalytics());
+});
+
+router.get("/funding-engine/v5/documents", async (req, res) => {
+  res.json(
+    await getV5DocumentCenter({
+      applicationId: req.query.applicationId ? String(req.query.applicationId) : undefined,
+      opportunityId: req.query.opportunityId ? String(req.query.opportunityId) : undefined,
+    }),
+  );
 });
 
 router.get("/funding-engine/v5/national", async (req, res) => {

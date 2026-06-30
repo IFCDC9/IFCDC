@@ -2,7 +2,15 @@ import crypto from "crypto";
 import { getDb } from "../db";
 
 const MFA_ROLES = new Set([
-  "owner", "founder", "admin", "administrator", "exec", "executive", "executive_director",
+  "owner",
+  "founder",
+  "admin",
+  "administrator",
+  "exec",
+  "executive",
+  "executive_director",
+  "finance",
+  "grant_manager",
 ]);
 
 export function roleRequiresMfa(role: string): boolean {
@@ -160,7 +168,7 @@ export async function getKnownDevices(limit = 30) {
 export async function getMfaStatusSummary() {
   const db = await getDb();
   const privileged = (await db.all(
-    `SELECT email, role, twofa_enabled FROM users WHERE role IN ('owner','admin','exec','EXEC','executive','executive_director','administrator','founder')`
+    `SELECT email, role, twofa_enabled FROM users WHERE role IN ('owner','admin','exec','EXEC','executive','executive_director','administrator','founder','finance','grant_manager')`
   ) as unknown) as { email: string; role: string; twofa_enabled: number }[];
   const requiring = privileged.filter((u) => roleRequiresMfa(u.role));
   const enabled = requiring.filter((u) => u.twofa_enabled === 1);

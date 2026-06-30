@@ -25,5 +25,11 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
+      - name: Generate Prisma Client
+        run: DATABASE_URL=postgresql://localhost/ifcdc npx prisma generate
+
+      - name: Type Check
+        run: npm run check
+
       - name: Run Tests
         run: npm test

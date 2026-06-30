@@ -11,8 +11,8 @@ const fmt = formatCurrency;
 
 export const GrantV4LifecyclePanel: React.FC = () => {
   const lifecycle = useQuery({
-    queryKey: ["grant-v4-lifecycle"],
-    queryFn: grantsApi.v4Lifecycle,
+    queryKey: ["grant-v5-lifecycle"],
+    queryFn: grantsApi.v5Lifecycle,
     staleTime: 30_000,
   });
 

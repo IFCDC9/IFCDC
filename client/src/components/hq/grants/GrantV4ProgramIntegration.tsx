@@ -30,7 +30,7 @@ export const GrantV4ProgramIntegration: React.FC = () => {
 
   const programs = useQuery({
     queryKey: ["grant-v4-programs"],
-    queryFn: grantsApi.v4Programs,
+    queryFn: grantsApi.v5Programs,
     staleTime: 60_000,
   });
 

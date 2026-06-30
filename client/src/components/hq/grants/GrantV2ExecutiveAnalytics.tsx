@@ -12,7 +12,7 @@ const fmt = formatCurrency;
 export const GrantV2ExecutiveAnalytics: React.FC = () => {
   const analytics = useQuery({
     queryKey: ["grant-v2-analytics"],
-    queryFn: grantsApi.v2Analytics,
+    queryFn: grantsApi.v5Analytics,
     staleTime: 60_000,
   });
 

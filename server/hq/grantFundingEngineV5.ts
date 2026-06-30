@@ -20,11 +20,19 @@ import {
 } from "./grantFundingEngineV2";
 import {
   buildProgramFundingProfilesV3,
+  buildGrantDocumentCenter,
 } from "./grantFundingEngineV3";
 import {
   buildExecutiveOperationsDashboard,
   buildOrganizationFundingForecast,
+  buildGrantLifecyclePipeline,
+  buildFundingOperationsCalendar,
+  buildProgramIntegrationPortfolios,
 } from "./grantFundingEngineV4";
+import {
+  buildV2FundingPipeline,
+  buildExecutiveFundingAnalytics,
+} from "./grantFundingEngineV2";
 
 export const V5_SCORE_DIMENSIONS = ["bestFit", "deadline", "awardSize", "competitiveness"] as const;
 
@@ -606,3 +614,12 @@ export async function auraFundingIntelligenceAdvisorV5(opts?: { question?: strin
     generatedAt: new Date().toISOString(),
   };
 }
+
+/** Canonical V5 API surface — delegates to underlying engines (V2–V4 remain internal). */
+export const getV5LifecyclePipeline = buildGrantLifecyclePipeline;
+export const getV5OperationsCalendar = buildFundingOperationsCalendar;
+export const getV5ProgramProfiles = buildProgramFundingProfilesV3;
+export const getV5ProgramIntegration = buildProgramIntegrationPortfolios;
+export const getV5FundingPipeline = buildV2FundingPipeline;
+export const getV5ExecutiveAnalytics = buildExecutiveFundingAnalytics;
+export const getV5DocumentCenter = buildGrantDocumentCenter;

@@ -17,7 +17,7 @@ const TYPE_META: Record<string, { label: string; icon: React.ElementType; varian
 export const GrantV4FundingCalendar: React.FC = () => {
   const calendar = useQuery({
     queryKey: ["grant-v4-calendar"],
-    queryFn: () => grantsApi.v4Calendar(90),
+    queryFn: () => grantsApi.v5Calendar(90),
     staleTime: 30_000,
   });
 
