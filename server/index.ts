@@ -5,14 +5,10 @@ import fs from "fs";
 import sqlite3 from "sqlite3";
 import { open, Database } from "sqlite";
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
 import twilio from "twilio";
-import { authenticator } from "./otplib-compat";
-import QRCode from "qrcode";
 import cookieParser from "cookie-parser";
 import OpenAI from "openai";
 import rateLimit from "express-rate-limit";
-import * as client from "openid-client";
 import donationsRouter from "./routes/donations";
 import adminFundingRouter from "./routes/adminFunding";
 import hqRouter from "./routes/hq.routes";
@@ -38,10 +34,15 @@ import { ensureCommunicationsTables } from "./hq/communicationsSchema";
 import { ensureDocumentTables } from "./hq/documentsSchema";
 import { ensureHqFileRegistry } from "./hq/hqFileStorage";
 import { syncGrantFeeds } from "./hq/grantFeedConnectors";
-import { recordLoginAttempt, recordActiveSession, roleRequiresMfa } from "./hq/hqSecuritySessions";
 import { attachHqRealtimeHub } from "./hq/hqRealtimeHub";
 import { getAppRoot, getDistPublicDir, getPublicDir, getSpaIndexPath } from "./appPaths";
 import { assertProductionEnv } from "./config/validateProductionEnv";
+import { registerMonolithRoutes } from "./routes/monolith";
+import { setMonolithDb } from "./monolith/dbAccess";
+import { logAudit } from "./monolith/audit";
+import { ROLES, ROLE_VALUES, assignRole, cryptoRandomId } from "./monolith/constants";
+import { initGoogleOAuth } from "./monolith/googleOAuth";
+import { authRequired, requireAdmin, requireRole } from "./middleware/legacyAuth";
 import http from "http";
 
 assertProductionEnv();
@@ -84,11 +85,8 @@ const FOUNDER_EMAIL = (process.env.MASTER_OWNER_EMAIL || "service@ifcdc.org").to
 const FOUNDER_SEED_PASSWORD = process.env.FOUNDER_SEED_PASSWORD || "IFCDC@2026Secure";
 const FOUNDER_NAME = process.env.FOUNDER_NAME || "Mr. Fahreal Allah";
 
-function assignRole(email: string): string {
-  const lower = email.toLowerCase();
-  if (lower === FOUNDER_EMAIL) return "owner";
-  if (lower === ADMIN_EMAIL.toLowerCase()) return "admin";
-  return "user";
+function assignRoleForEmail(email: string): string {
+  return assignRole(email, FOUNDER_EMAIL);
 }
 
 // Only initialize Twilio if credentials are properly configured (SID must start with AC)
@@ -133,28 +131,7 @@ function isVoiceAllowedForChannel(channel: string | null | undefined): boolean {
   return v === "VOICE" || v === "BOTH";
 }
 
-// Google OAuth configuration
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-let googleOAuthConfig: Awaited<ReturnType<typeof client.discovery>> | null = null;
-
-async function initGoogleOAuth() {
-  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
-    console.log("Google OAuth not configured (missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET)");
-    return;
-  }
-  
-  try {
-    googleOAuthConfig = await client.discovery(
-      new URL("https://accounts.google.com/.well-known/openid-configuration"),
-      GOOGLE_CLIENT_ID,
-      GOOGLE_CLIENT_SECRET
-    );
-    console.log("Google OAuth configured successfully");
-  } catch (err) {
-    console.error("Failed to initialize Google OAuth:", err);
-  }
-}
+// Google OAuth configuration (see server/monolith/googleOAuth.ts)
 
 function buildSafeAppointmentReminderText(client: any, appointment: any): string {
   const when = new Date(appointment.start_time || appointment.startTime);
@@ -210,58 +187,11 @@ app.use("/api", donationsRouter);
 app.use("/api/admin", adminFundingRouter);
 app.use("/api/hq", hqRouter);
 app.use("/api/hq/v1", enterpriseApiRouter);
-
-app.get("/api/health", (_req, res) => {
-  res.json({
-    app: "ifcdc-headquarters",
-    status: "healthy",
-    version: "1.0.0",
-    platform: "IFCDC Enterprise Operating System",
-  });
-});
+registerMonolithRoutes(app);
 
 const publicDir = getPublicDir();
 // Serve static assets from public/ but don't serve index.html (let Vite handle SPA)
 app.use(express.static(publicDir, { index: false }));
-
-// Explicit routes for public HTML pages
-app.get("/book-barbershop", (_req, res) => {
-  res.sendFile(path.join(publicDir, "book-barbershop.html"));
-});
-app.get("/mental-health", (_req, res) => {
-  res.sendFile(path.join(publicDir, "mental-health.html"));
-});
-app.get("/programs", (_req, res) => {
-  res.sendFile(path.join(publicDir, "programs.html"));
-});
-app.get("/contact", (_req, res) => {
-  res.sendFile(path.join(publicDir, "contact.html"));
-});
-app.get("/records-policy", (_req, res) => {
-  res.sendFile(path.join(publicDir, "records-policy.html"));
-});
-app.get("/roi", (_req, res) => {
-  res.sendFile(path.join(publicDir, "roi.html"));
-});
-app.get("/privacy-policy", (_req, res) => {
-  res.sendFile(path.join(publicDir, "privacy-policy.html"));
-});
-app.get("/terms-of-use", (_req, res) => {
-  res.sendFile(path.join(publicDir, "terms-of-use.html"));
-});
-
-const ROLES = {
-  EXEC: "EXEC",
-  CLINICIAN: "CLINICIAN",
-  CASE_MANAGER: "CASE_MANAGER",
-  CHW: "CHW",
-  ADMIN: "ADMIN",
-} as const;
-
-const ROLE_VALUES = Object.values(ROLES);
-
-const JWT_SECRET = process.env.JWT_SECRET || "DEV_ONLY_CHANGE_ME_IFCDC";
-const JWT_EXPIRES_IN = "30d";
 
 interface User {
   id: string;
@@ -300,10 +230,6 @@ declare global {
 
 let db: Database;
 
-function cryptoRandomId() {
-  return "id_" + Math.random().toString(36).substring(2, 10) + "_" + Date.now().toString(36);
-}
-
 async function initDb() {
   const dataDir = path.join(import.meta.dirname, "..", "data");
   if (!fs.existsSync(dataDir)) {
@@ -314,6 +240,7 @@ async function initDb() {
     filename: path.join(dataDir, "ifcdc.db"),
     driver: sqlite3.Database,
   });
+  setMonolithDb(db);
 
   await db.exec(`
     CREATE TABLE IF NOT EXISTS users (
@@ -842,28 +769,6 @@ async function ensureFounderAccount() {
   }
 }
 
-interface AuditLogParams {
-  adminId?: string | null;
-  action: string;
-  targetType?: string | null;
-  targetId?: string | null;
-  ip?: string | null;
-  extra?: Record<string, unknown>;
-}
-
-async function logAudit(req: express.Request, params: AuditLogParams) {
-  const id = cryptoRandomId();
-  const timestamp = new Date().toISOString();
-  const ipAddress = params.ip || req?.headers?.["x-forwarded-for"]?.toString().split(",")[0]?.trim() || req?.socket?.remoteAddress || null;
-
-  await db.run(
-    `INSERT INTO audit_logs (id, timestamp, user_id, user_role, method, path, entity_type, entity_id, action, ip_address, extra)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    id, timestamp, params.adminId || req?.user?.id || null, req?.user?.role || null,
-    req?.method ?? null, req?.originalUrl ?? null, params.targetType || null, params.targetId || null, params.action, ipAddress, JSON.stringify(params.extra || {})
-  );
-}
-
 async function findAppointmentsNeedingReminder(leadHours: number) {
   const now = new Date();
   const windowEnd = new Date(now.getTime() + leadHours * 60 * 60 * 1000);
@@ -1032,62 +937,6 @@ function resolveVoiceLeadHours(
   return globalFallbackHours;
 }
 
-async function authRequired(req: express.Request, res: express.Response, next: express.NextFunction) {
-  // Check cookie first, then Authorization header, then query string
-  let token = req.cookies?.ifcdc_token || null;
-  
-  if (!token) {
-    const authHeader = req.header("Authorization") || "";
-    token = authHeader.startsWith("Bearer ") ? authHeader.replace("Bearer ", "") : null;
-  }
-
-  // Also support token via query string (for CSV downloads)
-  if (!token && req.query.token) {
-    token = req.query.token as string;
-  }
-
-  if (!token) {
-    return res.status(401).json({ error: "Not authenticated" });
-  }
-
-  try {
-    const payload = jwt.verify(token, JWT_SECRET) as { id: string; email: string; role: string };
-    const user = await db.get<User>("SELECT * FROM users WHERE id = ?", payload.id);
-    if (!user) {
-      return res.status(401).json({ error: "User not found" });
-    }
-    // Use JWT role (which may have owner override) instead of database role
-    req.user = { id: user.id, name: user.name, email: user.email, role: payload.role || user.role };
-    next();
-  } catch (err) {
-    return res.status(401).json({ error: "Invalid or expired token" });
-  }
-}
-
-function requireRole(...roles: (string | string[])[]) {
-  const allowedRoles = roles.flat();
-  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    if (!req.user) {
-      return res.status(401).json({ error: "Unauthenticated" });
-    }
-    // Owner has access to everything
-    if (req.user.role === "owner") {
-      return next();
-    }
-    if (!req.user?.role || !allowedRoles.includes(req.user.role)) {
-      return res.status(403).json({ error: "Forbidden" });
-    }
-    next();
-  };
-}
-
-function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
-  if (req.user?.role !== "admin" && req.user?.role !== "owner") {
-    return res.status(403).json({ error: "Unauthorized" });
-  }
-  next();
-}
-
 async function hasClientAccess(user: { id?: string; role?: string } | undefined, clientId: string): Promise<boolean> {
   if (!user?.id || !user?.role) return false;
   if (user.role === "owner" || user.role === ROLES.EXEC) return true;
@@ -1097,420 +946,6 @@ async function hasClientAccess(user: { id?: string; role?: string } | undefined,
   );
   return !!assignment;
 }
-
-// Legacy static pages (served before Vite takes over)
-app.get("/mental-health", (req, res) => res.sendFile(path.join(publicDir, "mental-health.html")));
-app.get("/records-policy", (req, res) => res.sendFile(path.join(publicDir, "records-policy.html")));
-app.get("/roi", (req, res) => res.sendFile(path.join(publicDir, "roi.html")));
-app.get("/contact", (req, res) => res.sendFile(path.join(publicDir, "contact.html")));
-app.get("/intake", (req, res) => res.sendFile(path.join(publicDir, "intake.html")));
-
-
-// REGISTER
-app.post('/api/auth/register', async (req, res) => {
-  try {
-    const { name, email, password, role } = req.body;
-
-    if (!name || !email || !password) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-
-    const lowerEmail = email.toLowerCase();
-
-    const existing = await db.get("SELECT 1 FROM users WHERE email = ?", lowerEmail);
-    if (existing) {
-      return res.status(409).json({ error: 'Email already registered' });
-    }
-
-    const finalRole = assignRole(lowerEmail);
-
-    const id = cryptoRandomId();
-    const password_hash = await bcrypt.hash(password, 10);
-    const created_at = new Date().toISOString();
-
-    await db.run(
-      `INSERT INTO users (id, name, email, role, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-      id, name, lowerEmail, finalRole, password_hash, created_at
-    );
-
-    await logAudit(
-      { method: "POST", originalUrl: "/api/auth/register" } as express.Request,
-      { action: "REGISTER", targetType: "USER", targetId: id, extra: { role: finalRole } }
-    );
-
-    return res.status(201).json({ message: 'User created', role: finalRole });
-  } catch (err) {
-    console.error('Register error', err);
-    return res.status(500).json({ error: 'Server error' });
-  }
-});
-
-// LOGIN
-app.post('/api/auth/login', async (req, res) => {
-  try {
-    const { email, password, totpCode } = req.body;
-    const lowerEmail = (email || '').toLowerCase();
-
-    const user = await db.get<any>("SELECT * FROM users WHERE email = ?", lowerEmail);
-    
-    if (!user) {
-      await recordLoginAttempt({ email: lowerEmail, success: false, ipAddress: req.ip, userAgent: req.get("user-agent"), failureReason: "user_not_found" });
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    // If user has no password_hash, set this password for them (migrate from Replit Auth)
-    if (!user.password_hash) {
-      const newHash = await bcrypt.hash(password, 10);
-      await db.run("UPDATE users SET password_hash = ? WHERE id = ?", newHash, user.id);
-    } else {
-      const ok = await bcrypt.compare(password, user.password_hash);
-      if (!ok) {
-        await recordLoginAttempt({ userId: user.id, email: lowerEmail, success: false, ipAddress: req.ip, userAgent: req.get("user-agent"), failureReason: "invalid_password" });
-        return res.status(401).json({ error: 'Invalid credentials' });
-      }
-    }
-
-    // Check account status
-    if (user.status !== 'active') {
-      return res.status(403).json({ message: 'Account restricted' });
-    }
-
-    // Override role to "owner" if email matches MASTER_OWNER_EMAIL, or "admin" if matches ADMIN_EMAIL
-    let effectiveRole = user.role;
-    if (MASTER_OWNER_EMAIL && lowerEmail === MASTER_OWNER_EMAIL.toLowerCase()) {
-      effectiveRole = "owner";
-    } else if (ADMIN_EMAIL && lowerEmail === ADMIN_EMAIL.toLowerCase()) {
-      effectiveRole = "admin";
-    }
-
-    // MFA for Founder, Executive, and Administrator accounts
-    if (user.twofa_enabled && roleRequiresMfa(effectiveRole)) {
-      if (!totpCode) {
-        return res.status(200).json({ requires2FA: true, message: 'Please enter your 2FA code' });
-      }
-      const isValid = authenticator.verify({ token: totpCode, secret: user.twofa_secret });
-      if (!isValid) {
-        await recordLoginAttempt({ userId: user.id, email: lowerEmail, success: false, ipAddress: req.ip, userAgent: req.get("user-agent"), failureReason: "invalid_2fa" });
-        return res.status(401).json({ error: 'Invalid 2FA code' });
-      }
-    }
-
-    const token = jwt.sign({ id: user.id, email: user.email, role: effectiveRole }, JWT_SECRET, { expiresIn: "7d" });
-
-    res.cookie('ifcdc_token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60 * 1000
-    });
-
-    await logAudit(
-      { method: "POST", originalUrl: "/api/auth/login", user: { id: user.id, name: user.name, email: user.email, role: effectiveRole } } as express.Request,
-      { action: "LOGIN", targetType: "USER", targetId: user.id, extra: {} }
-    );
-
-    await recordLoginAttempt({ userId: user.id, email: lowerEmail, success: true, ipAddress: req.ip, userAgent: req.get("user-agent") });
-    await recordActiveSession({ userId: user.id, email: lowerEmail, ipAddress: req.ip, userAgent: req.get("user-agent") });
-
-    return res.json({ message: 'Logged in', role: effectiveRole, user: { id: user.id, name: user.name, email: user.email, role: effectiveRole } });
-  } catch (err) {
-    console.error('Login error', err);
-    return res.status(500).json({ error: 'Server error' });
-  }
-});
-
-// LOGOUT
-app.post('/api/auth/logout', (req, res) => {
-  res.clearCookie('ifcdc_token');
-  return res.json({ message: 'Logged out' });
-});
-
-// GET CURRENT USER
-app.get('/api/auth/me', authRequired, (req, res) => {
-  return res.json({ user: req.user });
-});
-
-// Route aliases for /auth/* (without /api prefix)
-app.post('/auth/login', async (req, res) => {
-  try {
-    const { email, password, totpCode } = req.body;
-    const lowerEmail = (email || '').toLowerCase();
-    const user = await db.get<any>("SELECT * FROM users WHERE email = ?", lowerEmail);
-    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
-    if (!user.password_hash) {
-      const newHash = await bcrypt.hash(password, 10);
-      await db.run("UPDATE users SET password_hash = ? WHERE id = ?", newHash, user.id);
-    } else {
-      const ok = await bcrypt.compare(password, user.password_hash);
-      if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
-    }
-    
-    // Check account status
-    if (user.status !== 'active') {
-      return res.status(403).json({ message: 'Account restricted' });
-    }
-    
-    let effectiveRole = user.role;
-    if (MASTER_OWNER_EMAIL && lowerEmail === MASTER_OWNER_EMAIL.toLowerCase()) effectiveRole = "owner";
-    else if (ADMIN_EMAIL && lowerEmail === ADMIN_EMAIL.toLowerCase()) effectiveRole = "admin";
-    
-    // Check if 2FA is enabled for admin/owner roles
-    if (user.twofa_enabled && roleRequiresMfa(effectiveRole)) {
-      if (!totpCode) {
-        return res.status(200).json({ requires2FA: true, message: 'Please enter your 2FA code' });
-      }
-      const isValid = authenticator.verify({ token: totpCode, secret: user.twofa_secret });
-      if (!isValid) {
-        return res.status(401).json({ error: 'Invalid 2FA code' });
-      }
-    }
-    
-    const token = jwt.sign({ id: user.id, email: user.email, role: effectiveRole }, JWT_SECRET, { expiresIn: "7d" });
-    res.cookie('ifcdc_token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 });
-    return res.json({ id: user.id, email: user.email, role: effectiveRole });
-  } catch (err) {
-    console.error('Login error', err);
-    return res.status(500).json({ error: 'Server error' });
-  }
-});
-
-app.post('/auth/register', async (req, res) => {
-  try {
-    const { name, email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
-    const lowerEmail = (email || '').toLowerCase();
-    const existing = await db.get("SELECT id FROM users WHERE email = ?", lowerEmail);
-    if (existing) return res.status(409).json({ error: 'Email already registered' });
-    const finalRole = assignRole(lowerEmail);
-    const id = cryptoRandomId();
-    const password_hash = await bcrypt.hash(password, 10);
-    const created_at = new Date().toISOString();
-    await db.run(`INSERT INTO users (id, name, email, role, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)`, id, name, lowerEmail, finalRole, password_hash, created_at);
-    return res.status(201).json({ message: 'User created', role: finalRole });
-  } catch (err) {
-    console.error('Register error', err);
-    return res.status(500).json({ error: 'Server error' });
-  }
-});
-
-app.post('/auth/logout', (req, res) => {
-  res.clearCookie('ifcdc_token');
-  return res.json({ message: 'Logged out' });
-});
-
-app.get('/auth/me', authRequired, (req, res) => {
-  return res.json({ user: req.user });
-});
-
-// ----- Google OAuth Endpoints -----
-app.get('/auth/google', (req, res) => {
-  if (!googleOAuthConfig || !GOOGLE_CLIENT_ID) {
-    return res.status(503).json({ error: 'Google OAuth not configured' });
-  }
-  
-  const redirectUri = `${req.protocol}://${req.get('host')}/auth/google/callback`;
-  const state = Math.random().toString(36).substring(2);
-  
-  const authUrl = client.buildAuthorizationUrl(googleOAuthConfig, {
-    redirect_uri: redirectUri,
-    scope: 'openid email profile',
-    state,
-  });
-  
-  res.cookie('oauth_state', state, { httpOnly: true, maxAge: 600000 });
-  res.redirect(authUrl.href);
-});
-
-app.get('/auth/google/callback', async (req, res) => {
-  try {
-    if (!googleOAuthConfig || !GOOGLE_CLIENT_ID) {
-      return res.redirect('/login.html?error=google_not_configured');
-    }
-    
-    const redirectUri = `${req.protocol}://${req.get('host')}/auth/google/callback`;
-    const currentUrl = new URL(`${req.protocol}://${req.get('host')}${req.originalUrl}`);
-    
-    const tokens = await client.authorizationCodeGrant(googleOAuthConfig, currentUrl, {
-      expectedState: req.cookies.oauth_state,
-    });
-    
-    res.clearCookie('oauth_state');
-    
-    const claims = tokens.claims();
-    if (!claims || !claims.email) {
-      return res.redirect('/login.html?error=no_email');
-    }
-    
-    const email = (claims.email as string).toLowerCase();
-    const name = (claims.name as string) || email.split('@')[0];
-    const picture = claims.picture as string | undefined;
-    
-    let user = await db.get<any>("SELECT * FROM users WHERE email = ?", email);
-    
-    if (!user) {
-      const id = cryptoRandomId();
-      const finalRole = assignRole(email);
-      const created_at = new Date().toISOString();
-      
-      await db.run(
-        `INSERT INTO users (id, name, email, role, created_at, profile_image_url) VALUES (?, ?, ?, ?, ?, ?)`,
-        id, name, email, finalRole, created_at, picture || null
-      );
-      
-      user = await db.get<any>("SELECT * FROM users WHERE id = ?", id);
-      
-      await logAudit(
-        { method: "GET", originalUrl: "/auth/google/callback" } as express.Request,
-        { action: "GOOGLE_REGISTER", targetType: "USER", targetId: id, extra: { email } }
-      );
-    }
-    
-    if (user.status !== 'active') {
-      return res.redirect('/login.html?error=account_restricted');
-    }
-    
-    let effectiveRole = user.role;
-    if (MASTER_OWNER_EMAIL && email === MASTER_OWNER_EMAIL.toLowerCase()) effectiveRole = "owner";
-    else if (ADMIN_EMAIL && email === ADMIN_EMAIL.toLowerCase()) effectiveRole = "admin";
-    
-    const token = jwt.sign({ id: user.id, email: user.email, role: effectiveRole }, JWT_SECRET, { expiresIn: "7d" });
-    res.cookie('ifcdc_token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 });
-    
-    await logAudit(
-      { method: "GET", originalUrl: "/auth/google/callback", user: { id: user.id, name: user.name, email: user.email, role: effectiveRole } } as express.Request,
-      { action: "GOOGLE_LOGIN", targetType: "USER", targetId: user.id, extra: {} }
-    );
-    
-    if (effectiveRole === 'admin' || effectiveRole === 'owner' || effectiveRole === 'exec') {
-      return res.redirect('/admin/dashboard.html');
-    }
-    return res.redirect('/dashboard.html');
-  } catch (err) {
-    console.error('Google OAuth callback error:', err);
-    return res.redirect('/login.html?error=oauth_failed');
-  }
-});
-
-app.get('/auth/google/available', (req, res) => {
-  res.json({ available: !!googleOAuthConfig });
-});
-
-// ----- 2FA Setup Endpoints -----
-// Generate 2FA secret and QR code
-app.post('/api/auth/2fa/setup', authRequired, async (req, res) => {
-  try {
-    const userId = req.user?.id;
-    const user = await db.get<any>("SELECT * FROM users WHERE id = ?", userId);
-    
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    
-    const secret = authenticator.generateSecret();
-    const otpauthUrl = authenticator.keyuri(user.email, 'IFCDC', secret);
-    
-    // Generate QR code as data URL
-    const qrCodeDataUrl = await QRCode.toDataURL(otpauthUrl);
-    
-    // Temporarily store secret (will be confirmed on verify)
-    await db.run("UPDATE users SET twofa_secret = ? WHERE id = ?", secret, userId);
-    
-    res.json({ 
-      secret, 
-      qrCode: qrCodeDataUrl,
-      message: 'Scan the QR code with your authenticator app, then verify with a code'
-    });
-  } catch (err) {
-    console.error('2FA setup error:', err);
-    res.status(500).json({ error: 'Failed to setup 2FA' });
-  }
-});
-
-// Verify and enable 2FA
-app.post('/api/auth/2fa/verify', authRequired, async (req, res) => {
-  try {
-    const { code } = req.body;
-    const userId = req.user?.id;
-    
-    if (!code) {
-      return res.status(400).json({ error: '6-digit code required' });
-    }
-    
-    const user = await db.get<any>("SELECT * FROM users WHERE id = ?", userId);
-    
-    if (!user || !user.twofa_secret) {
-      return res.status(400).json({ error: 'Please generate a 2FA secret first' });
-    }
-    
-    const isValid = authenticator.verify({ token: code, secret: user.twofa_secret });
-    
-    if (!isValid) {
-      return res.status(401).json({ error: 'Invalid code. Please try again.' });
-    }
-    
-    // Enable 2FA
-    await db.run("UPDATE users SET twofa_enabled = 1 WHERE id = ?", userId);
-    
-    await logAudit(req, { action: "ENABLE_2FA", targetType: "USER", targetId: userId });
-    
-    res.json({ success: true, message: '2FA enabled successfully' });
-  } catch (err) {
-    console.error('2FA verify error:', err);
-    res.status(500).json({ error: 'Failed to verify 2FA' });
-  }
-});
-
-// Disable 2FA
-app.post('/api/auth/2fa/disable', authRequired, async (req, res) => {
-  try {
-    const { code, password } = req.body;
-    const userId = req.user?.id;
-    
-    const user = await db.get<any>("SELECT * FROM users WHERE id = ?", userId);
-    
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    
-    // Require password to disable 2FA
-    if (password) {
-      const ok = await bcrypt.compare(password, user.password_hash);
-      if (!ok) {
-        return res.status(401).json({ error: 'Invalid password' });
-      }
-    } else if (code) {
-      // Or verify with current TOTP code
-      const isValid = authenticator.verify({ token: code, secret: user.twofa_secret });
-      if (!isValid) {
-        return res.status(401).json({ error: 'Invalid 2FA code' });
-      }
-    } else {
-      return res.status(400).json({ error: 'Password or 2FA code required' });
-    }
-    
-    await db.run("UPDATE users SET twofa_enabled = 0, twofa_secret = NULL WHERE id = ?", userId);
-    
-    await logAudit(req, { action: "DISABLE_2FA", targetType: "USER", targetId: userId });
-    
-    res.json({ success: true, message: '2FA disabled' });
-  } catch (err) {
-    console.error('2FA disable error:', err);
-    res.status(500).json({ error: 'Failed to disable 2FA' });
-  }
-});
-
-// Get 2FA status
-app.get('/api/auth/2fa/status', authRequired, async (req, res) => {
-  try {
-    const userId = req.user?.id;
-    const user = await db.get<any>("SELECT twofa_enabled FROM users WHERE id = ?", userId);
-    
-    res.json({ enabled: !!user?.twofa_enabled });
-  } catch (err) {
-    console.error('2FA status error:', err);
-    res.status(500).json({ error: 'Failed to get 2FA status' });
-  }
-});
 
 // ----- Admin Services -----
 app.get("/api/admin/services", authRequired, requireAdmin, async (req, res) => {

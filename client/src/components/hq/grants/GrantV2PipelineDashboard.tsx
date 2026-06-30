@@ -27,8 +27,8 @@ export const GrantV2PipelineDashboard: React.FC<{
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
 
   const pipeline = useQuery({
-    queryKey: ["grant-v2-pipeline"],
-    queryFn: grantsApi.v2Pipeline,
+    queryKey: ["grant-v5-pipeline"],
+    queryFn: grantsApi.v5Pipeline,
     staleTime: 30_000,
   });
   const applications = useQuery({

@@ -19,18 +19,15 @@ import { GrantV5ComplianceDashboard } from "../../components/hq/grants/GrantV5Co
 import { GrantV4LifecyclePanel } from "../../components/hq/grants/GrantV4LifecyclePanel";
 import { GrantV4FundingCalendar } from "../../components/hq/grants/GrantV4FundingCalendar";
 import { GrantV4ProgramIntegration } from "../../components/hq/grants/GrantV4ProgramIntegration";
-import { GrantV4AuraAdvisor } from "../../components/hq/grants/GrantV4AuraAdvisor";
-import { GrantV3ProgramProfilesPanel } from "../../components/hq/grants/GrantV3ProgramProfilesPanel";
 import { GrantV3DocumentCenter } from "../../components/hq/grants/GrantV3DocumentCenter";
-import { GrantV3AuraExecutivePanel } from "../../components/hq/grants/GrantV3AuraExecutivePanel";
 import { GrantApplicationWorkflowPanel } from "../../components/hq/grants/GrantApplicationWorkflowPanel";
 import { GrantV2PipelineDashboard } from "../../components/hq/grants/GrantV2PipelineDashboard";
 import { GrantDocumentManagementPanel } from "../../components/hq/grants/GrantDocumentManagementPanel";
 import { GrantOutcomesPanel } from "../../components/hq/grants/GrantOutcomesPanel";
 import { GrantDeadlineRenewalPanel } from "../../components/hq/grants/GrantDeadlineRenewalPanel";
 import { GrantBudgetIntegrationPanel } from "../../components/hq/grants/GrantBudgetIntegrationPanel";
-import { GrantAuraIntelligencePanel } from "../../components/hq/grants/GrantAuraIntelligencePanel";
 import { GrantV2ExecutiveAnalytics } from "../../components/hq/grants/GrantV2ExecutiveAnalytics";
+import { GrantV5AuraAdvisorPanel } from "../../components/hq/grants/GrantV5AuraAdvisorPanel";
 import { GrantLibraryPanel, GrantWriterStudioPanel, GrantOpportunityFinderPanel } from "../../components/hq/grants/GrantCenterEnterprisePanels";
 
 type Tab = "overview" | "pipeline" | "divisions" | "funders" | "opportunities" | "writer-studio" | "library" | "applications" | "calendar" | "deadlines" | "documents"
@@ -341,12 +338,7 @@ const GrantCenterPage: React.FC = () => {
         )}
 
         {tab === "divisions" && (
-          <>
-            <GrantV4ProgramIntegration />
-            <div style={{ marginTop: "1.25rem" }}>
-              <GrantV3ProgramProfilesPanel />
-            </div>
-          </>
+          <GrantV4ProgramIntegration />
         )}
 
         {tab === "funders" && (
@@ -964,17 +956,7 @@ const GrantCenterPage: React.FC = () => {
           </HqPanel>
         )}
 
-        {tab === "ai-intelligence" && (
-          <>
-            <GrantV4AuraAdvisor />
-            <div style={{ marginTop: "1.25rem" }}>
-              <GrantV3AuraExecutivePanel />
-            </div>
-            <div style={{ marginTop: "1.25rem" }}>
-              <GrantAuraIntelligencePanel />
-            </div>
-          </>
-        )}
+        {tab === "ai-intelligence" && <GrantV5AuraAdvisorPanel />}
       </div>
     </HQLayout>
   );
