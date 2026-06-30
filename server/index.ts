@@ -133,10 +133,21 @@ async function startServer() {
     console.log(`Production static root: ${distPublic}`);
     console.log(`SPA index exists: ${fs.existsSync(spaIndexPath)}`);
 
-    app.use(express.static(distPublic));
+    app.use(
+      express.static(distPublic, {
+        setHeaders(res, filePath) {
+          if (filePath.endsWith("index.html")) {
+            res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+          } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+            res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+          }
+        },
+      }),
+    );
 
     app.get("/", (_req, res) => {
       if (fs.existsSync(spaIndexPath)) {
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
         return res.sendFile(spaIndexPath);
       }
       return res.redirect("/hq/grants");
@@ -146,7 +157,13 @@ async function startServer() {
       if (req.path.startsWith("/api") || req.path.startsWith("/twilio")) {
         return next();
       }
+      // Never serve SPA shell for missing hashed bundles — Safari reports
+      // "Importing a module script failed" when HTML is returned as JS.
+      if (req.path.startsWith("/assets/")) {
+        return res.status(404).type("text/plain").send("Asset not found");
+      }
       if (fs.existsSync(spaIndexPath)) {
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
         return res.sendFile(spaIndexPath);
       }
       const legacyIndex = path.join(publicDir, "index.html");
@@ -183,8 +200,7 @@ async function startServer() {
     seedPassword: FOUNDER_SEED_PASSWORD,
     name: FOUNDER_NAME,
   }).catch((err) => {
-    console.error("Failed to initialize IFCDC HQ:", err);
-    process.exit(1);
+    console.error("Failed to initialize IFCDC HQ (API remains up):", err);
   });
 }
 
