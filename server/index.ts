@@ -171,22 +171,21 @@ async function startServer() {
 
   await new Promise<void>((resolve, reject) => {
     server.listen(PORT, "0.0.0.0", () => {
-      console.log(`IFCDC Health System API live on port ${PORT}`);
+      console.log(`IFCDC Health System API live on port ${PORT} (0.0.0.0)`);
+      console.log(`Health check: GET /api/health`);
       resolve();
     });
     server.once("error", reject);
   });
 
-  try {
-    await initializeHqModules({
-      email: FOUNDER_EMAIL,
-      seedPassword: FOUNDER_SEED_PASSWORD,
-      name: FOUNDER_NAME,
-    });
-  } catch (err) {
+  void initializeHqModules({
+    email: FOUNDER_EMAIL,
+    seedPassword: FOUNDER_SEED_PASSWORD,
+    name: FOUNDER_NAME,
+  }).catch((err) => {
     console.error("Failed to initialize IFCDC HQ:", err);
     process.exit(1);
-  }
+  });
 }
 
 startServer().catch((err) => {

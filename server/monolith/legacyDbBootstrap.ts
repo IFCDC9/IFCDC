@@ -1,10 +1,9 @@
-import path from "path";
-import fs from "fs";
-import sqlite3 from "sqlite3";
-import { open, Database } from "sqlite";
 import bcrypt from "bcryptjs";
 import { setMonolithDb } from "./dbAccess";
 import { ROLES, cryptoRandomId } from "./constants";
+import { getDataDir, getDbPath } from "../config/dataPaths";
+import sqlite3 from "sqlite3";
+import { open, Database } from "sqlite";
 
 interface LegacyUser {
   id: string;
@@ -22,13 +21,10 @@ export interface FounderSeedConfig {
 }
 
 export async function initLegacyMonolithDb(founder: FounderSeedConfig): Promise<Database> {
-  const dataDir = path.join(import.meta.dirname, "..", "data");
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
+  getDataDir();
 
   const db = await open({
-    filename: path.join(dataDir, "ifcdc.db"),
+    filename: getDbPath(),
     driver: sqlite3.Database,
   });
   setMonolithDb(db);

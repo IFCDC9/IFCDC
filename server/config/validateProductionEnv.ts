@@ -43,6 +43,14 @@ export function assertProductionEnv(): void {
     for (const message of errors) {
       console.error(`  - ${message}`);
     }
+    console.error("Configured keys present:", [
+      "NODE_ENV",
+      "JWT_SECRET",
+      "SESSION_SECRET",
+      "FOUNDER_SEED_PASSWORD",
+      "MASTER_OWNER_EMAIL",
+      "PUBLIC_APP_URL",
+    ].map((k) => `${k}=${process.env[k] ? "set" : "MISSING"}`).join(", "));
     console.error("See .env.example for required production variables.");
     process.exit(1);
   }

@@ -19,6 +19,8 @@ services:
         value: production
       - key: NODE_VERSION
         value: "20"
+      - key: IFCDC_DATA_DIR
+        value: /opt/render/project/src/data
       - key: JWT_SECRET
         sync: false
       - key: MASTER_OWNER_EMAIL

@@ -2,17 +2,14 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import { getDb } from "../db";
+import { getBackupDir, getDbPath } from "../config/dataPaths";
 
-function getDataDir(): string {
-  return path.join(import.meta.dirname, "..", "..", "data");
+export function getDbPathForBackup(): string {
+  return getDbPath();
 }
 
-export function getDbPath(): string {
-  return path.join(getDataDir(), "ifcdc.db");
-}
-
-export function getBackupDir(): string {
-  return path.join(getDataDir(), "backups");
+export function getBackupDirPath(): string {
+  return getBackupDir();
 }
 
 export async function ensureBackupTables(): Promise<void> {
@@ -45,10 +42,6 @@ export async function createDatabaseBackup(triggeredBy = "system"): Promise<{
   }
 
   const backupDir = getBackupDir();
-  if (!fs.existsSync(backupDir)) {
-    fs.mkdirSync(backupDir, { recursive: true });
-  }
-
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const filename = `ifcdc-${timestamp}.db`;
   const dest = path.join(backupDir, filename);
