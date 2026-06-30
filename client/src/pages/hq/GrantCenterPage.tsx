@@ -33,6 +33,9 @@ import { GrantV5PipelineAutomationPanel } from "../../components/hq/grants/Grant
 import { GrantEconomicDevelopmentPanel } from "../../components/hq/grants/GrantEconomicDevelopmentPanel";
 import { GrantDivisionConnectorsPanel } from "../../components/hq/grants/GrantDivisionConnectorsPanel";
 import { GrantLibraryPanel, GrantWriterStudioPanel, GrantOpportunityFinderPanel } from "../../components/hq/grants/GrantCenterEnterprisePanels";
+import { GrantReadOnlyBanner } from "../../components/hq/grants/GrantReadOnlyBanner";
+import { HqDataUnavailable } from "../../components/hq/HqDataUnavailable";
+import { useGrantManage } from "../../hooks/useGrantManage";
 
 type Tab = "overview" | "pipeline" | "divisions" | "funders" | "opportunities" | "writer-studio" | "library" | "applications" | "calendar" | "deadlines" | "documents"
   | "budgets" | "finance" | "awards" | "compliance" | "funder-reports" | "analytics" | "history" | "notifications" | "ai-intelligence";
@@ -95,6 +98,7 @@ const GrantCenterPage: React.FC = () => {
   const [budgetLines, setBudgetLines] = useState([{ category: "personnel", line_name: "Staff Salaries", allocated: "" }]);
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
   const qc = useQueryClient();
+  const { canManage } = useGrantManage();
 
   useEffect(() => {
     const tabParam = searchParams.get("tab") as Tab | null;
@@ -224,6 +228,17 @@ const GrantCenterPage: React.FC = () => {
         ))}
       </nav>
 
+      <GrantReadOnlyBanner />
+
+      {dashboard.isError && (
+        <HqDataUnavailable
+          title="Grant Center data unavailable"
+          message="The grants dashboard could not load live data from headquarters."
+          detail={(dashboard.error as Error)?.message}
+          onRetry={() => void qc.invalidateQueries({ queryKey: ["grants-dashboard"] })}
+        />
+      )}
+
       <div className="hq-tab-content hq-fade-in">
         {tab === "overview" && (
           <>
@@ -251,9 +266,11 @@ const GrantCenterPage: React.FC = () => {
                   {" · "}
                   {grantPlatform.data.externalFeedCount ?? 0} imported opportunities
                   {" · "}
-                  <button type="button" className="hq-btn hq-btn-ghost hq-btn-sm" disabled={syncFeeds.isPending} onClick={() => syncFeeds.mutate()}>
-                    {syncFeeds.isPending ? "Syncing…" : "Sync feeds"}
-                  </button>
+                  {canManage && (
+                    <button type="button" className="hq-btn hq-btn-ghost hq-btn-sm" disabled={syncFeeds.isPending} onClick={() => syncFeeds.mutate()}>
+                      {syncFeeds.isPending ? "Syncing…" : "Sync feeds"}
+                    </button>
+                  )}
                 </p>
               </HqPanel>
               </div>
@@ -368,9 +385,11 @@ const GrantCenterPage: React.FC = () => {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: selectedFunderId ? "320px 1fr" : "1fr", gap: "1rem" }}>
               <HqPanel title="Funder CRM" headerExtra={
-                <button type="button" className="hq-btn hq-btn-sm hq-btn-primary" onClick={() => setShowNewFunder(!showNewFunder)}><Plus size={14} /> Add</button>
+                canManage ? (
+                  <button type="button" className="hq-btn hq-btn-sm hq-btn-primary" onClick={() => setShowNewFunder(!showNewFunder)}><Plus size={14} /> Add</button>
+                ) : undefined
               }>
-                {showNewFunder && (
+                {canManage && showNewFunder && (
                   <div style={{ marginBottom: "1rem", padding: "0.75rem", background: "var(--hq-bg-subtle)", borderRadius: 6 }}>
                     <input className="hq-aura-input" placeholder="Funder name" value={newFunder.name} onChange={(e) => setNewFunder({ ...newFunder, name: e.target.value })} style={{ marginBottom: "0.5rem" }} />
                     <input className="hq-aura-input" placeholder="Contact name" value={newFunder.contact_name} onChange={(e) => setNewFunder({ ...newFunder, contact_name: e.target.value })} style={{ marginBottom: "0.5rem" }} />
@@ -428,6 +447,7 @@ const GrantCenterPage: React.FC = () => {
                           </ul>
                         </HqPanel>
                       </div>
+                      {canManage && (
                       <HqPanel title="Log Interaction">
                         <div style={{ display: "grid", gap: "0.5rem" }}>
                           <input className="hq-aura-input" placeholder="Subject" value={newInteraction.subject} onChange={(e) => setNewInteraction({ ...newInteraction, subject: e.target.value })} />
@@ -443,6 +463,7 @@ const GrantCenterPage: React.FC = () => {
                           ))}
                         </ul>
                       </HqPanel>
+                      )}
                     </>
                   )}
                 </HqPanel>
@@ -459,12 +480,14 @@ const GrantCenterPage: React.FC = () => {
             <div style={{ marginBottom: "1.25rem" }}>
               <GrantV5NationalDatabase />
             </div>
+            {canManage && (
             <div style={{ marginBottom: "1rem", display: "flex", justifyContent: "flex-end" }}>
               <button type="button" className="hq-btn hq-btn-primary" onClick={() => setShowNewOpp(!showNewOpp)}>
                 <Plus size={16} /> New Opportunity
               </button>
             </div>
-            {showNewOpp && (
+            )}
+            {canManage && showNewOpp && (
               <div className="hq-panel hq-fade-in" style={{ marginBottom: "1rem", padding: "1.25rem" }}>
                 <h3 style={{ marginBottom: "1rem", color: "var(--hq-gold)" }}>Add Grant Opportunity</h3>
                 <div className="hq-form-grid">
@@ -535,7 +558,7 @@ const GrantCenterPage: React.FC = () => {
 
         {tab === "library" && (
           <GrantLibraryPanel
-            onApplyTemplate={(templateId) => {
+            onApplyTemplate={canManage ? (templateId) => {
               if (selectedApplicationId) {
                 grantsApi.writerStudio(selectedApplicationId, templateId).then(() => {
                   qc.invalidateQueries({ queryKey: ["grant-writer-studio", selectedApplicationId] });
@@ -546,16 +569,18 @@ const GrantCenterPage: React.FC = () => {
               } else {
                 selectTab("applications");
               }
-            }}
+            } : undefined}
           />
         )}
 
         {tab === "applications" && (
           <>
+            {canManage && (
             <div style={{ marginBottom: "1rem", display: "flex", justifyContent: "flex-end" }}>
               <button type="button" className="hq-btn hq-btn-primary" onClick={() => setShowNewApp(!showNewApp)}><Plus size={16} /> New Application</button>
             </div>
-            {showNewApp && (
+            )}
+            {canManage && showNewApp && (
               <div className="hq-panel hq-fade-in" style={{ marginBottom: "1rem", padding: "1.25rem" }}>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: "0.75rem", alignItems: "end" }}>
                   <div><label style={{ fontSize: "0.75rem", color: "var(--hq-text-muted)" }}>Title</label>
@@ -624,7 +649,7 @@ const GrantCenterPage: React.FC = () => {
                       <div className="hq-activity-content"><div className="hq-activity-title">{d.title}</div><div className="hq-activity-detail">{d.opportunity_title} · {d.deadline_type}</div></div>
                       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                         <span className="hq-activity-time">{fmtDate(d.due_date)}</span>
-                        {!d.completed && <button type="button" className="hq-btn hq-btn-secondary" style={{ padding: "0.25rem 0.5rem", fontSize: "0.7rem" }} onClick={() => completeDeadline.mutate(d.id)}><CheckCircle size={12} /></button>}
+                        {!d.completed && canManage && <button type="button" className="hq-btn hq-btn-secondary" style={{ padding: "0.25rem 0.5rem", fontSize: "0.7rem" }} onClick={() => completeDeadline.mutate(d.id)}><CheckCircle size={12} /></button>}
                       </div>
                     </li>
                   ))}
@@ -663,7 +688,7 @@ const GrantCenterPage: React.FC = () => {
                       <td>{fmtDate(d.due_date)}</td>
                       <td><StatusBadge label={d.completed ? "Complete" : "Open"} variant={d.completed ? "success" : "warning"} /></td>
                       <td>
-                        {!d.completed && (
+                        {!d.completed && canManage && (
                           <button type="button" className="hq-btn hq-btn-sm hq-btn-secondary" onClick={() => completeDeadline.mutate(d.id)}>
                             <CheckCircle size={12} /> Mark Done
                           </button>
@@ -686,7 +711,8 @@ const GrantCenterPage: React.FC = () => {
             <GrantDocumentManagementPanel
               applications={(applications.data?.applications ?? []).map((a) => ({ id: a.id, title: a.title }))}
               uploadPending={uploadDocFile.isPending}
-              onUpload={({ name, application_id, doc_category, file }) => {
+              readOnly={!canManage}
+              onUpload={canManage ? ({ name, application_id, doc_category, file }) => {
                 if (!file) return;
                 const reader = new FileReader();
                 reader.onload = () => {
@@ -701,7 +727,7 @@ const GrantCenterPage: React.FC = () => {
                   } as Parameters<typeof grantsApi.uploadDocumentFile>[0] & { doc_category?: string });
                 };
                 reader.readAsDataURL(file);
-              }}
+              } : () => undefined}
             />
           </GrantV3DocumentCenter>
         )}
@@ -709,6 +735,7 @@ const GrantCenterPage: React.FC = () => {
         {tab === "budgets" && (
           <>
             <GrantBudgetIntegrationPanel />
+            {canManage && (
             <div className="hq-panel" style={{ marginTop: "1.25rem", marginBottom: "1rem", padding: "1.25rem" }}>
               <h4 style={{ fontSize: "0.85rem", color: "var(--hq-gold)", marginBottom: "0.75rem" }}>Budget Builder — Connected to Financial Center</h4>
               <div style={{ display: "flex", gap: "0.75rem", alignItems: "end", flexWrap: "wrap" }}>
@@ -729,6 +756,7 @@ const GrantCenterPage: React.FC = () => {
                 </button>
               </div>
             </div>
+            )}
             <HqPanel title="Grant Budgets (Financial Center)">
               {budgets.isLoading ? <HqLoading /> : (
                 <table className="hq-table">
@@ -761,7 +789,7 @@ const GrantCenterPage: React.FC = () => {
                   <option value="">All awards</option>
                   {awardList.map((a) => <option key={a.id} value={a.id}>{a.opportunity_title ?? a.application_title}</option>)}
                 </select></div>
-              {selectedAward && (
+              {selectedAward && canManage && (
                 <button type="button" className="hq-btn hq-btn-secondary" disabled={syncLabor.isPending} onClick={() => syncLabor.mutate(selectedAward)}>
                   <Users size={14} /> Sync Labor from Payroll
                 </button>
@@ -845,7 +873,7 @@ const GrantCenterPage: React.FC = () => {
                       <td>{c.grant_title as string}</td><td>{c.report_type as string}</td>
                       <td>{fmtDate(c.due_date as string)}</td>
                       <td><StatusBadge label={c.status as string} variant={STATUS_VARIANT[c.status as string] ?? "muted"} /></td>
-                      <td>{c.status === "pending" && <button type="button" className="hq-btn hq-btn-sm" onClick={() => grantsApi.updateCompliance(c.id as string, { status: "submitted" }).then(() => qc.invalidateQueries({ queryKey: ["grants-compliance"] }))}>Mark Submitted</button>}</td>
+                      <td>{c.status === "pending" && canManage && <button type="button" className="hq-btn hq-btn-sm" onClick={() => grantsApi.updateCompliance(c.id as string, { status: "submitted" }).then(() => qc.invalidateQueries({ queryKey: ["grants-compliance"] }))}>Mark Submitted</button>}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -964,7 +992,7 @@ const GrantCenterPage: React.FC = () => {
                       <td>{n.notification_type as string}</td>
                       <td>{fmtDate(n.due_date as string)}</td>
                       <td><StatusBadge label={(n.read as number) ? "read" : "unread"} variant={(n.read as number) ? "muted" : "warning"} /></td>
-                      <td>{!(n.read as number) && <button type="button" className="hq-btn hq-btn-sm" onClick={() => markRead.mutate(n.id as string)}>Mark Read</button>}</td>
+                      <td>{!(n.read as number) && canManage && <button type="button" className="hq-btn hq-btn-sm" onClick={() => markRead.mutate(n.id as string)}>Mark Read</button>}</td>
                     </tr>
                   ))}
                   {!(notifications.data?.notifications ?? []).length && <tr><td colSpan={5} className="hq-empty-cell">No notifications. Deadlines and compliance items generate reminders automatically.</td></tr>}

@@ -3,12 +3,13 @@ import type { Request, Response } from "express";
 import { getDb } from "../db";
 import { hqAuthRequired, requireHQModule } from "../middleware/hqAuth";
 import { hasPermission } from "../hq/enterpriseRoles";
-import { ensureGrantTables, grantId, logGrantActivity } from "../hq/grantsSchema";
+import { grantId, logGrantActivity } from "../hq/grantsSchema";
+import { ensureGrantModulesReady } from "../hq/grantModuleBootstrap";
+import { validateGrantDocumentUpload } from "../hq/grantDocumentUpload";
 import { buildGrantExecutiveDashboard, buildGrantAnalytics, generateGrantNotifications, buildFunderReports } from "../hq/grantReporting";
 import { saveHqFileBase64 } from "../hq/hqFileStorage";
 import { createGrantFinanceBudget, getGrantFinancialSummary } from "../hq/grantFinanceIntegration";
 import { notifyGrantAwarded } from "../hq/criticalAlerts";
-import { ensureFinanceTables } from "../hq/financeSchema";
 import { getIntegrationOptions } from "../hq/financeReporting";
 import {
   findGrantOpportunities,
@@ -23,7 +24,6 @@ import {
   updateFunder,
   logFunderInteraction,
   buildFunderCrmDashboard,
-  ensureFunderCrmTables,
 } from "../hq/grantFunderCrm";
 import {
   searchGrantOpportunities,
@@ -113,7 +113,6 @@ import {
   assistWriterSection,
   buildOpportunityFinder,
   buildFundingAnalyticsDashboard,
-  ensureGrantCenterTables,
 } from "../hq/grantCenterEngine";
 import { syncGrantFeeds, getGrantFeedIntegrationStatus } from "../hq/grantFeedConnectors";
 
@@ -123,10 +122,7 @@ router.use(hqAuthRequired, requireHQModule("grants"));
 
 router.use(async (_req, _res, next) => {
   try {
-    await ensureGrantTables();
-    await ensureFinanceTables();
-    await ensureGrantCenterTables();
-    await ensureFunderCrmTables();
+    await ensureGrantModulesReady();
     next();
   } catch (e) {
     next(e);
@@ -644,8 +640,13 @@ router.post("/documents/upload", async (req: Request, res: Response) => {
   if (!fileName || !base64 || !name) {
     return res.status(400).json({ error: "fileName, base64, and name are required" });
   }
+  const validation = validateGrantDocumentUpload(String(fileName), String(base64), mimeType ? String(mimeType) : undefined);
+  if (!validation.ok) {
+    return res.status(400).json({ error: validation.error });
+  }
   try {
-    const saved = await saveHqFileBase64(String(fileName), String(base64), mimeType ? String(mimeType) : undefined);
+    const uploadedBy = req.hqUser?.email ?? "unknown";
+    const saved = await saveHqFileBase64(String(fileName), String(base64), validation.mime, uploadedBy);
     const db = await getDb();
     const now = new Date().toISOString();
     const docId = grantId();

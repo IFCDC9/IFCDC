@@ -1,6 +1,5 @@
-import { ensureGrantTables } from "../hq/grantsSchema";
+import { ensureGrantModulesReady } from "../hq/grantModuleBootstrap";
 import { ensurePeopleTables } from "../hq/peopleSchema";
-import { ensureFinanceTables } from "../hq/financeSchema";
 import { ensureOperationsTables } from "../hq/operationsSchema";
 import { ensureDashboardTables } from "../hq/dashboardSchema";
 import { ensureSoftwareDivisionTables } from "../hq/softwareDivisionSchema";
@@ -25,9 +24,8 @@ import { initLegacyMonolithDb, type FounderSeedConfig } from "../monolith/legacy
 /** Initialize legacy SQLite schema, seeds, and all HQ module tables. */
 export async function initializeHqModules(founder: FounderSeedConfig): Promise<void> {
   await initLegacyMonolithDb(founder);
-  await ensureGrantTables();
+  await ensureGrantModulesReady();
   await ensurePeopleTables();
-  await ensureFinanceTables();
   await ensureOperationsTables();
   await ensureDashboardTables();
   await ensureSoftwareDivisionTables();

@@ -5,6 +5,7 @@ import { grantsApi } from "../../../api/grantsApi";
 import { HqPanel } from "../HqPanel";
 import { HqLoading } from "../HqLoading";
 import { formatCurrency } from "../../../utils/safeFormat";
+import { useGrantManage } from "../../../hooks/useGrantManage";
 
 const fmt = formatCurrency;
 
@@ -17,6 +18,7 @@ const SUGGESTED_QUESTIONS = [
 
 export const GrantV5AuraAdvisorPanel: React.FC = () => {
   const [question, setQuestion] = useState("");
+  const { canManage } = useGrantManage();
 
   const briefing = useQuery({
     queryKey: ["grant-v5-aura-briefing"],
@@ -38,6 +40,8 @@ export const GrantV5AuraAdvisorPanel: React.FC = () => {
           <HqLoading />
         ) : (
           <>
+            {canManage && (
+            <>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginBottom: "0.75rem" }}>
               {SUGGESTED_QUESTIONS.map((q) => (
                 <button
@@ -72,6 +76,8 @@ export const GrantV5AuraAdvisorPanel: React.FC = () => {
                 <Sparkles size={14} /> Ask
               </button>
             </div>
+            </>
+            )}
 
             {data?.insight && (
               <div className="hq-aura-response" style={{ whiteSpace: "pre-wrap", marginBottom: "1rem" }}>

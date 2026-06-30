@@ -5,6 +5,7 @@ import { grantsApi } from "../../../api/grantsApi";
 import { HqPanel } from "../HqPanel";
 import { HqLoading } from "../HqLoading";
 import { formatCurrency, formatDateTime } from "../../../utils/safeFormat";
+import { useGrantManage } from "../../../hooks/useGrantManage";
 
 const fmt = formatCurrency;
 
@@ -12,6 +13,7 @@ type EntityType = "opportunity" | "application" | "award";
 
 export const GrantV5PipelineKanban: React.FC = () => {
   const qc = useQueryClient();
+  const { canManage } = useGrantManage();
   const [selected, setSelected] = useState<{ id: string; entityType: EntityType; stageKey: string } | null>(null);
   const [targetStage, setTargetStage] = useState("");
 
@@ -98,7 +100,7 @@ export const GrantV5PipelineKanban: React.FC = () => {
         ))}
       </div>
 
-      {selected && (
+      {selected && canManage && (
         <div
           style={{
             marginTop: "1rem",

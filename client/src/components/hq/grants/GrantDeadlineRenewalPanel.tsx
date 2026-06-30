@@ -5,6 +5,7 @@ import { grantsApi, type GrantAward, type GrantDeadline } from "../../../api/gra
 import { HqPanel } from "../HqPanel";
 import { StatusBadge } from "../StatusBadge";
 import { HqLoading } from "../HqLoading";
+import { useGrantManage } from "../../../hooks/useGrantManage";
 import { formatCurrency } from "../../../utils/safeFormat";
 
 const fmt = formatCurrency;
@@ -16,6 +17,7 @@ function fmtDate(d: string | null | undefined): string {
 
 export const GrantDeadlineRenewalPanel: React.FC = () => {
   const qc = useQueryClient();
+  const { canManage } = useGrantManage();
   const [renewalForm, setRenewalForm] = useState({ award_id: "", renewal_date: "", notes: "" });
 
   const deadlines = useQuery({
@@ -66,7 +68,7 @@ export const GrantDeadlineRenewalPanel: React.FC = () => {
                   <td>{d.opportunity_title ?? "—"}</td>
                   <td>{fmtDate(d.due_date)}</td>
                   <td>
-                    {!d.completed && (
+                    {!d.completed && canManage && (
                       <button
                         type="button"
                         className="hq-btn hq-btn-sm hq-btn-secondary"
@@ -90,6 +92,7 @@ export const GrantDeadlineRenewalPanel: React.FC = () => {
       <HqPanel title="Renewal Tracking" subtitle="Plan and monitor grant renewals">
         {renewals.isLoading ? <HqLoading /> : (
           <>
+            {canManage && (
             <div style={{ display: "grid", gap: "0.5rem", marginBottom: "1rem" }}>
               <label style={{ fontSize: "0.78rem", color: "var(--hq-text-muted)" }}>Award to renew</label>
               <select
@@ -133,6 +136,7 @@ export const GrantDeadlineRenewalPanel: React.FC = () => {
                 <RefreshCw size={14} /> Plan Renewal
               </button>
             </div>
+            )}
             <ul className="hq-activity-list" style={{ margin: 0, padding: 0, listStyle: "none" }}>
               {renewalList.map((r) => (
                 <li key={String(r.id)} className="hq-activity-item">

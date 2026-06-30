@@ -366,15 +366,16 @@ async function syncSamGovStatus(): Promise<FeedSyncResult> {
   }
   try {
     const apiKey = process.env.SAM_GOV_API_KEY;
-    const url = apiKey
-      ? `https://api.sam.gov/entity-information/v3/entities?ueiSAM=${encodeURIComponent(uei)}&api_key=${apiKey}`
-      : null;
-    if (!url) {
+    if (!apiKey) {
       const result = { status: "skipped" as const, imported: 0, updated: 0, error: "SAM_GOV_API_KEY not configured" };
       await recordFeedSync("sam_gov", result);
       return { provider: "sam_gov", ...result, syncedAt };
     }
-    const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    const url = `https://api.sam.gov/entity-information/v3/entities?ueiSAM=${encodeURIComponent(uei)}`;
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(15000),
+      headers: { "X-Api-Key": apiKey },
+    });
     const ok = res.ok;
     const result = {
       status: ok ? ("connected" as const) : ("error" as const),

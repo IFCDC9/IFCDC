@@ -19,7 +19,8 @@ export const GrantDocumentManagementPanel: React.FC<{
   applications: { id: string; title: string }[];
   onUpload: (payload: { name: string; application_id?: string; doc_category: string; file?: File }) => void;
   uploadPending?: boolean;
-}> = ({ applications, onUpload, uploadPending }) => {
+  readOnly?: boolean;
+}> = ({ applications, onUpload, uploadPending, readOnly }) => {
   const [selectedApp, setSelectedApp] = useState("");
   const [uploadForm, setUploadForm] = useState({ name: "", category: "attachment" as string, file: null as File | null });
 
@@ -42,6 +43,8 @@ export const GrantDocumentManagementPanel: React.FC<{
               ))}
             </select>
           </div>
+          {!readOnly && (
+          <>
           <div>
             <label style={{ fontSize: "0.72rem", color: "var(--hq-text-muted)" }}>Document name</label>
             <input className="hq-aura-input" value={uploadForm.name} onChange={(e) => setUploadForm({ ...uploadForm, name: e.target.value })} placeholder="Budget narrative Q1" />
@@ -78,6 +81,8 @@ export const GrantDocumentManagementPanel: React.FC<{
           >
             <Upload size={14} /> Upload
           </button>
+          </>
+          )}
         </div>
 
         {checklist.isLoading ? (

@@ -5,6 +5,7 @@ import { grantsApi } from "../../../api/grantsApi";
 import { HqPanel } from "../HqPanel";
 import { StatusBadge } from "../StatusBadge";
 import { HqLoading } from "../HqLoading";
+import { useGrantManage } from "../../../hooks/useGrantManage";
 
 function QueryError({ message }: { message: string }) {
   return (
@@ -84,6 +85,7 @@ export const GrantWriterStudioPanel: React.FC<{
   onSelectApplication: (id: string) => void;
 }> = ({ applications, selectedApplicationId, onSelectApplication }) => {
   const qc = useQueryClient();
+  const { canManage } = useGrantManage();
   const [activeSection, setActiveSection] = useState("executive_summary");
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -145,10 +147,12 @@ export const GrantWriterStudioPanel: React.FC<{
               rows={14}
               style={{ width: "100%", fontFamily: "inherit", lineHeight: 1.6 }}
               value={content}
-              onChange={(e) => setDraft({ ...draft, [activeSection]: e.target.value })}
+              onChange={(e) => canManage && setDraft({ ...draft, [activeSection]: e.target.value })}
+              readOnly={!canManage}
               placeholder={`Write ${current?.section_label ?? activeSection}…`}
             />
             {saveError && <p className="hq-muted-text" style={{ color: "var(--hq-danger)", marginTop: "0.5rem", fontSize: "0.8rem" }}>{saveError}</p>}
+            {canManage && (
             <div className="hq-founder-command-strip" style={{ marginTop: "0.75rem" }}>
               <button type="button" className="hq-btn hq-btn-primary" disabled={saveSection.isPending} onClick={() => saveSection.mutate({ sectionKey: activeSection, content })}>
                 <FileText size={14} /> {saveSection.isPending ? "Saving…" : "Save Section"}
@@ -157,6 +161,7 @@ export const GrantWriterStudioPanel: React.FC<{
                 <Sparkles size={14} /> {aiAssist.isPending ? "Drafting…" : "AURA Draft"}
               </button>
             </div>
+            )}
             {studio.data?.application && (
               <p className="hq-muted-text" style={{ marginTop: "0.75rem", fontSize: "0.8rem" }}>
                 Opportunity: {String((studio.data.application as { opportunity_title?: string }).opportunity_title ?? "—")}

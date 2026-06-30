@@ -6,10 +6,12 @@ import { HqPanel } from "../HqPanel";
 import { StatusBadge } from "../StatusBadge";
 import { HqLoading } from "../HqLoading";
 import { formatCurrency } from "../../../utils/safeFormat";
+import { useGrantManage } from "../../../hooks/useGrantManage";
 
 const fmt = formatCurrency;
 
 export const GrantV5NationalDatabase: React.FC = () => {
+  const { canManage } = useGrantManage();
   const national = useQuery({
     queryKey: ["grant-v5-national"],
     queryFn: () => grantsApi.v5NationalDatabase(30),
@@ -30,9 +32,11 @@ export const GrantV5NationalDatabase: React.FC = () => {
         <StatusBadge label="NATIONAL" variant="gold" />
         <Globe size={16} style={{ color: "var(--hq-gold)" }} />
         <span className="hq-muted-text" style={{ fontSize: "0.82rem" }}>{opps.length} national opportunities</span>
+        {canManage && (
         <button type="button" className="hq-btn hq-btn-primary hq-btn-sm" style={{ marginLeft: "auto" }} disabled={matchAll.isPending} onClick={() => matchAll.mutate()}>
           <Sparkles size={14} /> Match All Divisions
         </button>
+        )}
         <button type="button" className="hq-btn hq-btn-ghost hq-btn-sm" onClick={() => national.refetch()}>
           <RefreshCw size={14} />
         </button>

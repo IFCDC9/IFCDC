@@ -6,12 +6,14 @@ import { HqPanel } from "../HqPanel";
 import { StatusBadge } from "../StatusBadge";
 import { HqLoading } from "../HqLoading";
 import { formatCurrency } from "../../../utils/safeFormat";
+import { useGrantManage } from "../../../hooks/useGrantManage";
 
 const fmt = formatCurrency;
 
 export const GrantV5ApplicationWorkspace: React.FC<{
   applications: { id: string; title: string }[];
 }> = ({ applications }) => {
+  const { canManage } = useGrantManage();
   const [selectedId, setSelectedId] = useState(applications[0]?.id ?? "");
   const [aiSection, setAiSection] = useState("narrative");
   const [aiResult, setAiResult] = useState<string | null>(null);
@@ -68,6 +70,7 @@ export const GrantV5ApplicationWorkspace: React.FC<{
             Budget builder auto-generates line items — edit via Finance integration for awarded grants.
           </div>
 
+          {canManage && (
           <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
             <select className="hq-aura-input" value={aiSection} onChange={(e) => setAiSection(e.target.value)}>
               <option value="narrative">Narrative</option>
@@ -80,6 +83,7 @@ export const GrantV5ApplicationWorkspace: React.FC<{
               <Sparkles size={14} /> AI Assist
             </button>
           </div>
+          )}
 
           {aiResult && (
             <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: "0.85rem", lineHeight: 1.65, color: "var(--hq-text-muted)", padding: "0.75rem", background: "var(--hq-bg-subtle)", borderRadius: 6 }}>

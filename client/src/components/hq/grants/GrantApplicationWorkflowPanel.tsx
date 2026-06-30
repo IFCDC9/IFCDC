@@ -4,6 +4,7 @@ import { grantsApi } from "../../../api/grantsApi";
 import { HqPanel } from "../HqPanel";
 import { StatusBadge } from "../StatusBadge";
 import { HqLoading } from "../HqLoading";
+import { useGrantManage } from "../../../hooks/useGrantManage";
 
 const ACTION_LABELS: Record<string, string> = {
   submit: "Submit to funder",
@@ -17,6 +18,7 @@ export const GrantApplicationWorkflowPanel: React.FC<{
   onUpdated?: () => void;
 }> = ({ applicationId, onUpdated }) => {
   const qc = useQueryClient();
+  const { canManage } = useGrantManage();
   const workflow = useQuery({
     queryKey: ["grant-app-workflow", applicationId],
     queryFn: () => grantsApi.applicationWorkflow(applicationId!),
@@ -58,6 +60,7 @@ export const GrantApplicationWorkflowPanel: React.FC<{
           </li>
         ))}
       </ol>
+      {canManage && (
       <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
         {availableActions.map((action) => (
           <button
@@ -84,6 +87,7 @@ export const GrantApplicationWorkflowPanel: React.FC<{
           </button>
         ))}
       </div>
+      )}
       {advance.isError && (
         <p style={{ color: "var(--hq-warning)", fontSize: "0.8rem", marginTop: "0.5rem" }}>
           {(advance.error as Error)?.message ?? "Workflow action failed"}
