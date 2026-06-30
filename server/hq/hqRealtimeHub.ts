@@ -183,6 +183,10 @@ export function attachHqRealtimeHub(server: HttpServer) {
     clearInterval(fallback);
   });
 
+  wss.on("error", (err) => {
+    console.error("HQ realtime WebSocket hub error (non-fatal):", err);
+  });
+
   console.log("HQ realtime WebSocket hub attached at /api/hq/ws (event-driven push)");
   return wss;
 }

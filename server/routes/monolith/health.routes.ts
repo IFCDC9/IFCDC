@@ -1,12 +1,24 @@
 import type { Express } from "express";
+import { getBuildInfo } from "../../buildInfo";
 
 export function registerHealthRoutes(app: Express): void {
   app.get("/api/health", (_req, res) => {
+    const build = getBuildInfo();
+    const commit =
+      process.env.RENDER_GIT_COMMIT?.slice(0, 7) ??
+      process.env.GIT_COMMIT?.slice(0, 7) ??
+      build.commit?.slice(0, 7) ??
+      null;
     res.json({
       app: "ifcdc-headquarters",
       status: "healthy",
       version: "1.0.0",
       platform: "IFCDC Enterprise Operating System",
+      commit,
+      branch: process.env.RENDER_GIT_BRANCH ?? process.env.GIT_BRANCH ?? null,
+      builtAt: build.builtAt,
+      environment: process.env.NODE_ENV ?? "development",
+      port: Number(process.env.PORT) || 5000,
     });
   });
 }

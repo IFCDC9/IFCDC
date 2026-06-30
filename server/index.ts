@@ -174,8 +174,6 @@ async function startServer() {
     });
   }
 
-  attachHqRealtimeHub(server);
-
   server.on("error", (err: NodeJS.ErrnoException) => {
     if (err.code === "EADDRINUSE") {
       console.error(`\nPort ${PORT} is already in use.`);
@@ -194,6 +192,8 @@ async function startServer() {
     });
     server.once("error", reject);
   });
+
+  attachHqRealtimeHub(server);
 
   void initializeHqModules({
     email: FOUNDER_EMAIL,

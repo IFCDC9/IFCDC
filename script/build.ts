@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawnSync, execSync } from "node:child_process";
 import { build as esbuild } from "esbuild";
 import { rm, readFile, writeFile } from "fs/promises";
 
@@ -71,6 +71,24 @@ child.on('exit', (code) => process.exit(code));
     throw new Error("Vite client build failed");
   }
   console.log("client build complete");
+
+  let commit = (process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || "").trim();
+  if (!commit) {
+    try {
+      commit = execSync("git rev-parse HEAD", {
+        stdio: ["ignore", "pipe", "ignore"],
+      })
+        .toString()
+        .trim();
+    } catch {
+      commit = "";
+    }
+  }
+  await writeFile(
+    "dist/build-info.json",
+    JSON.stringify({ commit: commit || null, builtAt: new Date().toISOString() }),
+  );
+  console.log(`Wrote dist/build-info.json (commit ${commit ? commit.slice(0, 7) : "unknown"})`);
 }
 
 buildAll().catch((err) => {
