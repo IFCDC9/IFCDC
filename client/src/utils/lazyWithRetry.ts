@@ -5,7 +5,19 @@ type Importer<T> = () => Promise<{ default: T }>;
 const CHUNK_RE =
   /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module/i;
 
-/** Retry lazy chunks once — recovers from stale Vite HMR / browser cache after dev rebuilds */
+const RELOAD_KEY = "__IFCDC_CHUNK_RELOAD__";
+
+function maybeHardReload(): void {
+  try {
+    if (sessionStorage.getItem(RELOAD_KEY)) return;
+    sessionStorage.setItem(RELOAD_KEY, "1");
+    window.location.reload();
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Retry lazy chunks once — recovers from stale cache after production redeploys */
 export function lazyWithRetry<T extends ComponentType<unknown>>(
   importer: Importer<T>,
   label = "module"
@@ -18,8 +30,14 @@ export function lazyWithRetry<T extends ComponentType<unknown>>(
       if (!CHUNK_RE.test(message)) throw err;
 
       console.warn(`IFCDC: retrying lazy load for ${label}…`);
-      await new Promise((r) => setTimeout(r, 120));
-      return importer();
+      await new Promise((r) => setTimeout(r, 150));
+      try {
+        return await importer();
+      } catch (retryErr) {
+        const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+        if (CHUNK_RE.test(retryMsg)) maybeHardReload();
+        throw retryErr;
+      }
     }
   });
 }

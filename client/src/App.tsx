@@ -18,7 +18,7 @@ const AdminTimeOverviewPage = lazy(() => import("./pages/AdminTimeOverviewPage")
 const GrantReportPage = lazy(() => import("./pages/GrantReportPage"));
 const LogicModelPage = lazy(() => import("./pages/LogicModelPage"));
 const AIAssistantPage = lazy(() => import("./pages/AIAssistantPage"));
-const SoftwareDivisionPage = lazy(() => import("./pages/hq/SoftwareDivisionPage"));
+const SoftwareDivisionPage = lazyWithRetry(() => import("./pages/hq/SoftwareDivisionPage"), "SoftwareDivisionPage");
 const HqShellRoute = lazyWithRetry(
   () => import("./components/hq/HqShellRoute").then((m) => ({ default: m.HqShellRoute })),
   "HqShellRoute"
@@ -27,34 +27,34 @@ const ExecutiveDashboard = lazyWithRetry(
   () => import("./pages/hq/ExecutiveDashboard"),
   "ExecutiveDashboard"
 );
-const AuraCommandCenterPage = lazy(() => import("./pages/hq/AuraCommandCenterPage"));
-const PeopleManagementCenter = lazy(() => import("./pages/hq/PeopleManagementCenter"));
-const ClientCaseManagementPage = lazy(() => import("./pages/hq/ClientCaseManagementPage"));
-const StaffSelfServicePage = lazy(() => import("./pages/hq/StaffSelfServicePage"));
-const ManagerPortalPage = lazy(() => import("./pages/hq/ManagerPortalPage"));
-const HqPayrollPage = lazy(() => import("./pages/hq/HqPayrollPage"));
-const HqProgramsPage = lazy(() => import("./pages/hq/HqProgramsPage"));
-const ProgramModulePage = lazy(() => import("./pages/hq/ProgramModulePage"));
-const GrantCenterPage = lazy(() => import("./pages/hq/GrantCenterPage"));
-const FinancialCenterPage = lazy(() => import("./pages/hq/FinancialCenterPage"));
-const OrganizationAnalyticsPage = lazy(() => import("./pages/hq/OrganizationAnalyticsPage"));
-const EnterpriseOperationsPage = lazy(() => import("./pages/hq/EnterpriseOperationsPage"));
-const OperationsCenterPage = lazy(() => import("./pages/hq/OperationsCenterPage"));
-const OrganizationSettingsPage = lazy(() => import("./pages/hq/OrganizationSettingsPage"));
-const NotificationsCenterPage = lazy(() => import("./pages/hq/NotificationsCenterPage"));
-const DeveloperPortalPage = lazy(() => import("./pages/hq/DeveloperPortalPage"));
-const CommunicationsCenterPage = lazy(() => import("./pages/hq/CommunicationsCenterPage"));
-const DocumentCenterPage = lazy(() => import("./pages/hq/DocumentCenterPage"));
-const EnterpriseIntelligencePage = lazy(() => import("./pages/hq/EnterpriseIntelligencePage"));
-const Phase10ExecutivePlatformPage = lazy(() => import("./pages/hq/Phase10ExecutivePlatformPage"));
-const Phase9OperatingSystemPage = lazy(() => import("./pages/hq/Phase9OperatingSystemPage"));
-const WorkflowAutomationPage = lazy(() => import("./pages/hq/WorkflowAutomationPage"));
-const SecurityCenterPage = lazy(() => import("./pages/hq/SecurityCenterPage"));
-const IntegrationsHubPage = lazy(() => import("./pages/hq/IntegrationsHubPage"));
-const SsoGatewayPage = lazy(() => import("./pages/hq/SsoGatewayPage"));
-const FounderCommandCenterPage = lazy(() => import("./pages/hq/FounderCommandCenterPage"));
-const BoardPortalPage = lazy(() => import("./pages/hq/BoardPortalPage"));
-const EnterpriseReportingPage = lazy(() => import("./pages/hq/EnterpriseReportingPage"));
+const AuraCommandCenterPage = lazyWithRetry(() => import("./pages/hq/AuraCommandCenterPage"), "AuraCommandCenterPage");
+const PeopleManagementCenter = lazyWithRetry(() => import("./pages/hq/PeopleManagementCenter"), "PeopleManagementCenter");
+const ClientCaseManagementPage = lazyWithRetry(() => import("./pages/hq/ClientCaseManagementPage"), "ClientCaseManagementPage");
+const StaffSelfServicePage = lazyWithRetry(() => import("./pages/hq/StaffSelfServicePage"), "StaffSelfServicePage");
+const ManagerPortalPage = lazyWithRetry(() => import("./pages/hq/ManagerPortalPage"), "ManagerPortalPage");
+const HqPayrollPage = lazyWithRetry(() => import("./pages/hq/HqPayrollPage"), "HqPayrollPage");
+const HqProgramsPage = lazyWithRetry(() => import("./pages/hq/HqProgramsPage"), "HqProgramsPage");
+const ProgramModulePage = lazyWithRetry(() => import("./pages/hq/ProgramModulePage"), "ProgramModulePage");
+const GrantCenterPage = lazyWithRetry(() => import("./pages/hq/GrantCenterPage"), "GrantCenterPage");
+const FinancialCenterPage = lazyWithRetry(() => import("./pages/hq/FinancialCenterPage"), "FinancialCenterPage");
+const OrganizationAnalyticsPage = lazyWithRetry(() => import("./pages/hq/OrganizationAnalyticsPage"), "OrganizationAnalyticsPage");
+const EnterpriseOperationsPage = lazyWithRetry(() => import("./pages/hq/EnterpriseOperationsPage"), "EnterpriseOperationsPage");
+const OperationsCenterPage = lazyWithRetry(() => import("./pages/hq/OperationsCenterPage"), "OperationsCenterPage");
+const OrganizationSettingsPage = lazyWithRetry(() => import("./pages/hq/OrganizationSettingsPage"), "OrganizationSettingsPage");
+const NotificationsCenterPage = lazyWithRetry(() => import("./pages/hq/NotificationsCenterPage"), "NotificationsCenterPage");
+const DeveloperPortalPage = lazyWithRetry(() => import("./pages/hq/DeveloperPortalPage"), "DeveloperPortalPage");
+const CommunicationsCenterPage = lazyWithRetry(() => import("./pages/hq/CommunicationsCenterPage"), "CommunicationsCenterPage");
+const DocumentCenterPage = lazyWithRetry(() => import("./pages/hq/DocumentCenterPage"), "DocumentCenterPage");
+const EnterpriseIntelligencePage = lazyWithRetry(() => import("./pages/hq/EnterpriseIntelligencePage"), "EnterpriseIntelligencePage");
+const Phase10ExecutivePlatformPage = lazyWithRetry(() => import("./pages/hq/Phase10ExecutivePlatformPage"), "Phase10ExecutivePlatformPage");
+const Phase9OperatingSystemPage = lazyWithRetry(() => import("./pages/hq/Phase9OperatingSystemPage"), "Phase9OperatingSystemPage");
+const WorkflowAutomationPage = lazyWithRetry(() => import("./pages/hq/WorkflowAutomationPage"), "WorkflowAutomationPage");
+const SecurityCenterPage = lazyWithRetry(() => import("./pages/hq/SecurityCenterPage"), "SecurityCenterPage");
+const IntegrationsHubPage = lazyWithRetry(() => import("./pages/hq/IntegrationsHubPage"), "IntegrationsHubPage");
+const SsoGatewayPage = lazyWithRetry(() => import("./pages/hq/SsoGatewayPage"), "SsoGatewayPage");
+const FounderCommandCenterPage = lazyWithRetry(() => import("./pages/hq/FounderCommandCenterPage"), "FounderCommandCenterPage");
+const BoardPortalPage = lazyWithRetry(() => import("./pages/hq/BoardPortalPage"), "BoardPortalPage");
+const EnterpriseReportingPage = lazyWithRetry(() => import("./pages/hq/EnterpriseReportingPage"), "EnterpriseReportingPage");
 const BarberDashboard = lazy(() => import("./dashboards/BarberDashboard"));
 const RadioDashboard = lazy(() => import("./dashboards/RadioDashboard"));
 const MyTimeEntriesPage = lazy(() => import("./pages/MyTimeEntriesPage"));

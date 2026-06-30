@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef, Suspense, lazy } from "react";
+import React, { useState, useEffect, useCallback, useRef, Suspense } from "react";
+import { lazyWithRetry } from "../../utils/lazyWithRetry";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -57,8 +58,9 @@ import { intelligenceApi } from "../../api/intelligenceApi";
 import { peopleApi } from "../../api/peopleApi";
 import { HqWidgetErrorBoundary } from "../../components/hq/HqErrorBoundary";
 
-const ExecutiveWidgetDashboard = lazy(() =>
-  import("../../components/hq/ExecutiveWidgetDashboard").then((m) => ({ default: m.ExecutiveWidgetDashboard }))
+const ExecutiveWidgetDashboard = lazyWithRetry(
+  () => import("../../components/hq/ExecutiveWidgetDashboard").then((m) => ({ default: m.ExecutiveWidgetDashboard })),
+  "ExecutiveWidgetDashboard"
 );
 
 const QUICK_ACTIONS = [
