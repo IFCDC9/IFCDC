@@ -3,7 +3,7 @@
  * IFCDC Grant Center — Enterprise platform readiness gate
  */
 const BASE = process.env.IFCDC_BASE_URL || "http://127.0.0.1:5001";
-const FOUNDER_EMAIL = "service@ifcdc.org";
+const FOUNDER_EMAIL = (process.env.MASTER_OWNER_EMAIL || "service@ifcdc.org").toLowerCase();
 const FOUNDER_PASSWORD = process.env.FOUNDER_SEED_PASSWORD || "IFCDC@2026Secure";
 
 const results = { pass: 0, fail: 0 };

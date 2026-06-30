@@ -1,5 +1,6 @@
 import { getDb } from "../db";
 import crypto from "crypto";
+import { allowGrantDemoSeed } from "./grantProductionPolicy";
 
 export interface GrantExecutiveDashboard {
   openOpportunities: number;
@@ -18,11 +19,15 @@ export interface GrantExecutiveDashboard {
   recentNotifications: { id: string; title: string; due_date: string; notification_type: string }[];
 }
 
+const LIVE_OPP_FILTER = allowGrantDemoSeed()
+  ? ""
+  : " AND COALESCE(source_type, '') != 'dev_seed' AND COALESCE(import_status, '') != 'seed'";
+
 export async function buildGrantExecutiveDashboard(): Promise<GrantExecutiveDashboard> {
   const db = await getDb();
 
   const openOpportunities = (await db.get<{ c: number }>(
-    "SELECT COUNT(*) as c FROM grant_opportunities WHERE status = 'open'"
+    `SELECT COUNT(*) as c FROM grant_opportunities WHERE status = 'open'${LIVE_OPP_FILTER}`
   ))?.c ?? 0;
 
   const pendingApplications = (await db.get<{ c: number }>(
@@ -71,7 +76,7 @@ export async function buildGrantExecutiveDashboard(): Promise<GrantExecutiveDash
   const winRate = totalApps > 0 ? Math.round((awarded / totalApps) * 100) : 0;
 
   const oppPipeline = await db.get<{ c: number; t: number }>(
-    "SELECT COUNT(*) as c, COALESCE(SUM(amount_max), 0) as t FROM grant_opportunities WHERE status = 'open'"
+    `SELECT COUNT(*) as c, COALESCE(SUM(amount_max), 0) as t FROM grant_opportunities WHERE status = 'open'${LIVE_OPP_FILTER}`
   );
   const appliedPipeline = await db.get<{ c: number; t: number }>(
     "SELECT COUNT(*) as c, COALESCE(SUM(amount_requested), 0) as t FROM grant_applications WHERE status = 'submitted'"

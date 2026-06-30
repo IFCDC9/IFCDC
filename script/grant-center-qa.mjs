@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import jwt from "jsonwebtoken";
 
 const BASE = process.env.IFCDC_BASE_URL || "http://127.0.0.1:5001";
-const FOUNDER_EMAIL = "service@ifcdc.org";
+const FOUNDER_EMAIL = (process.env.MASTER_OWNER_EMAIL || "service@ifcdc.org").toLowerCase();
 const FOUNDER_PASSWORD = process.env.FOUNDER_SEED_PASSWORD || "IFCDC@2026Secure";
 const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET || "DEV_ONLY_CHANGE_ME_IFCDC";
 const QA_TAG = `qa-grant-${Date.now()}`;

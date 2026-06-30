@@ -1,10 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  FileText, Calendar, Award, ClipboardList, Shield, Plus, CheckCircle,
-  DollarSign, Users, BarChart3, Bell, History, Upload, TrendingUp, Wallet, Sparkles, FileBarChart, Handshake, BookOpen, PenLine,
-} from "lucide-react";
+import { Shield, Plus, CheckCircle, Users, Calendar, Award, Bell, Handshake } from "lucide-react";
 import HQLayout from "../../layouts/HQLayout";
 import { grantsApi, type GrantOpportunity, type GrantFunder } from "../../api/grantsApi";
 import { KpiCard } from "../../components/hq/KpiCard";
@@ -12,56 +9,94 @@ import { HqPanel } from "../../components/hq/HqPanel";
 import { StatusBadge } from "../../components/hq/StatusBadge";
 import { HqLoading } from "../../components/hq/HqLoading";
 import { formatCurrency } from "../../utils/safeFormat";
-import { GrantV5FundingIntelligenceDashboard } from "../../components/hq/grants/GrantV5FundingIntelligenceDashboard";
-import { GrantV5NationalDatabase } from "../../components/hq/grants/GrantV5NationalDatabase";
-import { GrantV5ApplicationWorkspace } from "../../components/hq/grants/GrantV5ApplicationWorkspace";
-import { GrantV5ComplianceDashboard } from "../../components/hq/grants/GrantV5ComplianceDashboard";
-import { GrantV4LifecyclePanel } from "../../components/hq/grants/GrantV4LifecyclePanel";
-import { GrantV4FundingCalendar } from "../../components/hq/grants/GrantV4FundingCalendar";
-import { GrantV4ProgramIntegration } from "../../components/hq/grants/GrantV4ProgramIntegration";
-import { GrantV3DocumentCenter } from "../../components/hq/grants/GrantV3DocumentCenter";
+import { lazyWithRetry } from "../../utils/lazyWithRetry";
 import { GrantApplicationWorkflowPanel } from "../../components/hq/grants/GrantApplicationWorkflowPanel";
-import { GrantV2PipelineDashboard } from "../../components/hq/grants/GrantV2PipelineDashboard";
-import { GrantDocumentManagementPanel } from "../../components/hq/grants/GrantDocumentManagementPanel";
-import { GrantOutcomesPanel } from "../../components/hq/grants/GrantOutcomesPanel";
-import { GrantDeadlineRenewalPanel } from "../../components/hq/grants/GrantDeadlineRenewalPanel";
-import { GrantBudgetIntegrationPanel } from "../../components/hq/grants/GrantBudgetIntegrationPanel";
-import { GrantV2ExecutiveAnalytics } from "../../components/hq/grants/GrantV2ExecutiveAnalytics";
-import { GrantV5AuraAdvisorPanel } from "../../components/hq/grants/GrantV5AuraAdvisorPanel";
-import { GrantV5PipelineKanban } from "../../components/hq/grants/GrantV5PipelineKanban";
-import { GrantV5PipelineAutomationPanel } from "../../components/hq/grants/GrantV5PipelineAutomationPanel";
-import { GrantEconomicDevelopmentPanel } from "../../components/hq/grants/GrantEconomicDevelopmentPanel";
-import { GrantDivisionConnectorsPanel } from "../../components/hq/grants/GrantDivisionConnectorsPanel";
 import { GrantLibraryPanel, GrantWriterStudioPanel, GrantOpportunityFinderPanel } from "../../components/hq/grants/GrantCenterEnterprisePanels";
 import { GrantReadOnlyBanner } from "../../components/hq/grants/GrantReadOnlyBanner";
+import { GrantQueryBoundary } from "../../components/hq/grants/GrantQueryBoundary";
+import { GrantSubNav } from "../../components/hq/grants/GrantSubNav";
 import { HqDataUnavailable } from "../../components/hq/HqDataUnavailable";
 import { useGrantManage } from "../../hooks/useGrantManage";
+import { GRANT_TABS, resolveGrantTab, grantTabIncludes, type GrantTab } from "./grantCenterConfig";
 
-type Tab = "overview" | "pipeline" | "divisions" | "funders" | "opportunities" | "writer-studio" | "library" | "applications" | "calendar" | "deadlines" | "documents"
-  | "budgets" | "finance" | "awards" | "compliance" | "funder-reports" | "analytics" | "history" | "notifications" | "ai-intelligence";
+const GrantV5FundingIntelligenceDashboard = lazyWithRetry(
+  () => import("../../components/hq/grants/GrantV5FundingIntelligenceDashboard").then((m) => ({ default: m.GrantV5FundingIntelligenceDashboard })),
+  "GrantV5FundingIntelligenceDashboard"
+);
+const GrantV5NationalDatabase = lazyWithRetry(
+  () => import("../../components/hq/grants/GrantV5NationalDatabase").then((m) => ({ default: m.GrantV5NationalDatabase })),
+  "GrantV5NationalDatabase"
+);
+const GrantV5ApplicationWorkspace = lazyWithRetry(
+  () => import("../../components/hq/grants/GrantV5ApplicationWorkspace").then((m) => ({ default: m.GrantV5ApplicationWorkspace })),
+  "GrantV5ApplicationWorkspace"
+);
+const GrantV5ComplianceDashboard = lazyWithRetry(
+  () => import("../../components/hq/grants/GrantV5ComplianceDashboard").then((m) => ({ default: m.GrantV5ComplianceDashboard })),
+  "GrantV5ComplianceDashboard"
+);
+const GrantV4LifecyclePanel = lazyWithRetry(
+  () => import("../../components/hq/grants/GrantV4LifecyclePanel").then((m) => ({ default: m.GrantV4LifecyclePanel })),
+  "GrantV4LifecyclePanel"
+);
+const GrantV4FundingCalendar = lazyWithRetry(
+  () => import("../../components/hq/grants/GrantV4FundingCalendar").then((m) => ({ default: m.GrantV4FundingCalendar })),
+  "GrantV4FundingCalendar"
+);
+const GrantV4ProgramIntegration = lazyWithRetry(
+  () => import("../../components/hq/grants/GrantV4ProgramIntegration").then((m) => ({ default: m.GrantV4ProgramIntegration })),
+  "GrantV4ProgramIntegration"
+);
+const GrantV3DocumentCenter = lazyWithRetry(
+  () => import("../../components/hq/grants/GrantV3DocumentCenter").then((m) => ({ default: m.GrantV3DocumentCenter })),
+  "GrantV3DocumentCenter"
+);
+const GrantV2PipelineDashboard = lazyWithRetry(
+  () => import("../../components/hq/grants/GrantV2PipelineDashboard").then((m) => ({ default: m.GrantV2PipelineDashboard })),
+  "GrantV2PipelineDashboard"
+);
+const GrantDocumentManagementPanel = lazyWithRetry(
+  () => import("../../components/hq/grants/GrantDocumentManagementPanel").then((m) => ({ default: m.GrantDocumentManagementPanel })),
+  "GrantDocumentManagementPanel"
+);
+const GrantOutcomesPanel = lazyWithRetry(
+  () => import("../../components/hq/grants/GrantOutcomesPanel").then((m) => ({ default: m.GrantOutcomesPanel })),
+  "GrantOutcomesPanel"
+);
+const GrantDeadlineRenewalPanel = lazyWithRetry(
+  () => import("../../components/hq/grants/GrantDeadlineRenewalPanel").then((m) => ({ default: m.GrantDeadlineRenewalPanel })),
+  "GrantDeadlineRenewalPanel"
+);
+const GrantBudgetIntegrationPanel = lazyWithRetry(
+  () => import("../../components/hq/grants/GrantBudgetIntegrationPanel").then((m) => ({ default: m.GrantBudgetIntegrationPanel })),
+  "GrantBudgetIntegrationPanel"
+);
+const GrantV2ExecutiveAnalytics = lazyWithRetry(
+  () => import("../../components/hq/grants/GrantV2ExecutiveAnalytics").then((m) => ({ default: m.GrantV2ExecutiveAnalytics })),
+  "GrantV2ExecutiveAnalytics"
+);
+const GrantV5AuraAdvisorPanel = lazyWithRetry(
+  () => import("../../components/hq/grants/GrantV5AuraAdvisorPanel").then((m) => ({ default: m.GrantV5AuraAdvisorPanel })),
+  "GrantV5AuraAdvisorPanel"
+);
+const GrantV5PipelineKanban = lazyWithRetry(
+  () => import("../../components/hq/grants/GrantV5PipelineKanban").then((m) => ({ default: m.GrantV5PipelineKanban })),
+  "GrantV5PipelineKanban"
+);
+const GrantV5PipelineAutomationPanel = lazyWithRetry(
+  () => import("../../components/hq/grants/GrantV5PipelineAutomationPanel").then((m) => ({ default: m.GrantV5PipelineAutomationPanel })),
+  "GrantV5PipelineAutomationPanel"
+);
+const GrantEconomicDevelopmentPanel = lazyWithRetry(
+  () => import("../../components/hq/grants/GrantEconomicDevelopmentPanel").then((m) => ({ default: m.GrantEconomicDevelopmentPanel })),
+  "GrantEconomicDevelopmentPanel"
+);
+const GrantDivisionConnectorsPanel = lazyWithRetry(
+  () => import("../../components/hq/grants/GrantDivisionConnectorsPanel").then((m) => ({ default: m.GrantDivisionConnectorsPanel })),
+  "GrantDivisionConnectorsPanel"
+);
 
-const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
-  { id: "overview", label: "Executive Dashboard", icon: ClipboardList },
-  { id: "opportunities", label: "Opportunity Finder", icon: FileText },
-  { id: "writer-studio", label: "Writer Studio", icon: PenLine },
-  { id: "library", label: "Grant Library", icon: BookOpen },
-  { id: "pipeline", label: "Funding Pipeline", icon: TrendingUp },
-  { id: "applications", label: "Applications", icon: ClipboardList },
-  { id: "calendar", label: "Grant Calendar", icon: Calendar },
-  { id: "deadlines", label: "Deadlines", icon: Bell },
-  { id: "documents", label: "Documents Vault", icon: Upload },
-  { id: "funders", label: "Partner CRM", icon: Handshake },
-  { id: "awards", label: "Awards & Budget", icon: Award },
-  { id: "budgets", label: "Budget Builder", icon: DollarSign },
-  { id: "finance", label: "Financial Reporting", icon: Wallet },
-  { id: "compliance", label: "Compliance", icon: Shield },
-  { id: "funder-reports", label: "Funder Reports", icon: FileBarChart },
-  { id: "analytics", label: "Funding Analytics", icon: BarChart3 },
-  { id: "ai-intelligence", label: "AI Intelligence", icon: Sparkles },
-  { id: "history", label: "History & Renewals", icon: History },
-  { id: "notifications", label: "Notifications", icon: Bell },
-  { id: "divisions", label: "Division Profiles", icon: Users },
-];
+const TabFallback = () => <HqLoading message="Loading grant module…" />;
 
 const STATUS_VARIANT: Record<string, "gold" | "success" | "warning" | "danger" | "muted"> = {
   open: "success", draft: "muted", submitted: "gold", under_review: "warning",
@@ -80,7 +115,12 @@ function fmtDate(d: string | null | undefined): string {
 
 const GrantCenterPage: React.FC = () => {
   const [searchParams] = useSearchParams();
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<GrantTab>("overview");
+  const [appsSection, setAppsSection] = useState<"list" | "studio" | "library">("list");
+  const [calendarSection, setCalendarSection] = useState<"calendar" | "deadlines" | "notifications">("calendar");
+  const [financeSection, setFinanceSection] = useState<"awards" | "budgets" | "reports">("awards");
+  const [complianceSection, setComplianceSection] = useState<"tracking" | "funder-reports">("tracking");
+  const [intelSection, setIntelSection] = useState<"analytics" | "ai" | "history" | "divisions">("analytics");
   const [showNewApp, setShowNewApp] = useState(false);
   const [showNewOpp, setShowNewOpp] = useState(false);
   const [showNewFunder, setShowNewFunder] = useState(false);
@@ -101,12 +141,25 @@ const GrantCenterPage: React.FC = () => {
   const { canManage } = useGrantManage();
 
   useEffect(() => {
-    const tabParam = searchParams.get("tab") as Tab | null;
-    if (tabParam && TABS.some((x) => x.id === tabParam)) setTab(tabParam);
+    const tabParam = searchParams.get("tab");
+    const resolved = resolveGrantTab(tabParam);
+    setTab(resolved);
+    if (tabParam === "writer-studio") setAppsSection("studio");
+    if (tabParam === "library") setAppsSection("library");
+    if (tabParam === "deadlines") setCalendarSection("deadlines");
+    if (tabParam === "notifications") setCalendarSection("notifications");
+    if (tabParam === "budgets") setFinanceSection("budgets");
+    if (tabParam === "finance") setFinanceSection("reports");
+    if (tabParam === "funder-reports") setComplianceSection("funder-reports");
+    if (tabParam === "ai-intelligence") setIntelSection("ai");
+    if (tabParam === "history") setIntelSection("history");
+    if (tabParam === "divisions") setIntelSection("divisions");
+    if (tabParam === "analytics") setIntelSection("analytics");
     const awardId = searchParams.get("award");
     if (awardId) {
       setSelectedAward(awardId);
       setTab("finance");
+      setFinanceSection("reports");
     }
     const funderId = searchParams.get("funder");
     if (funderId) {
@@ -115,14 +168,14 @@ const GrantCenterPage: React.FC = () => {
     }
   }, [searchParams]);
 
-  const selectTab = (next: Tab) => {
+  const selectTab = (next: GrantTab) => {
     setTab(next);
     const params = new URLSearchParams(searchParams);
     params.set("tab", next);
     window.history.replaceState(null, "", `/hq/grants?${params.toString()}`);
   };
 
-  const dashboard = useQuery({ queryKey: ["grants-dashboard"], queryFn: grantsApi.dashboard });
+  const dashboard = useQuery({ queryKey: ["grants-dashboard"], queryFn: grantsApi.dashboard, enabled: tab === "overview" });
   const grantPlatform = useQuery({ queryKey: ["grant-center-platform"], queryFn: grantsApi.grantCenterPlatform, enabled: tab === "overview" });
   const syncFeeds = useMutation({
     mutationFn: grantsApi.feedsSync,
@@ -132,22 +185,46 @@ const GrantCenterPage: React.FC = () => {
     },
   });
   const executiveSummary = useQuery({ queryKey: ["grant-executive-summary"], queryFn: grantsApi.grantExecutiveSummary, enabled: tab === "overview" });
-  const fundingAnalytics = useQuery({ queryKey: ["grant-funding-analytics"], queryFn: grantsApi.fundingAnalytics, enabled: tab === "analytics" });
-  const opportunities = useQuery({ queryKey: ["grants-opportunities"], queryFn: grantsApi.opportunities, enabled: ["opportunities", "applications", "overview"].includes(tab) || showNewApp });
-  const applications = useQuery({ queryKey: ["grants-applications"], queryFn: grantsApi.applications, enabled: ["applications", "writer-studio", "library", "documents", "pipeline", "overview"].includes(tab) || showNewApp });
-  const deadlines = useQuery({ queryKey: ["grants-deadlines"], queryFn: () => grantsApi.deadlines(true) });
-  const allDeadlines = useQuery({ queryKey: ["grants-deadlines-all"], queryFn: () => grantsApi.deadlines(false), enabled: tab === "deadlines" });
-  const awards = useQuery({ queryKey: ["grants-awards"], queryFn: grantsApi.awards });
-  const compliance = useQuery({ queryKey: ["grants-compliance"], queryFn: grantsApi.compliance });
-  const funderReports = useQuery({ queryKey: ["grants-funder-reports"], queryFn: grantsApi.funderReports, enabled: tab === "funder-reports" || tab === "overview" });
-  const calendar = useQuery({ queryKey: ["grants-calendar"], queryFn: () => grantsApi.calendar(), enabled: tab === "calendar" });
+  const fundingAnalytics = useQuery({ queryKey: ["grant-funding-analytics"], queryFn: grantsApi.fundingAnalytics, enabled: tab === "intelligence" && intelSection === "analytics" });
+  const opportunities = useQuery({
+    queryKey: ["grants-opportunities"],
+    queryFn: grantsApi.opportunities,
+    enabled: grantTabIncludes(tab, "discover", "applications", "overview") || showNewApp,
+  });
+  const applications = useQuery({
+    queryKey: ["grants-applications"],
+    queryFn: grantsApi.applications,
+    enabled: grantTabIncludes(tab, "applications", "documents", "pipeline", "overview") || showNewApp,
+  });
+  const deadlines = useQuery({
+    queryKey: ["grants-deadlines"],
+    queryFn: () => grantsApi.deadlines(true),
+    enabled: tab === "overview" || (tab === "calendar" && calendarSection !== "notifications"),
+  });
+  const allDeadlines = useQuery({
+    queryKey: ["grants-deadlines-all"],
+    queryFn: () => grantsApi.deadlines(false),
+    enabled: tab === "calendar" && calendarSection === "deadlines",
+  });
+  const awards = useQuery({ queryKey: ["grants-awards"], queryFn: grantsApi.awards, enabled: tab === "finance" });
+  const compliance = useQuery({ queryKey: ["grants-compliance"], queryFn: grantsApi.compliance, enabled: tab === "compliance" });
+  const funderReports = useQuery({
+    queryKey: ["grants-funder-reports"],
+    queryFn: grantsApi.funderReports,
+    enabled: (tab === "compliance" && complianceSection === "funder-reports") || tab === "overview",
+  });
+  const calendar = useQuery({ queryKey: ["grants-calendar"], queryFn: () => grantsApi.calendar(), enabled: tab === "calendar" && calendarSection === "calendar" });
   const documents = useQuery({ queryKey: ["grants-documents"], queryFn: () => grantsApi.documents(), enabled: tab === "documents" });
-  const budgets = useQuery({ queryKey: ["grants-budgets"], queryFn: grantsApi.budgets, enabled: tab === "budgets" || tab === "overview" });
-  const labor = useQuery({ queryKey: ["grants-labor", selectedAward], queryFn: () => grantsApi.labor(selectedAward || undefined), enabled: tab === "finance" });
-  const expenditures = useQuery({ queryKey: ["grants-expenditures"], queryFn: () => grantsApi.expenditures(), enabled: tab === "finance" });
-  const financial = useQuery({ queryKey: ["grants-financial", selectedAward], queryFn: () => grantsApi.financial(selectedAward), enabled: !!selectedAward && tab === "finance" });
-  const notifications = useQuery({ queryKey: ["grants-notifications"], queryFn: grantsApi.notifications, enabled: tab === "notifications" || tab === "overview" });
-  const history = useQuery({ queryKey: ["grants-history"], queryFn: grantsApi.history, enabled: tab === "history" });
+  const budgets = useQuery({ queryKey: ["grants-budgets"], queryFn: grantsApi.budgets, enabled: tab === "finance" && financeSection === "budgets" });
+  const labor = useQuery({ queryKey: ["grants-labor", selectedAward], queryFn: () => grantsApi.labor(selectedAward || undefined), enabled: tab === "finance" && financeSection === "reports" });
+  const expenditures = useQuery({ queryKey: ["grants-expenditures"], queryFn: () => grantsApi.expenditures(), enabled: tab === "finance" && financeSection === "reports" });
+  const financial = useQuery({ queryKey: ["grants-financial", selectedAward], queryFn: () => grantsApi.financial(selectedAward), enabled: !!selectedAward && tab === "finance" && financeSection === "reports" });
+  const notifications = useQuery({
+    queryKey: ["grants-notifications"],
+    queryFn: grantsApi.notifications,
+    enabled: (tab === "calendar" && calendarSection === "notifications") || tab === "overview",
+  });
+  const history = useQuery({ queryKey: ["grants-history"], queryFn: grantsApi.history, enabled: tab === "intelligence" && intelSection === "history" });
   const funderDashboard = useQuery({ queryKey: ["grants-funder-dashboard"], queryFn: grantsApi.funderDashboard, enabled: tab === "funders" || tab === "overview" });
   const funders = useQuery({ queryKey: ["grants-funders", funderSearch], queryFn: () => grantsApi.funders(funderSearch ? { q: funderSearch } : undefined), enabled: tab === "funders" });
   const funderDetail = useQuery({ queryKey: ["grants-funder", selectedFunderId], queryFn: () => grantsApi.getFunder(selectedFunderId!), enabled: !!selectedFunderId && tab === "funders" });
@@ -221,7 +298,7 @@ const GrantCenterPage: React.FC = () => {
   return (
     <HQLayout title="Grant Center" subtitle="Enterprise funding command hub — opportunities, writer studio, library, compliance, and financial integration">
       <nav className="hq-tabs">
-        {TABS.map((t) => (
+        {GRANT_TABS.map((t) => (
           <button key={t.id} type="button" className={`hq-tab ${tab === t.id ? "active" : ""}`} onClick={() => selectTab(t.id)}>
             <t.icon size={16} /> {t.label}
           </button>
@@ -253,7 +330,7 @@ const GrantCenterPage: React.FC = () => {
                       type="button"
                       className="hq-app-card"
                       style={{ textAlign: "left", cursor: "pointer" }}
-                      onClick={() => selectTab(m.tab as Tab)}
+                      onClick={() => selectTab(resolveGrantTab(m.tab))}
                     >
                       <div className="hq-app-name">{m.label}</div>
                       <StatusBadge label={m.status} variant="success" />
@@ -345,7 +422,7 @@ const GrantCenterPage: React.FC = () => {
         )}
 
         {tab === "pipeline" && (
-          <>
+          <Suspense fallback={<TabFallback />}>
             <GrantV5PipelineKanban />
             <div style={{ marginTop: "1.25rem" }}>
               <GrantEconomicDevelopmentPanel />
@@ -364,16 +441,7 @@ const GrantCenterPage: React.FC = () => {
                 }}
               />
             </div>
-          </>
-        )}
-
-        {tab === "divisions" && (
-          <>
-            <GrantDivisionConnectorsPanel />
-            <div style={{ marginTop: "1.25rem" }}>
-              <GrantV4ProgramIntegration />
-            </div>
-          </>
+          </Suspense>
         )}
 
         {tab === "funders" && (
@@ -472,13 +540,13 @@ const GrantCenterPage: React.FC = () => {
           </>
         )}
 
-        {tab === "opportunities" && (
+        {tab === "discover" && (
           <>
             <div style={{ marginBottom: "1.25rem" }}>
               <GrantOpportunityFinderPanel />
             </div>
             <div style={{ marginBottom: "1.25rem" }}>
-              <GrantV5NationalDatabase />
+              <Suspense fallback={<TabFallback />}><GrantV5NationalDatabase /></Suspense>
             </div>
             {canManage && (
             <div style={{ marginBottom: "1rem", display: "flex", justifyContent: "flex-end" }}>
@@ -548,32 +616,41 @@ const GrantCenterPage: React.FC = () => {
           </>
         )}
 
-        {tab === "writer-studio" && (
-          <GrantWriterStudioPanel
-            applications={(applications.data?.applications ?? []).map((a) => ({ id: a.id, title: a.title }))}
-            selectedApplicationId={selectedApplicationId}
-            onSelectApplication={(id) => setSelectedApplicationId(id || null)}
-          />
-        )}
-
-        {tab === "library" && (
-          <GrantLibraryPanel
-            onApplyTemplate={canManage ? (templateId) => {
-              if (selectedApplicationId) {
-                grantsApi.writerStudio(selectedApplicationId, templateId).then(() => {
-                  qc.invalidateQueries({ queryKey: ["grant-writer-studio", selectedApplicationId] });
-                  selectTab("writer-studio");
-                }).catch(() => {
-                  window.alert("Could not apply template. Select an application first.");
-                });
-              } else {
-                selectTab("applications");
-              }
-            } : undefined}
-          />
-        )}
-
         {tab === "applications" && (
+          <>
+            <GrantSubNav
+              items={[
+                { id: "list", label: "Applications" },
+                { id: "studio", label: "Writer Studio" },
+                { id: "library", label: "Grant Library" },
+              ]}
+              active={appsSection}
+              onChange={(id) => setAppsSection(id as typeof appsSection)}
+            />
+            {appsSection === "studio" && (
+              <GrantWriterStudioPanel
+                applications={(applications.data?.applications ?? []).map((a) => ({ id: a.id, title: a.title }))}
+                selectedApplicationId={selectedApplicationId}
+                onSelectApplication={(id) => setSelectedApplicationId(id || null)}
+              />
+            )}
+            {appsSection === "library" && (
+              <GrantLibraryPanel
+                onApplyTemplate={canManage ? (templateId) => {
+                  if (selectedApplicationId) {
+                    grantsApi.writerStudio(selectedApplicationId, templateId).then(() => {
+                      qc.invalidateQueries({ queryKey: ["grant-writer-studio", selectedApplicationId] });
+                      setAppsSection("studio");
+                    }).catch(() => {
+                      window.alert("Could not apply template. Select an application first.");
+                    });
+                  } else {
+                    setAppsSection("list");
+                  }
+                } : undefined}
+              />
+            )}
+            {appsSection === "list" && (
           <>
             {canManage && (
             <div style={{ marginBottom: "1rem", display: "flex", justifyContent: "flex-end" }}>
@@ -618,7 +695,9 @@ const GrantCenterPage: React.FC = () => {
               </table>
             </div>
             <div style={{ marginTop: "1.25rem" }}>
-              <GrantV5ApplicationWorkspace applications={(applications.data?.applications ?? []).map((a) => ({ id: a.id, title: a.title }))} />
+              <Suspense fallback={<TabFallback />}>
+                <GrantV5ApplicationWorkspace applications={(applications.data?.applications ?? []).map((a) => ({ id: a.id, title: a.title }))} />
+              </Suspense>
             </div>
             <div style={{ marginTop: "1.25rem" }}>
               <GrantApplicationWorkflowPanel
@@ -632,11 +711,24 @@ const GrantCenterPage: React.FC = () => {
               />
             </div>
           </>
+            )}
+          </>
         )}
 
         {tab === "calendar" && (
           <>
-            <GrantV4FundingCalendar />
+            <GrantSubNav
+              items={[
+                { id: "calendar", label: "Calendar" },
+                { id: "deadlines", label: "Deadlines" },
+                { id: "notifications", label: "Notifications" },
+              ]}
+              active={calendarSection}
+              onChange={(id) => setCalendarSection(id as typeof calendarSection)}
+            />
+            {calendarSection === "calendar" && (
+          <>
+            <Suspense fallback={<TabFallback />}><GrantV4FundingCalendar /></Suspense>
             <div style={{ marginTop: "1.25rem" }}>
           <HqPanel title="Grant Calendar" subtitle={calendar.data?.month ?? new Date().toISOString().slice(0, 7)}>
             {calendar.isLoading ? <HqLoading /> : (
@@ -668,14 +760,14 @@ const GrantCenterPage: React.FC = () => {
           </HqPanel>
             </div>
           </>
-        )}
-
-        {tab === "deadlines" && (
+            )}
+            {calendarSection === "deadlines" && (
           <>
             <div style={{ marginBottom: "1.25rem" }}>
-              <GrantDeadlineRenewalPanel />
+              <Suspense fallback={<TabFallback />}><GrantDeadlineRenewalPanel /></Suspense>
             </div>
             <HqPanel title="All Grant Deadlines" subtitle="Submission deadlines, compliance reports, and action items">
+            <GrantQueryBoundary query={allDeadlines} title="Deadlines unavailable">
             {allDeadlines.isLoading ? <HqLoading /> : (
               <table className="hq-table">
                 <thead><tr><th>Deadline</th><th>Type</th><th>Grant</th><th>Due</th><th>Status</th><th></th></tr></thead>
@@ -702,11 +794,38 @@ const GrantCenterPage: React.FC = () => {
                 </tbody>
               </table>
             )}
+            </GrantQueryBoundary>
           </HqPanel>
+          </>
+            )}
+            {calendarSection === "notifications" && (
+          <HqPanel title="Automated Notifications & Reminders">
+            <GrantQueryBoundary query={notifications} title="Notifications unavailable">
+            {notifications.isLoading ? <HqLoading /> : (
+              <table className="hq-table">
+                <thead><tr><th>Notification</th><th>Type</th><th>Due</th><th>Status</th><th></th></tr></thead>
+                <tbody>
+                  {(notifications.data?.notifications ?? []).map((n) => (
+                    <tr key={n.id as string}>
+                      <td><strong>{n.title as string}</strong><div className="hq-muted-text">{n.message as string}</div></td>
+                      <td>{n.notification_type as string}</td>
+                      <td>{fmtDate(n.due_date as string)}</td>
+                      <td><StatusBadge label={(n.read as number) ? "read" : "unread"} variant={(n.read as number) ? "muted" : "warning"} /></td>
+                      <td>{!(n.read as number) && canManage && <button type="button" className="hq-btn hq-btn-sm" onClick={() => markRead.mutate(n.id as string)}>Mark Read</button>}</td>
+                    </tr>
+                  ))}
+                  {!(notifications.data?.notifications ?? []).length && <tr><td colSpan={5} className="hq-empty-cell">No notifications. Deadlines and compliance items generate reminders automatically.</td></tr>}
+                </tbody>
+              </table>
+            )}
+            </GrantQueryBoundary>
+          </HqPanel>
+            )}
           </>
         )}
 
         {tab === "documents" && (
+          <Suspense fallback={<TabFallback />}>
           <GrantV3DocumentCenter applications={(applications.data?.applications ?? []).map((a) => ({ id: a.id, title: a.title }))}>
             <GrantDocumentManagementPanel
               applications={(applications.data?.applications ?? []).map((a) => ({ id: a.id, title: a.title }))}
@@ -730,11 +849,39 @@ const GrantCenterPage: React.FC = () => {
               } : () => undefined}
             />
           </GrantV3DocumentCenter>
+          </Suspense>
         )}
 
-        {tab === "budgets" && (
+        {tab === "finance" && (
           <>
-            <GrantBudgetIntegrationPanel />
+            <GrantSubNav
+              items={[
+                { id: "awards", label: "Awards" },
+                { id: "budgets", label: "Budget Builder" },
+                { id: "reports", label: "Financial Reports" },
+              ]}
+              active={financeSection}
+              onChange={(id) => setFinanceSection(id as typeof financeSection)}
+            />
+            {financeSection === "awards" && (
+          <div className="hq-app-grid">
+            {awards.isLoading ? <HqLoading /> : awardList.length === 0 ? (
+              <div className="hq-empty">No awards yet. Award an application to create a Financial Center budget automatically.</div>
+            ) : awardList.map((a) => (
+              <div key={a.id} className="hq-app-card">
+                <div className="hq-app-name">{a.opportunity_title ?? a.application_title}</div>
+                <div style={{ fontSize: "0.8rem", color: "var(--hq-gold)", margin: "0.25rem 0" }}>{a.funder}</div>
+                <div style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--hq-success)", margin: "0.5rem 0" }}>{fmt(a.amount)}</div>
+                <StatusBadge label={a.status} variant={STATUS_VARIANT[a.status] ?? "muted"} />
+                <div className="hq-app-meta-item" style={{ marginTop: "0.5rem" }}>Awarded {fmtDate(a.award_date)}</div>
+                {a.finance_budget_id && <div className="hq-app-meta-item" style={{ color: "var(--hq-gold)" }}>Linked to Financial Center</div>}
+              </div>
+            ))}
+          </div>
+            )}
+            {financeSection === "budgets" && (
+          <>
+            <Suspense fallback={<TabFallback />}><GrantBudgetIntegrationPanel /></Suspense>
             {canManage && (
             <div className="hq-panel" style={{ marginTop: "1.25rem", marginBottom: "1rem", padding: "1.25rem" }}>
               <h4 style={{ fontSize: "0.85rem", color: "var(--hq-gold)", marginBottom: "0.75rem" }}>Budget Builder — Connected to Financial Center</h4>
@@ -779,9 +926,8 @@ const GrantCenterPage: React.FC = () => {
               )}
             </HqPanel>
           </>
-        )}
-
-        {tab === "finance" && (
+            )}
+            {financeSection === "reports" && (
           <>
             <div style={{ marginBottom: "1rem", display: "flex", gap: "0.75rem", alignItems: "end" }}>
               <div><label style={{ fontSize: "0.72rem", color: "var(--hq-text-muted)" }}>Select Award</label>
@@ -840,28 +986,23 @@ const GrantCenterPage: React.FC = () => {
               </HqPanel>
             </div>
           </>
-        )}
-
-        {tab === "awards" && (
-          <div className="hq-app-grid">
-            {awards.isLoading ? <HqLoading /> : awardList.length === 0 ? (
-              <div className="hq-empty">No awards yet. Award an application to create a Financial Center budget automatically.</div>
-            ) : awardList.map((a) => (
-              <div key={a.id} className="hq-app-card">
-                <div className="hq-app-name">{a.opportunity_title ?? a.application_title}</div>
-                <div style={{ fontSize: "0.8rem", color: "var(--hq-gold)", margin: "0.25rem 0" }}>{a.funder}</div>
-                <div style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--hq-success)", margin: "0.5rem 0" }}>{fmt(a.amount)}</div>
-                <StatusBadge label={a.status} variant={STATUS_VARIANT[a.status] ?? "muted"} />
-                <div className="hq-app-meta-item" style={{ marginTop: "0.5rem" }}>Awarded {fmtDate(a.award_date)}</div>
-                {a.finance_budget_id && <div className="hq-app-meta-item" style={{ color: "var(--hq-gold)" }}>Linked to Financial Center</div>}
-              </div>
-            ))}
-          </div>
+            )}
+          </>
         )}
 
         {tab === "compliance" && (
           <>
-            <GrantV5ComplianceDashboard />
+            <GrantSubNav
+              items={[
+                { id: "tracking", label: "Compliance Tracking" },
+                { id: "funder-reports", label: "Funder Reports" },
+              ]}
+              active={complianceSection}
+              onChange={(id) => setComplianceSection(id as typeof complianceSection)}
+            />
+            {complianceSection === "tracking" && (
+          <>
+            <Suspense fallback={<TabFallback />}><GrantV5ComplianceDashboard /></Suspense>
             <div style={{ marginTop: "1.25rem" }}>
           <HqPanel title="Compliance Tracking & Reminders">
             {compliance.isLoading ? <HqLoading /> : (
@@ -882,10 +1023,10 @@ const GrantCenterPage: React.FC = () => {
           </HqPanel>
             </div>
           </>
-        )}
-
-        {tab === "funder-reports" && (
-          funderReports.isLoading ? <HqLoading /> : (
+            )}
+            {complianceSection === "funder-reports" && (
+          <GrantQueryBoundary query={funderReports} title="Funder reports unavailable" message="Live funder report data could not be loaded.">
+          {funderReports.isLoading ? <HqLoading /> : (
             <>
               <div className="hq-kpi-grid" style={{ marginBottom: "1.25rem" }}>
                 <KpiCard label="Active Awards" value={funderReports.data?.reports.length ?? 0} icon={Award} variant="gold" />
@@ -927,12 +1068,28 @@ const GrantCenterPage: React.FC = () => {
                 </table>
               </HqPanel>
             </>
-          )
+          )}
+          </GrantQueryBoundary>
+            )}
+          </>
         )}
 
-        {tab === "analytics" && (
+        {tab === "intelligence" && (
           <>
-            <GrantV2ExecutiveAnalytics />
+            <GrantSubNav
+              items={[
+                { id: "analytics", label: "Funding Analytics" },
+                { id: "ai", label: "AI Intelligence" },
+                { id: "history", label: "History & Outcomes" },
+                { id: "divisions", label: "Division Profiles" },
+              ]}
+              active={intelSection}
+              onChange={(id) => setIntelSection(id as typeof intelSection)}
+            />
+            {intelSection === "analytics" && (
+          <>
+            <Suspense fallback={<TabFallback />}><GrantV2ExecutiveAnalytics /></Suspense>
+            <GrantQueryBoundary query={fundingAnalytics} title="Funding analytics unavailable">
             {fundingAnalytics.isLoading ? <HqLoading /> : fundingAnalytics.data && (
               <div className="hq-grid-2" style={{ marginTop: "1.25rem" }}>
                 <HqPanel title="Awards by Funder">
@@ -957,15 +1114,19 @@ const GrantCenterPage: React.FC = () => {
                 </HqPanel>
               </div>
             )}
+            </GrantQueryBoundary>
           </>
-        )}
-
-        {tab === "history" && (
+            )}
+            {intelSection === "ai" && (
+              <Suspense fallback={<TabFallback />}><GrantV5AuraAdvisorPanel /></Suspense>
+            )}
+            {intelSection === "history" && (
           <>
             <div style={{ marginBottom: "1.25rem" }}>
-              <GrantOutcomesPanel />
+              <Suspense fallback={<TabFallback />}><GrantOutcomesPanel /></Suspense>
             </div>
             <HqPanel title="Grant Activity Log">
+              <GrantQueryBoundary query={history} title="Activity history unavailable">
               {history.isLoading ? <HqLoading /> : (
                 <ul className="hq-activity-list">
                   {(history.data?.activity ?? []).map((a) => (
@@ -976,33 +1137,20 @@ const GrantCenterPage: React.FC = () => {
                   ))}
                 </ul>
               )}
+              </GrantQueryBoundary>
             </HqPanel>
           </>
-        )}
-
-        {tab === "notifications" && (
-          <HqPanel title="Automated Notifications & Reminders">
-            {notifications.isLoading ? <HqLoading /> : (
-              <table className="hq-table">
-                <thead><tr><th>Notification</th><th>Type</th><th>Due</th><th>Status</th><th></th></tr></thead>
-                <tbody>
-                  {(notifications.data?.notifications ?? []).map((n) => (
-                    <tr key={n.id as string}>
-                      <td><strong>{n.title as string}</strong><div className="hq-muted-text">{n.message as string}</div></td>
-                      <td>{n.notification_type as string}</td>
-                      <td>{fmtDate(n.due_date as string)}</td>
-                      <td><StatusBadge label={(n.read as number) ? "read" : "unread"} variant={(n.read as number) ? "muted" : "warning"} /></td>
-                      <td>{!(n.read as number) && canManage && <button type="button" className="hq-btn hq-btn-sm" onClick={() => markRead.mutate(n.id as string)}>Mark Read</button>}</td>
-                    </tr>
-                  ))}
-                  {!(notifications.data?.notifications ?? []).length && <tr><td colSpan={5} className="hq-empty-cell">No notifications. Deadlines and compliance items generate reminders automatically.</td></tr>}
-                </tbody>
-              </table>
             )}
-          </HqPanel>
+            {intelSection === "divisions" && (
+          <Suspense fallback={<TabFallback />}>
+            <GrantDivisionConnectorsPanel />
+            <div style={{ marginTop: "1.25rem" }}>
+              <GrantV4ProgramIntegration />
+            </div>
+          </Suspense>
+            )}
+          </>
         )}
-
-        {tab === "ai-intelligence" && <GrantV5AuraAdvisorPanel />}
       </div>
     </HQLayout>
   );

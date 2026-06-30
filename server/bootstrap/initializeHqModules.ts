@@ -18,6 +18,7 @@ import { ensureCommunicationsTables } from "../hq/communicationsSchema";
 import { ensureDocumentTables } from "../hq/documentsSchema";
 import { ensureHqFileRegistry } from "../hq/hqFileStorage";
 import { syncGrantFeeds } from "../hq/grantFeedConnectors";
+import { purgeGrantDevSeedData } from "../hq/grantProductionCleanup";
 import { initGoogleOAuth } from "../monolith/googleOAuth";
 import { initLegacyMonolithDb, type FounderSeedConfig } from "../monolith/legacyDbBootstrap";
 
@@ -25,6 +26,7 @@ import { initLegacyMonolithDb, type FounderSeedConfig } from "../monolith/legacy
 export async function initializeHqModules(founder: FounderSeedConfig): Promise<void> {
   await initLegacyMonolithDb(founder);
   await ensureGrantModulesReady();
+  await purgeGrantDevSeedData().catch((e) => console.warn("Grant dev_seed purge skipped:", e?.message));
   await ensurePeopleTables();
   await ensureOperationsTables();
   await ensureDashboardTables();

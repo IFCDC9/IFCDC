@@ -22,6 +22,8 @@
     "grants:qa": "node script/grant-center-qa.mjs",
     "grants:release": "npm run check && npm run build && npm run grants:qa",
     "grants:deploy-verify": "node script/grant-center-deploy-verify.mjs",
+    "grants:founder-review": "node script/grant-center-founder-review.mjs",
+    "grants:signoff": "node script/grant-center-signoff.mjs",
     "deploy:parity": "node script/host-parity-verify.mjs",
     "production:verify": "node script/production-verify.mjs",
     "hq:nav-audit": "node script/hq-nav-audit.mjs",

@@ -5,6 +5,7 @@ import { grantsApi } from "../../../api/grantsApi";
 import { HqPanel } from "../HqPanel";
 import { StatusBadge } from "../StatusBadge";
 import { HqLoading } from "../HqLoading";
+import { useDebouncedValue } from "../../../hooks/useDebouncedValue";
 import { useGrantManage } from "../../../hooks/useGrantManage";
 
 function QueryError({ message }: { message: string }) {
@@ -177,9 +178,10 @@ export const GrantWriterStudioPanel: React.FC<{
 export const GrantOpportunityFinderPanel: React.FC = () => {
   const [category, setCategory] = useState("");
   const [q, setQ] = useState("");
+  const debouncedQ = useDebouncedValue(q, 350);
   const finder = useQuery({
-    queryKey: ["grant-opportunity-finder", category, q],
-    queryFn: () => grantsApi.opportunityFinder({ category: category || undefined, q: q || undefined }),
+    queryKey: ["grant-opportunity-finder", category, debouncedQ],
+    queryFn: () => grantsApi.opportunityFinder({ category: category || undefined, q: debouncedQ || undefined }),
     staleTime: 30_000,
   });
 
