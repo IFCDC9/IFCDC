@@ -22,17 +22,17 @@ services:
       - key: IFCDC_DATA_DIR
         value: /opt/render/project/src/data
       - key: JWT_SECRET
-        sync: false
+        generateValue: true
       - key: MASTER_OWNER_EMAIL
-        sync: false
+        value: "813786b@gmail.com"
       - key: FOUNDER_SEED_PASSWORD
-        sync: false
+        generateValue: true
       - key: OPENAI_API_KEY
         sync: false
       - key: PUBLIC_APP_URL
-        sync: false
+        value: https://ifcdc-hq-wst6.onrender.com
       - key: PUBLIC_BASE_URL
-        sync: false
+        value: https://ifcdc-hq-wst6.onrender.com
       - key: IFCDC_NOTIFICATIONS_URL
         sync: false
       - key: RESEND_API_KEY
