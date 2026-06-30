@@ -74,14 +74,15 @@ async function main() {
     const loadedBundles = new Map([["main", bundle]]);
 
     async function resolveChunk(mod) {
-      let chunkMatch = bundle.match(new RegExp(`${mod}-[A-Za-z0-9_-]+\\.js`));
+      const re = new RegExp(`(?:assets/)?${mod}-[A-Za-z0-9_-]+\\.js`);
+      let chunkMatch = bundle.match(re);
       if (!chunkMatch && mod === "ExecutiveWidgetDashboard") {
-        const execMatch = bundle.match(/ExecutiveDashboard-[A-Za-z0-9_-]+\.js/);
+        const execMatch = bundle.match(/(?:assets\/)?ExecutiveDashboard-[A-Za-z0-9_-]+\.js/);
         if (execMatch) {
-          const execPath = `/assets/${execMatch[0]}`;
+          const execFile = execMatch[0].replace(/^assets\//, "");
+          const execPath = `/assets/${execFile}`;
           const execBundle = await (await fetch(`${BASE}${execPath}`)).text();
-          loadedBundles.set("executive", execBundle);
-          chunkMatch = execBundle.match(/ExecutiveWidgetDashboard-[A-Za-z0-9_-]+\.js/);
+          chunkMatch = execBundle.match(/(?:assets\/)?ExecutiveWidgetDashboard-[A-Za-z0-9_-]+\.js/);
         }
       }
       return chunkMatch;
@@ -90,10 +91,11 @@ async function main() {
     for (const mod of HQ_LAZY_MODULES) {
       const chunkMatch = await resolveChunk(mod);
       if (!chunkMatch) {
-        log(mod === "ExecutiveWidgetDashboard" ? true : false, `chunk ref ${mod}`, mod === "ExecutiveWidgetDashboard" ? "nested in ExecutiveDashboard (optional)" : "not found in main bundle");
+        log(false, `chunk ref ${mod}`, "not found in main bundle");
         continue;
       }
-      const chunkPath = `/assets/${chunkMatch[0].replace(/^assets\//, "")}`;
+      const chunkFile = chunkMatch[0].replace(/^assets\//, "");
+      const chunkPath = `/assets/${chunkFile}`;
       const cRes = await fetch(`${BASE}${chunkPath}`);
       const cMime = cRes.headers.get("content-type") || "";
       const cHead = (await cRes.text()).slice(0, 40);
