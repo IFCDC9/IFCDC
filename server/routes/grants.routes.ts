@@ -165,7 +165,11 @@ router.get("/funder-reports", async (_req, res) => {
     res.json(await buildFunderReports());
   } catch (error) {
     console.error("Funder reports error:", error);
-    res.json({ reports: [], upcomingCompliance: [], generatedAt: new Date().toISOString() });
+    res.status(503).json({
+      error: "Funder reports unavailable",
+      message: error instanceof Error ? error.message : "Failed to load funder reports",
+      liveDataOnly: true,
+    });
   }
 });
 

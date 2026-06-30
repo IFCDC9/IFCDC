@@ -1,5 +1,6 @@
 import { getDb } from "../db";
 import crypto from "crypto";
+import { allowGrantDemoSeed } from "./grantProductionPolicy";
 
 function id() {
   return crypto.randomUUID();
@@ -126,6 +127,9 @@ export async function ensureGrantTables(): Promise<void> {
   await migrateGrantPhase6();
   await migrateGrantPhase7();
   await migrateGrantPhase8();
+  if (!allowGrantDemoSeed()) {
+    return;
+  }
   const count = await db.get<{ c: number }>("SELECT COUNT(*) as c FROM grant_opportunities");
   if (count && count.c === 0) {
     const now = new Date().toISOString();
@@ -175,8 +179,8 @@ export async function ensureGrantTables(): Promise<void> {
     for (const s of seeds) {
       const oppId = id();
       await db.run(
-        `INSERT INTO grant_opportunities (id, title, funder, description, amount_min, amount_max, status, deadline, url, requirements, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)`,
+        `INSERT INTO grant_opportunities (id, title, funder, description, amount_min, amount_max, status, deadline, url, requirements, source_type, import_status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, 'dev_seed', 'seed', ?, ?)`,
         oppId, s.title, s.funder, s.description, s.amount_min, s.amount_max, s.deadline, s.url, s.requirements, now, now
       );
       await db.run(

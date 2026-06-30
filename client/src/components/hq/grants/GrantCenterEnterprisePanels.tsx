@@ -178,11 +178,21 @@ export const GrantOpportunityFinderPanel: React.FC = () => {
     staleTime: 30_000,
   });
 
-  const data = finder.data as { categorized?: Record<string, unknown[]>; opportunities?: unknown[]; integrations?: string } | undefined;
+  const data = finder.data as {
+    categorized?: Record<string, unknown[]>;
+    opportunities?: { id: string; title: string; funder: string; deadline?: string; amount_max?: number; dataSourceLabel?: string }[];
+    source?: string;
+    externalFeedCount?: number;
+    dataSourceBreakdown?: Record<string, number>;
+    integrations?: string;
+  } | undefined;
   const list = category && data?.categorized?.[category] ? data.categorized[category] : (data?.opportunities ?? []);
 
   return (
-    <HqPanel title="Grant Opportunity Finder" subtitle="Federal, state, foundation, and corporate opportunities — live feeds connect later">
+    <HqPanel
+      title="Grant Opportunity Finder"
+      subtitle="Federal, state, foundation, and corporate opportunities — live API feeds and organization records only"
+    >
       <div className="hq-founder-command-strip" style={{ marginBottom: "1rem", flexWrap: "wrap" }}>
         {["federal", "state", "foundation", "corporate"].map((c) => (
           <button key={c} type="button" className={`hq-btn hq-btn-sm ${category === c ? "hq-btn-primary" : "hq-btn-secondary"}`} onClick={() => setCategory(category === c ? "" : c)}>{c}</button>
@@ -194,18 +204,26 @@ export const GrantOpportunityFinderPanel: React.FC = () => {
       ) : (
         <div style={{ overflowX: "auto" }}>
           <table className="hq-table">
-            <thead><tr><th>Title</th><th>Funder</th><th>Deadline</th><th>Max Award</th></tr></thead>
+            <thead><tr><th>Title</th><th>Funder</th><th>Source</th><th>Deadline</th><th>Max Award</th></tr></thead>
             <tbody>
-              {(list as { id: string; title: string; funder: string; deadline?: string; amount_max?: number }[]).map((o) => (
-                <tr key={String(o.id)}><td>{o.title}</td><td>{o.funder}</td><td>{o.deadline ?? "—"}</td><td>{o.amount_max ? `$${o.amount_max.toLocaleString()}` : "—"}</td></tr>
+              {(list as { id: string; title: string; funder: string; deadline?: string; amount_max?: number; dataSourceLabel?: string }[]).map((o) => (
+                <tr key={String(o.id)}>
+                  <td>{o.title}</td>
+                  <td>{o.funder}</td>
+                  <td><span className="hq-muted-text" style={{ fontSize: "0.75rem" }}>{o.dataSourceLabel ?? "—"}</span></td>
+                  <td>{o.deadline ?? "—"}</td>
+                  <td>{o.amount_max ? `$${o.amount_max.toLocaleString()}` : "—"}</td>
+                </tr>
               ))}
-              {(list as unknown[]).length === 0 && <tr><td colSpan={4} className="hq-muted-text">No opportunities match. Add grants or connect external feeds.</td></tr>}
+              {(list as unknown[]).length === 0 && <tr><td colSpan={5} className="hq-muted-text">No opportunities match. Sync Grants.gov feeds or add opportunities manually.</td></tr>}
             </tbody>
           </table>
         </div>
       )}
       <p className="hq-muted-text" style={{ marginTop: "0.75rem", fontSize: "0.75rem" }}>
-        Live feeds: Grants.gov, Foundation Directory, and Corporate CSR sync into the opportunity database. Use Sync feeds on the overview tab to refresh.
+        Feed mode: {data?.source ?? "—"}
+        {data?.externalFeedCount != null ? ` · ${data.externalFeedCount} live imported` : ""}
+        . Grants.gov syncs live listings; foundation rows are directory references; CSR reference data is disabled in production unless configured.
       </p>
     </HqPanel>
   );

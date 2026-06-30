@@ -10,6 +10,8 @@ import { buildApplicationWorkspace, aiAssistApplicationSection } from "./grantFu
 import { discoverAndRankGrants } from "./grantFundingEngineV3";
 import { buildFundingOperationsCalendar } from "./grantFundingEngineV4";
 import { getGrantFeedIntegrationStatus, countExternalFeedOpportunities } from "./grantFeedConnectors";
+import { annotateOpportunity, summarizeGrantDataSources, resolveFeedAggregateSource } from "./grantDataSource";
+import { allowGrantDemoSeed } from "./grantProductionPolicy";
 
 export const GRANT_CENTER_MODULES = [
   { id: "executive-dashboard", label: "Executive Funding Dashboard", tab: "overview", status: "live" },
@@ -270,7 +272,11 @@ export async function assistWriterSection(applicationId: string, sectionKey: str
 }
 
 export async function buildOpportunityFinder(filters?: { category?: string; geography?: string; q?: string }) {
-  const discovery = await discoverAndRankGrants({ limit: 50 }).catch(() => ({ ranked: [] as Record<string, unknown>[] }));
+  const discovery = await discoverAndRankGrants({ limit: 50 }).catch((err) => {
+    if (process.env.NODE_ENV === "production") throw err;
+    console.warn("Grant discovery unavailable:", err instanceof Error ? err.message : err);
+    return { ranked: [] as Record<string, unknown>[] };
+  });
   const db = await getDb();
   let sql = `SELECT o.*, 
     CASE WHEN o.funder LIKE '%Department%' OR o.funder LIKE '%U.S.%' THEN 'federal'
@@ -282,7 +288,8 @@ export async function buildOpportunityFinder(filters?: { category?: string; geog
   if (filters?.q) { sql += " AND (o.title LIKE ? OR o.funder LIKE ? OR o.description LIKE ?)"; const q = `%${filters.q}%`; params.push(q, q, q); }
   if (filters?.geography) { sql += " AND o.geography = ?"; params.push(filters.geography); }
   sql += " ORDER BY o.deadline ASC LIMIT 100";
-  const local = await db.all(sql, ...params) as Record<string, unknown>[];
+  const raw = await db.all(sql, ...params) as Record<string, unknown>[];
+  const local = raw.map(annotateOpportunity);
   const categorized = {
     federal: local.filter((o) => o.funder_category === "federal"),
     state: local.filter((o) => o.funder_category === "state"),
@@ -291,12 +298,21 @@ export async function buildOpportunityFinder(filters?: { category?: string; geog
   };
   const externalCount = await countExternalFeedOpportunities();
   const integrations = await getGrantFeedIntegrationStatus();
-  const source = externalCount > 0 ? "live" : "local";
+  const dataSourceBreakdown = summarizeGrantDataSources(local);
+  const source = resolveFeedAggregateSource(externalCount, dataSourceBreakdown);
   const integrationState = integrationsStatus(integrations);
+  const payload = {
+    source,
+    dataSourceBreakdown,
+    externalFeedCount: externalCount,
+    integrations: integrationState,
+    demoSeedEnabled: allowGrantDemoSeed(),
+    generatedAt: new Date().toISOString(),
+  };
   if (filters?.category && categorized[filters.category as keyof typeof categorized]) {
-    return { opportunities: categorized[filters.category as keyof typeof categorized], source, integrations: integrationState, externalFeedCount: externalCount };
+    return { ...payload, opportunities: categorized[filters.category as keyof typeof categorized] };
   }
-  return { opportunities: local, categorized, ranked: discovery.ranked ?? [], source, integrations: integrationState, externalFeedCount: externalCount };
+  return { ...payload, opportunities: local, categorized, ranked: discovery.ranked ?? [] };
 }
 
 function integrationsStatus(integrations: Awaited<ReturnType<typeof getGrantFeedIntegrationStatus>>) {

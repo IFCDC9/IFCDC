@@ -29,8 +29,13 @@ router.get("/organization/health", async (_req, res) => {
 router.get("/finance/summary", async (_req, res) => {
   try {
     res.json(await buildExecutiveDashboard());
-  } catch {
-    res.json({ cashFlow: 0, donationsReceived: 0, financialHealthScore: 0 });
+  } catch (error) {
+    console.error("Enterprise API finance summary error:", error);
+    res.status(503).json({
+      error: "Finance summary unavailable",
+      message: error instanceof Error ? error.message : "Failed to load finance summary",
+      liveDataOnly: true,
+    });
   }
 });
 
@@ -43,8 +48,13 @@ router.get("/grants/pipeline", async (_req, res) => {
       activeAwards: dashboard.activeAwards,
       winRate: dashboard.winRate,
     });
-  } catch {
-    res.json({ pipeline: [], pipelineValue: 0, activeAwards: 0, winRate: 0 });
+  } catch (error) {
+    console.error("Enterprise API grants pipeline error:", error);
+    res.status(503).json({
+      error: "Grant pipeline unavailable",
+      message: error instanceof Error ? error.message : "Failed to load grant pipeline",
+      liveDataOnly: true,
+    });
   }
 });
 

@@ -4,12 +4,14 @@
  */
 import { getDb } from "../db";
 import { grantId } from "./grantsSchema";
+import { allowStaticCsrFeedSync } from "./grantProductionPolicy";
 
 export type GrantFeedProvider = "grants_gov" | "sam_gov" | "foundation_directory" | "corporate_csr";
 
 export interface NormalizedGrantOpportunity {
   external_id: string;
   source_type: string;
+  import_status?: string;
   title: string;
   funder: string;
   description: string;
@@ -79,7 +81,7 @@ async function upsertFeedOpportunity(opp: NormalizedGrantOpportunity): Promise<"
     await db.run(
       `UPDATE grant_opportunities SET title = ?, funder = ?, description = ?, amount_min = ?, amount_max = ?,
        deadline = ?, url = ?, funder_type = ?, geography = ?, eligibility = ?, requirements = ?,
-       is_live = ?, is_national = ?, import_status = 'imported', last_verified_at = ?, updated_at = ?, status = 'open'
+       is_live = ?, is_national = ?, import_status = ?, last_verified_at = ?, updated_at = ?, status = 'open'
        WHERE id = ?`,
       opp.title,
       opp.funder,
@@ -94,6 +96,7 @@ async function upsertFeedOpportunity(opp: NormalizedGrantOpportunity): Promise<"
       opp.requirements,
       opp.is_live,
       opp.is_national,
+      opp.import_status ?? "imported",
       now,
       now,
       existing.id
@@ -105,7 +108,7 @@ async function upsertFeedOpportunity(opp: NormalizedGrantOpportunity): Promise<"
        id, title, funder, description, amount_min, amount_max, status, deadline, url, requirements,
        source_type, external_id, import_status, funder_type, geography, eligibility, is_live, is_national,
        posted_date, last_verified_at, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, 'imported', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     grantId(),
     opp.title,
     opp.funder,
@@ -117,6 +120,7 @@ async function upsertFeedOpportunity(opp: NormalizedGrantOpportunity): Promise<"
     opp.requirements,
     opp.source_type,
     opp.external_id,
+    opp.import_status ?? "imported",
     opp.funder_type,
     opp.geography,
     opp.eligibility,
@@ -251,18 +255,19 @@ async function fetchFoundationDirectoryFeed(): Promise<NormalizedGrantOpportunit
       return {
         external_id: `prop-${ein}`,
         source_type: "foundation_directory",
-        title: `${name} — Grant Program Inquiry`,
+        import_status: "imported",
+        title: `${name} — Foundation profile`,
         funder: name,
-        description: `Foundation grant opportunity sourced from public 990 filings. ${String(org.city ?? "")} ${String(org.state ?? "")}`.trim(),
+        description: `Public 990 nonprofit record (${String(org.city ?? "")} ${String(org.state ?? "")}). Verify open grant programs directly with the foundation — this is not an active RFP listing.`.trim(),
         amount_min: null,
         amount_max: parseAmount(org.gross_receipts ?? org.income_amount),
         deadline: null,
         url: `https://projects.propublica.org/nonprofits/organizations/${ein}`,
         funder_type: "foundation",
         geography: String(org.state ?? "US"),
-        eligibility: "501(c)(3) organizations — verify with funder",
-        requirements: "Foundation LOI or application per funder guidelines",
-        is_live: 1,
+        eligibility: "501(c)(3) organizations — verify grant programs with funder",
+        requirements: "Contact foundation for current LOI or application guidelines",
+        is_live: 0,
         is_national: 0,
       };
     });
@@ -271,13 +276,14 @@ async function fetchFoundationDirectoryFeed(): Promise<NormalizedGrantOpportunit
   }
 }
 
-/** Curated corporate CSR programs with live program URLs */
+/** Curated corporate CSR reference programs — not live grant listings. */
 async function fetchCorporateCsrFeed(): Promise<NormalizedGrantOpportunity[]> {
   const programs: NormalizedGrantOpportunity[] = [
     {
       external_id: "csr-walmart-foundation",
       source_type: "corporate_csr",
-      title: "Walmart Foundation Community Grant Program",
+      import_status: "static",
+      title: "Walmart Foundation Community Grant Program (reference)",
       funder: "Walmart Foundation",
       description: "Community grants for hunger relief, workforce development, and disaster response.",
       amount_min: 25000,
@@ -288,13 +294,14 @@ async function fetchCorporateCsrFeed(): Promise<NormalizedGrantOpportunity[]> {
       geography: "US",
       eligibility: "Registered 501(c)(3) organizations",
       requirements: "Online application via Walmart Foundation portal",
-      is_live: 1,
+      is_live: 0,
       is_national: 1,
     },
     {
       external_id: "csr-target-circle",
       source_type: "corporate_csr",
-      title: "Target Foundation Community Grants",
+      import_status: "static",
+      title: "Target Foundation Community Grants (reference)",
       funder: "Target Corporation",
       description: "Grants supporting economic opportunity, education, and community development.",
       amount_min: 10000,
@@ -305,13 +312,14 @@ async function fetchCorporateCsrFeed(): Promise<NormalizedGrantOpportunity[]> {
       geography: "US",
       eligibility: "501(c)(3) nonprofits in Target communities",
       requirements: "Invitation or open RFP per cycle",
-      is_live: 1,
+      is_live: 0,
       is_national: 1,
     },
     {
       external_id: "csr-google-org",
       source_type: "corporate_csr",
-      title: "Google.org Impact Challenge",
+      import_status: "static",
+      title: "Google.org Impact Challenge (reference)",
       funder: "Google.org",
       description: "Technology and innovation grants for nonprofits addressing community challenges.",
       amount_min: 50000,
@@ -322,13 +330,14 @@ async function fetchCorporateCsrFeed(): Promise<NormalizedGrantOpportunity[]> {
       geography: "US",
       eligibility: "Nonprofits with scalable impact models",
       requirements: "Application during open challenge cycles",
-      is_live: 1,
+      is_live: 0,
       is_national: 1,
     },
     {
       external_id: "csr-bankofamerica",
       source_type: "corporate_csr",
-      title: "Bank of America Neighborhood Builders",
+      import_status: "static",
+      title: "Bank of America Neighborhood Builders (reference)",
       funder: "Bank of America Charitable Foundation",
       description: "Leadership development and capacity-building grants for high-impact nonprofits.",
       amount_min: 200000,
@@ -339,7 +348,7 @@ async function fetchCorporateCsrFeed(): Promise<NormalizedGrantOpportunity[]> {
       geography: "US",
       eligibility: "501(c)(3) with strong leadership pipeline",
       requirements: "Nomination and application process",
-      is_live: 1,
+      is_live: 0,
       is_national: 1,
     },
   ];
@@ -389,18 +398,24 @@ async function syncSamGovStatus(): Promise<FeedSyncResult> {
 
 async function syncProvider(
   provider: GrantFeedProvider,
-  fetcher: () => Promise<NormalizedGrantOpportunity[]>
+  fetcher: () => Promise<NormalizedGrantOpportunity[]>,
+  opts?: { staticReference?: boolean }
 ): Promise<FeedSyncResult> {
   const syncedAt = new Date().toISOString();
   try {
     const opps = await fetcher();
     const { imported, updated } = await importBatch(opps);
-    const status = imported + updated > 0 ? ("connected" as const) : ("error" as const);
+    const hasRecords = imported + updated > 0;
+    const status = hasRecords ? ("connected" as const) : ("error" as const);
     const result = {
       status,
       imported,
       updated,
-      error: imported + updated > 0 ? undefined : "No opportunities returned from feed",
+      error: hasRecords
+        ? opts?.staticReference
+          ? "Curated reference data — verify cycles with each funder"
+          : undefined
+        : "No opportunities returned from feed",
     };
     await recordFeedSync(provider, result);
     return { provider, ...result, syncedAt };
@@ -418,7 +433,11 @@ async function syncProvider(
 
 export async function syncGrantFeeds(opts?: { providers?: GrantFeedProvider[] }): Promise<FeedSyncResult[]> {
   await ensureGrantFeedSyncTables();
-  const providers = opts?.providers ?? (["grants_gov", "foundation_directory", "corporate_csr"] as GrantFeedProvider[]);
+  const defaultProviders: GrantFeedProvider[] = ["grants_gov", "foundation_directory"];
+  if (allowStaticCsrFeedSync()) {
+    defaultProviders.push("corporate_csr");
+  }
+  const providers = opts?.providers ?? defaultProviders;
   const results: FeedSyncResult[] = [];
 
   if (providers.includes("grants_gov")) {
@@ -428,7 +447,7 @@ export async function syncGrantFeeds(opts?: { providers?: GrantFeedProvider[] })
     results.push(await syncProvider("foundation_directory", fetchFoundationDirectoryFeed));
   }
   if (providers.includes("corporate_csr")) {
-    results.push(await syncProvider("corporate_csr", fetchCorporateCsrFeed));
+    results.push(await syncProvider("corporate_csr", fetchCorporateCsrFeed, { staticReference: true }));
   }
   if (providers.includes("sam_gov")) {
     results.push(await syncSamGovStatus());
@@ -461,8 +480,8 @@ export async function getGrantFeedIntegrationStatus(): Promise<
   return {
     grantsGov: statusFor("grants_gov", "Grants.gov", "Federal opportunity feed"),
     samGov: statusFor("sam_gov", "SAM.gov", "Entity verification"),
-    foundationDirectory: statusFor("foundation_directory", "Foundation Directory", "Foundation grant programs"),
-    corporateGrants: statusFor("corporate_csr", "Corporate CSR Portal", "Corporate giving programs"),
+    foundationDirectory: statusFor("foundation_directory", "Foundation Directory", "990 nonprofit profiles — verify grant programs with each funder"),
+    corporateGrants: statusFor("corporate_csr", "Corporate CSR Reference", "Curated program links — not live grant listings"),
   };
 }
 
@@ -470,7 +489,10 @@ export async function countExternalFeedOpportunities(): Promise<number> {
   const db = await getDb();
   return (
     (await db.get<{ c: number }>(
-      "SELECT COUNT(*) as c FROM grant_opportunities WHERE source_type IN ('grants_gov', 'foundation_directory', 'corporate_csr') AND import_status = 'imported'"
+      `SELECT COUNT(*) as c FROM grant_opportunities
+       WHERE source_type IN ('grants_gov', 'foundation_directory')
+         AND import_status = 'imported'
+         AND COALESCE(is_live, 0) = 1`
     ))?.c ?? 0
   );
 }
