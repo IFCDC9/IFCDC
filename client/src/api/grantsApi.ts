@@ -581,6 +581,15 @@ export const grantsApi = {
     apiFetch<{ log: Record<string, unknown>[]; generatedAt: string }>(
       `/funding-engine/v5/pipeline/automation/log?limit=${limit}`,
     ),
+  v5EconomicDevelopmentWorkforce: () =>
+    apiFetch<{
+      id: string;
+      name: string;
+      metrics: Record<string, number | string>;
+      summary: string;
+      lastSync: string;
+      status?: string;
+    }>("/funding-engine/v5/workforce/economic-development"),
   v5Calendar: (days = 90) =>
     apiFetch<{ events: Record<string, unknown>[]; generatedAt: string }>(`/funding-engine/v5/calendar?days=${days}`),
   v5Profiles: () =>

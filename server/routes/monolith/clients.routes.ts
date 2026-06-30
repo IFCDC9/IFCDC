@@ -34,11 +34,16 @@ router.post("/clients", authRequired, requireRole(ROLES.EXEC, ROLES.CLINICIAN, R
 
   await logAudit(req, { action: "CREATE_CLIENT", targetType: "CLIENT", targetId: id, extra: { fullName } });
 
+  const peopleLink = await import("../../hq/clientCaseEngine")
+    .then((m) => m.linkClientToPeopleRegistry(id, req.user?.email))
+    .catch(() => null);
+
   res.status(201).json({
     id, fullName, dateOfBirth,
     contactInfo: { phone, email },
     programs: JSON.parse(programsJson),
     createdAt: created_at,
+    peopleLink: peopleLink?.ok ? { personId: peopleLink.personId, linked: peopleLink.linked } : undefined,
   });
 });
 

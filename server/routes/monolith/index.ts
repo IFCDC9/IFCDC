@@ -14,6 +14,12 @@ import { registerDashboardRoutes } from "./dashboard.routes";
 import { registerReportsRoutes } from "./reports.routes";
 import { registerOutreachRoutes } from "./outreach.routes";
 import { registerTwilioRoutes } from "./twilio.routes";
+import { registerLegacyHrRoutes } from "./legacy-hr.routes";
+import { registerBarbershopRoutes } from "./barbershop.routes";
+import { registerPaypalRoutes } from "./paypal.routes";
+import { registerAiRoutes } from "./ai.routes";
+import { registerPoliciesRoutes } from "./policies.routes";
+import { registerPublicChatbotRoutes } from "./publicChatbot.routes";
 
 type TwilioSenders = ReturnType<typeof createTwilioSenders>;
 
@@ -40,6 +46,15 @@ export function registerMonolithRoutes(app: Express, deps: MonolithRouteDeps): v
   registerReportsRoutes(app);
   registerOutreachRoutes(app);
   registerTwilioRoutes(app, deps.publicIfcdcPhone);
+  registerLegacyHrRoutes(app);
+  registerBarbershopRoutes(app, {
+    twilioClient: deps.twilioClient,
+    twilioSmsFrom: deps.twilioSmsFrom,
+  });
+  registerPaypalRoutes(app);
+  registerAiRoutes(app);
+  registerPoliciesRoutes(app);
+  registerPublicChatbotRoutes(app);
 }
 
 export function registerMonolithCronRoutes(app: Express, deps: MonolithRouteDeps): void {
