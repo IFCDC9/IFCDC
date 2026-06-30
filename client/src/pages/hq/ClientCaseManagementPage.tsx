@@ -57,7 +57,7 @@ const ClientCaseManagementPage: React.FC = () => {
       setShowNew(false);
       setNewClient({ fullName: "", phone: "", email: "", programs: "" });
       setSelectedId(data.id);
-      const link = (data as ClientRecord & { peopleLink?: { personId: string; linked: boolean } }).peopleLink;
+      const link = data.peopleLink;
       setCreateNotice(
         link?.personId
           ? `Client created and linked to People registry (${link.linked ? "existing" : "new"} person ${link.personId})`
