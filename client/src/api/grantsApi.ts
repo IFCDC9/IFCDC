@@ -590,6 +590,41 @@ export const grantsApi = {
       lastSync: string;
       status?: string;
     }>("/funding-engine/v5/workforce/economic-development"),
+  v5Connectors: () =>
+    apiFetch<{
+      softwareDivision: {
+        id: string;
+        name: string;
+        status: string;
+        independentlyDeployable: boolean;
+        inheritedServices: string[];
+        integrationEndpoints: Record<string, string>;
+        reportingPath: string;
+        description: string;
+      }[];
+      economicDevelopment: {
+        id: string;
+        name: string;
+        status: string;
+        independentlyDeployable: boolean;
+        inheritedServices: string[];
+        integrationEndpoints: Record<string, string>;
+        reportingPath: string;
+        description: string;
+      };
+      caseManagement: {
+        id: string;
+        name: string;
+        status: string;
+        independentlyDeployable: boolean;
+        inheritedServices: string[];
+        integrationEndpoints: Record<string, string>;
+        reportingPath: string;
+        description: string;
+      };
+      headquartersRole: string;
+      timestamp: string;
+    }>("/funding-engine/v5/connectors"),
   v5Calendar: (days = 90) =>
     apiFetch<{ events: Record<string, unknown>[]; generatedAt: string }>(`/funding-engine/v5/calendar?days=${days}`),
   v5Profiles: () =>

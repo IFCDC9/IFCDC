@@ -68,7 +68,7 @@ export const HQ_NAV_ITEMS: HQNavItem[] = [
   { label: "AURA AI Command Center", path: "/hq/aura", icon: Sparkles, section: "Command" },
   { label: "Integrations Hub", path: "/hq/integrations", icon: Plug, section: "Operations" },
   { label: "People Management", path: "/hq/people", icon: Users, section: "Operations" },
-  { label: "Client & Case Management", path: "/hq/clients", icon: Users, section: "Operations", badge: "M2.1" },
+  { label: "Client & Case Management", path: "/hq/clients", icon: Users, section: "Operations", badge: "M2.2" },
   { label: "Payroll", path: "/hq/payroll", icon: Wallet, section: "Operations" },
   { label: "Volunteers", path: "/hq/people?type=volunteer", icon: HandHeart, section: "Operations" },
 

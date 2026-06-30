@@ -14,6 +14,7 @@ export interface ClientRecord {
   contactInfo: { phone?: string | null; email?: string | null };
   programs: string[];
   createdAt: string;
+  peopleLink?: { personId: string; linked: boolean };
 }
 
 export interface ClientOverview {
