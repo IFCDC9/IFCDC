@@ -97,6 +97,11 @@ import {
 } from "../hq/grantFundingEngineV5";
 import { buildPipelineKanbanBoard, transitionPipelineEntity } from "../hq/grantPipelineEngine";
 import {
+  listPipelineAutomationRules,
+  listPipelineAutomationLog,
+  scanPipelineDeadlineAlerts,
+} from "../hq/pipelineAutomation";
+import {
   buildGrantCenterPlatform,
   buildGrantCenterExecutiveSummary,
   listGrantTemplates,
@@ -1292,6 +1297,20 @@ router.post("/funding-engine/v5/pipeline/transition", async (req, res) => {
   });
   if (!result.ok) return res.status(400).json(result);
   res.json(result);
+});
+
+router.get("/funding-engine/v5/pipeline/automation/rules", async (_req, res) => {
+  res.json({ rules: await listPipelineAutomationRules(), generatedAt: new Date().toISOString() });
+});
+
+router.get("/funding-engine/v5/pipeline/automation/log", async (req, res) => {
+  const limit = req.query.limit ? Number(req.query.limit) : 50;
+  res.json({ log: await listPipelineAutomationLog(limit), generatedAt: new Date().toISOString() });
+});
+
+router.post("/funding-engine/v5/pipeline/automation/scan-deadlines", async (req, res) => {
+  const days = req.body?.daysAhead ? Number(req.body.daysAhead) : 7;
+  res.json(await scanPipelineDeadlineAlerts(days));
 });
 
 export default router;

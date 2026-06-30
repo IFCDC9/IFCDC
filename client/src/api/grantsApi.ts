@@ -564,6 +564,23 @@ export const grantsApi = {
         body: JSON.stringify(body),
       },
     ),
+  v5PipelineAutomationRules: () =>
+    apiFetch<{
+      rules: {
+        id: string;
+        trigger: string;
+        stage?: string;
+        action: string;
+        priority: string;
+        titleTemplate: string;
+        enabled: boolean;
+      }[];
+      generatedAt: string;
+    }>("/funding-engine/v5/pipeline/automation/rules"),
+  v5PipelineAutomationLog: (limit = 30) =>
+    apiFetch<{ log: Record<string, unknown>[]; generatedAt: string }>(
+      `/funding-engine/v5/pipeline/automation/log?limit=${limit}`,
+    ),
   v5Calendar: (days = 90) =>
     apiFetch<{ events: Record<string, unknown>[]; generatedAt: string }>(`/funding-engine/v5/calendar?days=${days}`),
   v5Profiles: () =>

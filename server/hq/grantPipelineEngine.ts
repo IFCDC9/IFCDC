@@ -11,6 +11,7 @@ import {
   updateGrantLifecycleStage,
   buildGrantLifecyclePipeline,
 } from "./grantFundingEngineV4";
+import { runPipelineAutomationOnTransition } from "./pipelineAutomation";
 
 export { GRANT_LIFECYCLE_STAGES, GRANT_LIFECYCLE_LABELS };
 
@@ -171,6 +172,15 @@ export async function transitionPipelineEntity(opts: {
     entityId: opts.entityId,
     actorEmail: opts.actorEmail,
     metadata: { fromStage, toStage: opts.toStage, title: row.title },
+  });
+
+  await runPipelineAutomationOnTransition({
+    entityType: opts.entityType,
+    entityId: opts.entityId,
+    title: row.title,
+    fromStage,
+    toStage: opts.toStage,
+    actorEmail: opts.actorEmail,
   });
 
   return { ok: true, fromStage, toStage: opts.toStage };
