@@ -148,6 +148,14 @@ router.get("/executive/overview", hqAuthRequired, requireHQModule("executive"), 
     });
   } catch (error) {
     console.error("Executive overview error:", error);
+    if (process.env.NODE_ENV === "production") {
+      res.status(503).json({
+        error: "Executive overview unavailable",
+        message: error instanceof Error ? error.message : "Failed to load live organization metrics",
+        liveDataOnly: true,
+      });
+      return;
+    }
     const [metrics, orgHealth, recentActivity] = await Promise.all([
       getOrganizationMetrics().catch(() => ({
         totalEmployees: 24,

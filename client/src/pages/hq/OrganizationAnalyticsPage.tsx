@@ -25,6 +25,8 @@ import {
   normalizeAnalyticsOverview,
   normalizeOperationsOverview,
 } from "../../data/founderDashboardDefaults";
+import { isProductionClient, devPlaceholder, strictApiCall } from "../../utils/productionDataPolicy";
+import { HqDataUnavailable } from "../../components/hq/HqDataUnavailable";
 
 type Tab = "overview" | "finance" | "grants" | "people" | "payroll" | "donations" | "programs"
   | "software" | "trends" | "kpi" | "reports" | "board" | "aura";
@@ -73,15 +75,15 @@ const OrganizationAnalyticsPage: React.FC = () => {
 
   const ops = useQuery({
     queryKey: ["analytics-ops"],
-    queryFn: () => operationsApi.overview().catch(() => DEFAULT_OPERATIONS_OVERVIEW),
-    placeholderData: DEFAULT_OPERATIONS_OVERVIEW,
+    queryFn: () => strictApiCall(() => operationsApi.overview(), DEFAULT_OPERATIONS_OVERVIEW),
+    placeholderData: devPlaceholder(DEFAULT_OPERATIONS_OVERVIEW),
     enabled: tab === "programs" || tab === "overview",
   });
 
   const overview = useQuery({
     queryKey: ["analytics-overview"],
-    queryFn: () => analyticsApi.overview().catch(() => DEFAULT_ANALYTICS_OVERVIEW),
-    placeholderData: DEFAULT_ANALYTICS_OVERVIEW,
+    queryFn: () => strictApiCall(() => analyticsApi.overview(), DEFAULT_ANALYTICS_OVERVIEW),
+    placeholderData: devPlaceholder(DEFAULT_ANALYTICS_OVERVIEW),
   });
   const finance = useQuery({ queryKey: ["analytics-finance"], queryFn: analyticsApi.finance, enabled: tab === "finance" || tab === "overview" || tab === "board" });
   const grants = useQuery({ queryKey: ["analytics-grants"], queryFn: analyticsApi.grants, enabled: tab === "grants" || tab === "board" });
@@ -104,6 +106,17 @@ const OrganizationAnalyticsPage: React.FC = () => {
   const ov = normalizeAnalyticsOverview(overview.data);
   const opsData = normalizeOperationsOverview(ops.data);
 
+  if (isProductionClient && overview.isFetched && !ov) {
+    return (
+      <HQLayout title="Organization Analytics" subtitle="Executive reporting and real-time organizational intelligence">
+        <HqDataUnavailable
+          message="Analytics overview could not be loaded from production APIs."
+          onRetry={() => overview.refetch()}
+        />
+      </HQLayout>
+    );
+  }
+
   return (
     <HQLayout
       title="Organization Analytics"
@@ -125,7 +138,7 @@ const OrganizationAnalyticsPage: React.FC = () => {
         <div className="hq-panel" style={{ padding: "1rem", color: "#ef4444" }}>{(overview.error as Error).message}</div>
       )}
 
-      {tab === "overview" && (
+      {tab === "overview" && ov && (
         <>
           <div className="hq-kpi-grid">
             <KpiCard label="Organization Health" value={`${ov.organizationHealth.overall}%`} icon={Activity} variant={ov.organizationHealth.overall >= 75 ? "success" : "warning"} meta={ov.organizationHealth.grade} />

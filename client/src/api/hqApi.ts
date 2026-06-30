@@ -31,6 +31,8 @@ export interface ExecutiveOverview {
   softwareDivision: {
     total: number;
     healthy: number;
+    operational?: number;
+    polledHealthy?: number;
     production: number;
     inDevelopment: number;
   };

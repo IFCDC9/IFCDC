@@ -82,46 +82,76 @@ export const DEFAULT_TRENDS = {
   donationGrowth: 8.5,
 };
 
-/** Merge partial API payloads with safe defaults so dashboard widgets never crash. */
-export function normalizeAnalyticsOverview(data?: Partial<AnalyticsOverview> | null): AnalyticsOverview {
+import { isProductionClient } from "../utils/productionDataPolicy";
+
+/** Dev: merge partial API payloads with defaults. Production: live data only — no demo fill. */
+export function normalizeAnalyticsOverview(data?: Partial<AnalyticsOverview> | null): AnalyticsOverview | null {
+  if (!data) return isProductionClient ? null : DEFAULT_ANALYTICS_OVERVIEW;
+  if (isProductionClient) {
+    return {
+      organizationHealth: data.organizationHealth!,
+      finance: data.finance!,
+      grants: data.grants!,
+      people: data.people!,
+      programs: data.programs!,
+      donations: data.donations!,
+      software: data.software!,
+      timestamp: data.timestamp ?? new Date().toISOString(),
+    };
+  }
   return {
     organizationHealth: {
       ...DEFAULT_ANALYTICS_OVERVIEW.organizationHealth,
-      ...data?.organizationHealth,
-      factors: data?.organizationHealth?.factors?.length
+      ...data.organizationHealth,
+      factors: data.organizationHealth?.factors?.length
         ? data.organizationHealth.factors
         : DEFAULT_ANALYTICS_OVERVIEW.organizationHealth.factors,
     },
-    finance: { ...DEFAULT_ANALYTICS_OVERVIEW.finance, ...data?.finance },
-    grants: { ...DEFAULT_ANALYTICS_OVERVIEW.grants, ...data?.grants },
-    people: { ...DEFAULT_ANALYTICS_OVERVIEW.people, ...data?.people },
+    finance: { ...DEFAULT_ANALYTICS_OVERVIEW.finance, ...data.finance },
+    grants: { ...DEFAULT_ANALYTICS_OVERVIEW.grants, ...data.grants },
+    people: { ...DEFAULT_ANALYTICS_OVERVIEW.people, ...data.people },
     programs: {
-      programsRunning: data?.programs?.programsRunning ?? DEFAULT_ANALYTICS_OVERVIEW.programs.programsRunning,
-      participants: data?.programs?.participants ?? DEFAULT_ANALYTICS_OVERVIEW.programs.participants,
+      programsRunning: data.programs?.programsRunning ?? DEFAULT_ANALYTICS_OVERVIEW.programs.programsRunning,
+      participants: data.programs?.participants ?? DEFAULT_ANALYTICS_OVERVIEW.programs.participants,
     },
-    donations: { ...DEFAULT_ANALYTICS_OVERVIEW.donations, ...data?.donations },
-    software: { ...DEFAULT_ANALYTICS_OVERVIEW.software, ...data?.software },
-    timestamp: data?.timestamp ?? DEFAULT_ANALYTICS_OVERVIEW.timestamp,
+    donations: { ...DEFAULT_ANALYTICS_OVERVIEW.donations, ...data.donations },
+    software: { ...DEFAULT_ANALYTICS_OVERVIEW.software, ...data.software },
+    timestamp: data.timestamp ?? DEFAULT_ANALYTICS_OVERVIEW.timestamp,
   };
 }
 
-export function normalizeOperationsOverview(data?: Partial<OperationsOverview> | null): OperationsOverview {
+export function normalizeOperationsOverview(data?: Partial<OperationsOverview> | null): OperationsOverview | null {
+  if (!data) return isProductionClient ? null : DEFAULT_OPERATIONS_OVERVIEW;
+  if (isProductionClient) return data as OperationsOverview;
   return {
-    housing: { ...DEFAULT_OPERATIONS_OVERVIEW.housing, ...data?.housing },
-    scholarships: { ...DEFAULT_OPERATIONS_OVERVIEW.scholarships, ...data?.scholarships },
-    media: { ...DEFAULT_OPERATIONS_OVERVIEW.media, ...data?.media },
-    documents: { ...DEFAULT_OPERATIONS_OVERVIEW.documents, ...data?.documents },
-    assets: { ...DEFAULT_OPERATIONS_OVERVIEW.assets, ...data?.assets },
-    fleet: { ...DEFAULT_OPERATIONS_OVERVIEW.fleet, ...data?.fleet },
-    facilities: { ...DEFAULT_OPERATIONS_OVERVIEW.facilities, ...data?.facilities },
-    board: { ...DEFAULT_OPERATIONS_OVERVIEW.board, ...data?.board },
-    compliance: { ...DEFAULT_OPERATIONS_OVERVIEW.compliance, ...data?.compliance },
-    calendar: { ...DEFAULT_OPERATIONS_OVERVIEW.calendar, ...data?.calendar },
+    housing: { ...DEFAULT_OPERATIONS_OVERVIEW.housing, ...data.housing },
+    scholarships: { ...DEFAULT_OPERATIONS_OVERVIEW.scholarships, ...data.scholarships },
+    media: { ...DEFAULT_OPERATIONS_OVERVIEW.media, ...data.media },
+    documents: { ...DEFAULT_OPERATIONS_OVERVIEW.documents, ...data.documents },
+    assets: { ...DEFAULT_OPERATIONS_OVERVIEW.assets, ...data.assets },
+    fleet: { ...DEFAULT_OPERATIONS_OVERVIEW.fleet, ...data.fleet },
+    facilities: { ...DEFAULT_OPERATIONS_OVERVIEW.facilities, ...data.facilities },
+    board: { ...DEFAULT_OPERATIONS_OVERVIEW.board, ...data.board },
+    compliance: { ...DEFAULT_OPERATIONS_OVERVIEW.compliance, ...data.compliance },
+    calendar: { ...DEFAULT_OPERATIONS_OVERVIEW.calendar, ...data.calendar },
   };
 }
 
-export function normalizeExecutiveOverview(data?: Partial<ExecutiveOverview> | null): ExecutiveOverview {
-  const orgHealth = data?.organizationHealth
+export function normalizeExecutiveOverview(data?: Partial<ExecutiveOverview> | null): ExecutiveOverview | null {
+  if (!data) return isProductionClient ? null : DEFAULT_EXECUTIVE_OVERVIEW;
+  if (isProductionClient) {
+    return {
+      ...data,
+      organizationHealth: data.organizationHealth,
+      organizationHealthScore:
+        data.organizationHealthScore ?? data.organizationHealth?.overall ?? 0,
+      metrics: data.metrics!,
+      recentActivity: data.recentActivity ?? [],
+      softwareDivision: data.softwareDivision,
+      platformServices: data.platformServices ?? [],
+    } as ExecutiveOverview;
+  }
+  const orgHealth = data.organizationHealth
     ? {
         ...DEFAULT_EXECUTIVE_OVERVIEW.organizationHealth!,
         ...data.organizationHealth,
@@ -136,12 +166,12 @@ export function normalizeExecutiveOverview(data?: Partial<ExecutiveOverview> | n
     ...data,
     organizationHealth: orgHealth,
     organizationHealthScore:
-      data?.organizationHealthScore ??
-      data?.organizationHealth?.overall ??
+      data.organizationHealthScore ??
+      data.organizationHealth?.overall ??
       DEFAULT_EXECUTIVE_OVERVIEW.organizationHealthScore,
-    metrics: { ...DEFAULT_EXECUTIVE_OVERVIEW.metrics, ...data?.metrics },
-    recentActivity: data?.recentActivity?.length ? data.recentActivity : DEFAULT_EXECUTIVE_OVERVIEW.recentActivity,
-    softwareDivision: { ...DEFAULT_EXECUTIVE_OVERVIEW.softwareDivision, ...data?.softwareDivision },
-    platformServices: data?.platformServices ?? DEFAULT_EXECUTIVE_OVERVIEW.platformServices,
+    metrics: { ...DEFAULT_EXECUTIVE_OVERVIEW.metrics, ...data.metrics },
+    recentActivity: data.recentActivity?.length ? data.recentActivity : DEFAULT_EXECUTIVE_OVERVIEW.recentActivity,
+    softwareDivision: { ...DEFAULT_EXECUTIVE_OVERVIEW.softwareDivision, ...data.softwareDivision },
+    platformServices: data.platformServices ?? DEFAULT_EXECUTIVE_OVERVIEW.platformServices,
   };
 }

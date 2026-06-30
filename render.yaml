@@ -37,6 +37,8 @@ services:
         value: https://ifcdc-hq-wst6.onrender.com/api/health
       - key: HQ_RADIO_HEALTH_URL
         value: https://ifcdc-hq-wst6.onrender.com/api/health
+      - key: HQ_BARBERS_HEALTH_URL
+        sync: false
       - key: IFCDC_NOTIFICATIONS_URL
         sync: false
       - key: RESEND_API_KEY

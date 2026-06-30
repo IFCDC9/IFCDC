@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { lazyWithRetry } from "../../utils/lazyWithRetry";
 import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Users,
   HandHeart,
@@ -57,6 +57,8 @@ import { resolveOrganizationHealth, formatHealthScore } from "../../utils/organi
 import { intelligenceApi } from "../../api/intelligenceApi";
 import { peopleApi } from "../../api/peopleApi";
 import { HqWidgetErrorBoundary } from "../../components/hq/HqErrorBoundary";
+import { HqDataUnavailable } from "../../components/hq/HqDataUnavailable";
+import { isProductionClient, devPlaceholder, strictApiCall } from "../../utils/productionDataPolicy";
 
 const ExecutiveWidgetDashboard = lazyWithRetry(
   () => import("../../components/hq/ExecutiveWidgetDashboard").then((m) => ({ default: m.ExecutiveWidgetDashboard })),
@@ -74,6 +76,7 @@ const QUICK_ACTIONS = [
 
 const ExecutiveDashboard: React.FC = () => {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const { connected: realtimeConnected, anomalyAlerts } = useHqRealtime();
   const [viewMode, setViewMode] = useState<"standard" | "custom">(() => loadDashboardModeLocal());
   const [workspaceReady, setWorkspaceReady] = useState(false);
@@ -122,53 +125,51 @@ const ExecutiveDashboard: React.FC = () => {
 
   const trends = useQuery({
     queryKey: ["hq-founder-trends"],
-    queryFn: async () => {
-      try {
-        return await analyticsApi.trends();
-      } catch {
-        return DEFAULT_TRENDS;
-      }
-    },
-    placeholderData: DEFAULT_TRENDS,
+    queryFn: () => strictApiCall(() => analyticsApi.trends(), DEFAULT_TRENDS),
+    placeholderData: devPlaceholder(DEFAULT_TRENDS),
     staleTime: 300_000,
-    retry: false,
+    retry: isProductionClient ? 1 : false,
   });
 
   const financeDetail = useQuery({
     queryKey: ["hq-founder-finance"],
-    queryFn: () => analyticsApi.finance().catch(() => ({ monthlyTrend: [] })),
+    queryFn: () =>
+      isProductionClient
+        ? analyticsApi.finance()
+        : analyticsApi.finance().catch(() => ({ monthlyTrend: [] })),
     staleTime: 300_000,
-    retry: false,
+    retry: isProductionClient ? 1 : false,
   });
 
   const ops = useQuery({
     queryKey: ["hq-founder-ops"],
-    queryFn: async () => {
-      try {
-        return await operationsApi.overview();
-      } catch {
-        return DEFAULT_OPERATIONS_OVERVIEW;
-      }
-    },
-    placeholderData: DEFAULT_OPERATIONS_OVERVIEW,
+    queryFn: () => strictApiCall(() => operationsApi.overview(), DEFAULT_OPERATIONS_OVERVIEW),
+    placeholderData: devPlaceholder(DEFAULT_OPERATIONS_OVERVIEW),
     staleTime: 120_000,
-    retry: false,
+    retry: isProductionClient ? 1 : false,
   });
 
   const aura = useQuery({
     queryKey: ["hq-founder-aura"],
     queryFn: () =>
-      analyticsApi
-        .auraInsights("Provide 3 executive priorities for the IFCDC founder based on current organization health.")
-        .catch(() => DEFAULT_AURA_INSIGHT),
-    placeholderData: DEFAULT_AURA_INSIGHT,
+      strictApiCall(
+        () =>
+          analyticsApi.auraInsights(
+            "Provide 3 executive priorities for the IFCDC founder based on current organization health."
+          ),
+        DEFAULT_AURA_INSIGHT
+      ),
+    placeholderData: devPlaceholder(DEFAULT_AURA_INSIGHT),
     staleTime: 600_000,
     retry: false,
   });
 
   const activity = useQuery({
     queryKey: ["hq-activity-feed"],
-    queryFn: () => analyticsApi.activity(15).catch(() => ({ activity: DEFAULT_EXECUTIVE_OVERVIEW.recentActivity })),
+    queryFn: () =>
+      isProductionClient
+        ? analyticsApi.activity(15)
+        : analyticsApi.activity(15).catch(() => ({ activity: DEFAULT_EXECUTIVE_OVERVIEW.recentActivity })),
     staleTime: 60_000,
     retry: false,
     refetchInterval: 90_000,
@@ -176,82 +177,97 @@ const ExecutiveDashboard: React.FC = () => {
 
   const grantPipeline = useQuery({
     queryKey: ["hq-exec-grant-pipeline"],
-    queryFn: () => grantsApi.pipeline().catch(() => ({ pipeline: [] })),
+    queryFn: () =>
+      isProductionClient ? grantsApi.pipeline() : grantsApi.pipeline().catch(() => ({ pipeline: [] })),
     staleTime: 120_000,
     refetchInterval: 120_000,
   });
 
   const grantDeadlines = useQuery({
     queryKey: ["hq-exec-grant-deadlines"],
-    queryFn: () => grantsApi.deadlines(true).catch(() => ({ deadlines: [] })),
+    queryFn: () =>
+      isProductionClient ? grantsApi.deadlines(true) : grantsApi.deadlines(true).catch(() => ({ deadlines: [] })),
     staleTime: 120_000,
     refetchInterval: 120_000,
   });
 
   const enterpriseNotifs = useQuery({
     queryKey: ["hq-exec-notifications"],
-    queryFn: () => enterpriseApi.notifications().catch(() => ({ notifications: [], unreadCount: 0 })),
+    queryFn: () =>
+      isProductionClient
+        ? enterpriseApi.notifications()
+        : enterpriseApi.notifications().catch(() => ({ notifications: [], unreadCount: 0 })),
     staleTime: 60_000,
     refetchInterval: 90_000,
   });
 
   const upcomingEvents = useQuery({
     queryKey: ["hq-exec-events"],
-    queryFn: () => operationsApi.list("/calendar/events").catch(() => ({ items: [] })),
+    queryFn: () =>
+      isProductionClient
+        ? operationsApi.list("/calendar/events")
+        : operationsApi.list("/calendar/events").catch(() => ({ items: [] })),
     staleTime: 120_000,
   });
 
   const programAnalytics = useQuery({
     queryKey: ["hq-exec-programs"],
-    queryFn: () => analyticsApi.programs().catch(() => null),
+    queryFn: () => (isProductionClient ? analyticsApi.programs() : analyticsApi.programs().catch(() => null)),
     staleTime: 120_000,
     refetchInterval: 120_000,
   });
 
   const payrollAnalytics = useQuery({
     queryKey: ["hq-exec-payroll"],
-    queryFn: () => analyticsApi.payroll().catch(() => null),
+    queryFn: () => (isProductionClient ? analyticsApi.payroll() : analyticsApi.payroll().catch(() => null)),
     staleTime: 120_000,
     refetchInterval: 120_000,
   });
 
   const peopleAnalytics = useQuery({
     queryKey: ["hq-exec-people"],
-    queryFn: () => analyticsApi.people().catch(() => null),
+    queryFn: () => (isProductionClient ? analyticsApi.people() : analyticsApi.people().catch(() => null)),
     staleTime: 120_000,
   });
 
   const workforceIntel = useQuery({
     queryKey: ["hq-workforce-intelligence"],
-    queryFn: () => peopleApi.phase3Intelligence().catch(() => null),
+    queryFn: () =>
+      isProductionClient ? peopleApi.phase3Intelligence() : peopleApi.phase3Intelligence().catch(() => null),
     staleTime: 120_000,
     enabled: viewMode === "standard",
   });
 
   const dailyBriefing = useQuery({
     queryKey: ["hq-exec-daily-briefing"],
-    queryFn: () => analyticsApi.dailyBriefing().catch(() => null),
+    queryFn: () =>
+      isProductionClient ? analyticsApi.dailyBriefing() : analyticsApi.dailyBriefing().catch(() => null),
     staleTime: 300_000,
     enabled: viewMode === "standard",
   });
 
   const opsBriefing = useQuery({
     queryKey: ["hq-ops-briefing"],
-    queryFn: () => hqApi.auraOperationsBriefing().catch(() => null),
+    queryFn: () =>
+      isProductionClient ? hqApi.auraOperationsBriefing() : hqApi.auraOperationsBriefing().catch(() => null),
     staleTime: 120_000,
     enabled: viewMode === "standard",
   });
 
   const complianceAlerts = useQuery({
     queryKey: ["hq-exec-compliance"],
-    queryFn: () => hqApi.auraComplianceTracker().catch(() => ({ overdue: 0, dueNext14Days: 0, deadlines: [] })),
+    queryFn: () =>
+      isProductionClient
+        ? hqApi.auraComplianceTracker()
+        : hqApi.auraComplianceTracker().catch(() => ({ overdue: 0, dueNext14Days: 0, deadlines: [] })),
     staleTime: 120_000,
     enabled: viewMode === "standard",
   });
 
   const scorecard = useQuery({
     queryKey: ["hq-intelligence-scorecard"],
-    queryFn: () => intelligenceApi.scorecard().catch(() => null),
+    queryFn: () =>
+      isProductionClient ? intelligenceApi.scorecard() : intelligenceApi.scorecard().catch(() => null),
     staleTime: 120_000,
     enabled: viewMode === "standard",
   });
@@ -284,24 +300,54 @@ const ExecutiveDashboard: React.FC = () => {
     enabled: viewMode === "standard",
   });
 
-  const data = normalizeExecutiveOverview(rawData ?? (executiveFetched ? null : DEFAULT_EXECUTIVE_OVERVIEW));
+  const data = normalizeExecutiveOverview(
+    rawData ?? (isProductionClient ? null : executiveFetched ? null : DEFAULT_EXECUTIVE_OVERVIEW)
+  );
   const analyticsData = analytics.data
     ? normalizeAnalyticsOverview(analytics.data)
-    : normalizeAnalyticsOverview(analytics.isFetched ? null : DEFAULT_ANALYTICS_OVERVIEW);
+    : normalizeAnalyticsOverview(
+        isProductionClient ? null : analytics.isFetched ? null : DEFAULT_ANALYTICS_OVERVIEW
+      );
   const opsData = normalizeOperationsOverview(ops.data);
 
+  const executiveCoreFailed =
+    isProductionClient && (isError || (executiveFetched && !rawData) || !data);
+  const analyticsCoreFailed = isProductionClient && analytics.isError && !analyticsData;
+
+  if (isProductionClient && isLoading && !rawData) {
+    return <HqLoading message="Loading executive command center…" />;
+  }
+
+  if (executiveCoreFailed) {
+    return (
+      <HqDataUnavailable
+        message="Executive overview could not be loaded from production APIs. Demo metrics are disabled in production."
+        detail={isError ? "GET /api/hq/executive/overview failed" : undefined}
+        onRetry={() => {
+          void queryClient.invalidateQueries({ queryKey: ["hq-executive-overview"] });
+          void queryClient.invalidateQueries({ queryKey: ["hq-founder-analytics"] });
+        }}
+      />
+    );
+  }
+
   const healthLoading = !analytics.isFetched && !executiveFetched;
-  const health = resolveOrganizationHealth(analyticsData, data) ?? (healthLoading ? null : data.organizationHealth ?? null);
+  const health = resolveOrganizationHealth(analyticsData, data) ?? (healthLoading ? null : data?.organizationHealth ?? null);
   const healthScore = health?.overall;
   const healthScoreLabel = formatHealthScore(health, healthLoading);
-  const metrics = data.metrics;
+  const metrics = data?.metrics;
   const trendData = financeDetail.data?.monthlyTrend as { month: string; cashFlow: number; donations: number; expenses: number }[] | undefined;
   const greeting = formatWelcomeGreeting(user);
-  const financialHealth = analyticsData.finance.financialHealthScore ?? 0;
-  const softwareHealthy = data.softwareDivision?.healthy ?? opsData.software?.healthy ?? 0;
-  const softwareTotal = data.softwareDivision?.total ?? opsData.software?.total ?? 0;
-  const hrActive = analyticsData.people.totalPeople ?? metrics?.totalEmployees ?? 0;
-  const grantsActive = analyticsData.grants.activeAwards ?? metrics?.activeGrants ?? 0;
+  const financialHealth = analyticsData?.finance.financialHealthScore ?? 0;
+  const softwareHealthy =
+    data?.softwareDivision?.operational ??
+    data?.softwareDivision?.healthy ??
+    opsData?.software?.healthy ??
+    0;
+  const softwareTotal = data?.softwareDivision?.total ?? opsData?.software?.total ?? 0;
+  const softwarePolled = data?.softwareDivision?.polledHealthy;
+  const hrActive = analyticsData?.people.totalPeople ?? metrics?.totalEmployees ?? 0;
+  const grantsActive = analyticsData?.grants.activeAwards ?? metrics?.activeGrants ?? 0;
   const complianceOverdue = complianceAlerts.data?.overdue ?? 0;
 
   return (
@@ -341,7 +387,7 @@ const ExecutiveDashboard: React.FC = () => {
         <div className="hq-executive-health-card">
           <span className="hq-executive-health-label">Financial</span>
           <span className="hq-executive-health-value">{financialHealth}%</span>
-          <span className="hq-executive-health-meta">{formatCurrency(analyticsData.finance.cashFlow ?? 0)} cash flow</span>
+          <span className="hq-executive-health-meta">{formatCurrency(analyticsData?.finance.cashFlow ?? 0)} cash flow</span>
         </div>
         <div className="hq-executive-health-card">
           <span className="hq-executive-health-label">Grants</span>
@@ -351,12 +397,16 @@ const ExecutiveDashboard: React.FC = () => {
         <div className="hq-executive-health-card">
           <span className="hq-executive-health-label">People & HR</span>
           <span className="hq-executive-health-value">{hrActive}</span>
-          <span className="hq-executive-health-meta">{(peopleAnalytics.data as { volunteerCount?: number })?.volunteerCount ?? analyticsData.people.volunteers ?? 0} volunteers</span>
+          <span className="hq-executive-health-meta">{(peopleAnalytics.data as { volunteerCount?: number })?.volunteerCount ?? analyticsData?.people.volunteers ?? 0} volunteers</span>
         </div>
         <div className="hq-executive-health-card">
           <span className="hq-executive-health-label">System Health</span>
           <span className="hq-executive-health-value">{softwareHealthy}/{softwareTotal || "—"}</span>
-          <span className="hq-executive-health-meta">Apps online</span>
+          <span className="hq-executive-health-meta">
+            {softwarePolled != null && softwarePolled !== softwareHealthy
+              ? `${softwarePolled} polled · operational score`
+              : "Apps operational"}
+          </span>
         </div>
         </HqWidgetErrorBoundary>
       </div>
@@ -364,10 +414,10 @@ const ExecutiveDashboard: React.FC = () => {
       <HqWidgetErrorBoundary label="KPI summary">
       <div className="hq-kpi-grid hq-founder-kpi-grid hq-fade-in">
         <KpiCard label="Organization Health" value={healthScoreLabel} icon={Activity} variant={(healthScore ?? 0) >= 80 ? "success" : (healthScore ?? 0) >= 60 ? "warning" : healthScore == null ? "muted" : "danger"} meta={health?.grade ?? "Composite score"} />
-        <KpiCard label="Financial Health" value={`${financialHealth}%`} icon={TrendingUp} variant={financialHealth >= 70 ? "success" : "warning"} meta={formatCurrency(analyticsData.finance.cashFlow ?? 0)} />
-        <KpiCard label="Active Grants" value={grantsActive} icon={FileText} meta={formatCurrency(analyticsData.grants.totalAwarded ?? 0)} />
-        <KpiCard label="Total People" value={hrActive} icon={Users} meta={`${analyticsData.people.employees ?? metrics?.activeEmployees ?? 0} employees`} />
-        <KpiCard label="Donation Revenue" value={formatCurrency(analyticsData.donations.total ?? metrics?.donationRevenue ?? 0)} icon={Heart} variant="success" />
+        <KpiCard label="Financial Health" value={`${financialHealth}%`} icon={TrendingUp} variant={financialHealth >= 70 ? "success" : "warning"} meta={formatCurrency(analyticsData?.finance.cashFlow ?? 0)} />
+        <KpiCard label="Active Grants" value={grantsActive} icon={FileText} meta={formatCurrency(analyticsData?.grants.totalAwarded ?? 0)} />
+        <KpiCard label="Total People" value={hrActive} icon={Users} meta={`${analyticsData?.people.employees ?? metrics?.activeEmployees ?? 0} employees`} />
+        <KpiCard label="Donation Revenue" value={formatCurrency(analyticsData?.donations.total ?? metrics?.donationRevenue ?? 0)} icon={Heart} variant="success" />
         <KpiCard label="System Status" value={`${softwareHealthy}/${softwareTotal || 0}`} icon={Monitor} variant={softwareHealthy === softwareTotal && softwareTotal > 0 ? "success" : "warning"} meta="Software Division" />
       </div>
       </HqWidgetErrorBoundary>
@@ -399,9 +449,14 @@ const ExecutiveDashboard: React.FC = () => {
       {viewMode === "standard" && isLoading && (
         <HqLoading message="Refreshing enterprise metrics…" />
       )}
-      {viewMode === "standard" && isError && (
+      {viewMode === "standard" && analyticsCoreFailed && (
         <div className="hq-panel" style={{ padding: "0.75rem 1rem", marginBottom: "1rem", color: "var(--hq-warning)", fontSize: "0.85rem" }}>
-          Live metrics unavailable — showing Headquarters default dashboard data.
+          Analytics API unavailable — executive overview metrics shown without analytics enrichment.
+        </div>
+      )}
+      {!isProductionClient && viewMode === "standard" && isError && (
+        <div className="hq-panel" style={{ padding: "0.75rem 1rem", marginBottom: "1rem", color: "var(--hq-warning)", fontSize: "0.85rem" }}>
+          Live metrics unavailable — showing development placeholder data.
         </div>
       )}
 
@@ -561,18 +616,18 @@ const ExecutiveDashboard: React.FC = () => {
             <KpiCard label="Housing Units" value={opsData.housing.units ?? 0} icon={Home} meta={`${opsData.housing.placements ?? 0} active placements`} />
             <KpiCard label="Open Risks" value={opsData.compliance.openRisks ?? 0} icon={Shield} variant={(opsData.compliance.highRisks ?? 0) > 0 ? "warning" : "success"} meta={`${opsData.compliance.policies ?? 0} policies active`} />
             <KpiCard label="Upcoming Events" value={opsData.calendar.upcomingEvents ?? 0} icon={Calendar} meta={`${opsData.board.upcomingMeetings ?? 0} board meetings`} />
-            <KpiCard label="Pipeline Value" value={formatCurrency(grantPipeline.data?.pipelineValue ?? analyticsData.grants.pipelineValue ?? 0)} icon={FileText} variant="gold" />
+            <KpiCard label="Pipeline Value" value={formatCurrency(grantPipeline.data?.pipelineValue ?? analyticsData?.grants.pipelineValue ?? 0)} icon={FileText} variant="gold" />
           </div>
 
           <div className="hq-grid-2" style={{ marginBottom: "1.25rem" }}>
             <HqPanel title="Program Performance" subtitle="Live impact across IFCDC community programs" action={{ label: "Programs", to: "/hq/programs" }}>
               <div className="hq-widget-stat-grid" style={{ marginBottom: "0.75rem" }}>
                 <div className="hq-widget-stat">
-                  <span className="hq-widget-stat-val">{(programAnalytics.data as { hqPrograms?: { active: number } })?.hqPrograms?.active ?? analyticsData.programs.programsRunning ?? "—"}</span>
+                  <span className="hq-widget-stat-val">{(programAnalytics.data as { hqPrograms?: { active: number } })?.hqPrograms?.active ?? analyticsData?.programs.programsRunning ?? "—"}</span>
                   <span className="hq-widget-stat-lbl">Active Programs</span>
                 </div>
                 <div className="hq-widget-stat">
-                  <span className="hq-widget-stat-val">{(programAnalytics.data as { hqPrograms?: { participants: number } })?.hqPrograms?.participants ?? analyticsData.programs.participants ?? "—"}</span>
+                  <span className="hq-widget-stat-val">{(programAnalytics.data as { hqPrograms?: { participants: number } })?.hqPrograms?.participants ?? analyticsData?.programs.participants ?? "—"}</span>
                   <span className="hq-widget-stat-lbl">Participants</span>
                 </div>
               </div>
@@ -601,7 +656,7 @@ const ExecutiveDashboard: React.FC = () => {
                   <span className="hq-widget-stat-lbl">Latest Net</span>
                 </div>
                 <div className="hq-widget-stat">
-                  <span className="hq-widget-stat-val">{(peopleAnalytics.data as { volunteerCount?: number })?.volunteerCount ?? analyticsData.people.volunteers ?? "—"}</span>
+                  <span className="hq-widget-stat-val">{(peopleAnalytics.data as { volunteerCount?: number })?.volunteerCount ?? analyticsData?.people.volunteers ?? "—"}</span>
                   <span className="hq-widget-stat-lbl">Volunteers</span>
                 </div>
                 <div className="hq-widget-stat">
@@ -718,10 +773,10 @@ const ExecutiveDashboard: React.FC = () => {
                 </HqPanel>
               </div>
 
-              {(analyticsData.grants.complianceDue ?? 0) > 0 && (
+              {(analyticsData?.grants.complianceDue ?? 0) > 0 && (
                 <div style={{ marginTop: "1.25rem" }}>
                   <HqPanel title="Compliance Alerts">
-                    <StatusBadge label={`${analyticsData.grants.complianceDue} grant reports due within 14 days`} variant="warning" />
+                    <StatusBadge label={`${analyticsData?.grants.complianceDue} grant reports due within 14 days`} variant="warning" />
                     <Link to="/hq/compliance" className="hq-entity-link" style={{ display: "block", marginTop: "0.5rem" }}>Open Compliance Center →</Link>
                   </HqPanel>
                 </div>

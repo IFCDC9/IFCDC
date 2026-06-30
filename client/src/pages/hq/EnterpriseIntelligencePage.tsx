@@ -9,6 +9,8 @@ import {
 } from "recharts";
 import HQLayout from "../../layouts/HQLayout";
 import { warehouseApi, DEFAULT_WAREHOUSE_OVERVIEW } from "../../api/warehouseApi";
+import { isProductionClient, devPlaceholder } from "../../utils/productionDataPolicy";
+import { HqDataUnavailable } from "../../components/hq/HqDataUnavailable";
 import { hqApi } from "../../api/hqApi";
 import { intelligenceApi } from "../../api/intelligenceApi";
 import { KpiCard } from "../../components/hq/KpiCard";
@@ -140,7 +142,7 @@ const EnterpriseIntelligencePage: React.FC = () => {
   const overview = useQuery({
     queryKey: ["warehouse-overview"],
     queryFn: warehouseApi.overview,
-    placeholderData: DEFAULT_WAREHOUSE_OVERVIEW,
+    placeholderData: devPlaceholder(DEFAULT_WAREHOUSE_OVERVIEW),
     staleTime: 60_000,
   });
 
@@ -196,7 +198,7 @@ const EnterpriseIntelligencePage: React.FC = () => {
 
   const snapshot = useMutation({ mutationFn: () => warehouseApi.snapshot("organization", true) });
 
-  const data = overview.data ?? DEFAULT_WAREHOUSE_OVERVIEW;
+  const data = isProductionClient ? overview.data ?? null : overview.data ?? DEFAULT_WAREHOUSE_OVERVIEW;
   const chartData = (trends.data?.trends ?? []).map((t) => ({
     period: t.period ?? t.created_at?.slice(0, 10) ?? "",
     value: t.metric_value,
@@ -204,6 +206,20 @@ const EnterpriseIntelligencePage: React.FC = () => {
 
   const health = executiveHealth.data;
   const risks = (health?.risks ?? []) as { level: string; area: string; detail: string }[];
+
+  if (isProductionClient && overview.isFetched && !data) {
+    return (
+      <HQLayout
+        title="Enterprise Intelligence"
+        subtitle="Organization-wide data warehouse — executive analytics, forecasting, and KPI drill-downs"
+      >
+        <HqDataUnavailable
+          message="Warehouse overview could not be loaded from production APIs."
+          onRetry={() => overview.refetch()}
+        />
+      </HQLayout>
+    );
+  }
 
   return (
     <HQLayout

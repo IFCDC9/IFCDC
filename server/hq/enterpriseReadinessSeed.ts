@@ -176,6 +176,10 @@ async function seedDemoWorkflow(): Promise<void> {
 }
 
 export async function ensureEnterpriseReadinessSeed(): Promise<void> {
+  if (process.env.NODE_ENV === "production" && process.env.ALLOW_DEMO_SEED !== "true") {
+    console.log("[Enterprise Readiness Seed] Skipped in production (demo data disabled; set ALLOW_DEMO_SEED=true to override)");
+    return;
+  }
   try {
     await seedGrantPortfolio();
     await seedDivisionWebhooks();

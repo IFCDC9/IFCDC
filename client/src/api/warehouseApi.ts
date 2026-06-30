@@ -1,3 +1,5 @@
+import { isProductionClient } from "../utils/productionDataPolicy";
+
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`/api/hq/warehouse${path}`, { credentials: "include", ...options });
   if (!res.ok) {
@@ -47,7 +49,10 @@ export const DEFAULT_WAREHOUSE_OVERVIEW: WarehouseOverview = {
 };
 
 export const warehouseApi = {
-  overview: () => apiFetch<WarehouseOverview>("/overview").catch(() => DEFAULT_WAREHOUSE_OVERVIEW),
+  overview: () => {
+    const req = apiFetch<WarehouseOverview>("/overview");
+    return isProductionClient ? req : req.catch(() => DEFAULT_WAREHOUSE_OVERVIEW);
+  },
   trends: (metricKey?: string, limit = 30) => {
     const qs = new URLSearchParams();
     if (metricKey) qs.set("metric", metricKey);

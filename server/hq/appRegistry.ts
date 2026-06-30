@@ -160,6 +160,43 @@ export async function pollAppHealth(app: SoftwareApp): Promise<{
 }> {
   const start = Date.now();
   const deployment = process.env[`HQ_${app.id.toUpperCase()}_DEPLOYMENT`] || (app.locked ? "production" : "development");
+  const barbersLiveUrl = app.id === "barbers" ? process.env.HQ_BARBERS_HEALTH_URL?.trim() : undefined;
+  const healthUrl = barbersLiveUrl || app.healthUrl;
+
+  if (app.locked) {
+    if (app.id === "barbers" && barbersLiveUrl) {
+      // Flagship app: poll live production health when URL is configured.
+    } else if (app.id === "barbers" && process.env.NODE_ENV === "production") {
+      return {
+        id: app.id,
+        healthy: false,
+        latencyMs: 0,
+        version: app.version,
+        deployment: "not_configured",
+        error: "Set HQ_BARBERS_HEALTH_URL on Render to the live Barbers /api/health endpoint",
+      };
+    } else {
+      return {
+        id: app.id,
+        healthy: true,
+        latencyMs: 0,
+        version: app.version,
+        deployment: "production-locked",
+        data: { status: "production-locked" },
+      };
+    }
+  }
+
+  if (process.env.NODE_ENV === "production" && isLocalhostUrl(healthUrl)) {
+    return {
+      id: app.id,
+      healthy: false,
+      latencyMs: 0,
+      version: app.version,
+      deployment: "not_configured",
+      error: `Set HQ_${app.id.toUpperCase()}_HEALTH_URL on Render when this app is deployed`,
+    };
+  }
 
   if (app.locked) {
     return {
@@ -184,7 +221,7 @@ export async function pollAppHealth(app: SoftwareApp): Promise<{
   }
 
   try {
-    const res = await fetch(app.healthUrl, { signal: AbortSignal.timeout(8000) });
+    const res = await fetch(healthUrl, { signal: AbortSignal.timeout(8000) });
     const latencyMs = Date.now() - start;
     let data: Record<string, unknown> | undefined;
     try {

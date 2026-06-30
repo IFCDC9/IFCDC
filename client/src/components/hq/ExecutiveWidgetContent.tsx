@@ -18,6 +18,8 @@ import {
   normalizeAnalyticsOverview,
   normalizeOperationsOverview,
 } from "../../data/founderDashboardDefaults";
+import { isProductionClient, devPlaceholder, strictApiCall } from "../../utils/productionDataPolicy";
+import { HqDataUnavailable } from "./HqDataUnavailable";
 import { Users, FileText, Activity, Home, Shield, Calendar, Sparkles, FileBarChart, Monitor, Building2, HandHeart, Wallet, Target, Briefcase, DollarSign, Clock } from "lucide-react";
 import { formatCurrency } from "../../utils/safeFormat";
 
@@ -40,11 +42,15 @@ const QUICK_ACTIONS = [
 ];
 
 export const ExecutiveWidgetContent: React.FC<{ widgetId: string }> = ({ widgetId }) => {
-  const overview = useQuery({ queryKey: ["hq-executive-overview"], queryFn: () => hqApi.executiveOverview().catch(() => null), staleTime: 60_000 });
+  const overview = useQuery({
+    queryKey: ["hq-executive-overview"],
+    queryFn: () => (isProductionClient ? hqApi.executiveOverview() : hqApi.executiveOverview().catch(() => null)),
+    staleTime: 60_000,
+  });
   const analytics = useQuery({
     queryKey: ["hq-founder-analytics"],
-    queryFn: () => analyticsApi.overview().catch(() => DEFAULT_ANALYTICS_OVERVIEW),
-    placeholderData: DEFAULT_ANALYTICS_OVERVIEW,
+    queryFn: () => strictApiCall(() => analyticsApi.overview(), DEFAULT_ANALYTICS_OVERVIEW),
+    placeholderData: devPlaceholder(DEFAULT_ANALYTICS_OVERVIEW),
     staleTime: 60_000,
   });
   const trends = useQuery({ queryKey: ["hq-founder-trends"], queryFn: analyticsApi.trends, staleTime: 120_000 });
@@ -53,8 +59,8 @@ export const ExecutiveWidgetContent: React.FC<{ widgetId: string }> = ({ widgetI
   const aura = useQuery({ queryKey: ["hq-widget-aura"], queryFn: () => analyticsApi.auraInsights(), staleTime: 300_000 });
   const ops = useQuery({
     queryKey: ["hq-founder-ops"],
-    queryFn: () => operationsApi.overview().catch(() => DEFAULT_OPERATIONS_OVERVIEW),
-    placeholderData: DEFAULT_OPERATIONS_OVERVIEW,
+    queryFn: () => strictApiCall(() => operationsApi.overview(), DEFAULT_OPERATIONS_OVERVIEW),
+    placeholderData: devPlaceholder(DEFAULT_OPERATIONS_OVERVIEW),
     staleTime: 60_000,
   });
   const notifs = useQuery({ queryKey: ["enterprise-notif-count"], queryFn: enterpriseApi.notifications, staleTime: 30_000 });
@@ -71,8 +77,16 @@ export const ExecutiveWidgetContent: React.FC<{ widgetId: string }> = ({ widgetI
   const analyticsData = normalizeAnalyticsOverview(analytics.data);
   const opsData = normalizeOperationsOverview(ops.data);
 
-  const health = analyticsData.organizationHealth ?? overview.data?.organizationHealth;
+  if (isProductionClient && widgetId === "health-score" && !analyticsData && analytics.isFetched) {
+    return <HqDataUnavailable title="Analytics unavailable" message="Live organization health could not be loaded." />;
+  }
+
+  const health = analyticsData?.organizationHealth ?? overview.data?.organizationHealth;
   const trendData = finance.data?.monthlyTrend as { month: string; cashFlow: number; donations: number; expenses: number; payroll: number }[] | undefined;
+
+  if (isProductionClient && !analyticsData && !overview.data && analytics.isFetched && overview.isFetched) {
+    return <HqDataUnavailable title="No data available" message="Live metrics could not be loaded for this widget." />;
+  }
 
   switch (widgetId) {
     case "health-score":

@@ -2,10 +2,12 @@ import "dotenv/config";
 import express from "express";
 import http from "http";
 import { assertProductionEnv } from "./config/validateProductionEnv";
+import { reportProductionEnvGaps } from "./config/productionEnvReport";
 import { registerHealthRoutes } from "./routes/monolith/health.routes";
 import { setApplicationReady } from "./bootstrap/applicationState";
 
 assertProductionEnv();
+reportProductionEnvGaps();
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "5000", 10);
