@@ -121,6 +121,10 @@ export async function getClientSummary(clientId: string, user: { id: string; rol
     "SELECT id, type, created_at FROM encounters WHERE client_id = ? ORDER BY created_at DESC LIMIT 1",
     clientId,
   );
+  const peopleLink = await db.get<{ id: string }>(
+    "SELECT id FROM people WHERE linked_external_id = ? AND source_app = 'case_management'",
+    clientId,
+  );
 
   return {
     client: {
@@ -134,6 +138,7 @@ export async function getClientSummary(clientId: string, user: { id: string; rol
       ? { id: nextAppt.id, startTime: nextAppt.start_time, program: nextAppt.program, location: nextAppt.location }
       : null,
     lastEncounter: lastEnc ? { id: lastEnc.id, type: lastEnc.type, createdAt: lastEnc.created_at } : null,
+    peopleRegistry: peopleLink ? { personId: peopleLink.id, linked: true } : { linked: false },
   };
 }
 

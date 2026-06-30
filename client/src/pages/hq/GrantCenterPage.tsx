@@ -31,6 +31,7 @@ import { GrantV5AuraAdvisorPanel } from "../../components/hq/grants/GrantV5AuraA
 import { GrantV5PipelineKanban } from "../../components/hq/grants/GrantV5PipelineKanban";
 import { GrantV5PipelineAutomationPanel } from "../../components/hq/grants/GrantV5PipelineAutomationPanel";
 import { GrantEconomicDevelopmentPanel } from "../../components/hq/grants/GrantEconomicDevelopmentPanel";
+import { GrantDivisionConnectorsPanel } from "../../components/hq/grants/GrantDivisionConnectorsPanel";
 import { GrantLibraryPanel, GrantWriterStudioPanel, GrantOpportunityFinderPanel } from "../../components/hq/grants/GrantCenterEnterprisePanels";
 
 type Tab = "overview" | "pipeline" | "divisions" | "funders" | "opportunities" | "writer-studio" | "library" | "applications" | "calendar" | "deadlines" | "documents"
@@ -350,7 +351,12 @@ const GrantCenterPage: React.FC = () => {
         )}
 
         {tab === "divisions" && (
-          <GrantV4ProgramIntegration />
+          <>
+            <GrantDivisionConnectorsPanel />
+            <div style={{ marginTop: "1.25rem" }}>
+              <GrantV4ProgramIntegration />
+            </div>
+          </>
         )}
 
         {tab === "funders" && (
