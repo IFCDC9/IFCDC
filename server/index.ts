@@ -41,7 +41,10 @@ import { syncGrantFeeds } from "./hq/grantFeedConnectors";
 import { recordLoginAttempt, recordActiveSession, roleRequiresMfa } from "./hq/hqSecuritySessions";
 import { attachHqRealtimeHub } from "./hq/hqRealtimeHub";
 import { getAppRoot, getDistPublicDir, getPublicDir, getSpaIndexPath } from "./appPaths";
+import { assertProductionEnv } from "./config/validateProductionEnv";
 import http from "http";
+
+assertProductionEnv();
 
 function getOpenAI(): OpenAI | null {
   const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
