@@ -96,6 +96,7 @@ import {
   getV5DocumentCenter,
 } from "../hq/grantFundingEngineV5";
 import { buildPipelineKanbanBoard, transitionPipelineEntity } from "../hq/grantPipelineEngine";
+import { fetchDivisionSnapshot } from "../hq/divisionIntegrationLayer";
 import {
   listPipelineAutomationRules,
   listPipelineAutomationLog,
@@ -1311,6 +1312,12 @@ router.get("/funding-engine/v5/pipeline/automation/log", async (req, res) => {
 router.post("/funding-engine/v5/pipeline/automation/scan-deadlines", async (req, res) => {
   const days = req.body?.daysAhead ? Number(req.body.daysAhead) : 7;
   res.json(await scanPipelineDeadlineAlerts(days));
+});
+
+router.get("/funding-engine/v5/workforce/economic-development", async (_req, res) => {
+  const snapshot = await fetchDivisionSnapshot("economic_development");
+  if (!snapshot) return res.status(404).json({ error: "Economic Development division not found" });
+  res.json(snapshot);
 });
 
 export default router;

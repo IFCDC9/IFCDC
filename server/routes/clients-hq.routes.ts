@@ -117,6 +117,8 @@ router.post("/", requireHQPermission("hq.clients.manage"), async (req: Request, 
     metadata: { fullName },
   });
 
+  const peopleLink = await linkClientToPeopleRegistry(id, req.hqUser?.email).catch(() => null);
+
   res.status(201).json({
     id,
     fullName,
@@ -124,6 +126,7 @@ router.post("/", requireHQPermission("hq.clients.manage"), async (req: Request, 
     contactInfo: { phone, email },
     programs: JSON.parse(programsJson),
     createdAt: created_at,
+    peopleLink: peopleLink?.ok ? { personId: peopleLink.personId, linked: peopleLink.linked } : undefined,
   });
 });
 
