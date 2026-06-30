@@ -529,6 +529,41 @@ export const grantsApi = {
     apiFetch<{ stages: { stage: string; count: number; value: number; statusKey: string }[]; totalValue: number; generatedAt: string }>(
       "/funding-engine/v5/pipeline",
     ),
+  v5PipelineBoard: () =>
+    apiFetch<{
+      columns: {
+        stageKey: string;
+        label: string;
+        count: number;
+        value: number;
+        items: {
+          id: string;
+          entityType: "opportunity" | "application" | "award";
+          title: string;
+          amount: number;
+          status: string;
+          lifecycleStage: string;
+          deadline: string | null;
+          updatedAt: string | null;
+        }[];
+      }[];
+      summary: Record<string, unknown>;
+      generatedAt: string;
+    }>("/funding-engine/v5/pipeline/board"),
+  v5PipelineTransition: (body: {
+    entityType: "opportunity" | "application" | "award";
+    entityId: string;
+    toStage: string;
+    note?: string;
+  }) =>
+    apiFetch<{ ok: boolean; fromStage?: string; toStage?: string; error?: string }>(
+      "/funding-engine/v5/pipeline/transition",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    ),
   v5Calendar: (days = 90) =>
     apiFetch<{ events: Record<string, unknown>[]; generatedAt: string }>(`/funding-engine/v5/calendar?days=${days}`),
   v5Profiles: () =>

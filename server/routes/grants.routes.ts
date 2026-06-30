@@ -23,6 +23,7 @@ import {
   updateFunder,
   logFunderInteraction,
   buildFunderCrmDashboard,
+  ensureFunderCrmTables,
 } from "../hq/grantFunderCrm";
 import {
   searchGrantOpportunities,
@@ -94,6 +95,7 @@ import {
   getV5ExecutiveAnalytics,
   getV5DocumentCenter,
 } from "../hq/grantFundingEngineV5";
+import { buildPipelineKanbanBoard, transitionPipelineEntity } from "../hq/grantPipelineEngine";
 import {
   buildGrantCenterPlatform,
   buildGrantCenterExecutiveSummary,
@@ -118,6 +120,7 @@ router.use(async (_req, _res, next) => {
     await ensureGrantTables();
     await ensureFinanceTables();
     await ensureGrantCenterTables();
+    await ensureFunderCrmTables();
     next();
   } catch (e) {
     next(e);
@@ -1268,6 +1271,27 @@ router.post("/funding-engine/v5/aura", async (req, res) => {
     console.error("AURA v5 funding intelligence error:", e);
     res.status(500).json({ error: "Funding intelligence advisor unavailable" });
   }
+});
+
+router.get("/funding-engine/v5/pipeline/board", async (req, res) => {
+  const limit = req.query.limit ? Number(req.query.limit) : 25;
+  res.json(await buildPipelineKanbanBoard(limit));
+});
+
+router.post("/funding-engine/v5/pipeline/transition", async (req, res) => {
+  const { entityType, entityId, toStage, note } = req.body ?? {};
+  if (!entityType || !entityId || !toStage) {
+    return res.status(400).json({ error: "entityType, entityId, and toStage are required" });
+  }
+  const result = await transitionPipelineEntity({
+    entityType,
+    entityId,
+    toStage,
+    note,
+    actorEmail: req.hqUser?.email,
+  });
+  if (!result.ok) return res.status(400).json(result);
+  res.json(result);
 });
 
 export default router;

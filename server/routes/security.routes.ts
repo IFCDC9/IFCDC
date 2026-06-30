@@ -17,12 +17,29 @@ import {
   getBackupHealth,
 } from "../hq/hqBackupService";
 import { revokeSession } from "../hq/hqSecuritySessions";
+import {
+  buildMfaComplianceReport,
+  getSessionPolicyReport,
+  validateAuditLoggingHealth,
+} from "../hq/sessionPolicy";
 
 const router = Router();
 router.use(hqAuthRequired, requireHQModule("settings"));
 
 router.get("/dashboard", async (_req, res) => {
   res.json(await buildSecurityDashboard());
+});
+
+router.get("/session-policy", async (_req, res) => {
+  res.json(getSessionPolicyReport());
+});
+
+router.get("/mfa-compliance", async (_req, res) => {
+  res.json(await buildMfaComplianceReport());
+});
+
+router.get("/audit-health", async (_req, res) => {
+  res.json(await validateAuditLoggingHealth());
 });
 
 router.get("/audit", async (req, res) => {

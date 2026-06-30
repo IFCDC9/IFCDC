@@ -59,4 +59,32 @@ export const securityApi = {
     apiFetch<{ restorePoints: { id: string; filename: string; size_bytes: number; created_at: string }[] }>(`/backup/restore-points?limit=${limit}`).catch(() => ({ restorePoints: [] })),
   createBackup: () =>
     apiFetch<{ snapshot: { id: string; filename: string; createdAt: string } }>("/backup/snapshot", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }),
+  sessionPolicy: () =>
+    apiFetch<{
+      maxAgeDays: number;
+      maxConcurrentSessions: number;
+      rotateOnLogin: boolean;
+      cookieName: string;
+      jwtExpiresIn: string;
+      description: string;
+      timestamp: string;
+    }>("/session-policy"),
+  mfaCompliance: () =>
+    apiFetch<{
+      compliancePct: number;
+      totalPrivileged: number;
+      compliantCount: number;
+      nonCompliantAccounts: { email: string; role: string }[];
+      policy: string;
+      generatedAt: string;
+    }>("/mfa-compliance"),
+  auditHealth: () =>
+    apiFetch<{
+      healthy: boolean;
+      auditLogCount: number;
+      hqAuditCount: number;
+      lastAuditAt: string | null;
+      lastHqAuditAt: string | null;
+      issues: string[];
+    }>("/audit-health"),
 };

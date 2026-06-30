@@ -28,6 +28,7 @@ import { GrantDeadlineRenewalPanel } from "../../components/hq/grants/GrantDeadl
 import { GrantBudgetIntegrationPanel } from "../../components/hq/grants/GrantBudgetIntegrationPanel";
 import { GrantV2ExecutiveAnalytics } from "../../components/hq/grants/GrantV2ExecutiveAnalytics";
 import { GrantV5AuraAdvisorPanel } from "../../components/hq/grants/GrantV5AuraAdvisorPanel";
+import { GrantV5PipelineKanban } from "../../components/hq/grants/GrantV5PipelineKanban";
 import { GrantLibraryPanel, GrantWriterStudioPanel, GrantOpportunityFinderPanel } from "../../components/hq/grants/GrantCenterEnterprisePanels";
 
 type Tab = "overview" | "pipeline" | "divisions" | "funders" | "opportunities" | "writer-studio" | "library" | "applications" | "calendar" | "deadlines" | "documents"
@@ -325,7 +326,10 @@ const GrantCenterPage: React.FC = () => {
 
         {tab === "pipeline" && (
           <>
-            <GrantV4LifecyclePanel />
+            <GrantV5PipelineKanban />
+            <div style={{ marginTop: "1.25rem" }}>
+              <GrantV4LifecyclePanel />
+            </div>
             <div style={{ marginTop: "1.25rem" }}>
               <GrantV2PipelineDashboard
                 onNavigate={(nextTab, applicationId) => {

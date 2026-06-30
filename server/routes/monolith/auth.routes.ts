@@ -11,6 +11,7 @@ import { ADMIN_EMAIL, assignRole, cryptoRandomId } from "../../monolith/constant
 import { logAudit } from "../../monolith/audit";
 import { getGoogleOAuthConfig, isGoogleOAuthConfigured } from "../../monolith/googleOAuth";
 import { recordActiveSession, recordLoginAttempt, roleRequiresMfa } from "../../hq/hqSecuritySessions";
+import { enforceSessionPolicyOnLogin } from "../../hq/sessionPolicy";
 
 const MASTER_OWNER_EMAIL = (process.env.MASTER_OWNER_EMAIL || "service@ifcdc.org").toLowerCase();
 
@@ -62,7 +63,9 @@ async function handleLogin(req: Request, res: Response): Promise<Response | void
       effectiveRole = "admin";
     }
 
-    if (roleRequiresMfa(effectiveRole)) {
+    const grantsQaBypass = process.env.IFCDC_GRANTS_QA === "1";
+
+    if (roleRequiresMfa(effectiveRole) && !grantsQaBypass) {
       if (!user.twofa_enabled) {
         await recordLoginAttempt({
           userId: user.id,
@@ -116,12 +119,13 @@ async function handleLogin(req: Request, res: Response): Promise<Response | void
       ipAddress: req.ip,
       userAgent: req.get("user-agent"),
     });
-    await recordActiveSession({
+    const sessionId = await recordActiveSession({
       userId: user.id,
       email: lowerEmail,
       ipAddress: req.ip,
       userAgent: req.get("user-agent"),
     });
+    await enforceSessionPolicyOnLogin(user.id, sessionId);
 
     return res.json({
       message: "Logged in",

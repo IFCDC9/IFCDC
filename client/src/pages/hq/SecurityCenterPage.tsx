@@ -27,6 +27,9 @@ const SecurityCenterPage: React.FC = () => {
   const devices = useQuery({ queryKey: ["security-devices"], queryFn: () => securityApi.devices(20), enabled: tab === "sessions" });
   const threats = useQuery({ queryKey: ["security-threats"], queryFn: securityApi.threats, enabled: tab === "threats" || tab === "overview" });
   const restorePoints = useQuery({ queryKey: ["security-restore-points"], queryFn: () => securityApi.restorePoints(15), enabled: tab === "backup" || tab === "overview" });
+  const sessionPolicy = useQuery({ queryKey: ["security-session-policy"], queryFn: securityApi.sessionPolicy, enabled: tab === "overview" });
+  const mfaCompliance = useQuery({ queryKey: ["security-mfa-compliance"], queryFn: securityApi.mfaCompliance, enabled: tab === "overview" || tab === "mfa" });
+  const auditHealth = useQuery({ queryKey: ["security-audit-health"], queryFn: securityApi.auditHealth, enabled: tab === "overview" });
   const mfaStatus = useQuery({ queryKey: ["mfa-status"], queryFn: authApi.mfaStatus, enabled: tab === "mfa" });
 
   const mfaSetup = useMutation({
@@ -80,10 +83,30 @@ const SecurityCenterPage: React.FC = () => {
             <KpiCard label="Failed Logins (24h)" value={threats.data?.failedLogins24h ?? 0} icon={AlertTriangle} variant={(threats.data?.failedLogins24h ?? 0) > 5 ? "warning" : "muted"} />
           </div>
           <div className="hq-grid-2 hq-fade-in" style={{ marginBottom: "1.25rem" }}>
-            <HqPanel title="MFA Compliance" subtitle="Founder, Executive, and Administrator accounts">
+            <HqPanel title="MFA Compliance" subtitle="Founder, Executive, Finance, Grant Manager, and Administrator accounts">
               <StatusBadge label={data.mfa.status.replace(/_/g, " ")} variant={data.mfa.status === "compliant" ? "success" : "warning"} />
               <p className="hq-muted-text" style={{ marginTop: "0.75rem" }}>{data.mfa.message}</p>
+              {mfaCompliance.data && (
+                <p className="hq-muted-text" style={{ marginTop: "0.5rem", fontSize: "0.8rem" }}>
+                  Org compliance: {mfaCompliance.data.compliancePct}% ({mfaCompliance.data.compliantCount}/{mfaCompliance.data.totalPrivileged} privileged accounts)
+                </p>
+              )}
               <button type="button" className="hq-btn hq-btn-sm hq-btn-secondary" style={{ marginTop: "0.5rem" }} onClick={() => setTab("mfa")}>Configure MFA</button>
+            </HqPanel>
+            <HqPanel title="Session & Audit Policy" subtitle="Rotation limits and audit logging health">
+              {sessionPolicy.data && (
+                <ul className="hq-muted-text" style={{ fontSize: "0.8rem", margin: "0.5rem 0", paddingLeft: "1.1rem" }}>
+                  <li>Max concurrent sessions: {sessionPolicy.data.maxConcurrentSessions}</li>
+                  <li>Rotate on login: {sessionPolicy.data.rotateOnLogin ? "Enabled" : "Disabled"}</li>
+                  <li>Session max age: {sessionPolicy.data.maxAgeDays} days</li>
+                </ul>
+              )}
+              {auditHealth.data && (
+                <StatusBadge
+                  label={auditHealth.data.healthy ? "Audit logging healthy" : "Audit logging needs review"}
+                  variant={auditHealth.data.healthy ? "success" : "warning"}
+                />
+              )}
             </HqPanel>
             <HqPanel title="Backup Health" subtitle={backup?.status ?? "—"}>
               <p className="hq-muted-text">{backup?.message}</p>
