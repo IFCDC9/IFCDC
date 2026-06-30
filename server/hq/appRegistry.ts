@@ -19,8 +19,36 @@ export interface SoftwareApp {
   priority: number;
 }
 
+/** Production base URL for HQ-hosted and self health checks. */
+export function getHqPublicBase(): string {
+  const raw = (process.env.PUBLIC_APP_URL || process.env.PUBLIC_BASE_URL || "").trim();
+  if (raw) return raw.replace(/\/$/, "");
+  if (process.env.NODE_ENV === "production") {
+    return "https://ifcdc-hq-wst6.onrender.com";
+  }
+  return "http://localhost:5000";
+}
+
+function isLocalhostUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname;
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  } catch {
+    return url.includes("localhost") || url.includes("127.0.0.1");
+  }
+}
+
 function envUrl(key: string, fallback: string): string {
-  return process.env[key] || fallback;
+  const value = process.env[key]?.trim();
+  if (value) return value;
+  if (process.env.NODE_ENV === "production" && isLocalhostUrl(fallback)) {
+    return fallback;
+  }
+  return fallback;
+}
+
+function selfHealthUrl(): string {
+  return envUrl("HQ_SELF_HEALTH_URL", `${getHqPublicBase()}/api/health`);
 }
 
 export const SOFTWARE_DIVISION_APPS: SoftwareApp[] = [
@@ -54,8 +82,8 @@ export const SOFTWARE_DIVISION_APPS: SoftwareApp[] = [
     status: "development",
     version: "1.0.0",
     path: "Apps/IMPERIAL-FOUNDATION-CDC/",
-    healthUrl: envUrl("HQ_RADIO_HEALTH_URL", "http://localhost:5000/api/health"),
-    launchUrl: "/radio",
+    healthUrl: envUrl("HQ_RADIO_HEALTH_URL", selfHealthUrl()),
+    launchUrl: `${getHqPublicBase()}/radio`,
     priority: 2,
   },
   {
@@ -89,8 +117,8 @@ export const SOFTWARE_DIVISION_APPS: SoftwareApp[] = [
     status: "development",
     version: "1.0.0",
     path: "Apps/IMPERIAL-FOUNDATION-CDC/",
-    healthUrl: envUrl("HQ_SELF_HEALTH_URL", "http://localhost:5000/api/health"),
-    launchUrl: "/",
+    healthUrl: selfHealthUrl(),
+    launchUrl: `${getHqPublicBase()}/`,
     priority: 5,
   },
   {
@@ -132,6 +160,28 @@ export async function pollAppHealth(app: SoftwareApp): Promise<{
 }> {
   const start = Date.now();
   const deployment = process.env[`HQ_${app.id.toUpperCase()}_DEPLOYMENT`] || (app.locked ? "production" : "development");
+
+  if (app.locked) {
+    return {
+      id: app.id,
+      healthy: true,
+      latencyMs: 0,
+      version: app.version,
+      deployment: "production-locked",
+      data: { status: "production-locked" },
+    };
+  }
+
+  if (process.env.NODE_ENV === "production" && isLocalhostUrl(app.healthUrl)) {
+    return {
+      id: app.id,
+      healthy: false,
+      latencyMs: 0,
+      version: app.version,
+      deployment: "not_configured",
+      error: `Set HQ_${app.id.toUpperCase()}_HEALTH_URL on Render when this app is deployed`,
+    };
+  }
 
   try {
     const res = await fetch(app.healthUrl, { signal: AbortSignal.timeout(8000) });

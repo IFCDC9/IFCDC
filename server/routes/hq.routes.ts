@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { Request, Response } from "express";
 import { hqAuthRequired, requireHQModule } from "../middleware/hqAuth";
 import { SOFTWARE_DIVISION_APPS, pollAllApps, getSoftwareDivisionApps } from "../hq/appRegistry";
+import { buildSoftwareDivisionHealthScore } from "../hq/enterpriseHealthScoring";
 import { toHQRole, HQ_MODULE_PERMISSIONS } from "../hq/enterpriseRoles";
 import peopleRouter from "./people.routes";
 import clientsHqRouter from "./clients-hq.routes";
@@ -109,12 +110,13 @@ router.get("/executive/overview", hqAuthRequired, requireHQModule("executive"), 
     const apps = await pollAllApps();
     const services = await checkIfcdcServices();
     const metrics = await getOrganizationMetrics();
-    const [recentActivity, monthlyTrend, orgHealth] = await Promise.all([
+    const [recentActivity, monthlyTrend, orgHealth, softwareHealth] = await Promise.all([
       buildHeadquartersActivityFeed(12),
       getMonthlyTrend(),
       buildOrganizationHealthScore(),
+      buildSoftwareDivisionHealthScore(apps),
     ]);
-    const healthyApps = apps.filter((a) => a.healthy).length;
+    const healthyApps = softwareHealth.operational;
     const healthyServices = Object.values(services).filter(Boolean).length;
     const orgHealthScore = orgHealth.overall;
 
@@ -125,8 +127,10 @@ router.get("/executive/overview", hqAuthRequired, requireHQModule("executive"), 
       monthlyTrend,
       recentActivity,
       softwareDivision: {
-        total: apps.length,
+        total: softwareHealth.total,
         healthy: healthyApps,
+        operational: healthyApps,
+        polledHealthy: apps.filter((a) => a.healthy).length,
         production: SOFTWARE_DIVISION_APPS.filter((a) => a.status === "locked" || a.status === "production").length,
         inDevelopment: SOFTWARE_DIVISION_APPS.filter((a) => a.status === "development" || a.status === "mvp").length,
       },

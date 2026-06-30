@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { getBuildInfo } from "../../buildInfo";
+import { isApplicationReady } from "../../bootstrap/applicationState";
 
 export function registerHealthRoutes(app: Express): void {
   app.get("/api/health", (_req, res) => {
@@ -12,6 +13,7 @@ export function registerHealthRoutes(app: Express): void {
     res.json({
       app: "ifcdc-headquarters",
       status: "healthy",
+      ready: isApplicationReady(),
       version: "1.0.0",
       platform: "IFCDC Enterprise Operating System",
       commit,

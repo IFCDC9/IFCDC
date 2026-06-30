@@ -1,7 +1,6 @@
 import type { Express } from "express";
 import type { Twilio } from "twilio";
 import type { createTwilioSenders } from "../../monolith/twilioHelpers";
-import { registerHealthRoutes } from "./health.routes";
 import { registerPublicPageRoutes } from "./publicPages.routes";
 import { registerLegacyAuthRoutes } from "./auth.routes";
 import { registerAdminRoutes } from "./admin.routes";
@@ -34,7 +33,6 @@ export interface MonolithRouteDeps {
 
 /** Mount extracted monolith route modules (Phase 0 M0.3). */
 export function registerMonolithRoutes(app: Express, deps: MonolithRouteDeps): void {
-  registerHealthRoutes(app);
   registerPublicPageRoutes(app);
   registerLegacyAuthRoutes(app);
   registerAdminRoutes(app);
