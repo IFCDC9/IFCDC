@@ -28,6 +28,9 @@ jobs:
       - name: Generate Prisma Client
         run: DATABASE_URL=postgresql://localhost/ifcdc npx prisma generate
 
+      - name: Build @ifcdc workspace packages
+        run: npm run build:packages
+
       - name: Type Check
         run: npm run check
 
