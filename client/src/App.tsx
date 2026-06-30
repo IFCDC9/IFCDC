@@ -29,6 +29,7 @@ const ExecutiveDashboard = lazyWithRetry(
 );
 const AuraCommandCenterPage = lazy(() => import("./pages/hq/AuraCommandCenterPage"));
 const PeopleManagementCenter = lazy(() => import("./pages/hq/PeopleManagementCenter"));
+const ClientCaseManagementPage = lazy(() => import("./pages/hq/ClientCaseManagementPage"));
 const StaffSelfServicePage = lazy(() => import("./pages/hq/StaffSelfServicePage"));
 const ManagerPortalPage = lazy(() => import("./pages/hq/ManagerPortalPage"));
 const HqPayrollPage = lazy(() => import("./pages/hq/HqPayrollPage"));
@@ -133,6 +134,7 @@ const App: React.FC = () => (
           <Route path="/hq/developer" element={<HqRoute path="/hq/developer"><DeveloperPortalPage /></HqRoute>} />
           <Route path="/hq/aura" element={<HqRoute path="/hq/aura"><AuraCommandCenterPage /></HqRoute>} />
           <Route path="/hq/people" element={<HqRoute path="/hq/people"><PeopleManagementCenter /></HqRoute>} />
+          <Route path="/hq/clients" element={<HqRoute path="/hq/clients"><ClientCaseManagementPage /></HqRoute>} />
           <Route path="/hq/my-workspace" element={<HqRoute path="/hq/my-workspace"><StaffSelfServicePage /></HqRoute>} />
           <Route path="/hq/manager" element={<HqRoute path="/hq/manager"><ManagerPortalPage /></HqRoute>} />
           <Route path="/hq/hr" element={<Navigate to="/hq/people" replace />} />

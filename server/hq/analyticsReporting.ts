@@ -1,6 +1,7 @@
 import { getDb } from "../db";
 import { buildExecutiveDashboard } from "./financeReporting";
 import { buildGrantExecutiveDashboard, buildGrantAnalytics } from "./grantReporting";
+import { buildClientCaseOverview } from "./clientCaseEngine";
 import { pollAllApps, SOFTWARE_DIVISION_APPS } from "./appRegistry";
 import type { ActivityItem } from "./metrics";
 import {
@@ -23,6 +24,7 @@ export interface AnalyticsOverview {
   grants: { totalAwarded: number; activeAwards: number; pipelineValue: number; winRate: number; complianceDue: number };
   people: { totalPeople: number; employees: number; volunteers: number; activePayroll: number; hoursThisMonth: number };
   programs: { programsRunning: number; participants: number };
+  clients: { totalClients: number; activeAssignments: number; openGoals: number; upcomingAppointments: number; highRiskClients: number };
   donations: { total: number; monthly: number; count: number };
   software: { total: number; healthy: number; production: number; inDevelopment: number };
   timestamp: string;
@@ -44,6 +46,7 @@ export const SAFE_ANALYTICS_OVERVIEW: AnalyticsOverview = {
   grants: { totalAwarded: 1200000, activeAwards: 6, pipelineValue: 450000, winRate: 68, complianceDue: 0 },
   people: { totalPeople: 42, employees: 24, volunteers: 18, activePayroll: 22, hoursThisMonth: 3840 },
   programs: { programsRunning: 8, participants: 340 },
+  clients: { totalClients: 128, activeAssignments: 96, openGoals: 42, upcomingAppointments: 18, highRiskClients: 3 },
   donations: { total: 485000, monthly: 42000, count: 156 },
   software: { total: 5, healthy: 4, production: 2, inDevelopment: 2 },
   timestamp: new Date().toISOString(),
@@ -129,6 +132,13 @@ export async function buildAnalyticsOverview(): Promise<AnalyticsOverview> {
   ))?.c ?? 0;
 
   const softwareHealth = await buildSoftwareDivisionHealthScore(apps);
+  const clientCase = await buildClientCaseOverview().catch(() => ({
+    totalClients: 0,
+    activeAssignments: 0,
+    openGoals: 0,
+    upcomingAppointments: 0,
+    highRiskClients: 0,
+  }));
 
   return {
     organizationHealth: health,
@@ -154,6 +164,13 @@ export async function buildAnalyticsOverview(): Promise<AnalyticsOverview> {
       hoursThisMonth: Math.round(hoursThisMonth * 100) / 100,
     },
     programs: { programsRunning, participants: participantCount },
+    clients: {
+      totalClients: clientCase.totalClients,
+      activeAssignments: clientCase.activeAssignments,
+      openGoals: clientCase.openGoals,
+      upcomingAppointments: clientCase.upcomingAppointments,
+      highRiskClients: clientCase.highRiskClients,
+    },
     donations: { total: finance.donationsReceived, monthly: finance.donationsReceived, count: donationCount },
     software: {
       total: softwareHealth.total,

@@ -5,6 +5,7 @@ import type { DivisionId } from "./divisionIntegrationLayer";
 const VALID_DIVISIONS: DivisionId[] = [
   "barbers", "housing", "scholarships", "community_programs",
   "media", "radio", "music", "tapis", "inclusive",
+  "case_management", "economic_development", "software_division",
 ];
 
 const DIVISION_ALIASES: Record<string, DivisionId> = {
@@ -22,6 +23,14 @@ const DIVISION_ALIASES: Record<string, DivisionId> = {
   barbers: "barbers",
   barbershop: "barbers",
   inclusive: "inclusive",
+  case_management: "case_management",
+  clients: "case_management",
+  case: "case_management",
+  economic_development: "economic_development",
+  economic_development_program: "economic_development",
+  econ_dev: "economic_development",
+  software_division: "software_division",
+  software: "software_division",
 };
 
 export async function ensureDivisionAnalyticsTables(): Promise<void> {

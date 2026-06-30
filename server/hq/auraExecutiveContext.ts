@@ -11,6 +11,7 @@ import { getOrganizationMetrics } from "./metrics";
 import { pollAllApps } from "./appRegistry";
 import { listLeadershipAlerts } from "./criticalAlerts";
 import { buildWorkforceExecutiveIntelligence } from "./peopleOperationsEngine";
+import { buildClientCaseOverview } from "./clientCaseEngine";
 
 let contextCache: { text: string; expires: number } | null = null;
 const CONTEXT_CACHE_TTL_MS = 2 * 60 * 1000;
@@ -20,7 +21,7 @@ export async function buildAuraExecutiveContext(extra?: string): Promise<string>
   if (!extra && contextCache && contextCache.expires > now) {
     return contextCache.text;
   }
-  const [overview, ops, health, trends, metrics, apps, payroll, programs, alerts, workforce] = await Promise.all([
+  const [overview, ops, health, trends, metrics, apps, payroll, programs, alerts, workforce, clients] = await Promise.all([
     buildAnalyticsOverview().catch(() => null),
     buildOperationsOverview().catch(() => null),
     buildOrganizationHealthScore().catch(() => null),
@@ -31,6 +32,7 @@ export async function buildAuraExecutiveContext(extra?: string): Promise<string>
     buildProgramAnalytics().catch(() => null),
     listLeadershipAlerts(8).catch(() => []),
     buildWorkforceExecutiveIntelligence().catch(() => null),
+    buildClientCaseOverview().catch(() => null),
   ]);
 
   const db = await getDb();
@@ -61,6 +63,14 @@ export async function buildAuraExecutiveContext(extra?: string): Promise<string>
     workforce ? `- Open applicants: ${(workforce as { hiringPipeline?: { open: number } }).hiringPipeline?.open ?? 0}` : "",
     workforce ? `- Monthly labor forecast: $${((workforce as { payrollForecast?: { monthlyLabor: number } }).payrollForecast?.monthlyLabor ?? 0).toLocaleString()}` : "",
     workforce ? `- 6-month staffing forecast: ${(workforce as { staffingForecast?: { forecast?: { projectedHeadcount: number }[] } }).staffingForecast?.forecast?.[5]?.projectedHeadcount ?? (workforce as { staffingForecast?: { currentHeadcount: number } }).staffingForecast?.currentHeadcount ?? "N/A"} staff` : "",
+    "",
+    "Client & Case Management:",
+    clients ? `- Total clients: ${clients.totalClients}` : "",
+    clients ? `- Active caseload assignments: ${clients.activeAssignments}` : "",
+    clients ? `- Open goals: ${clients.openGoals}` : "",
+    clients ? `- Encounters (30d): ${clients.encounters30d}` : "",
+    clients ? `- Upcoming appointments (14d): ${clients.upcomingAppointments}` : "",
+    clients ? `- High-risk clients: ${clients.highRiskClients}` : "",
     "",
     "Finance:",
     `- Total revenue: $${(overview?.finance.totalRevenue ?? 0).toLocaleString()}`,

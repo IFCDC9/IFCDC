@@ -68,6 +68,7 @@ export const HQ_NAV_ITEMS: HQNavItem[] = [
   { label: "AURA AI Command Center", path: "/hq/aura", icon: Sparkles, section: "Command" },
   { label: "Integrations Hub", path: "/hq/integrations", icon: Plug, section: "Operations" },
   { label: "People Management", path: "/hq/people", icon: Users, section: "Operations" },
+  { label: "Client & Case Management", path: "/hq/clients", icon: Users, section: "Operations", badge: "M2.1" },
   { label: "Payroll", path: "/hq/payroll", icon: Wallet, section: "Operations" },
   { label: "Volunteers", path: "/hq/people?type=volunteer", icon: HandHeart, section: "Operations" },
 
@@ -155,6 +156,13 @@ export const HQ_MODULE_CONFIGS: Record<string, HQModuleConfig> = {
     subtitle: "Program enrollment, sessions, and impact",
     description: "Manage all IFCDC community programs including enrollments, sessions, and outcome tracking.",
     features: ["Program dashboards", "Client enrollment", "Session scheduling", "Impact metrics"],
+    status: "live",
+  },
+  clients: {
+    title: "Client & Case Management",
+    subtitle: "Enterprise caseload registry with shared HQ auth and reporting",
+    description: "Client registry, case assignments, goals, assessments, appointments, and people database bridge — integrated with Economic Development and executive analytics.",
+    features: ["Client 360 summary", "Caseload assignments", "Goals & assessments", "Appointment calendar", "People registry bridge", "Executive reporting"],
     status: "live",
   },
   housing: {

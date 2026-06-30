@@ -62,7 +62,12 @@ export const PROGRAM_MODULES: ProgramModuleDef[] = [
     title: "Economic Development",
     description: "Job training, workforce placement, and business support.",
     icon: TrendingUp,
-    relatedPaths: [{ label: "Financial Center", path: "/hq/finance" }, { label: "Grant Center", path: "/hq/grants" }],
+    opsPath: "/hq/clients?program=ECON_DEV",
+    relatedPaths: [
+      { label: "Client & Case Management", path: "/hq/clients?program=ECON_DEV" },
+      { label: "Financial Center", path: "/hq/finance" },
+      { label: "Grant Center", path: "/hq/grants" },
+    ],
   },
 ];
 

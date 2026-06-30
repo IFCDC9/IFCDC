@@ -99,6 +99,8 @@ export type Permission =
   | "hq.finance.manage"
   | "hq.donations"
   | "hq.programs"
+  | "hq.clients"
+  | "hq.clients.manage"
   | "hq.software"
   | "hq.aura"
   | "hq.analytics"
@@ -116,19 +118,19 @@ export type Permission =
 export const ROLE_PERMISSIONS: Record<EnterpriseRole, Permission[]> = {
   founder: [
     "hq.executive", "hq.hr", "hq.hr.manage", "hq.hr.approve", "hq.hr.self", "hq.payroll", "hq.grants", "hq.grants.manage",
-    "hq.finance", "hq.finance.manage", "hq.donations", "hq.programs", "hq.software", "hq.aura",
+    "hq.finance", "hq.finance.manage", "hq.donations", "hq.programs", "hq.clients", "hq.clients.manage", "hq.software", "hq.aura",
     "hq.analytics", "hq.notifications", "hq.settings", "hq.settings.manage",
     "app.barbers", "app.music", "app.radio", "app.tapis", "app.inclusive", "app.swiftware", "app.cryptocoin",
   ],
   executive: [
     "hq.executive", "hq.hr", "hq.hr.manage", "hq.hr.approve", "hq.payroll", "hq.grants", "hq.grants.manage",
-    "hq.finance", "hq.donations", "hq.programs", "hq.software", "hq.aura",
+    "hq.finance", "hq.donations", "hq.programs", "hq.clients", "hq.clients.manage", "hq.software", "hq.aura",
     "hq.analytics", "hq.notifications", "hq.settings",
     "app.barbers", "app.music", "app.radio", "app.tapis", "app.inclusive", "app.swiftware", "app.cryptocoin",
   ],
   administrator: [
     "hq.executive", "hq.hr", "hq.hr.manage", "hq.hr.approve", "hq.payroll", "hq.grants", "hq.grants.manage",
-    "hq.finance", "hq.finance.manage", "hq.donations", "hq.programs", "hq.software", "hq.aura",
+    "hq.finance", "hq.finance.manage", "hq.donations", "hq.programs", "hq.clients", "hq.clients.manage", "hq.software", "hq.aura",
     "hq.analytics", "hq.notifications", "hq.settings", "hq.settings.manage",
     "app.barbers", "app.music", "app.radio", "app.tapis", "app.inclusive", "app.swiftware", "app.cryptocoin",
   ],
@@ -139,10 +141,10 @@ export const ROLE_PERMISSIONS: Record<EnterpriseRole, Permission[]> = {
     "hq.finance", "hq.finance.manage", "hq.payroll", "hq.hr", "hq.donations", "hq.aura", "hq.notifications", "hq.analytics",
   ],
   program_director: [
-    "hq.programs", "hq.grants", "hq.hr", "hq.analytics", "hq.aura", "hq.notifications",
+    "hq.programs", "hq.grants", "hq.hr", "hq.clients", "hq.clients.manage", "hq.analytics", "hq.aura", "hq.notifications",
   ],
   manager: [
-    "hq.programs", "hq.hr", "hq.hr.approve", "hq.aura", "hq.notifications",
+    "hq.programs", "hq.hr", "hq.hr.approve", "hq.clients", "hq.aura", "hq.notifications",
   ],
   board_member: [
     "hq.executive", "hq.grants", "hq.finance", "hq.donations", "hq.aura", "hq.analytics", "hq.notifications",
@@ -152,7 +154,7 @@ export const ROLE_PERMISSIONS: Record<EnterpriseRole, Permission[]> = {
     "hq.analytics", "hq.notifications",
   ],
   employee: [
-    "hq.hr.self", "hq.programs", "hq.aura", "hq.notifications", "app.barbers", "app.music", "app.radio",
+    "hq.hr.self", "hq.programs", "hq.clients", "hq.aura", "hq.notifications", "app.barbers", "app.music", "app.radio",
   ],
   volunteer: [
     "hq.hr.self", "hq.programs", "hq.aura", "hq.notifications",
@@ -176,6 +178,7 @@ export const HQ_MODULE_PERMISSIONS: Record<string, EnterpriseRole[]> = {
   finance: ["founder", "executive", "administrator", "board_member", "grant_manager", "finance"],
   grants: ["founder", "executive", "administrator", "board_member", "grant_manager"],
   programs: ["founder", "executive", "administrator", "employee", "volunteer"],
+  clients: ["founder", "executive", "administrator", "program_director", "manager", "employee"],
   software_division: ["founder", "executive", "administrator"],
   aura: ["founder", "executive", "administrator", "board_member", "grant_manager", "employee", "volunteer", "barber", "client", "donor"],
   settings: ["founder", "executive", "administrator"],
@@ -209,6 +212,7 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   "/hq/grants": "hq.grants",
   "/hq/donations": "hq.donations",
   "/hq/programs": "hq.programs",
+  "/hq/clients": "hq.clients",
   "/hq/housing": "hq.programs",
   "/hq/scholarships": "hq.programs",
   "/hq/media": "hq.programs",

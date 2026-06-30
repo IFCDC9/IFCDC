@@ -18,6 +18,7 @@ import {
   listDivisionAdapters,
   type DivisionId,
 } from "../hq/divisionIntegrationLayer";
+import { buildDivisionConnectorManifest } from "../hq/divisionConnectors";
 import {
   deliverExecutiveDocument,
   listRecentReports,
@@ -180,6 +181,11 @@ router.get("/reports/:filename", requireHQModule("executive"), async (req, res) 
   res.setHeader("Content-Type", file.contentType);
   res.setHeader("Content-Disposition", `attachment; filename="${req.params.filename}"`);
   res.send(file.buffer);
+});
+
+// ─── Division Connectors (Software Division, Economic Development, Case Management) ───
+router.get("/connectors", requireHQModule("executive"), async (_req, res) => {
+  res.json(buildDivisionConnectorManifest());
 });
 
 // ─── Anomaly Detection ───

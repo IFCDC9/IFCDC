@@ -7,6 +7,7 @@
  */
 
 import { SOFTWARE_DIVISION_APPS } from "./appRegistry";
+import { buildDivisionConnectorManifest } from "./divisionConnectors";
 
 export interface InheritedService {
   id: string;
@@ -92,6 +93,7 @@ export function buildSoftwareDivisionFramework() {
     ],
     inheritedServices: HQ_INHERITED_SERVICES,
     apps,
+    divisionConnectors: buildDivisionConnectorManifest(),
     barbersProductionLocked: true,
     timestamp: new Date().toISOString(),
   };

@@ -4,6 +4,7 @@ import { hqAuthRequired, requireHQModule } from "../middleware/hqAuth";
 import { SOFTWARE_DIVISION_APPS, pollAllApps, getSoftwareDivisionApps } from "../hq/appRegistry";
 import { toHQRole, HQ_MODULE_PERMISSIONS } from "../hq/enterpriseRoles";
 import peopleRouter from "./people.routes";
+import clientsHqRouter from "./clients-hq.routes";
 import enterpriseAuthRouter from "./enterpriseAuth.routes";
 import { checkIfcdcServices, auraExecutiveChat } from "../lib/ifcdc";
 import { sendHqNotification } from "../lib/notifications";
@@ -67,6 +68,7 @@ router.use(hqMutationPushMiddleware);
 
 router.use("/auth", enterpriseAuthRouter);
 router.use("/people", peopleRouter);
+router.use("/clients", clientsHqRouter);
 router.use("/grants", grantsRouter);
 router.use("/finance", financeRouter);
 router.use("/analytics", analyticsRouter);

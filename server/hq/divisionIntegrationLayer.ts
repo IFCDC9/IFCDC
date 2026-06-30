@@ -17,7 +17,10 @@ export type DivisionId =
   | "radio"
   | "music"
   | "tapis"
-  | "inclusive";
+  | "inclusive"
+  | "case_management"
+  | "economic_development"
+  | "software_division";
 
 export interface DivisionSnapshot {
   id: DivisionId;
@@ -41,6 +44,9 @@ const DIVISION_META: Record<DivisionId, { name: string; appId?: string }> = {
   music: { name: "IFCDC Music App", appId: "music" },
   tapis: { name: "IFCDC Tapis", appId: "tapis" },
   inclusive: { name: "Inclusive Community", appId: "inclusive" },
+  case_management: { name: "Client & Case Management" },
+  economic_development: { name: "Economic Development" },
+  software_division: { name: "Software Division Hub" },
 };
 
 async function fetchAppHealth(appId: string) {
@@ -153,6 +159,88 @@ async function fetchAppDivisionSnapshot(id: DivisionId, appId: string): Promise<
   };
 }
 
+async function fetchCaseManagementSnapshot(): Promise<DivisionSnapshot> {
+  const { buildClientCaseOverview } = await import("./clientCaseEngine");
+  const overview = await buildClientCaseOverview();
+
+  return {
+    id: "case_management",
+    name: DIVISION_META.case_management.name,
+    status: "live",
+    readOnly: true,
+    healthy: true,
+    metrics: {
+      totalClients: overview.totalClients,
+      activeAssignments: overview.activeAssignments,
+      openGoals: overview.openGoals,
+      encounters30d: overview.encounters30d,
+      upcomingAppointments: overview.upcomingAppointments,
+      highRiskClients: overview.highRiskClients,
+    },
+    summary: `${overview.totalClients} clients · ${overview.openGoals} open goals · ${overview.upcomingAppointments} upcoming appointments`,
+    lastSync: overview.generatedAt,
+    independentlyDeployable: false,
+  };
+}
+
+async function fetchEconomicDevelopmentSnapshot(): Promise<DivisionSnapshot> {
+  const db = await getDb();
+  const participants = (await db.get<{ c: number }>(
+    "SELECT COUNT(*) as c FROM hq_program_participants WHERE program_slug = 'economic-development' AND status = 'active'",
+  ).catch(() => ({ c: 0 })))?.c ?? 0;
+  const jobsPlaced = (await db.get<{ v: number }>(
+    "SELECT COALESCE(metric_value, 0) as v FROM hq_program_metrics WHERE program_slug = 'economic-development' AND metric_key = 'jobs_placed' ORDER BY recorded_at DESC LIMIT 1",
+  ).catch(() => ({ v: 0 })))?.v ?? 0;
+  const training = (await db.get<{ v: number }>(
+    "SELECT COALESCE(metric_value, 0) as v FROM hq_program_metrics WHERE program_slug = 'economic-development' AND metric_key = 'training' ORDER BY recorded_at DESC LIMIT 1",
+  ).catch(() => ({ v: 0 })))?.v ?? 0;
+  const econClients = (await db.get<{ c: number }>(`
+    SELECT COUNT(*) as c FROM clients WHERE programs LIKE '%ECON_DEV%' OR programs LIKE '%economic%'
+  `).catch(() => ({ c: 0 })))?.c ?? 0;
+  const webhook = await import("./divisionAnalyticsWebhook").then((m) => m.getLatestDivisionAnalytics("economic_development")).catch(() => null);
+
+  return {
+    id: "economic_development",
+    name: DIVISION_META.economic_development.name,
+    status: "live",
+    readOnly: true,
+    healthy: true,
+    metrics: {
+      participants,
+      jobsPlaced,
+      trainingCompletions: training,
+      linkedClients: econClients,
+      ...(webhook?.metrics as Record<string, number | string> | undefined),
+    },
+    summary: `${participants} active participants · ${jobsPlaced} jobs placed · ${econClients} case clients`,
+    lastSync: webhook?.receivedAt ?? new Date().toISOString(),
+    independentlyDeployable: true,
+  };
+}
+
+async function fetchSoftwareDivisionHubSnapshot(): Promise<DivisionSnapshot> {
+  const apps = await pollAllApps();
+  const healthy = apps.filter((a) => a.healthy).length;
+  const { buildSoftwareDivisionConnectors } = await import("./divisionConnectors");
+
+  return {
+    id: "software_division",
+    name: DIVISION_META.software_division.name,
+    status: "live",
+    readOnly: true,
+    healthy: healthy > 0,
+    metrics: {
+      totalApps: apps.length,
+      healthyApps: healthy,
+      connectors: buildSoftwareDivisionConnectors().length,
+      productionLocked: SOFTWARE_DIVISION_APPS.filter((a) => a.locked).length,
+    },
+    summary: `${healthy}/${apps.length} Software Division apps online · ${buildSoftwareDivisionConnectors().length} connectors`,
+    lastSync: new Date().toISOString(),
+    independentlyDeployable: true,
+  };
+}
+
 export async function fetchDivisionSnapshot(divisionId: DivisionId): Promise<DivisionSnapshot | null> {
   switch (divisionId) {
     case "barbers":
@@ -172,6 +260,12 @@ export async function fetchDivisionSnapshot(divisionId: DivisionId): Promise<Div
       return fetchAppDivisionSnapshot("tapis", "tapis");
     case "inclusive":
       return fetchAppDivisionSnapshot("inclusive", "inclusive");
+    case "case_management":
+      return fetchCaseManagementSnapshot();
+    case "economic_development":
+      return fetchEconomicDevelopmentSnapshot();
+    case "software_division":
+      return fetchSoftwareDivisionHubSnapshot();
     default:
       return null;
   }
@@ -179,6 +273,7 @@ export async function fetchDivisionSnapshot(divisionId: DivisionId): Promise<Div
 
 export async function buildDivisionIntegrationOverview() {
   const divisionIds: DivisionId[] = [
+    "software_division", "case_management", "economic_development",
     "barbers", "housing", "scholarships", "community_programs", "media", "radio", "music", "tapis", "inclusive",
   ];
 
