@@ -9,6 +9,10 @@ const FOUNDER_PASSWORD = process.env.FOUNDER_SEED_PASSWORD || "";
 const results = { pass: 0, fail: 0 };
 
 function log(status, msg, detail = "") {
+  if (status === "skip") {
+    console.log(`○ ${msg}${detail ? ` — ${detail}` : ""}`);
+    return;
+  }
   console.log(`${status === "pass" ? "✓" : "✗"} ${msg}${detail ? ` — ${detail}` : ""}`);
   results[status === "pass" ? "pass" : "fail"]++;
 }
