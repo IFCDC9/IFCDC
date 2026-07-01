@@ -1,14 +1,12 @@
-async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`/api/hq/phase9${path}`, { credentials: "include", ...options });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || "Request failed");
-  }
-  return res.json();
+import { hqApiFetch, HQ_HEAVY_FETCH_TIMEOUT_MS } from "./hqApiFetch";
+
+async function apiFetch<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  const { timeoutMs, ...init } = options ?? {};
+  return hqApiFetch<T>(`/api/hq/phase9${path}`, { ...init, timeoutMs });
 }
 
 export const phase9Api = {
-  package: () => apiFetch<Record<string, unknown>>("/package"),
+  package: () => apiFetch<Record<string, unknown>>("/package", { timeoutMs: HQ_HEAVY_FETCH_TIMEOUT_MS }),
   commandCenter: () => apiFetch<Record<string, unknown>>("/command-center"),
   loginBriefing: () => apiFetch<{
     greeting: string;

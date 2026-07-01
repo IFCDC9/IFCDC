@@ -6,6 +6,7 @@ import { workflowApi, type WorkflowInstance } from "../../api/workflowApi";
 import { enterpriseApi } from "../../api/enterpriseApi";
 import { HqPanel } from "../../components/hq/HqPanel";
 import { HqLoading } from "../../components/hq/HqLoading";
+import { HqQueryBoundary } from "../../components/hq/HqQueryBoundary";
 import { StatusBadge } from "../../components/hq/StatusBadge";
 
 const WorkflowAutomationPage: React.FC = () => {
@@ -64,8 +65,13 @@ const WorkflowAutomationPage: React.FC = () => {
         </div>
       </div>
 
-      {dashboard.isLoading ? <HqLoading /> : (
-        <div className="hq-grid-main-side hq-fade-in">
+      <HqQueryBoundary
+        query={dashboard}
+        title="Workflow Automation unavailable"
+        message="Workflow definitions and approval queues could not be loaded from headquarters."
+        loadingMessage="Loading workflow automation…"
+      >
+      <div className="hq-grid-main-side hq-fade-in">
           <HqPanel title="Workflow Definitions" subtitle="Onboarding, board approval, grant deadlines, compliance reminders">
             <table className="hq-table">
               <thead><tr><th>Workflow</th><th>Category</th><th>Status</th></tr></thead>
@@ -102,11 +108,11 @@ const WorkflowAutomationPage: React.FC = () => {
             </ul>
           </HqPanel>
         </div>
-      )}
+      </HqQueryBoundary>
 
       <div style={{ marginTop: "1.25rem" }}>
         <HqPanel title="Approval Queue" subtitle="Process pending executive approvals inline">
-        {dashboard.isLoading ? <HqLoading /> : (
+        <HqQueryBoundary query={dashboard} loadingMessage="Loading approval queue…">
           <table className="hq-table">
             <thead><tr><th>Task</th><th>Type</th><th>Priority</th><th>Actions</th></tr></thead>
             <tbody>
@@ -142,11 +148,12 @@ const WorkflowAutomationPage: React.FC = () => {
               )}
             </tbody>
           </table>
-        )}
+        </HqQueryBoundary>
         </HqPanel>
       </div>
 
       <HqPanel title="Active Workflow Instances" subtitle="Multi-step approvals — expand to review and advance">
+        <HqQueryBoundary query={dashboard} loadingMessage="Loading workflow instances…">
         <table className="hq-table">
           <thead><tr><th></th><th>Title</th><th>Workflow</th><th>Status</th><th>Due</th><th>Actions</th></tr></thead>
           <tbody>
@@ -207,6 +214,7 @@ const WorkflowAutomationPage: React.FC = () => {
             })}
           </tbody>
         </table>
+        </HqQueryBoundary>
       </HqPanel>
     </HQLayout>
   );

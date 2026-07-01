@@ -1,10 +1,8 @@
-async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`/api/hq/workflows${path}`, { credentials: "include", ...options });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || "Request failed");
-  }
-  return res.json();
+import { hqApiFetch } from "./hqApiFetch";
+
+async function apiFetch<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  const { timeoutMs, ...init } = options ?? {};
+  return hqApiFetch<T>(`/api/hq/workflows${path}`, { ...init, timeoutMs });
 }
 
 export interface WorkflowDefinition {
@@ -48,14 +46,7 @@ export const workflowApi = {
       approvalTasks: unknown[];
       counts: Record<string, number>;
       timestamp: string;
-    }>("/dashboard").catch(() => ({
-      definitions: [],
-      instances: [],
-      jobs: [],
-      approvalTasks: [],
-      counts: { total: 0, workflowPending: 0 },
-      timestamp: new Date().toISOString(),
-    })),
+    }>("/dashboard"),
   definitions: () => apiFetch<{ definitions: WorkflowDefinition[] }>("/definitions").catch(() => ({ definitions: [] })),
   instances: (params?: { status?: string; workflow_key?: string }) => {
     const qs = new URLSearchParams();

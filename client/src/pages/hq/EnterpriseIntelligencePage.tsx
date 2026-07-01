@@ -10,7 +10,7 @@ import {
 import HQLayout from "../../layouts/HQLayout";
 import { warehouseApi, DEFAULT_WAREHOUSE_OVERVIEW } from "../../api/warehouseApi";
 import { isProductionClient, devPlaceholder } from "../../utils/productionDataPolicy";
-import { HqDataUnavailable } from "../../components/hq/HqDataUnavailable";
+import { HqQueryBoundary } from "../../components/hq/HqQueryBoundary";
 import { hqApi } from "../../api/hqApi";
 import { intelligenceApi } from "../../api/intelligenceApi";
 import { KpiCard } from "../../components/hq/KpiCard";
@@ -198,7 +198,8 @@ const EnterpriseIntelligencePage: React.FC = () => {
 
   const snapshot = useMutation({ mutationFn: () => warehouseApi.snapshot("organization", true) });
 
-  const data = isProductionClient ? overview.data ?? null : overview.data ?? DEFAULT_WAREHOUSE_OVERVIEW;
+  const data = overview.data ?? (isProductionClient ? null : DEFAULT_WAREHOUSE_OVERVIEW);
+
   const chartData = (trends.data?.trends ?? []).map((t) => ({
     period: t.period ?? t.created_at?.slice(0, 10) ?? "",
     value: t.metric_value,
@@ -207,25 +208,19 @@ const EnterpriseIntelligencePage: React.FC = () => {
   const health = executiveHealth.data;
   const risks = (health?.risks ?? []) as { level: string; area: string; detail: string }[];
 
-  if (isProductionClient && overview.isFetched && !data) {
-    return (
-      <HQLayout
-        title="Enterprise Intelligence"
-        subtitle="Organization-wide data warehouse — executive analytics, forecasting, and KPI drill-downs"
-      >
-        <HqDataUnavailable
-          message="Warehouse overview could not be loaded from production APIs."
-          onRetry={() => overview.refetch()}
-        />
-      </HQLayout>
-    );
-  }
-
   return (
     <HQLayout
       title="Enterprise Intelligence"
       subtitle="Organization-wide data warehouse — executive analytics, forecasting, and KPI drill-downs"
     >
+      <HqQueryBoundary
+        query={overview}
+        title="Enterprise Intelligence unavailable"
+        message="Warehouse overview could not be loaded from production APIs."
+        loadingMessage="Loading enterprise intelligence…"
+      >
+      {data && (
+      <>
       <div className="hq-sd-toolbar" style={{ marginBottom: "1.25rem" }}>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
           <StatusBadge label="Data Warehouse" variant="gold" />
@@ -432,6 +427,9 @@ const EnterpriseIntelligencePage: React.FC = () => {
         )}
         </HqPanel>
       </div>
+      </>
+      )}
+      </HqQueryBoundary>
     </HQLayout>
   );
 };

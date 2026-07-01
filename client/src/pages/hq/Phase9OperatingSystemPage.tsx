@@ -10,6 +10,7 @@ import { phase9Api } from "../../api/phase9Api";
 import { KpiCard } from "../../components/hq/KpiCard";
 import { HqPanel } from "../../components/hq/HqPanel";
 import { HqLoading } from "../../components/hq/HqLoading";
+import { HqQueryBoundary } from "../../components/hq/HqQueryBoundary";
 import { StatusBadge } from "../../components/hq/StatusBadge";
 import { formatCurrency, formatLocaleNumber, formatPercent } from "../../utils/safeFormat";
 import { HqWidgetErrorBoundary } from "../../components/hq/HqErrorBoundary";
@@ -52,7 +53,12 @@ const Phase9OperatingSystemPage: React.FC = () => {
 
   return (
     <HQLayout title="Intelligent Operating System" subtitle="Phase 9 — Enterprise Intelligence & Automation">
-      {os.isLoading ? <HqLoading message="Loading operating system…" /> : (
+      <HqQueryBoundary
+        query={os}
+        title="Intelligent OS unavailable"
+        message="The Phase 9 operating system package could not be loaded. Retry or use Mission Control / Executive Dashboard."
+        loadingMessage="Loading operating system…"
+      >
         <>
           <div className="hq-founder-hero hq-fade-in" style={{ marginBottom: "1.25rem" }}>
             <div>
@@ -183,7 +189,7 @@ const Phase9OperatingSystemPage: React.FC = () => {
             </div>
           </HqPanel>
         </>
-      )}
+      </HqQueryBoundary>
     </HQLayout>
   );
 };

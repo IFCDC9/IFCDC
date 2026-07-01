@@ -1,10 +1,8 @@
-async function intelFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`/api/hq/intelligence${path}`, { credentials: "include", ...options });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || "Request failed");
-  }
-  return res.json();
+import { hqApiFetch } from "./hqApiFetch";
+
+async function intelFetch<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  const { timeoutMs, ...init } = options ?? {};
+  return hqApiFetch<T>(`/api/hq/intelligence${path}`, { ...init, timeoutMs });
 }
 
 export const intelligenceApi = {

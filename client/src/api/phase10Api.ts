@@ -1,10 +1,8 @@
-async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`/api/hq/phase10${path}`, { credentials: "include", ...options });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || "Request failed");
-  }
-  return res.json();
+import { hqApiFetch, HQ_HEAVY_FETCH_TIMEOUT_MS } from "./hqApiFetch";
+
+async function apiFetch<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  const { timeoutMs, ...init } = options ?? {};
+  return hqApiFetch<T>(`/api/hq/phase10${path}`, { ...init, timeoutMs });
 }
 
 export interface ScenarioProjection {
@@ -33,7 +31,7 @@ export interface ScenarioResult {
 }
 
 export const phase10Api = {
-  package: () => apiFetch<Record<string, unknown>>("/package"),
+  package: () => apiFetch<Record<string, unknown>>("/package", { timeoutMs: HQ_HEAVY_FETCH_TIMEOUT_MS }),
   missionControl: () => apiFetch<Record<string, unknown>>("/mission-control"),
   roleHome: () => apiFetch<{ path: string; role: string }>("/role-home"),
   enterpriseAI: () => apiFetch<Record<string, unknown>>("/enterprise-ai"),

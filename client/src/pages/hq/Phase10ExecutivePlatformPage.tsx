@@ -10,6 +10,7 @@ import { phase10Api } from "../../api/phase10Api";
 import { KpiCard } from "../../components/hq/KpiCard";
 import { HqPanel } from "../../components/hq/HqPanel";
 import { HqLoading } from "../../components/hq/HqLoading";
+import { HqQueryBoundary } from "../../components/hq/HqQueryBoundary";
 import { StatusBadge } from "../../components/hq/StatusBadge";
 import { ActivityFeed } from "../../components/hq/ActivityFeed";
 import { HqWidgetErrorBoundary } from "../../components/hq/HqErrorBoundary";
@@ -66,7 +67,12 @@ const Phase10ExecutivePlatformPage: React.FC = () => {
 
   return (
     <HQLayout title="Mission Control" subtitle="Phase 10 — Enterprise Command & Intelligence Platform">
-      {pkg.isLoading ? <HqLoading message="Loading mission control…" /> : (
+      <HqQueryBoundary
+        query={pkg}
+        title="Mission Control unavailable"
+        message="Mission Control could not load from headquarters APIs. Retry or open Executive Dashboard while we restore the package endpoint."
+        loadingMessage="Loading mission control…"
+      >
         <>
           <div className="hq-founder-hero hq-fade-in" style={{ marginBottom: "1.25rem" }}>
             <div>
@@ -221,7 +227,7 @@ const Phase10ExecutivePlatformPage: React.FC = () => {
             </div>
           </HqPanel>
         </>
-      )}
+      </HqQueryBoundary>
     </HQLayout>
   );
 };

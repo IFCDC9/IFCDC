@@ -18,12 +18,15 @@ import {
 } from "../hq/notificationQueue";
 import { deliverExecutiveDocument } from "../hq/executiveDocumentDelivery";
 import { enterpriseGlobalSearch } from "../hq/enterpriseHub";
+import { createPackageCache } from "../hq/packageCache";
 
 const router = Router();
 router.use(hqAuthRequired);
 
+const phase9PackageCache = createPackageCache<Record<string, unknown>>(60_000);
+
 router.get("/package", requireHQModule("executive"), async (_req, res) => {
-  res.json(await buildPhase9OperatingSystemPackage());
+  res.json(await phase9PackageCache.get("phase9", () => buildPhase9OperatingSystemPackage()));
 });
 
 router.get("/command-center", requireHQModule("executive"), async (_req, res) => {
