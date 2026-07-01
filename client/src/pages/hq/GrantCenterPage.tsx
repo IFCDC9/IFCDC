@@ -451,7 +451,7 @@ const GrantCenterPage: React.FC = () => {
               <KpiCard label="Active Partners" value={funderDashboard.data?.activePartners ?? 0} variant="success" />
               <KpiCard label="Total Awarded" value={fmt(funderDashboard.data?.totalAwarded)} variant="gold" />
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: selectedFunderId ? "320px 1fr" : "1fr", gap: "1rem" }}>
+            <div className={`hq-grant-funder-grid${selectedFunderId ? " has-detail" : ""}`}>
               <HqPanel title="Funder CRM" headerExtra={
                 canManage ? (
                   <button type="button" className="hq-btn hq-btn-sm hq-btn-primary" onClick={() => setShowNewFunder(!showNewFunder)}><Plus size={14} /> Add</button>

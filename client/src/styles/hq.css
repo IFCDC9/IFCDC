@@ -493,6 +493,7 @@ body:has(.hq-login-shell) {
   .hq-aura-messages { min-height: 240px; }
   .hq-tabs { gap: 0.25rem; }
   .hq-tab { padding: 0.45rem 0.75rem; font-size: 0.78rem; }
+  .hq-grant-funder-grid.has-detail { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 480px) {
@@ -526,6 +527,11 @@ body:has(.hq-login-shell) {
 .hq-live-dot--offline { background: var(--hq-text-muted); box-shadow: none; animation: none; }
 
 .hq-analytics-toolbar { display: flex; justify-content: flex-end; margin-bottom: 0.65rem; }
+
+.hq-grant-funder-grid { display: grid; grid-template-columns: 1fr; gap: 1rem; }
+@media (min-width: 900px) {
+  .hq-grant-funder-grid.has-detail { grid-template-columns: minmax(260px, 320px) 1fr; }
+}
 
 /* Mobile bottom navigation */
 .hq-mobile-nav {

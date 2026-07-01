@@ -73,7 +73,7 @@ export const GrantLibraryPanel: React.FC<{ onApplyTemplate?: (templateId: string
           </div>
         )}
         <p className="hq-muted-text" style={{ marginTop: "1rem", fontSize: "0.75rem" }}>
-          Integration placeholders: winning proposal archive and Grants.gov template sync planned.
+          Roadmap: winning proposal archive and Grants.gov template sync (future release).
         </p>
       </HqPanel>
     </div>
