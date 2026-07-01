@@ -35,11 +35,14 @@ async function jsonFetch(url, opts = {}) {
 }
 
 async function login(email, password) {
-  const { ok, res } = await jsonFetch(`${BASE}/api/auth/login`, {
+  const { ok, res, body } = await jsonFetch(`${BASE}/api/auth/login`, {
     method: "POST",
     body: JSON.stringify({ email, password }),
   });
-  if (!ok) throw new Error(`Login failed for ${email}: ${res.status}`);
+  if (!ok) {
+    const reason = body?.message || body?.error || res.status;
+    throw new Error(`Login failed for ${email}: ${reason}`);
+  }
   return (res.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).join("; ");
 }
 

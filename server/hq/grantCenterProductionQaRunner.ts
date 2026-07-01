@@ -62,6 +62,8 @@ export async function runGrantCenterProductionQa(port: number): Promise<GrantCen
   running = true;
   const target = `http://127.0.0.1:${port}`;
   const startedAt = new Date().toISOString();
+  const prevQaFlag = process.env.IFCDC_GRANTS_QA;
+  process.env.IFCDC_GRANTS_QA = "1";
   setGrantCenterQaReport({
     status: "running",
     pass: 0,
@@ -92,6 +94,8 @@ export async function runGrantCenterProductionQa(port: number): Promise<GrantCen
 
     child.on("close", (code) => {
       running = false;
+      if (prevQaFlag === undefined) delete process.env.IFCDC_GRANTS_QA;
+      else process.env.IFCDC_GRANTS_QA = prevQaFlag;
       const completedAt = new Date().toISOString();
       try {
         const marker = "__GRANT_QA_JSON__";
