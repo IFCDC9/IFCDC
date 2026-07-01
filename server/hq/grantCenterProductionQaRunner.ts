@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   getGrantCenterQaReport,
   grantCenterQaEnvReady,
@@ -9,8 +9,9 @@ import {
   type GrantQaCheck,
 } from "./grantCenterQaCache";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const QA_SCRIPT = path.resolve(__dirname, "../../script/grant-center-qa.mjs");
+/** Render/npm start cwd is the app root; bundled __dirname lives under dist/. */
+const PROJECT_ROOT = process.cwd();
+const QA_SCRIPT = path.join(PROJECT_ROOT, "script/grant-center-qa.mjs");
 
 let running = false;
 
@@ -42,6 +43,22 @@ export function scheduleGrantCenterProductionQa(port: number): void {
 
 export async function runGrantCenterProductionQa(port: number): Promise<GrantCenterQaReport> {
   if (running) return getGrantCenterQaReport();
+  if (!fs.existsSync(QA_SCRIPT)) {
+    const report: GrantCenterQaReport = {
+      status: "error",
+      pass: 0,
+      fail: 1,
+      checks: [{
+        status: "fail",
+        message: "QA script missing on server",
+        detail: QA_SCRIPT,
+      }],
+      target: `http://127.0.0.1:${port}`,
+      completedAt: new Date().toISOString(),
+    };
+    setGrantCenterQaReport(report);
+    return report;
+  }
   running = true;
   const target = `http://127.0.0.1:${port}`;
   const startedAt = new Date().toISOString();
@@ -64,7 +81,7 @@ export async function runGrantCenterProductionQa(port: number): Promise<GrantCen
           IFCDC_BASE_URL: target,
           IFCDC_GRANTS_QA: "1",
         },
-        cwd: path.resolve(__dirname, "../.."),
+        cwd: PROJECT_ROOT,
       }
     );
 
