@@ -115,8 +115,21 @@ import {
   buildFundingAnalyticsDashboard,
 } from "../hq/grantCenterEngine";
 import { syncGrantFeeds, getGrantFeedIntegrationStatus } from "../hq/grantFeedConnectors";
+import { getGrantCenterQaReport, grantCenterQaEnvReady } from "../hq/grantCenterQaCache";
+import { runGrantCenterProductionQa } from "../hq/grantCenterProductionQaRunner";
 
 const router = Router();
+
+/** Public QA report (no credentials). Runs on Render using secure env vars. */
+router.get("/qa/report", (_req, res) => {
+  const env = grantCenterQaEnvReady();
+  res.json({
+    ...getGrantCenterQaReport(),
+    envReady: env.ready,
+    missingEnv: env.missing,
+    renderService: env.service,
+  });
+});
 
 router.use(hqAuthRequired, requireHQModule("grants"));
 
@@ -141,6 +154,16 @@ router.use((req, res, next) => {
 function actor(req: Request) {
   return { email: req.hqUser?.email };
 }
+
+router.post("/qa/run", async (req: Request, res: Response) => {
+  const role = req.hqUser?.role;
+  if (role !== "founder" && role !== "owner") {
+    return res.status(403).json({ error: "Founder access required to re-run production QA" });
+  }
+  const port = Number(process.env.PORT) || 5000;
+  const report = await runGrantCenterProductionQa(port);
+  res.json({ ...report, envReady: grantCenterQaEnvReady().ready });
+});
 
 router.get("/dashboard", async (_req, res) => {
   await generateGrantNotifications();

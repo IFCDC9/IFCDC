@@ -4,7 +4,7 @@
  */
 const BASE = process.env.IFCDC_BASE_URL || "http://127.0.0.1:5001";
 const FOUNDER_EMAIL = (process.env.MASTER_OWNER_EMAIL || "service@ifcdc.org").toLowerCase();
-const FOUNDER_PASSWORD = process.env.FOUNDER_SEED_PASSWORD || "IFCDC@2026Secure";
+const FOUNDER_PASSWORD = process.env.FOUNDER_SEED_PASSWORD || "";
 
 const results = { pass: 0, fail: 0 };
 
@@ -34,6 +34,11 @@ async function login() {
 
 async function main() {
   console.log("\n=== IFCDC Grant Center Enterprise Readiness ===\n");
+  if (!FOUNDER_PASSWORD) {
+    log("fail", "FOUNDER_SEED_PASSWORD not configured", "Set on Render service ifcdc-hq");
+    console.log(`\n=== Grant Center Enterprise: ${results.pass} PASS / ${results.fail} FAIL ===\n`);
+    process.exit(1);
+  }
   const cookie = await login();
   log("pass", "Founder login");
   const auth = { credentials: "include", headers: { Cookie: cookie } };

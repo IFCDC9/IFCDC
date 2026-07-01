@@ -7,15 +7,19 @@ import jwt from "jsonwebtoken";
 
 const BASE = process.env.IFCDC_BASE_URL || "http://127.0.0.1:5001";
 const FOUNDER_EMAIL = (process.env.MASTER_OWNER_EMAIL || "service@ifcdc.org").toLowerCase();
-const FOUNDER_PASSWORD = process.env.FOUNDER_SEED_PASSWORD || "IFCDC@2026Secure";
+const FOUNDER_PASSWORD = process.env.FOUNDER_SEED_PASSWORD || "";
 const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET || "DEV_ONLY_CHANGE_ME_IFCDC";
+const JSON_REPORT = process.argv.includes("--json-report");
 const QA_TAG = `qa-grant-${Date.now()}`;
 
 const results = { pass: 0, fail: 0 };
-const cleanup = [];
+const checks = [];
 
 function log(status, msg, detail = "") {
-  console.log(`${status === "pass" ? "✓" : "✗"} ${msg}${detail ? ` — ${detail}` : ""}`);
+  checks.push({ status, message: msg, detail: detail || undefined });
+  if (!JSON_REPORT) {
+    console.log(`${status === "pass" ? "✓" : "✗"} ${msg}${detail ? ` — ${detail}` : ""}`);
+  }
   results[status === "pass" ? "pass" : "fail"]++;
 }
 
@@ -49,7 +53,7 @@ function boardAuthHeader() {
 }
 
 async function runReadiness() {
-  const proc = spawnSync("node", ["script/grant-center-readiness.mjs"], {
+  const proc = spawnSync("node", ["script/grant-center-readiness.mjs", ...(JSON_REPORT ? ["--json-report"] : [])], {
     stdio: "pipe",
     env: { ...process.env, IFCDC_BASE_URL: BASE },
   });
@@ -57,15 +61,31 @@ async function runReadiness() {
   const match = out.match(/(\d+) PASS \/ (\d+) FAIL/);
   if (proc.status !== 0) {
     log("fail", "Readiness suite", match ? `${match[1]} pass / ${match[2]} fail` : "exit non-zero");
-    if (out.trim()) console.log(out.trim());
+    if (!JSON_REPORT && out.trim()) console.log(out.trim());
     return false;
   }
   log("pass", "Readiness suite", match ? `${match[1]} checks` : "all pass");
   return true;
 }
 
+function emitReport(exitCode) {
+  if (JSON_REPORT) {
+    console.log(`__GRANT_QA_JSON__${JSON.stringify({ pass: results.pass, fail: results.fail, checks, qaTag: QA_TAG })}`);
+  } else {
+    console.log(`\n=== Grant Center QA: ${results.pass} PASS / ${results.fail} FAIL ===`);
+    console.log(`QA records tagged: ${QA_TAG}\n`);
+  }
+  process.exit(exitCode);
+}
+
 async function main() {
-  console.log("\n=== IFCDC Grant Center Production QA ===\n");
+  if (!JSON_REPORT) console.log("\n=== IFCDC Grant Center Production QA ===\n");
+
+  if (!FOUNDER_PASSWORD) {
+    log("fail", "FOUNDER_SEED_PASSWORD not configured", "Set on Render service ifcdc-hq");
+    emitReport(1);
+    return;
+  }
 
   const cookie = await login(FOUNDER_EMAIL, FOUNDER_PASSWORD);
   log("pass", "Founder authentication");
@@ -125,7 +145,6 @@ async function main() {
   });
   const oppId = founderWrite.body?.opportunity?.id ?? founderWrite.body?.id;
   log(founderWrite.ok && oppId ? "pass" : "fail", "CRUD: Create opportunity");
-  if (oppId) cleanup.push(["opportunity", oppId]);
 
   if (oppId) {
     const patchOpp = await jsonFetch(`${BASE}/api/hq/grants/opportunities/${oppId}`, {
@@ -151,7 +170,6 @@ async function main() {
   });
   const appId = createApp.body?.application?.id ?? createApp.body?.id;
   log(createApp.ok && appId ? "pass" : "fail", "CRUD: Create application");
-  if (appId) cleanup.push(["application", appId]);
 
   if (appId) {
     const patchApp = await jsonFetch(`${BASE}/api/hq/grants/applications/${appId}`, {
@@ -213,9 +231,10 @@ async function main() {
 
   await runReadiness();
 
-  console.log(`\n=== Grant Center QA: ${results.pass} PASS / ${results.fail} FAIL ===`);
-  console.log(`QA records tagged: ${QA_TAG}\n`);
-  process.exit(results.fail > 0 ? 1 : 0);
+  emitReport(results.fail > 0 ? 1 : 0);
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+main().catch((e) => {
+  log("fail", "QA runner error", e instanceof Error ? e.message : String(e));
+  emitReport(1);
+});

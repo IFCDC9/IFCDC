@@ -24,6 +24,7 @@
     "grants:deploy-verify": "node script/grant-center-deploy-verify.mjs",
     "grants:founder-review": "node script/grant-center-founder-review.mjs",
     "grants:signoff": "node script/grant-center-signoff.mjs",
+    "grants:production-qa-report": "node script/grant-center-fetch-production-qa.mjs",
     "deploy:parity": "node script/host-parity-verify.mjs",
     "production:verify": "node script/production-verify.mjs",
     "hq:nav-audit": "node script/hq-nav-audit.mjs",

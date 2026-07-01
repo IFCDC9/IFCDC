@@ -92,9 +92,14 @@ async function startServer() {
     email: FOUNDER_EMAIL,
     seedPassword: FOUNDER_SEED_PASSWORD,
     name: FOUNDER_NAME,
-  }).catch((err) => {
-    console.error("Failed to initialize IFCDC HQ (API remains up):", err);
-  });
+  })
+    .then(async () => {
+      const { scheduleGrantCenterProductionQa } = await import("./hq/grantCenterProductionQaRunner");
+      scheduleGrantCenterProductionQa(PORT);
+    })
+    .catch((err) => {
+      console.error("Failed to initialize IFCDC HQ (API remains up):", err);
+    });
 }
 
 startServer().catch((err) => {

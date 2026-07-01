@@ -1,11 +1,7 @@
 #!/usr/bin/env node
 /**
  * Grant Center — Founder visual review checklist (API + RBAC simulation).
- * Usage:
- *   IFCDC_BASE_URL=https://ifcdc-hq-wst6.onrender.com \
- *   MASTER_OWNER_EMAIL=813786b@gmail.com \
- *   FOUNDER_SEED_PASSWORD=<from Render> \
- *   node script/grant-center-founder-review.mjs
+ * Uses Render env when run on-server; external runs use public /api/hq/grants/qa/report.
  */
 import jwt from "jsonwebtoken";
 
@@ -78,7 +74,7 @@ async function main() {
   console.log(`Founder: ${FOUNDER_EMAIL}\n`);
 
   if (!FOUNDER_PASSWORD) {
-    log("fail", "FOUNDER_SEED_PASSWORD required", "Set from Render dashboard env vars");
+    log("fail", "FOUNDER_SEED_PASSWORD not configured on Render", "Service: ifcdc-hq");
     process.exit(1);
   }
 
@@ -91,7 +87,7 @@ async function main() {
     log("pass", "Founder authentication");
   } catch (e) {
     log("fail", "Founder authentication", e.message);
-    console.log("\nSet MASTER_OWNER_EMAIL=813786b@gmail.com and FOUNDER_SEED_PASSWORD from Render.\n");
+    console.log("\nConfigure FOUNDER_SEED_PASSWORD on Render service ifcdc-hq (Environment tab).\n");
     process.exit(1);
   }
 

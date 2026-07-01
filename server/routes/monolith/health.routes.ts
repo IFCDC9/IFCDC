@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { getBuildInfo } from "../../buildInfo";
 import { isApplicationReady } from "../../bootstrap/applicationState";
+import { getGrantCenterQaReport, grantCenterQaEnvReady } from "../../hq/grantCenterQaCache";
 
 export function registerHealthRoutes(app: Express): void {
   app.get("/api/health", (_req, res) => {
@@ -10,6 +11,8 @@ export function registerHealthRoutes(app: Express): void {
       process.env.GIT_COMMIT?.slice(0, 7) ??
       build.commit?.slice(0, 7) ??
       null;
+    const qaEnv = grantCenterQaEnvReady();
+    const qaReport = getGrantCenterQaReport();
     res.json({
       app: "ifcdc-headquarters",
       status: "healthy",
@@ -21,6 +24,16 @@ export function registerHealthRoutes(app: Express): void {
       builtAt: build.builtAt,
       environment: process.env.NODE_ENV ?? "development",
       port: Number(process.env.PORT) || 5000,
+      grantCenterQa: {
+        envReady: qaEnv.ready,
+        missingEnv: qaEnv.missing,
+        renderService: qaEnv.service,
+        status: qaReport.status,
+        pass: qaReport.pass,
+        fail: qaReport.fail,
+        completedAt: qaReport.completedAt ?? null,
+        reportUrl: "/api/hq/grants/qa/report",
+      },
     });
   });
 }
