@@ -7,13 +7,22 @@ import { authenticator } from "../../otplib-compat";
 import { JWT_SECRET } from "../../config/auth";
 import { authRequired } from "../../middleware/legacyAuth";
 import { getMonolithDb } from "../../monolith/dbAccess";
-import { ADMIN_EMAIL, assignRole, cryptoRandomId } from "../../monolith/constants";
+import { assignRole, cryptoRandomId } from "../../monolith/constants";
+import { getGrantsOperatorEmail, getSuperAdminEmail } from "../../config/credentials";
 import { logAudit } from "../../monolith/audit";
 import { getGoogleOAuthConfig, isGoogleOAuthConfigured } from "../../monolith/googleOAuth";
 import { recordActiveSession, recordLoginAttempt, roleRequiresMfa } from "../../hq/hqSecuritySessions";
 import { enforceSessionPolicyOnLogin } from "../../hq/sessionPolicy";
 
-const MASTER_OWNER_EMAIL = (process.env.MASTER_OWNER_EMAIL || "service@ifcdc.org").toLowerCase();
+const SUPER_ADMIN_EMAIL = getSuperAdminEmail();
+const GRANTS_OPERATOR_EMAIL = getGrantsOperatorEmail();
+
+function resolveEffectiveRole(email: string, storedRole: string): string {
+  const lower = email.toLowerCase();
+  if (SUPER_ADMIN_EMAIL && lower === SUPER_ADMIN_EMAIL) return "owner";
+  if (GRANTS_OPERATOR_EMAIL && lower === GRANTS_OPERATOR_EMAIL) return "grant_manager";
+  return storedRole;
+}
 
 async function handleLogin(req: Request, res: Response): Promise<Response | void> {
   try {
@@ -56,47 +65,30 @@ async function handleLogin(req: Request, res: Response): Promise<Response | void
       return res.status(403).json({ message: "Account restricted" });
     }
 
-    let effectiveRole = user.role;
-    if (MASTER_OWNER_EMAIL && lowerEmail === MASTER_OWNER_EMAIL.toLowerCase()) {
-      effectiveRole = "owner";
-    } else if (ADMIN_EMAIL && lowerEmail === ADMIN_EMAIL.toLowerCase()) {
-      effectiveRole = "admin";
-    }
+    let effectiveRole = resolveEffectiveRole(lowerEmail, user.role);
 
     const grantsQaBypass = process.env.IFCDC_GRANTS_QA === "1";
 
     if (roleRequiresMfa(effectiveRole) && !grantsQaBypass) {
-      if (!user.twofa_enabled) {
-        await recordLoginAttempt({
-          userId: user.id,
-          email: lowerEmail,
-          success: false,
-          ipAddress: req.ip,
-          userAgent: req.get("user-agent"),
-          failureReason: "mfa_setup_required",
-        });
-        return res.status(403).json({
-          requiresMfaSetup: true,
-          message: "Two-factor authentication is required for your role. Enable 2FA in Security Center before signing in.",
-        });
-      }
+      if (user.twofa_enabled) {
+        if (!totpCode) {
+          return res.status(200).json({ requires2FA: true, message: "Please enter your 2FA code" });
+        }
 
-      if (!totpCode) {
-        return res.status(200).json({ requires2FA: true, message: "Please enter your 2FA code" });
+        const isValid = authenticator.verify({ token: totpCode, secret: user.twofa_secret });
+        if (!isValid) {
+          await recordLoginAttempt({
+            userId: user.id,
+            email: lowerEmail,
+            success: false,
+            ipAddress: req.ip,
+            userAgent: req.get("user-agent"),
+            failureReason: "invalid_2fa",
+          });
+          return res.status(401).json({ error: "Invalid 2FA code" });
+        }
       }
-
-      const isValid = authenticator.verify({ token: totpCode, secret: user.twofa_secret });
-      if (!isValid) {
-        await recordLoginAttempt({
-          userId: user.id,
-          email: lowerEmail,
-          success: false,
-          ipAddress: req.ip,
-          userAgent: req.get("user-agent"),
-          failureReason: "invalid_2fa",
-        });
-        return res.status(401).json({ error: "Invalid 2FA code" });
-      }
+      // twofa not yet enabled: allow login so Super Admin can enroll in Security Center
     }
 
     const token = jwt.sign({ id: user.id, email: user.email, role: effectiveRole }, JWT_SECRET, {
@@ -130,6 +122,7 @@ async function handleLogin(req: Request, res: Response): Promise<Response | void
     return res.json({
       message: "Logged in",
       role: effectiveRole,
+      mfaSetupRequired: roleRequiresMfa(effectiveRole) && !user.twofa_enabled && !grantsQaBypass,
       user: { id: user.id, name: user.name, email: user.email, role: effectiveRole },
     });
   } catch (err) {
@@ -157,7 +150,7 @@ export function createAuthRouter(): Router {
         return res.status(409).json({ error: "Email already registered" });
       }
 
-      const finalRole = assignRole(lowerEmail, MASTER_OWNER_EMAIL);
+      const finalRole = assignRole(lowerEmail, SUPER_ADMIN_EMAIL, GRANTS_OPERATOR_EMAIL);
       const id = cryptoRandomId();
       const password_hash = await bcrypt.hash(password, 10);
       const created_at = new Date().toISOString();
@@ -303,6 +296,34 @@ export function createAuthRouter(): Router {
     }
   });
 
+  router.post("/change-password", authRequired, async (req, res) => {
+    try {
+      const { currentPassword, newPassword } = req.body;
+      if (!currentPassword || !newPassword || String(newPassword).length < 12) {
+        return res.status(400).json({
+          error: "currentPassword and newPassword required (minimum 12 characters)",
+        });
+      }
+      const userId = req.user?.id;
+      const db = getMonolithDb();
+      const user = await db.get<any>("SELECT * FROM users WHERE id = ?", userId);
+      if (!user?.password_hash) {
+        return res.status(400).json({ error: "Account has no password set" });
+      }
+      const ok = await bcrypt.compare(currentPassword, user.password_hash);
+      if (!ok) {
+        return res.status(401).json({ error: "Current password is incorrect" });
+      }
+      const password_hash = await bcrypt.hash(newPassword, 10);
+      await db.run("UPDATE users SET password_hash = ? WHERE id = ?", password_hash, userId);
+      await logAudit(req, { action: "CHANGE_PASSWORD", targetType: "USER", targetId: userId! });
+      res.json({ success: true, message: "Password updated successfully" });
+    } catch (err) {
+      console.error("Change password error:", err);
+      res.status(500).json({ error: "Failed to change password" });
+    }
+  });
+
   return router;
 }
 
@@ -359,7 +380,7 @@ export function registerLegacyAuthRoutes(app: import("express").Express): void {
 
       if (!user) {
         const id = cryptoRandomId();
-        const finalRole = assignRole(email, MASTER_OWNER_EMAIL);
+        const finalRole = assignRole(email, SUPER_ADMIN_EMAIL, GRANTS_OPERATOR_EMAIL);
         const created_at = new Date().toISOString();
 
         await db.run(
@@ -386,9 +407,7 @@ export function registerLegacyAuthRoutes(app: import("express").Express): void {
         return res.redirect("/login.html?error=account_restricted");
       }
 
-      let effectiveRole = user.role;
-      if (MASTER_OWNER_EMAIL && email === MASTER_OWNER_EMAIL.toLowerCase()) effectiveRole = "owner";
-      else if (ADMIN_EMAIL && email === ADMIN_EMAIL.toLowerCase()) effectiveRole = "admin";
+      let effectiveRole = resolveEffectiveRole(email, user.role);
 
       const token = jwt.sign({ id: user.id, email: user.email, role: effectiveRole }, JWT_SECRET, {
         expiresIn: "7d",

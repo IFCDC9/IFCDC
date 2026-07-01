@@ -8,6 +8,7 @@ vite.config.ts.*
 .env
 .env.*
 !.env.example
+.credentials/
 data/*.db
 data/backups/
 .local/

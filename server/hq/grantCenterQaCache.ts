@@ -36,6 +36,7 @@ export function grantCenterQaEnvReady(): { ready: boolean; missing: string[]; se
   const missing: string[] = [];
   if (!(process.env.FOUNDER_SEED_PASSWORD || "").trim()) missing.push("FOUNDER_SEED_PASSWORD");
   if (!(process.env.MASTER_OWNER_EMAIL || "").trim()) missing.push("MASTER_OWNER_EMAIL");
+  if (!(process.env.GRANTS_OPERATOR_PASSWORD || "").trim()) missing.push("GRANTS_OPERATOR_PASSWORD");
   if (!(process.env.JWT_SECRET || process.env.SESSION_SECRET || "").trim()) missing.push("JWT_SECRET");
   return { ready: missing.length === 0, missing, service: "ifcdc-hq" };
 }

@@ -24,6 +24,8 @@
     "grants:deploy-verify": "node script/grant-center-deploy-verify.mjs",
     "grants:founder-review": "node script/grant-center-founder-review.mjs",
     "grants:founder-visual": "node script/grant-center-founder-visual.mjs",
+    "credentials:generate": "node script/generate-super-admin-password.mjs",
+    "credentials:verify": "node script/credential-separation-verify.mjs",
     "grants:signoff": "node script/grant-center-signoff.mjs",
     "grants:production-qa-report": "node script/grant-center-fetch-production-qa.mjs",
     "deploy:parity": "node script/host-parity-verify.mjs",

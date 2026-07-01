@@ -24,9 +24,15 @@ services:
       - key: JWT_SECRET
         generateValue: true
       - key: MASTER_OWNER_EMAIL
-        value: "813786b@gmail.com"
+        value: "service@ifcdc.org"
       - key: FOUNDER_SEED_PASSWORD
         generateValue: true
+      - key: GRANTS_OPERATOR_EMAIL
+        value: "813786b@gmail.com"
+      - key: GRANTS_OPERATOR_PASSWORD
+        generateValue: true
+      - key: GRANTS_OPERATOR_NAME
+        value: "IFCDC Grants Operator"
       - key: OPENAI_API_KEY
         sync: false
       - key: PUBLIC_APP_URL

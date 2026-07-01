@@ -46,11 +46,19 @@ const LoginPage = () => {
 
       if (!res.ok) {
         setSubmitting(false);
-        setMessage({ type: "error", text: data.error || "Login failed" });
+        if (data.requiresMfaSetup) {
+          setMessage({ type: "error", text: data.message || "Enable 2FA in Security Center after signing in." });
+          return;
+        }
+        setMessage({ type: "error", text: data.error || data.message || "Login failed" });
         return;
       }
 
-      setMessage({ type: "success", text: "Welcome to Headquarters. Redirecting…" });
+      if (data.mfaSetupRequired) {
+        setMessage({ type: "", text: "Sign-in successful. Enable two-factor authentication in Security Center to complete hardening." });
+      } else {
+        setMessage({ type: "success", text: "Welcome to Headquarters. Redirecting…" });
+      }
       saveDashboardModeLocal("standard");
 
       const role = data.role ?? data.user?.role;
@@ -72,7 +80,7 @@ const LoginPage = () => {
 
       if (sessionUser) {
         applySessionUser(sessionUser);
-        navigate(sessionUser.defaultRoute || "/hq", { replace: true });
+        navigate(data.mfaSetupRequired ? "/hq/security" : (sessionUser.defaultRoute || "/hq"), { replace: true });
         return;
       }
 

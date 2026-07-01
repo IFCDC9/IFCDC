@@ -5,6 +5,12 @@ import { assertProductionEnv } from "./config/validateProductionEnv";
 import { reportProductionEnvGaps } from "./config/productionEnvReport";
 import { registerHealthRoutes } from "./routes/monolith/health.routes";
 import { setApplicationReady } from "./bootstrap/applicationState";
+import {
+  getGrantsOperatorEmail,
+  getGrantsOperatorPassword,
+  getSuperAdminEmail,
+  getSuperAdminPassword,
+} from "./config/credentials";
 
 assertProductionEnv();
 reportProductionEnvGaps();
@@ -19,9 +25,14 @@ if (!isDev) {
   console.log("DEV MODE ACTIVE");
 }
 
-const FOUNDER_EMAIL = (process.env.MASTER_OWNER_EMAIL || "service@ifcdc.org").toLowerCase();
-const FOUNDER_SEED_PASSWORD = process.env.FOUNDER_SEED_PASSWORD || "IFCDC@2026Secure";
-const FOUNDER_NAME = process.env.FOUNDER_NAME || "Mr. Fahreal Allah";
+const FOUNDER_EMAIL = getSuperAdminEmail();
+const FOUNDER_SEED_PASSWORD = getSuperAdminPassword() || "IFCDC@2026Secure";
+const FOUNDER_NAME = process.env.FOUNDER_NAME || "IFCDC Super Admin";
+const GRANTS_OPERATOR = {
+  email: getGrantsOperatorEmail(),
+  seedPassword: getGrantsOperatorPassword(),
+  name: process.env.GRANTS_OPERATOR_NAME || "IFCDC Grants Operator",
+};
 
 // Lightweight middleware + health only — bind PORT before heavy route imports (Render stability).
 app.use(express.json());
@@ -92,6 +103,9 @@ async function startServer() {
     email: FOUNDER_EMAIL,
     seedPassword: FOUNDER_SEED_PASSWORD,
     name: FOUNDER_NAME,
+    grantsOperator: GRANTS_OPERATOR.seedPassword
+      ? { email: GRANTS_OPERATOR.email, seedPassword: GRANTS_OPERATOR.seedPassword, name: GRANTS_OPERATOR.name }
+      : undefined,
   })
     .then(async () => {
       const { scheduleGrantCenterProductionQa } = await import("./hq/grantCenterProductionQaRunner");

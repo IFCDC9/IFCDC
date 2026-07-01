@@ -18,6 +18,11 @@ export interface FounderSeedConfig {
   email: string;
   seedPassword: string;
   name: string;
+  grantsOperator?: {
+    email: string;
+    seedPassword: string;
+    name: string;
+  };
 }
 
 export async function initLegacyMonolithDb(founder: FounderSeedConfig): Promise<Database> {
@@ -516,8 +521,62 @@ export async function initLegacyMonolithDb(founder: FounderSeedConfig): Promise<
   }
 
   await ensureFounderAccount(db, founder);
+  if (founder.grantsOperator?.email && founder.grantsOperator.seedPassword) {
+    await ensureGrantOperatorAccount(db, founder.grantsOperator);
+  }
+  await enforceCredentialSeparation(db, founder.email, founder.grantsOperator?.email);
 
   return db;
+}
+
+async function enforceCredentialSeparation(
+  db: Database,
+  superAdminEmail: string,
+  grantsOperatorEmail?: string,
+): Promise<void> {
+  const superEmail = superAdminEmail.toLowerCase();
+  if (grantsOperatorEmail && grantsOperatorEmail.toLowerCase() !== superEmail) {
+    const row = await db.get<{ role: string }>("SELECT role FROM users WHERE email = ?", grantsOperatorEmail.toLowerCase());
+    if (row?.role === "owner" || row?.role === "admin") {
+      await db.run(
+        `UPDATE users SET role = 'grant_manager' WHERE email = ?`,
+        grantsOperatorEmail.toLowerCase(),
+      );
+      console.log("Credential separation: grants operator demoted from HQ admin role:", grantsOperatorEmail);
+    }
+  }
+  const strayOwners = (await db.all(
+    "SELECT email FROM users WHERE role = 'owner' AND email != ?",
+    superEmail,
+  )) as { email: string }[];
+  for (const u of strayOwners) {
+    await db.run(`UPDATE users SET role = 'grant_manager' WHERE email = ?`, u.email);
+    console.log("Credential separation: removed duplicate owner role from:", u.email);
+  }
+}
+
+async function ensureGrantOperatorAccount(
+  db: Database,
+  operator: { email: string; seedPassword: string; name: string },
+): Promise<void> {
+  const email = operator.email.toLowerCase();
+  const password_hash = await bcrypt.hash(operator.seedPassword, 10);
+  const created_at = new Date().toISOString();
+  const existing = await db.get<LegacyUser>("SELECT * FROM users WHERE email = ?", email);
+
+  if (existing) {
+    await db.run(
+      `UPDATE users SET name = ?, role = 'grant_manager', password_hash = ?, status = 'active' WHERE email = ?`,
+      operator.name, password_hash, email,
+    );
+    console.log("Grants operator account ready:", email);
+  } else {
+    await db.run(
+      `INSERT INTO users (id, name, email, role, password_hash, created_at, status, twofa_enabled) VALUES (?, ?, ?, 'grant_manager', ?, ?, 'active', 0)`,
+      cryptoRandomId(), operator.name, email, password_hash, created_at,
+    );
+    console.log("Grants operator account created:", email);
+  }
 }
 
 async function ensureFounderAccount(db: Database, founder: FounderSeedConfig) {
@@ -528,16 +587,16 @@ async function ensureFounderAccount(db: Database, founder: FounderSeedConfig) {
 
   if (existing) {
     await db.run(
-      `UPDATE users SET name = ?, role = ?, password_hash = ?, status = 'active', twofa_enabled = 0 WHERE email = ?`,
-      founder.name, "owner", password_hash, email
+      `UPDATE users SET name = ?, role = ?, password_hash = ?, status = 'active' WHERE email = ?`,
+      founder.name, "owner", password_hash, email,
     );
-    console.log("Founder / Super Admin account ready:", email);
+    console.log("Super Admin account ready:", email);
   } else {
     await db.run(
       `INSERT INTO users (id, name, email, role, password_hash, created_at, status, twofa_enabled) VALUES (?, ?, ?, ?, ?, ?, 'active', 0)`,
-      cryptoRandomId(), founder.name, email, "owner", password_hash, created_at
+      cryptoRandomId(), founder.name, email, "owner", password_hash, created_at,
     );
-    console.log("Founder / Super Admin account created:", email);
+    console.log("Super Admin account created:", email);
   }
 
   const emp = await db.get("SELECT id FROM employees WHERE email = ?", email);

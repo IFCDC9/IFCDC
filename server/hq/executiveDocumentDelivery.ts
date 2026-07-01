@@ -122,7 +122,7 @@ export async function deliverExecutiveDocument(
     ? await generateExecutiveBriefingDocument()
     : await generateBoardReportDocument();
 
-  const to = opts?.to ?? process.env.FOUNDER_EMAIL ?? "service@ifcdc.org";
+  const to = opts?.to ?? process.env.GRANTS_OPERATOR_EMAIL ?? process.env.FOUNDER_EMAIL ?? "service@ifcdc.org";
   let emailStatus: "sent" | "skipped" | "failed" = "skipped";
 
   if (opts?.sendEmail !== false) {

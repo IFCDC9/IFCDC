@@ -34,6 +34,17 @@ export function assertProductionEnv(): void {
     errors.push("MASTER_OWNER_EMAIL must be set in production");
   }
 
+  const superAdmin = (process.env.MASTER_OWNER_EMAIL || "").toLowerCase().trim();
+  const grantsOp = (process.env.GRANTS_OPERATOR_EMAIL || "813786b@gmail.com").toLowerCase().trim();
+  if (superAdmin && grantsOp && superAdmin === grantsOp) {
+    errors.push("MASTER_OWNER_EMAIL and GRANTS_OPERATOR_EMAIL must be different accounts");
+  }
+
+  const grantsPassword = (process.env.GRANTS_OPERATOR_PASSWORD || "").trim();
+  if (!grantsPassword) {
+    errors.push("GRANTS_OPERATOR_PASSWORD must be set in production");
+  }
+
   if (!(process.env.PUBLIC_APP_URL || "").trim()) {
     errors.push("PUBLIC_APP_URL must be set in production");
   }
@@ -49,6 +60,8 @@ export function assertProductionEnv(): void {
       "SESSION_SECRET",
       "FOUNDER_SEED_PASSWORD",
       "MASTER_OWNER_EMAIL",
+      "GRANTS_OPERATOR_EMAIL",
+      "GRANTS_OPERATOR_PASSWORD",
       "PUBLIC_APP_URL",
     ].map((k) => `${k}=${process.env[k] ? "set" : "MISSING"}`).join(", "));
     console.error("See .env.example for required production variables.");

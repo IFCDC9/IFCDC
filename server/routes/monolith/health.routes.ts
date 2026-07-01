@@ -2,6 +2,11 @@ import type { Express } from "express";
 import { getBuildInfo } from "../../buildInfo";
 import { isApplicationReady } from "../../bootstrap/applicationState";
 import { getGrantCenterQaReport, grantCenterQaEnvReady } from "../../hq/grantCenterQaCache";
+import {
+  credentialsAreSeparated,
+  getGrantsOperatorEmail,
+  getSuperAdminEmail,
+} from "../../config/credentials";
 
 export function registerHealthRoutes(app: Express): void {
   app.get("/api/health", (_req, res) => {
@@ -33,6 +38,11 @@ export function registerHealthRoutes(app: Express): void {
         fail: qaReport.fail,
         completedAt: qaReport.completedAt ?? null,
         reportUrl: "/api/hq/grants/qa/report",
+      },
+      credentials: {
+        superAdminEmail: getSuperAdminEmail(),
+        grantsOperatorEmail: getGrantsOperatorEmail(),
+        separated: credentialsAreSeparated(),
       },
     });
   });
