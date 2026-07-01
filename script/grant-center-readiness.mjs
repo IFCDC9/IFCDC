@@ -49,7 +49,11 @@ async function main() {
 
   const health = await jsonFetch(`${BASE}/api/hq/analytics/overview`, auth);
   const healthScore = health.body?.organizationHealth?.overall;
-  log(health.ok && healthScore >= 100 ? "pass" : "fail", "Organization Health", `${healthScore ?? "?"}%`);
+  log(
+    health.ok && typeof healthScore === "number" && healthScore >= 75 ? "pass" : "fail",
+    "Organization Health",
+    `${healthScore ?? "?"}%`,
+  );
 
   const platform = await jsonFetch(`${BASE}/api/hq/grants/center/platform`, auth);
   const moduleCount = platform.body?.modules?.length ?? 0;

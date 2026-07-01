@@ -63,7 +63,13 @@ async function runReadiness() {
   const out = `${proc.stdout?.toString() ?? ""}${proc.stderr?.toString() ?? ""}`;
   const match = out.match(/(\d+) PASS \/ (\d+) FAIL/);
   if (proc.status !== 0) {
-    log("fail", "Readiness suite", match ? `${match[1]} pass / ${match[2]} fail` : "exit non-zero");
+    const failLine = out.split("\n").find((l) => l.startsWith("✗"));
+    const detail = failLine
+      ? failLine.replace(/^✗\s*/, "")
+      : match
+        ? `${match[1]} pass / ${match[2]} fail`
+        : "exit non-zero";
+    log("fail", "Readiness suite", detail);
     if (!JSON_REPORT && out.trim()) console.log(out.trim());
     return false;
   }
