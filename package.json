@@ -34,6 +34,7 @@
     "hq:chunk-audit": "node script/hq-chunk-audit.mjs",
     "hq:production-audit": "node script/hq-full-production-audit.mjs",
     "hq:module-api-verify": "node script/hq-module-api-verify.mjs",
+    "hq:mission-control-verify": "node script/mission-control-verify.mjs",
     "hq:phase1-verify": "node script/phase1-production-hardening-verify.mjs",
     "comms:readiness": "node script/communications-readiness.mjs",
     "docs:readiness": "node script/documents-readiness.mjs",

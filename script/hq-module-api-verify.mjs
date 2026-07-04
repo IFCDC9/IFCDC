@@ -12,7 +12,8 @@ const EMAIL = process.env.IFCDC_SUPER_ADMIN_EMAIL || process.env.MASTER_OWNER_EM
 const PASSWORD = process.env.IFCDC_SUPER_ADMIN_PASSWORD || process.env.FOUNDER_SEED_PASSWORD;
 
 const MODULE_APIS = [
-  ["Mission Control", "GET", "/api/hq/phase10/package", 45000],
+  ["Mission Control", "GET", "/api/hq/phase10/mission-control", 45000],
+  ["Mission Control Package", "GET", "/api/hq/phase10/package", 45000],
   ["Intelligent OS", "GET", "/api/hq/phase9/package", 45000],
   ["Enterprise Intelligence", "GET", "/api/hq/warehouse/overview", 20000],
   ["Workflow Automation", "GET", "/api/hq/workflows/dashboard", 20000],
