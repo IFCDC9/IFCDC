@@ -10,15 +10,23 @@ const SUPER_ADMIN = (process.env.MASTER_OWNER_EMAIL || "service@ifcdc.org").toLo
 const GRANTS_OP = (process.env.GRANTS_OPERATOR_EMAIL || "813786b@gmail.com").toLowerCase();
 const SUPER_PW = process.env.FOUNDER_SEED_PASSWORD || "";
 const GRANTS_PW = process.env.GRANTS_OPERATOR_PASSWORD || "";
-const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET || "DEV_ONLY_CHANGE_ME_IFCDC";
+const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET || "";
+const DEV_JWT = "DEV_ONLY_CHANGE_ME_IFCDC";
+const CAN_SIGN_TOKENS = JWT_SECRET && JWT_SECRET !== DEV_JWT;
 
 let pass = 0;
 let fail = 0;
+let skip = 0;
 
 function log(ok, msg, detail = "") {
   console.log(`${ok ? "✓" : "✗"} ${msg}${detail ? ` — ${detail}` : ""}`);
   if (ok) pass++;
   else fail++;
+}
+
+function logSkip(msg, detail = "") {
+  console.log(`○ ${msg}${detail ? ` — ${detail}` : ""}`);
+  skip++;
 }
 
 async function jsonFetch(url, opts = {}) {
@@ -32,6 +40,7 @@ async function jsonFetch(url, opts = {}) {
 async function login(email, password) {
   const { ok, res, body } = await jsonFetch(`${BASE}/api/auth/login`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
   if (!ok) throw new Error(`${email}: ${body?.message || body?.error || res.status}`);
@@ -58,8 +67,22 @@ async function main() {
   const health = await jsonFetch(`${BASE}/api/health`);
   log(health.ok, "Production health", health.body?.commit ?? "?");
 
+  if (health.body?.credentials) {
+    log(health.body.credentials.separated === true, "Health reports credentials separated");
+    log(
+      (health.body.credentials.superAdminEmail || "").toLowerCase() === SUPER_ADMIN,
+      "Health superAdminEmail matches env",
+      health.body.credentials.superAdminEmail ?? "?",
+    );
+    log(
+      (health.body.credentials.grantsOperatorEmail || "").toLowerCase() === GRANTS_OP,
+      "Health grantsOperatorEmail matches env",
+      health.body.credentials.grantsOperatorEmail ?? "?",
+    );
+  }
+
   if (!SUPER_PW) {
-    log(false, "FOUNDER_SEED_PASSWORD configured locally", "Set in env to test login");
+    logSkip("Super Admin login/session", "Set FOUNDER_SEED_PASSWORD to test");
   } else {
     try {
       const { cookie, body } = await login(SUPER_ADMIN, SUPER_PW);
@@ -76,7 +99,7 @@ async function main() {
   }
 
   if (!GRANTS_PW) {
-    log(false, "GRANTS_OPERATOR_PASSWORD configured locally", "Set in env to test grants login");
+    logSkip("Grants operator login", "Set GRANTS_OPERATOR_PASSWORD to test");
   } else {
     try {
       const { cookie, body } = await login(GRANTS_OP, GRANTS_PW);
@@ -87,25 +110,36 @@ async function main() {
       log(!perms.includes("hq.settings.manage"), "Grants operator lacks hq.settings.manage");
       log(perms.includes("hq.grants.manage"), "Grants operator has hq.grants.manage");
       const settingsTry = await jsonFetch(`${BASE}/api/hq/settings/organization`, { headers: { Cookie: cookie } });
-      log(settingsTry.res.status === 403 || settingsTry.res.status === 401 || settingsTry.ok === false, "Grants operator restricted from org settings", String(settingsTry.res.status));
+      log(
+        settingsTry.res.status === 403 || settingsTry.res.status === 401,
+        "Grants operator restricted from org settings",
+        String(settingsTry.res.status),
+      );
     } catch (e) {
       log(false, "Grants operator login", e.message);
     }
   }
 
-  const boardWrite = await jsonFetch(`${BASE}/api/hq/grants/opportunities`, {
-    method: "POST",
-    headers: boardHeaders(),
-    body: JSON.stringify({ title: "sep-test", funder: "Test" }),
-  });
-  log(boardWrite.res.status === 403, "Board member write still blocked", String(boardWrite.res.status));
+  if (!CAN_SIGN_TOKENS) {
+    logSkip("Board member write blocked", "Set JWT_SECRET to match production for RBAC token tests");
+    logSkip("MFA required for Super Admin role", "Set JWT_SECRET to match production for MFA token tests");
+  } else {
+    const boardWrite = await jsonFetch(`${BASE}/api/hq/grants/opportunities`, {
+      method: "POST",
+      headers: { ...boardHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "sep-test", funder: "Test" }),
+    });
+    log(boardWrite.res.status === 403, "Board member write still blocked", String(boardWrite.res.status));
 
-  const mfaStatus = await jsonFetch(`${BASE}/api/auth/2fa/status`, {
-    headers: { Cookie: `ifcdc_token=${jwt.sign({ id: "x", email: SUPER_ADMIN, role: "owner" }, JWT_SECRET, { expiresIn: "5m" })}` },
-  });
-  log(mfaStatus.body?.required === true, "MFA required for Super Admin role", String(mfaStatus.body?.required));
+    const mfaStatus = await jsonFetch(`${BASE}/api/auth/2fa/status`, {
+      headers: {
+        Cookie: `ifcdc_token=${jwt.sign({ id: "x", email: SUPER_ADMIN, role: "owner" }, JWT_SECRET, { expiresIn: "5m" })}`,
+      },
+    });
+    log(mfaStatus.body?.required === true, "MFA required for Super Admin role", String(mfaStatus.body?.required));
+  }
 
-  console.log(`\n=== ${pass} PASS / ${fail} FAIL ===\n`);
+  console.log(`\n=== ${pass} PASS / ${fail} FAIL / ${skip} SKIP ===\n`);
   process.exit(fail > 0 ? 1 : 0);
 }
 
