@@ -310,7 +310,7 @@ const OrganizationAnalyticsPage: React.FC = () => {
           <div className="hq-kpi-grid">
             <KpiCard label="People Served" value={(programs.data as { communityImpact: { peopleServed: number } }).communityImpact.peopleServed} icon={Users} />
             <KpiCard label="Active Programs" value={(programs.data as { communityImpact: { programsActive: number } }).communityImpact.programsActive} icon={LayoutGrid} />
-            <KpiCard label="Housing Units" value={opsData.housing.units} icon={Home} meta={`${opsData.housing.placements} placements`} />
+            <KpiCard label="Housing Units" value={opsData.housing.units} icon={Home} meta={opsData.housing.placements > 0 ? `${opsData.housing.placements} placements` : "No housing data yet"} />
             <KpiCard label="Scholarships Awarded" value={opsData.scholarships.awarded} icon={GraduationCap} meta={`${opsData.scholarships.applications} applications`} />
           </div>
           <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginBottom: "1.25rem" }}>

@@ -76,6 +76,7 @@ export const ExecutiveWidgetContent: React.FC<{ widgetId: string }> = ({ widgetI
 
   const analyticsData = normalizeAnalyticsOverview(analytics.data);
   const opsData = normalizeOperationsOverview(ops.data);
+  const hasAnalyticsData = Boolean(analyticsData);
 
   if (isProductionClient && widgetId === "health-score" && !analyticsData && analytics.isFetched) {
     return <HqDataUnavailable title="Analytics unavailable" message="Live organization health could not be loaded." />;
@@ -108,12 +109,15 @@ export const ExecutiveWidgetContent: React.FC<{ widgetId: string }> = ({ widgetI
       ) : <div className="hq-muted-text">Loading…</div>;
 
     case "kpi-summary":
+      if (!hasAnalyticsData) {
+        return <div className="hq-muted-text">Analytics data unavailable — KPI summary will appear when headquarters metrics load.</div>;
+      }
       return (
         <div className="hq-widget-stat-grid">
-          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{analyticsData.people.totalPeople ?? "—"}</span><span className="hq-widget-stat-lbl">People</span></div>
-          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{analyticsData.grants.activeAwards ?? "—"}</span><span className="hq-widget-stat-lbl">Grants</span></div>
-          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{formatCurrency(analyticsData.finance.cashFlow)}</span><span className="hq-widget-stat-lbl">Cash Flow</span></div>
-          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{formatCurrency(analyticsData.donations.total)}</span><span className="hq-widget-stat-lbl">Donations</span></div>
+          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{analyticsData!.people.totalPeople ?? "—"}</span><span className="hq-widget-stat-lbl">People</span></div>
+          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{analyticsData!.grants.activeAwards ?? "—"}</span><span className="hq-widget-stat-lbl">Grants</span></div>
+          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{formatCurrency(analyticsData!.finance.cashFlow)}</span><span className="hq-widget-stat-lbl">Cash Flow</span></div>
+          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{formatCurrency(analyticsData!.donations.total)}</span><span className="hq-widget-stat-lbl">Donations</span></div>
         </div>
       );
 
@@ -165,21 +169,33 @@ export const ExecutiveWidgetContent: React.FC<{ widgetId: string }> = ({ widgetI
       return <QuickActions actions={QUICK_ACTIONS} />;
 
     case "operations":
+      if (ops.isLoading) return <div className="hq-muted-text">Loading operations snapshot…</div>;
+      if (isProductionClient && ops.isError && ops.isFetched) {
+        return <HqDataUnavailable title="Operations unavailable" message="Housing and operations metrics could not be loaded." onRetry={() => void ops.refetch()} />;
+      }
       return (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", fontSize: "0.82rem" }}>
           <div><Home size={14} /> Housing: {opsData.housing.units} units</div>
           <div><Shield size={14} /> Risks: {opsData.compliance.openRisks}</div>
           <div><Calendar size={14} /> Events: {opsData.calendar.upcomingEvents}</div>
           <div>Board: {opsData.board.upcomingMeetings} meetings</div>
+          {opsData.housing.units === 0 && opsData.housing.placements === 0 && (
+            <div className="hq-muted-text" style={{ gridColumn: "1 / -1", fontSize: "0.75rem" }}>
+              No housing records yet — connect Housing Programs to populate this widget.
+            </div>
+          )}
         </div>
       );
 
     case "compliance":
+      if (!hasAnalyticsData) {
+        return <div className="hq-muted-text">Compliance metrics unavailable until analytics load.</div>;
+      }
       return (
         <div>
-          {(analyticsData.grants.complianceDue ?? 0) > 0 ? (
+          {(analyticsData!.grants.complianceDue ?? 0) > 0 ? (
             <>
-              <StatusBadge label={`${analyticsData.grants.complianceDue} grant reports due`} variant="warning" />
+              <StatusBadge label={`${analyticsData!.grants.complianceDue} grant reports due`} variant="warning" />
               <Link to="/hq/compliance" className="hq-entity-link" style={{ display: "block", marginTop: "0.5rem" }}>Compliance Center →</Link>
             </>
           ) : (
@@ -194,22 +210,24 @@ export const ExecutiveWidgetContent: React.FC<{ widgetId: string }> = ({ widgetI
       );
 
     case "grants-pipeline":
+      if (!hasAnalyticsData) return <div className="hq-muted-text">Grant pipeline data unavailable.</div>;
       return (
         <div className="hq-widget-stat-grid">
-          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{analyticsData.grants.activeAwards}</span><span className="hq-widget-stat-lbl">Active</span></div>
-          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{analyticsData.grants.winRate}%</span><span className="hq-widget-stat-lbl">Win Rate</span></div>
-          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{formatCurrency(analyticsData.grants.totalAwarded)}</span><span className="hq-widget-stat-lbl">Awarded</span></div>
-          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{analyticsData.grants.complianceDue}</span><span className="hq-widget-stat-lbl">Due Soon</span></div>
+          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{analyticsData!.grants.activeAwards}</span><span className="hq-widget-stat-lbl">Active</span></div>
+          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{analyticsData!.grants.winRate}%</span><span className="hq-widget-stat-lbl">Win Rate</span></div>
+          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{formatCurrency(analyticsData!.grants.totalAwarded)}</span><span className="hq-widget-stat-lbl">Awarded</span></div>
+          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{analyticsData!.grants.complianceDue}</span><span className="hq-widget-stat-lbl">Due Soon</span></div>
         </div>
       );
 
     case "people-hr":
+      if (!hasAnalyticsData) return <div className="hq-muted-text">People & HR metrics unavailable.</div>;
       return (
         <div className="hq-widget-stat-grid">
-          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{analyticsData.people.totalPeople}</span><span className="hq-widget-stat-lbl">Total</span></div>
-          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{analyticsData.people.employees}</span><span className="hq-widget-stat-lbl">Employees</span></div>
-          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{analyticsData.people.volunteers}</span><span className="hq-widget-stat-lbl">Volunteers</span></div>
-          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{analyticsData.people.activePayroll}</span><span className="hq-widget-stat-lbl">On Payroll</span></div>
+          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{analyticsData!.people.totalPeople}</span><span className="hq-widget-stat-lbl">Total</span></div>
+          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{analyticsData!.people.employees}</span><span className="hq-widget-stat-lbl">Employees</span></div>
+          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{analyticsData!.people.volunteers}</span><span className="hq-widget-stat-lbl">Volunteers</span></div>
+          <div className="hq-widget-stat"><span className="hq-widget-stat-val">{analyticsData!.people.activePayroll}</span><span className="hq-widget-stat-lbl">On Payroll</span></div>
         </div>
       );
 
@@ -278,6 +296,9 @@ export const ExecutiveWidgetContent: React.FC<{ widgetId: string }> = ({ widgetI
       return <QuickActions actions={FOUNDER_ACTIONS} />;
 
     case "program-performance": {
+      if (!hasAnalyticsData && !programs.data) {
+        return <div className="hq-muted-text">Program metrics unavailable until analytics load.</div>;
+      }
       const programData = programs.data as {
         hqPrograms?: { active: number; participants: number };
         communityImpact?: { volunteerHours: number };
@@ -287,15 +308,15 @@ export const ExecutiveWidgetContent: React.FC<{ widgetId: string }> = ({ widgetI
         <div>
           <div className="hq-widget-stat-grid" style={{ marginBottom: "0.75rem" }}>
             <div className="hq-widget-stat">
-              <span className="hq-widget-stat-val">{programData?.hqPrograms?.active ?? analyticsData.programs.programsRunning ?? "—"}</span>
+              <span className="hq-widget-stat-val">{programData?.hqPrograms?.active ?? analyticsData?.programs.programsRunning ?? "—"}</span>
               <span className="hq-widget-stat-lbl">Programs</span>
             </div>
             <div className="hq-widget-stat">
-              <span className="hq-widget-stat-val">{programData?.hqPrograms?.participants ?? analyticsData.programs.participants ?? "—"}</span>
+              <span className="hq-widget-stat-val">{programData?.hqPrograms?.participants ?? analyticsData?.programs.participants ?? "—"}</span>
               <span className="hq-widget-stat-lbl">Participants</span>
             </div>
             <div className="hq-widget-stat">
-              <span className="hq-widget-stat-val">{programData?.communityImpact?.volunteerHours ?? analyticsData.people.hoursThisMonth ?? "—"}</span>
+              <span className="hq-widget-stat-val">{programData?.communityImpact?.volunteerHours ?? analyticsData?.people.hoursThisMonth ?? "—"}</span>
               <span className="hq-widget-stat-lbl">Vol. Hours</span>
             </div>
           </div>
@@ -339,19 +360,22 @@ export const ExecutiveWidgetContent: React.FC<{ widgetId: string }> = ({ widgetI
       ) : <div className="hq-muted-text">Loading…</div>;
 
     case "volunteer-impact":
+      if (!hasAnalyticsData && !peopleData.data) {
+        return <div className="hq-muted-text">Volunteer metrics unavailable.</div>;
+      }
       return (
         <div>
           <div className="hq-widget-stat-grid">
             <div className="hq-widget-stat">
-              <span className="hq-widget-stat-val">{analyticsData.people.volunteers ?? (peopleData.data as { volunteerCount?: number })?.volunteerCount ?? "—"}</span>
+              <span className="hq-widget-stat-val">{analyticsData?.people.volunteers ?? (peopleData.data as { volunteerCount?: number })?.volunteerCount ?? "—"}</span>
               <span className="hq-widget-stat-lbl"><HandHeart size={12} style={{ display: "inline", marginRight: 2 }} />Volunteers</span>
             </div>
             <div className="hq-widget-stat">
-              <span className="hq-widget-stat-val">{(peopleData.data as { volunteerHours?: number })?.volunteerHours ?? analyticsData.people.hoursThisMonth ?? "—"}</span>
+              <span className="hq-widget-stat-val">{(peopleData.data as { volunteerHours?: number })?.volunteerHours ?? analyticsData?.people.hoursThisMonth ?? "—"}</span>
               <span className="hq-widget-stat-lbl">Hours</span>
             </div>
             <div className="hq-widget-stat">
-              <span className="hq-widget-stat-val">{analyticsData.programs.participants ?? "—"}</span>
+              <span className="hq-widget-stat-val">{analyticsData?.programs.participants ?? "—"}</span>
               <span className="hq-widget-stat-lbl">Served</span>
             </div>
           </div>
@@ -406,12 +430,12 @@ export const ExecutiveWidgetContent: React.FC<{ widgetId: string }> = ({ widgetI
           </div>
           <Link to="/hq/finance" className="hq-entity-link" style={{ display: "block", marginTop: "0.5rem" }}><DollarSign size={12} style={{ display: "inline", marginRight: 4 }} />Financial Center →</Link>
         </div>
-      ) : (
+      ) : hasAnalyticsData ? (
         <div>
-          <div style={{ fontSize: "2rem", fontWeight: 800, color: "var(--hq-gold)" }}>{analyticsData.finance.financialHealthScore}%</div>
-          <div style={{ marginTop: "0.5rem", fontSize: "0.82rem" }}>Cash flow: {formatCurrency(analyticsData.finance.cashFlow)}</div>
+          <div style={{ fontSize: "2rem", fontWeight: 800, color: "var(--hq-gold)" }}>{analyticsData!.finance.financialHealthScore}%</div>
+          <div style={{ marginTop: "0.5rem", fontSize: "0.82rem" }}>Cash flow: {formatCurrency(analyticsData!.finance.cashFlow)}</div>
         </div>
-      );
+      ) : <div className="hq-muted-text">Financial health data unavailable.</div>;
     }
 
     case "unified-deadlines":

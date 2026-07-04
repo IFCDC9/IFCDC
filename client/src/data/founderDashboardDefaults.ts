@@ -69,6 +69,20 @@ export const DEFAULT_OPERATIONS_OVERVIEW: OperationsOverview = {
   calendar: { upcomingEvents: 7 },
 };
 
+/** Production-safe empty operations snapshot — zeros only, never demo seed numbers. */
+export const EMPTY_OPERATIONS_OVERVIEW: OperationsOverview = {
+  housing: { units: 0, available: 0, applications: 0, placements: 0 },
+  scholarships: { programs: 0, applications: 0, awarded: 0 },
+  media: { content: 0, published: 0, broadcasts: 0 },
+  documents: { total: 0 },
+  assets: { total: 0 },
+  fleet: { vehicles: 0, maintenanceDue: 0 },
+  facilities: { properties: 0, openWorkOrders: 0 },
+  board: { upcomingMeetings: 0, openActions: 0 },
+  compliance: { policies: 0, openRisks: 0, highRisks: 0 },
+  calendar: { upcomingEvents: 0 },
+};
+
 export const DEFAULT_ACTIVITY: ActivityItem[] = DEFAULT_EXECUTIVE_OVERVIEW.recentActivity;
 
 export const DEFAULT_AURA_INSIGHT = {
@@ -120,20 +134,20 @@ export function normalizeAnalyticsOverview(data?: Partial<AnalyticsOverview> | n
   };
 }
 
-export function normalizeOperationsOverview(data?: Partial<OperationsOverview> | null): OperationsOverview | null {
-  if (!data) return isProductionClient ? null : DEFAULT_OPERATIONS_OVERVIEW;
-  if (isProductionClient) return data as OperationsOverview;
+export function normalizeOperationsOverview(data?: Partial<OperationsOverview> | null): OperationsOverview {
+  const base = isProductionClient ? EMPTY_OPERATIONS_OVERVIEW : DEFAULT_OPERATIONS_OVERVIEW;
+  if (!data) return base;
   return {
-    housing: { ...DEFAULT_OPERATIONS_OVERVIEW.housing, ...data.housing },
-    scholarships: { ...DEFAULT_OPERATIONS_OVERVIEW.scholarships, ...data.scholarships },
-    media: { ...DEFAULT_OPERATIONS_OVERVIEW.media, ...data.media },
-    documents: { ...DEFAULT_OPERATIONS_OVERVIEW.documents, ...data.documents },
-    assets: { ...DEFAULT_OPERATIONS_OVERVIEW.assets, ...data.assets },
-    fleet: { ...DEFAULT_OPERATIONS_OVERVIEW.fleet, ...data.fleet },
-    facilities: { ...DEFAULT_OPERATIONS_OVERVIEW.facilities, ...data.facilities },
-    board: { ...DEFAULT_OPERATIONS_OVERVIEW.board, ...data.board },
-    compliance: { ...DEFAULT_OPERATIONS_OVERVIEW.compliance, ...data.compliance },
-    calendar: { ...DEFAULT_OPERATIONS_OVERVIEW.calendar, ...data.calendar },
+    housing: { ...base.housing, ...data.housing },
+    scholarships: { ...base.scholarships, ...data.scholarships },
+    media: { ...base.media, ...data.media },
+    documents: { ...base.documents, ...data.documents },
+    assets: { ...base.assets, ...data.assets },
+    fleet: { ...base.fleet, ...data.fleet },
+    facilities: { ...base.facilities, ...data.facilities },
+    board: { ...base.board, ...data.board },
+    compliance: { ...base.compliance, ...data.compliance },
+    calendar: { ...base.calendar, ...data.calendar },
   };
 }
 

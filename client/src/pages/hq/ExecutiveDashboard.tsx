@@ -612,12 +612,14 @@ const ExecutiveDashboard: React.FC = () => {
             </HqPanel>
           </div>
 
+          <HqWidgetErrorBoundary label="Operations snapshot">
           <div className="hq-kpi-grid hq-founder-secondary-kpis">
-            <KpiCard label="Housing Units" value={opsData.housing.units ?? 0} icon={Home} meta={`${opsData.housing.placements ?? 0} active placements`} />
-            <KpiCard label="Open Risks" value={opsData.compliance.openRisks ?? 0} icon={Shield} variant={(opsData.compliance.highRisks ?? 0) > 0 ? "warning" : "success"} meta={`${opsData.compliance.policies ?? 0} policies active`} />
-            <KpiCard label="Upcoming Events" value={opsData.calendar.upcomingEvents ?? 0} icon={Calendar} meta={`${opsData.board.upcomingMeetings ?? 0} board meetings`} />
+            <KpiCard label="Housing Units" value={opsData.housing.units} icon={Home} meta={opsData.housing.placements > 0 ? `${opsData.housing.placements} active placements` : "No housing data yet"} />
+            <KpiCard label="Open Risks" value={opsData.compliance.openRisks} icon={Shield} variant={opsData.compliance.highRisks > 0 ? "warning" : "success"} meta={`${opsData.compliance.policies} policies active`} />
+            <KpiCard label="Upcoming Events" value={opsData.calendar.upcomingEvents} icon={Calendar} meta={`${opsData.board.upcomingMeetings} board meetings`} />
             <KpiCard label="Pipeline Value" value={formatCurrency(grantPipeline.data?.pipelineValue ?? analyticsData?.grants.pipelineValue ?? 0)} icon={FileText} variant="gold" />
           </div>
+          </HqWidgetErrorBoundary>
 
           <div className="hq-grid-2" style={{ marginBottom: "1.25rem" }}>
             <HqPanel title="Program Performance" subtitle="Live impact across IFCDC community programs" action={{ label: "Programs", to: "/hq/programs" }}>
