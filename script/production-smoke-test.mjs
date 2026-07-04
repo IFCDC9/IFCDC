@@ -63,9 +63,15 @@ const MODULE_APIS = [
 
 const results = [];
 
-function record(module, ok, detail = "") {
-  results.push({ module, status: ok ? "PASS" : "FAIL", detail });
-  console.log(`${ok ? "✓" : "✗"} ${module}${detail ? ` — ${detail}` : ""}`);
+function record(module, ok, detail = "", statusOverride) {
+  const status = statusOverride ?? (ok ? "PASS" : "FAIL");
+  results.push({ module, status, detail });
+  const mark = status === "PASS" ? "✓" : status === "SKIP" ? "○" : "✗";
+  console.log(`${mark} ${module}${detail ? ` — ${detail}` : ""}`);
+}
+
+function recordSkip(module, detail = "") {
+  record(module, false, detail, "SKIP");
 }
 
 async function jsonFetch(url, opts = {}) {
@@ -113,7 +119,7 @@ async function main() {
   const commit = health.body?.commit ?? "?";
   record(
     "Production Health",
-    health.ok && (health.body?.status === "healthy" || health.body?.ready === true),
+    health.res.ok && (health.body?.status === "healthy" || health.body?.ready === true),
     `commit=${commit}`,
   );
   if (EXPECT_COMMIT) {
@@ -129,7 +135,7 @@ async function main() {
 
   let cookie = null;
   if (!PASSWORD) {
-    record("Login", false, "Set FOUNDER_SEED_PASSWORD or IFCDC_SUPER_ADMIN_PASSWORD");
+    recordSkip("Login", "Set FOUNDER_SEED_PASSWORD from Render env");
   } else {
     try {
       const loginResult = await login();
@@ -160,12 +166,14 @@ async function main() {
     }
   } else {
     for (const [label] of MODULE_APIS) {
-      record(`${label} (API)`, false, "Skipped — no login cookie");
+      recordSkip(`${label} (API)`, "Requires Super Admin login");
     }
   }
 
   const fail = results.filter((r) => r.status === "FAIL").length;
-  console.log(`\n── SUMMARY (${results.length - fail} PASS / ${fail} FAIL) ──`);
+  const skip = results.filter((r) => r.status === "SKIP").length;
+  const pass = results.filter((r) => r.status === "PASS").length;
+  console.log(`\n── SUMMARY (${pass} PASS / ${fail} FAIL / ${skip} SKIP) ──`);
   console.log("Module".padEnd(36), "Status", "Detail");
   console.log("-".repeat(72));
   for (const r of results) {
