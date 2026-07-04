@@ -41,6 +41,7 @@
     "platform:audit": "node script/platform-audit.mjs",
     "enterprise:verify": "node script/enterprise-production-verify.mjs",
     "render:sync-env": "node script/render-sync-production-env.mjs",
+    "build:render": "node script/render-build.mjs",
     "start:render": "node script/render-prestart.mjs && npm run start",
     "db:push": "drizzle-kit push"
   },

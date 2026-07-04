@@ -9,7 +9,7 @@ services:
     runtime: node
     region: ohio
     plan: starter
-    buildCommand: npm ci && npm run build && node script/render-postbuild.mjs
+    buildCommand: npm ci --include=dev && node script/render-build.mjs
     startCommand: node script/render-prestart.mjs && npm run start
     healthCheckPath: /api/health
     autoDeploy: false

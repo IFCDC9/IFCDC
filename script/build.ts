@@ -1,6 +1,8 @@
 import { spawnSync, execSync } from "node:child_process";
 import { build as esbuild } from "esbuild";
 import { rm, readFile, writeFile } from "fs/promises";
+import path from "node:path";
+import fs from "node:fs";
 
 const allowlist = [
   "@neondatabase/serverless",
@@ -17,10 +19,14 @@ const allowlist = [
   "jsonwebtoken",
 ];
 
+function log(msg: string) {
+  console.log(`[build] ${msg} — ${new Date().toISOString()}`);
+}
+
 async function buildAll() {
   await rm("dist", { recursive: true, force: true });
 
-  console.log("building server...");
+  log("building server (esbuild)…");
   const pkg = JSON.parse(await readFile("package.json", "utf-8"));
   const allDeps = [
     ...Object.keys(pkg.dependencies || {}),
@@ -28,6 +34,7 @@ async function buildAll() {
   ];
   const externals = allDeps.filter((dep) => !allowlist.includes(dep));
 
+  const esbuildStarted = Date.now();
   await esbuild({
     entryPoints: ["server/index.ts"],
     platform: "node",
@@ -44,12 +51,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
       `.trim(),
     },
-    minify: true,
+    // Minify disabled on Render — reduces memory pressure on starter plan during bundle.
+    minify: !process.env.RENDER,
     external: externals,
     logLevel: "info",
   });
+  log(`server bundle complete (${Math.round((Date.now() - esbuildStarted) / 1000)}s)`);
 
-  // Create CJS wrapper for deployment compatibility
   const startScript = `#!/usr/bin/env node
 const { spawn } = require('child_process');
 const path = require('path');
@@ -63,14 +71,19 @@ const child = spawn('node', [mjsFile], {
 child.on('exit', (code) => process.exit(code));
 `;
   await writeFile("dist/index.cjs", startScript);
-  console.log("Created dist/index.cjs wrapper");
+  log("Created dist/index.cjs wrapper");
 
-  console.log("building client...");
-  const vite = spawnSync("npx", ["vite", "build"], { stdio: "inherit" });
+  log("building client (vite)…");
+  const viteBin = path.join(process.cwd(), "node_modules", "vite", "bin", "vite.js");
+  if (!fs.existsSync(viteBin)) {
+    throw new Error(`Vite not found at ${viteBin} — ensure devDependencies are installed (npm ci --include=dev)`);
+  }
+  const viteStarted = Date.now();
+  const vite = spawnSync(process.execPath, [viteBin, "build"], { stdio: "inherit" });
   if (vite.status !== 0) {
     throw new Error("Vite client build failed");
   }
-  console.log("client build complete");
+  log(`client build complete (${Math.round((Date.now() - viteStarted) / 1000)}s)`);
 
   let commit = (process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || "").trim();
   if (!commit) {
@@ -88,10 +101,10 @@ child.on('exit', (code) => process.exit(code));
     "dist/build-info.json",
     JSON.stringify({ commit: commit || null, builtAt: new Date().toISOString() }),
   );
-  console.log(`Wrote dist/build-info.json (commit ${commit ? commit.slice(0, 7) : "unknown"})`);
+  log(`Wrote dist/build-info.json (commit ${commit ? commit.slice(0, 7) : "unknown"})`);
 }
 
 buildAll().catch((err) => {
-  console.error(err);
+  console.error("[build] FAILED:", err);
   process.exit(1);
 });
