@@ -5,14 +5,14 @@ import {
   Activity, Target, ListTodo, Building2, Crown, Brain, History, Rocket,
   Plus, Check, X, AlertTriangle, ChevronRight,
 } from "lucide-react";
-import { phase10Api } from "../../api/phase10Api";
-import type { MissionControlCommandCenter, HqMission, HqMissionTask } from "../../api/missionControlTypes";
+import { phase10Api } from "../../../api/phase10Api";
+import type { MissionControlCommandCenter, HqMission, HqMissionTask } from "../../../api/missionControlTypes";
 import { KpiCard } from "../KpiCard";
 import { HqPanel } from "../HqPanel";
 import { StatusBadge } from "../StatusBadge";
 import { HqQueryBoundary } from "../HqQueryBoundary";
-import { formatPercent } from "../../utils/safeFormat";
-import { useAuth } from "../../auth/AuthContext";
+import { formatPercent } from "../../../utils/safeFormat";
+import { useAuth } from "../../../auth/AuthContext";
 
 const TABS = [
   { id: "executive", label: "Executive Dashboard", icon: Activity },
