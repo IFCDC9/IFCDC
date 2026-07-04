@@ -35,6 +35,7 @@
     "hq:production-audit": "node script/hq-full-production-audit.mjs",
     "hq:production-smoke": "node script/production-smoke-test.mjs",
     "hq:deploy-wait-verify": "node script/deploy-wait-verify.mjs",
+    "hq:publish-alignment": "node script/publish-production-alignment.mjs",
     "hq:module-api-verify": "node script/hq-module-api-verify.mjs",
     "hq:mission-control-verify": "node script/mission-control-verify.mjs",
     "hq:phase1-verify": "node script/phase1-production-hardening-verify.mjs",
