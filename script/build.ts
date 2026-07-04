@@ -51,8 +51,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
       `.trim(),
     },
-    // Minify disabled on Render — reduces memory pressure on starter plan during bundle.
-    minify: !process.env.RENDER,
+    minify: true,
     external: externals,
     logLevel: "info",
   });
