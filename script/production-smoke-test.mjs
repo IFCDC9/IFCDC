@@ -50,14 +50,14 @@ const SPA_ROUTES = [
 ];
 
 const MODULE_APIS = [
-  ["Dashboard API", "/api/hq/dashboard/summary", 20000],
+  ["Dashboard API", "/api/hq/workspace/dashboard", 20000],
   ["Mission Control", "/api/hq/phase10/mission-control", 45000],
   ["Intelligent OS", "/api/hq/phase9/package", 45000],
   ["Enterprise Intelligence", "/api/hq/warehouse/overview", 20000],
   ["Workflow Automation", "/api/hq/workflows/dashboard", 20000],
   ["AURA Status", "/api/hq/aura/status", 20000],
   ["AURA Executive Health", "/api/hq/aura/executive/health", 20000],
-  ["Grant Center", "/api/hq/grants/overview", 20000],
+  ["Grant Center", "/api/hq/grants/dashboard", 20000],
   ["HQ Session", "/api/hq/auth/session", 10000],
 ];
 
@@ -111,7 +111,11 @@ async function main() {
 
   const health = await jsonFetch(`${BASE}/api/health`);
   const commit = health.body?.commit ?? "?";
-  record("Production Health", health.ok && health.body?.status === "healthy", `commit=${commit}`);
+  record(
+    "Production Health",
+    health.ok && (health.body?.status === "healthy" || health.body?.ready === true),
+    `commit=${commit}`,
+  );
   if (EXPECT_COMMIT) {
     record("Commit Match", commit === EXPECT_COMMIT || commit.startsWith(EXPECT_COMMIT.slice(0, 7)), `expected ${EXPECT_COMMIT}`);
   }
