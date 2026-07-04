@@ -33,6 +33,7 @@
     "hq:nav-audit": "node script/hq-nav-audit.mjs",
     "hq:chunk-audit": "node script/hq-chunk-audit.mjs",
     "hq:production-audit": "node script/hq-full-production-audit.mjs",
+    "hq:production-smoke": "node script/production-smoke-test.mjs",
     "hq:module-api-verify": "node script/hq-module-api-verify.mjs",
     "hq:mission-control-verify": "node script/mission-control-verify.mjs",
     "hq:phase1-verify": "node script/phase1-production-hardening-verify.mjs",
