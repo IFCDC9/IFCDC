@@ -15,7 +15,7 @@
 import { spawnSync } from "node:child_process";
 
 const BASE = process.env.IFCDC_BASE_URL || "https://ifcdc-hq-wst6.onrender.com";
-const EXPECT = (process.env.IFCDC_EXPECT_COMMIT || "4d23e72").trim();
+const EXPECT = (process.env.IFCDC_EXPECT_COMMIT || "ef1d39a").trim();
 const SKIP_PUSH = process.env.SKIP_PUSH === "1";
 const SKIP_RENDER_WAIT = process.env.SKIP_RENDER_WAIT === "1";
 
