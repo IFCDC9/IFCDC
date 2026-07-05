@@ -1,0 +1,47 @@
+# Imperial Foundation CDC
+
+Community development platform for the Imperial Foundation Community Development Corporation (IFCDC).
+
+## Technology Stack
+
+- **Frontend**: React 19, TypeScript, Tailwind CSS 4, shadcn/ui, Vite
+- **Backend**: Express.js, Prisma ORM, PostgreSQL
+- **Services**: Stripe, Twilio, OpenAI (AURA AI), WebSockets
+
+## Getting Started
+
+```bash
+npm install
+cp .env.example .env   # Configure DATABASE_URL, JWT_SECRET, etc.
+npm run db:push
+npm run dev
+```
+
+## Scripts
+
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start development server |
+| `npm run dev:client` | Start Vite client only (port 5000) |
+| `npm run build` | Production build |
+| `npm run start` | Run production server |
+| `npm run check` | TypeScript type check |
+| `npm run db:push` | Push Prisma schema to database |
+
+## Project Structure
+
+```
+├── client/          # React frontend
+├── server/          # Express API
+├── prisma/          # Database schema
+├── shared/          # Shared types and schemas
+└── script/          # Build scripts
+```
+
+## Environment Variables
+
+- `DATABASE_URL` — PostgreSQL connection string
+- `JWT_SECRET` — JWT signing secret
+- `STRIPE_SECRET_KEY` — Stripe API key
+- `OPENAI_API_KEY` — AURA AI integration
+- `TWILIO_*` — SMS notification credentials

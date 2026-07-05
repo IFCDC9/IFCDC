@@ -37,6 +37,7 @@
     "hq:deploy-wait-verify": "node script/deploy-wait-verify.mjs",
     "hq:publish-alignment": "node script/publish-production-alignment.mjs",
     "hq:push-github": "node script/push-to-github.mjs",
+    "hq:deploy-mc": "bash script/deploy-mission-control-now.sh",
     "hq:module-api-verify": "node script/hq-module-api-verify.mjs",
     "hq:mission-control-verify": "node script/mission-control-verify.mjs",
     "hq:phase1-verify": "node script/phase1-production-hardening-verify.mjs",
