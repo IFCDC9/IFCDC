@@ -143,7 +143,10 @@ const ExecutiveDashboard: React.FC = () => {
 
   const ops = useQuery({
     queryKey: ["hq-founder-ops"],
-    queryFn: () => strictApiCall(() => operationsApi.overview(), DEFAULT_OPERATIONS_OVERVIEW),
+    queryFn: () =>
+      isProductionClient
+        ? operationsApi.overview().catch(() => null)
+        : strictApiCall(() => operationsApi.overview(), DEFAULT_OPERATIONS_OVERVIEW),
     placeholderData: devPlaceholder(DEFAULT_OPERATIONS_OVERVIEW),
     staleTime: 120_000,
     retry: isProductionClient ? 1 : false,
@@ -614,9 +617,9 @@ const ExecutiveDashboard: React.FC = () => {
 
           <HqWidgetErrorBoundary label="Operations snapshot">
           <div className="hq-kpi-grid hq-founder-secondary-kpis">
-            <KpiCard label="Housing Units" value={opsData.housing.units} icon={Home} meta={opsData.housing.placements > 0 ? `${opsData.housing.placements} active placements` : "No housing data yet"} />
-            <KpiCard label="Open Risks" value={opsData.compliance.openRisks} icon={Shield} variant={opsData.compliance.highRisks > 0 ? "warning" : "success"} meta={`${opsData.compliance.policies} policies active`} />
-            <KpiCard label="Upcoming Events" value={opsData.calendar.upcomingEvents} icon={Calendar} meta={`${opsData.board.upcomingMeetings} board meetings`} />
+            <KpiCard label="Housing Units" value={opsData.housing?.units ?? 0} icon={Home} meta={(opsData.housing?.placements ?? 0) > 0 ? `${opsData.housing?.placements} active placements` : "No housing data yet"} />
+            <KpiCard label="Open Risks" value={opsData.compliance?.openRisks ?? 0} icon={Shield} variant={(opsData.compliance?.highRisks ?? 0) > 0 ? "warning" : "success"} meta={`${opsData.compliance?.policies ?? 0} policies active`} />
+            <KpiCard label="Upcoming Events" value={opsData.calendar?.upcomingEvents ?? 0} icon={Calendar} meta={`${opsData.board?.upcomingMeetings ?? 0} board meetings`} />
             <KpiCard label="Pipeline Value" value={formatCurrency(grantPipeline.data?.pipelineValue ?? analyticsData?.grants.pipelineValue ?? 0)} icon={FileText} variant="gold" />
           </div>
           </HqWidgetErrorBoundary>

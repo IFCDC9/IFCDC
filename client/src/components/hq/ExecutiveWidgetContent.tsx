@@ -59,7 +59,10 @@ export const ExecutiveWidgetContent: React.FC<{ widgetId: string }> = ({ widgetI
   const aura = useQuery({ queryKey: ["hq-widget-aura"], queryFn: () => analyticsApi.auraInsights(), staleTime: 300_000 });
   const ops = useQuery({
     queryKey: ["hq-founder-ops"],
-    queryFn: () => strictApiCall(() => operationsApi.overview(), DEFAULT_OPERATIONS_OVERVIEW),
+    queryFn: () =>
+      isProductionClient
+        ? operationsApi.overview().catch(() => null)
+        : strictApiCall(() => operationsApi.overview(), DEFAULT_OPERATIONS_OVERVIEW),
     placeholderData: devPlaceholder(DEFAULT_OPERATIONS_OVERVIEW),
     staleTime: 60_000,
   });
@@ -175,11 +178,11 @@ export const ExecutiveWidgetContent: React.FC<{ widgetId: string }> = ({ widgetI
       }
       return (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", fontSize: "0.82rem" }}>
-          <div><Home size={14} /> Housing: {opsData.housing.units} units</div>
-          <div><Shield size={14} /> Risks: {opsData.compliance.openRisks}</div>
-          <div><Calendar size={14} /> Events: {opsData.calendar.upcomingEvents}</div>
-          <div>Board: {opsData.board.upcomingMeetings} meetings</div>
-          {opsData.housing.units === 0 && opsData.housing.placements === 0 && (
+          <div><Home size={14} /> Housing: {opsData.housing?.units ?? 0} units</div>
+          <div><Shield size={14} /> Risks: {opsData.compliance?.openRisks ?? 0}</div>
+          <div><Calendar size={14} /> Events: {opsData.calendar?.upcomingEvents ?? 0}</div>
+          <div>Board: {opsData.board?.upcomingMeetings ?? 0} meetings</div>
+          {(opsData.housing?.units ?? 0) === 0 && (opsData.housing?.placements ?? 0) === 0 && (
             <div className="hq-muted-text" style={{ gridColumn: "1 / -1", fontSize: "0.75rem" }}>
               No housing records yet — connect Housing Programs to populate this widget.
             </div>
@@ -201,9 +204,9 @@ export const ExecutiveWidgetContent: React.FC<{ widgetId: string }> = ({ widgetI
           ) : (
             <StatusBadge label="All compliance current" variant="success" />
           )}
-          {opsData.compliance.highRisks > 0 && (
+          {(opsData.compliance?.highRisks ?? 0) > 0 && (
             <div style={{ marginTop: "0.5rem" }}>
-              <StatusBadge label={`${opsData.compliance.highRisks} high-risk items`} variant="danger" />
+              <StatusBadge label={`${opsData.compliance?.highRisks} high-risk items`} variant="danger" />
             </div>
           )}
         </div>

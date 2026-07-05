@@ -24,7 +24,7 @@ const HqProgramsPage: React.FC = () => {
           <div className="hq-kpi-grid hq-fade-in" style={{ marginBottom: "1.25rem" }}>
             <KpiCard label="Active Programs" value={PROGRAM_MODULES.length} icon={LayoutGrid} variant="gold" />
             <KpiCard label="Total Participants" value={(programs.data?.programs ?? []).reduce((s, p) => s + (p.counts?.participants ?? 0), 0)} icon={LayoutGrid} />
-            <KpiCard label="Housing Units" value={ops.data?.housing.units ?? 0} icon={LayoutGrid} meta={`${ops.data?.housing.placements ?? 0} placements`} />
+            <KpiCard label="Housing Units" value={ops.data?.housing?.units ?? 0} icon={LayoutGrid} meta={`${ops.data?.housing?.placements ?? 0} placements`} />
             <KpiCard label="Scholarships Awarded" value={ops.data?.scholarships.awarded ?? 0} icon={LayoutGrid} meta={`${ops.data?.scholarships.applications ?? 0} applications`} />
           </div>
 

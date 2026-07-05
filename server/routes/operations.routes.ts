@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { getDb } from "../db";
 import { hqAuthRequired, requireHQModule } from "../middleware/hqAuth";
-import { ensureOperationsTables, buildOperationsOverview, opsId } from "../hq/operationsSchema";
+import { ensureOperationsTables, buildOperationsOverview, opsId, EMPTY_OPERATIONS_OVERVIEW } from "../hq/operationsSchema";
 import {
   buildOperationsCommandCenter,
   listOpsTasks,
@@ -22,7 +22,12 @@ router.use(async (_req, _res, next) => {
 });
 
 router.get("/overview", async (_req, res) => {
-  res.json(await buildOperationsOverview());
+  try {
+    res.json(await buildOperationsOverview());
+  } catch (error) {
+    console.error("GET /operations/overview error:", error);
+    res.json({ ...EMPTY_OPERATIONS_OVERVIEW });
+  }
 });
 
 router.get("/command-center/v3/platform", requireHQModule("operations"), async (_req, res) => {

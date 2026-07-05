@@ -103,7 +103,7 @@ export async function buildAuraExecutiveContext(extra?: string): Promise<string>
     programs ? `- Community impact hours: ${programs.communityImpact?.volunteerHours ?? 0}` : "",
     "",
     "Operations:",
-    ops ? `- Housing: ${ops.housing.units} units, ${ops.housing.placements} placements, ${ops.housing.applications} applications` : "",
+    ops ? `- Housing: ${ops.housing?.units ?? 0} units, ${ops.housing?.placements ?? 0} placements, ${ops.housing?.applications ?? 0} applications` : "",
     ops ? `- Scholarships: ${ops.scholarships.programs} programs, ${ops.scholarships.applications} applications` : "",
     ops ? `- Open compliance risks: ${ops.compliance.openRisks} (${ops.compliance.highRisks} high)` : "",
     ops ? `- Upcoming events: ${ops.calendar.upcomingEvents}, board meetings: ${ops.board.upcomingMeetings}` : "",

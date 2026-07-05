@@ -83,6 +83,14 @@ export const EMPTY_OPERATIONS_OVERVIEW: OperationsOverview = {
   calendar: { upcomingEvents: 0 },
 };
 
+function mergeOpsSection<T extends Record<string, number>>(
+  base: T,
+  partial: Partial<T> | null | undefined,
+): T {
+  if (partial == null || typeof partial !== "object") return { ...base };
+  return { ...base, ...partial };
+}
+
 export const DEFAULT_ACTIVITY: ActivityItem[] = DEFAULT_EXECUTIVE_OVERVIEW.recentActivity;
 
 export const DEFAULT_AURA_INSIGHT = {
@@ -136,18 +144,18 @@ export function normalizeAnalyticsOverview(data?: Partial<AnalyticsOverview> | n
 
 export function normalizeOperationsOverview(data?: Partial<OperationsOverview> | null): OperationsOverview {
   const base = isProductionClient ? EMPTY_OPERATIONS_OVERVIEW : DEFAULT_OPERATIONS_OVERVIEW;
-  if (!data) return base;
+  if (!data) return { ...base };
   return {
-    housing: { ...base.housing, ...data.housing },
-    scholarships: { ...base.scholarships, ...data.scholarships },
-    media: { ...base.media, ...data.media },
-    documents: { ...base.documents, ...data.documents },
-    assets: { ...base.assets, ...data.assets },
-    fleet: { ...base.fleet, ...data.fleet },
-    facilities: { ...base.facilities, ...data.facilities },
-    board: { ...base.board, ...data.board },
-    compliance: { ...base.compliance, ...data.compliance },
-    calendar: { ...base.calendar, ...data.calendar },
+    housing: mergeOpsSection(base.housing, data.housing),
+    scholarships: mergeOpsSection(base.scholarships, data.scholarships),
+    media: mergeOpsSection(base.media, data.media),
+    documents: mergeOpsSection(base.documents, data.documents),
+    assets: mergeOpsSection(base.assets, data.assets),
+    fleet: mergeOpsSection(base.fleet, data.fleet),
+    facilities: mergeOpsSection(base.facilities, data.facilities),
+    board: mergeOpsSection(base.board, data.board),
+    compliance: mergeOpsSection(base.compliance, data.compliance),
+    calendar: mergeOpsSection(base.calendar, data.calendar),
   };
 }
 

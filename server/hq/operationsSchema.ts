@@ -229,8 +229,22 @@ export async function ensureOperationsTables(): Promise<void> {
   }
 }
 
+export const EMPTY_OPERATIONS_OVERVIEW = {
+  housing: { units: 0, available: 0, applications: 0, placements: 0 },
+  scholarships: { programs: 0, applications: 0, awarded: 0 },
+  media: { content: 0, published: 0, broadcasts: 0 },
+  documents: { total: 0 },
+  assets: { total: 0 },
+  fleet: { vehicles: 0, maintenanceDue: 0 },
+  facilities: { properties: 0, openWorkOrders: 0 },
+  board: { upcomingMeetings: 0, openActions: 0 },
+  compliance: { policies: 0, openRisks: 0, highRisks: 0 },
+  calendar: { upcomingEvents: 0 },
+} as const;
+
 export async function buildOperationsOverview() {
-  const db = await getDb();
+  try {
+    const db = await getDb();
   const safeCount = async (table: string, where = "1=1") =>
     (await db.get<{ c: number }>(`SELECT COUNT(*) as c FROM ${table} WHERE ${where}`))?.c ?? 0;
 
@@ -274,4 +288,8 @@ export async function buildOperationsOverview() {
       upcomingEvents: await safeCount("org_events", "start_at >= date('now') AND status = 'scheduled'"),
     },
   };
+  } catch (error) {
+    console.error("buildOperationsOverview failed — returning empty snapshot:", error);
+    return { ...EMPTY_OPERATIONS_OVERVIEW };
+  }
 }
