@@ -63,7 +63,7 @@ export interface SoftwareAppEntry {
   registered?: boolean;
   apiKeyPrefix?: string;
   onboardedAt?: string;
-  health: SoftwareAppHealth;
+  health?: SoftwareAppHealth;
 }
 
 export interface AppDiagnostics {

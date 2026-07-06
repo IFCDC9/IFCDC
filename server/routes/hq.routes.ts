@@ -44,7 +44,10 @@ import { buildSoftwareDivisionFramework } from "../hq/softwareDivisionFramework"
 import { hqApiLimiter, hqSecurityHeaders } from "../middleware/hqSecurity";
 import { buildPredictiveTrends } from "../hq/analyticsReporting";
 import { runAppDiagnostics, runAllAppDiagnostics } from "../hq/appDiagnostics";
-import { listRegisteredApps } from "../hq/softwareDivisionSchema";
+import { listRegisteredApps, registerSoftwareApp, updateSoftwareApp, deleteSoftwareApp } from "../hq/softwareDivisionSchema";
+import { createPackageCache } from "../hq/packageCache";
+import { logDeveloperAudit } from "../hq/hqDeveloperAudit";
+import { notifyHqDataChange } from "../hq/hqRealtimeEvents";
 import {
   answerEnterpriseQuestion,
   generateEnterpriseBoardReport,
@@ -198,24 +201,58 @@ router.get("/executive/overview", hqAuthRequired, requireHQModule("executive"), 
   }
 });
 
+const softwareDivisionCache = createPackageCache<{ apps: unknown[]; timestamp: string }>(30_000);
+
 router.get("/software-division", hqAuthRequired, requireHQModule("software_division"), async (_req, res) => {
-  const [healthResults, registered, registry] = await Promise.all([
-    pollAllApps(),
-    listRegisteredApps(),
-    getSoftwareDivisionApps(),
-  ]);
-  const registeredMap = new Map(registered.map((r) => [r.id, r]));
+  try {
+    const payload = await softwareDivisionCache.get("all", async () => {
+      const [healthResults, registered, registry] = await Promise.all([
+        Promise.race([
+          pollAllApps(),
+          new Promise<Awaited<ReturnType<typeof pollAllApps>>>((resolve) =>
+            setTimeout(() => resolve([]), 8_000)
+          ),
+        ]),
+        listRegisteredApps(),
+        getSoftwareDivisionApps(),
+      ]);
+      const registeredMap = new Map(registered.map((r) => [r.id, r]));
 
-  const mergedApps = registry.map((app) => ({
-    ...app,
-    version: app.version ?? "1.0.0",
-    health: healthResults.find((h) => h.id === app.id),
-    registered: Boolean(registeredMap.get(app.id)),
-    apiKeyPrefix: registeredMap.get(app.id)?.api_key_prefix,
-    onboardedAt: registeredMap.get(app.id)?.created_at,
-  }));
+      const mergedApps = registry.map((app) => {
+        const health = healthResults.find((h) => h.id === app.id);
+        return {
+          ...app,
+          version: app.version ?? "1.0.0",
+          health: health ?? {
+            id: app.id,
+            healthy: false,
+            latencyMs: 0,
+            version: app.version,
+            error: "Health check timed out or unavailable",
+          },
+          registered: Boolean(registeredMap.get(app.id)),
+          apiKeyPrefix: registeredMap.get(app.id)?.api_key_prefix,
+          onboardedAt: registeredMap.get(app.id)?.created_at,
+        };
+      });
 
-  res.json({ apps: mergedApps, timestamp: new Date().toISOString() });
+      return { apps: mergedApps, timestamp: new Date().toISOString() };
+    });
+    res.json(payload);
+  } catch (error) {
+    console.error("Software division error:", error);
+    const registry = await getSoftwareDivisionApps();
+    res.json({
+      apps: registry.map((app) => ({
+        ...app,
+        version: app.version ?? "1.0.0",
+        health: { id: app.id, healthy: false, latencyMs: 0, error: "Software Division API degraded" },
+        registered: false,
+      })),
+      timestamp: new Date().toISOString(),
+      degraded: true,
+    });
+  }
 });
 
 router.get("/software-division/diagnostics", hqAuthRequired, requireHQModule("software_division"), async (_req, res) => {
@@ -251,15 +288,96 @@ router.get("/software-division/framework", hqAuthRequired, requireHQModule("soft
   }
 });
 
-router.post("/software-division/register", hqAuthRequired, requireHQModule("software_division"), (req, res) => {
-  const { id, name, healthUrl, launchUrl, description } = req.body;
-  if (!id || !name || !healthUrl) {
-    return res.status(400).json({ error: "id, name, and healthUrl are required" });
+router.post("/software-division/register", hqAuthRequired, requireHQModule("software_division"), async (req, res) => {
+  try {
+    const { id, name, healthUrl, launchUrl, description } = req.body ?? {};
+    if (!id || !name || !healthUrl) {
+      return res.status(400).json({ error: "id, name, and healthUrl are required" });
+    }
+    if (!/^[a-z0-9-]+$/.test(String(id))) {
+      return res.status(400).json({ error: "id must be lowercase alphanumeric with hyphens only" });
+    }
+
+    const { app, apiKey } = await registerSoftwareApp({
+      id: String(id),
+      name: String(name),
+      description: description ? String(description) : undefined,
+      healthUrl: String(healthUrl),
+      launchUrl: launchUrl ? String(launchUrl) : undefined,
+      createdBy: req.hqUser!.id,
+    });
+
+    await logDeveloperAudit({
+      appId: app.id,
+      eventType: "app.registered",
+      actorId: req.hqUser!.id,
+      actorEmail: req.hqUser!.email,
+      detail: `Registered ${app.name} via Software Division`,
+    });
+
+    softwareDivisionCache.clear();
+    notifyHqDataChange("software");
+
+    res.status(201).json({
+      message: "Application registered with IFCDC Headquarters",
+      app: {
+        id: app.id,
+        name: app.name,
+        healthUrl: app.health_url,
+        launchUrl: app.launch_url,
+        status: app.status,
+        apiKeyPrefix: app.api_key_prefix,
+      },
+      credentials: {
+        appId: app.id,
+        apiKey,
+        apiKeyPrefix: app.api_key_prefix,
+        warning: "Store this API key securely — it will not be shown again.",
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Registration failed";
+    res.status(message.includes("already registered") ? 409 : 400).json({ error: message });
   }
-  res.status(201).json({
-    message: "App registration queued for HQ Software Division",
-    app: { id, name, healthUrl, launchUrl, description, status: "planned" },
-  });
+});
+
+router.patch("/software-division/apps/:appId", hqAuthRequired, requireHQModule("software_division"), async (req, res) => {
+  try {
+    const app = await updateSoftwareApp(req.params.appId, {
+      name: req.body?.name,
+      description: req.body?.description,
+      healthUrl: req.body?.healthUrl,
+      launchUrl: req.body?.launchUrl,
+      status: req.body?.status,
+    });
+    softwareDivisionCache.clear();
+    notifyHqDataChange("software");
+    res.json({
+      app: {
+        id: app.id,
+        name: app.name,
+        description: app.description,
+        healthUrl: app.health_url,
+        launchUrl: app.launch_url,
+        status: app.status,
+        apiKeyPrefix: app.api_key_prefix,
+        updatedAt: app.updated_at,
+      },
+    });
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Update failed" });
+  }
+});
+
+router.delete("/software-division/apps/:appId", hqAuthRequired, requireHQModule("software_division"), async (req, res) => {
+  try {
+    await deleteSoftwareApp(req.params.appId);
+    softwareDivisionCache.clear();
+    notifyHqDataChange("software");
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Delete failed" });
+  }
 });
 
 router.post("/aura/chat", hqAuthRequired, requireHQModule("aura"), async (req, res) => {

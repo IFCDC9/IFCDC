@@ -130,3 +130,57 @@ export async function rotateAppApiKey(appId: string): Promise<{ app: RegisteredA
   const updated = await getRegisteredApp(appId);
   return { app: updated!, apiKey };
 }
+
+const ALLOWED_STATUSES = new Set(["development", "mvp", "production", "planned"]);
+
+export async function updateSoftwareApp(
+  id: string,
+  input: Partial<{
+    name: string;
+    description: string;
+    healthUrl: string;
+    launchUrl: string | null;
+    status: string;
+  }>
+): Promise<RegisteredAppRow> {
+  if (id === "barbers") {
+    throw new Error("The Barbers App is production locked and cannot be modified");
+  }
+  const app = await getRegisteredApp(id);
+  if (!app) throw new Error("Application not found — only HQ-registered apps can be edited");
+
+  if (input.status && !ALLOWED_STATUSES.has(input.status)) {
+    throw new Error(`status must be one of: development, mvp, production, planned`);
+  }
+
+  const db = await getDb();
+  await db.run(
+    `UPDATE hq_registered_apps SET
+      name = COALESCE(?, name),
+      description = COALESCE(?, description),
+      health_url = COALESCE(?, health_url),
+      launch_url = COALESCE(?, launch_url),
+      status = COALESCE(?, status),
+      updated_at = datetime('now')
+     WHERE id = ?`,
+    input.name ?? null,
+    input.description ?? null,
+    input.healthUrl ?? null,
+    input.launchUrl === undefined ? null : input.launchUrl,
+    input.status ?? null,
+    id
+  );
+
+  const updated = await getRegisteredApp(id);
+  return updated!;
+}
+
+export async function deleteSoftwareApp(id: string): Promise<void> {
+  if (id === "barbers") {
+    throw new Error("The Barbers App is production locked and cannot be removed");
+  }
+  const app = await getRegisteredApp(id);
+  if (!app) throw new Error("Application not found");
+  const db = await getDb();
+  await db.run("DELETE FROM hq_registered_apps WHERE id = ?", id);
+}
