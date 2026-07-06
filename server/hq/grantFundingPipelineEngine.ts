@@ -115,38 +115,87 @@ export function resolvePipelineStage(
   return "discovered";
 }
 
+/** Bulk stage sync — used only by scheduled/manual sync, never on dashboard reads. */
 export async function syncAllPipelineStages(): Promise<number> {
   const db = await getDb();
+  const now = new Date().toISOString();
   let updated = 0;
+  const prodFilter = productionGrantOpportunitySqlFilter("o");
 
-  const opps = (await db.all(
-    `SELECT o.*,
-      (SELECT composite_score FROM grant_opportunity_scores WHERE opportunity_id = o.id ORDER BY created_at DESC LIMIT 1) as composite_score
-     FROM grant_opportunities o WHERE o.status IN ('open','active','researching','closed')${productionGrantOpportunitySqlFilter("o")}`
-  )) as Record<string, unknown>[];
+  const closed = await db.run(
+    `UPDATE grant_opportunities SET status = 'closed', pipeline_stage = 'closed', updated_at = ?
+     WHERE deadline IS NOT NULL AND deadline < date('now') AND status IN ('open','active','researching')
+     AND pipeline_stage NOT IN ('awarded','closed')${prodFilter}`,
+    now
+  );
+  updated += closed.changes ?? 0;
 
-  for (const row of opps) {
-    const score = Number(row.composite_score ?? 0);
-    let stage = resolvePipelineStage("opportunity", row, score);
-    if (row.deadline && new Date(String(row.deadline)) < new Date() && stage !== "awarded") {
-      stage = "closed";
-      await db.run("UPDATE grant_opportunities SET status = 'closed' WHERE id = ? AND status != 'closed'", row.id);
-    }
-    await db.run("UPDATE grant_opportunities SET pipeline_stage = ?, updated_at = ? WHERE id = ?", stage, new Date().toISOString(), row.id);
-    updated++;
-  }
+  const fromFunding = await db.run(
+    `UPDATE grant_opportunities SET pipeline_stage = CASE
+       WHEN status = 'closed' THEN 'closed'
+       WHEN funding_status = 'awarded' THEN 'awarded'
+       WHEN funding_status IN ('declined','denied') THEN 'declined'
+       WHEN funding_status = 'submitted' THEN 'submitted'
+       WHEN funding_status = 'eligible' THEN 'qualified'
+       WHEN funding_status = 'reviewing' THEN 'matched'
+       ELSE pipeline_stage
+     END, updated_at = ?
+     WHERE pipeline_stage IS NULL OR funding_status IN ('awarded','declined','denied','submitted','eligible','reviewing')${prodFilter}`,
+    now
+  );
+  updated += fromFunding.changes ?? 0;
 
-  const apps = (await db.all("SELECT * FROM grant_applications")) as Record<string, unknown>[];
-  for (const row of apps) {
-    const stage = resolvePipelineStage("application", row);
-    await db.run("UPDATE grant_applications SET pipeline_stage = ?, lifecycle_stage = COALESCE(lifecycle_stage, ?), updated_at = ? WHERE id = ?",
-      stage,
-      stage === "drafting" ? "application_drafting" : stage === "submitted" ? "submitted" : row.lifecycle_stage,
-      new Date().toISOString(),
-      row.id
-    );
-    updated++;
-  }
+  const qualified = await db.run(
+    `UPDATE grant_opportunities SET pipeline_stage = 'qualified', updated_at = ?
+     WHERE status IN ('open','active','researching') AND pipeline_stage IN ('discovered','matched')
+     AND id IN (
+       SELECT opportunity_id FROM grant_opportunity_scores WHERE composite_score >= 75
+     )${prodFilter}`,
+    now
+  );
+  updated += qualified.changes ?? 0;
+
+  const matched = await db.run(
+    `UPDATE grant_opportunities SET pipeline_stage = 'matched', updated_at = ?
+     WHERE status IN ('open','active','researching') AND pipeline_stage = 'discovered'
+     AND id IN (
+       SELECT opportunity_id FROM grant_opportunity_scores WHERE composite_score >= 55 AND composite_score < 75
+     )${prodFilter}`,
+    now
+  );
+  updated += matched.changes ?? 0;
+
+  const discovered = await db.run(
+    `UPDATE grant_opportunities SET pipeline_stage = 'discovered', updated_at = ?
+     WHERE pipeline_stage IS NULL AND status IN ('open','active','researching')${prodFilter}`,
+    now
+  );
+  updated += discovered.changes ?? 0;
+
+  const apps = await db.run(
+    `UPDATE grant_applications SET
+       pipeline_stage = CASE
+         WHEN status = 'awarded' THEN 'awarded'
+         WHEN status = 'denied' THEN 'declined'
+         WHEN status = 'under_review' THEN 'under_review'
+         WHEN status = 'submitted' THEN 'submitted'
+         WHEN founder_approval_status = 'approved' AND COALESCE(ready_to_submit, 0) = 1 THEN 'ready_for_submission'
+         WHEN founder_approval_status = 'approved' THEN 'founder_approval'
+         WHEN founder_approval_status = 'rejected' THEN 'declined'
+         WHEN founder_approval_status = 'changes_requested' THEN 'internal_review'
+         ELSE 'drafting'
+       END,
+       lifecycle_stage = COALESCE(lifecycle_stage,
+         CASE
+           WHEN status = 'submitted' THEN 'submitted'
+           WHEN status = 'draft' THEN 'application_drafting'
+           ELSE lifecycle_stage
+         END
+       ),
+       updated_at = ?`,
+    now
+  );
+  updated += apps.changes ?? 0;
 
   return updated;
 }
@@ -165,86 +214,105 @@ export interface PipelineBoardItem {
   updatedAt: string | null;
 }
 
+function mapOppToBoardItem(r: Record<string, unknown>, stageKey: FundingPipelineStage): PipelineBoardItem {
+  return {
+    id: String(r.id),
+    entityType: "opportunity",
+    title: String(r.title),
+    funder: String(r.funder ?? "—"),
+    amount: Number(r.amount_max ?? 0),
+    pipelineStage: stageKey,
+    deadline: r.deadline ? String(r.deadline) : null,
+    matchScore: Number(r.composite_score ?? 0),
+    programFit: parseJsonArray(r.division_slugs),
+    priority: null,
+    updatedAt: r.updated_at ? String(r.updated_at) : null,
+  };
+}
+
+function mapAppToBoardItem(r: Record<string, unknown>, stageKey: FundingPipelineStage): PipelineBoardItem {
+  return {
+    id: String(r.id),
+    entityType: "application",
+    title: String(r.title),
+    funder: String(r.funder ?? "—"),
+    amount: Number(r.amount_requested ?? 0),
+    pipelineStage: stageKey,
+    deadline: r.opp_deadline ? String(r.opp_deadline) : null,
+    matchScore: 0,
+    programFit: r.matched_program_slug ? [String(r.matched_program_slug)] : [],
+    priority: r.founder_priority ? String(r.founder_priority) : null,
+    updatedAt: r.updated_at ? String(r.updated_at) : null,
+  };
+}
+
 export async function buildEnterprisePipelineBoard(limitPerStage = 20) {
-  await syncAllPipelineStages();
   const db = await getDb();
-  const columns: {
-    stageKey: FundingPipelineStage;
-    label: string;
-    count: number;
-    value: number;
-    items: PipelineBoardItem[];
-  }[] = [];
+  const prodFilter = productionGrantOpportunitySqlFilter("o");
 
+  const stageStats = (await db.all(`
+    SELECT pipeline_stage as stage, COUNT(*) as c, COALESCE(SUM(val), 0) as v FROM (
+      SELECT pipeline_stage, COALESCE(amount_max, 0) as val FROM grant_opportunities WHERE pipeline_stage IS NOT NULL
+      UNION ALL
+      SELECT pipeline_stage, COALESCE(amount_requested, 0) as val FROM grant_applications WHERE pipeline_stage IS NOT NULL
+    ) GROUP BY pipeline_stage
+  `)) as { stage: string; c: number; v: number }[];
+  const statsByStage = new Map(stageStats.map((s) => [s.stage, s]));
+
+  const oppRows = (await db.all(
+    `SELECT o.*,
+      (SELECT composite_score FROM grant_opportunity_scores WHERE opportunity_id = o.id ORDER BY created_at DESC LIMIT 1) as composite_score
+     FROM grant_opportunities o
+     WHERE o.pipeline_stage IS NOT NULL${prodFilter}
+     ORDER BY o.pipeline_stage, o.updated_at DESC`
+  )) as Record<string, unknown>[];
+
+  const appRows = (await db.all(
+    `SELECT a.*, o.funder, o.deadline as opp_deadline
+     FROM grant_applications a LEFT JOIN grant_opportunities o ON o.id = a.opportunity_id
+     WHERE a.pipeline_stage IS NOT NULL
+     ORDER BY a.pipeline_stage, a.updated_at DESC`
+  )) as Record<string, unknown>[];
+
+  const oppsByStage = new Map<string, PipelineBoardItem[]>();
+  const appsByStage = new Map<string, PipelineBoardItem[]>();
   for (const stageKey of FUNDING_PIPELINE_STAGES) {
-    const countRow = await db.get<{ c: number; v: number }>(`
-      SELECT
-        (SELECT COUNT(*) FROM grant_opportunities WHERE pipeline_stage = ?) +
-        (SELECT COUNT(*) FROM grant_applications WHERE pipeline_stage = ?) as c,
-        (SELECT COALESCE(SUM(amount_max), 0) FROM grant_opportunities WHERE pipeline_stage = ?) +
-        (SELECT COALESCE(SUM(amount_requested), 0) FROM grant_applications WHERE pipeline_stage = ?) as v
-    `, stageKey, stageKey, stageKey, stageKey);
+    oppsByStage.set(stageKey, []);
+    appsByStage.set(stageKey, []);
+  }
 
-    const oppRows = (await db.all(
-      `SELECT o.*,
-        (SELECT composite_score FROM grant_opportunity_scores WHERE opportunity_id = o.id ORDER BY created_at DESC LIMIT 1) as composite_score
-       FROM grant_opportunities o WHERE o.pipeline_stage = ? ORDER BY o.updated_at DESC LIMIT ?`,
-      stageKey,
-      limitPerStage
-    )) as Record<string, unknown>[];
+  for (const r of oppRows) {
+    const stage = String(r.pipeline_stage);
+    const bucket = oppsByStage.get(stage);
+    if (bucket && bucket.length < limitPerStage) {
+      bucket.push(mapOppToBoardItem(r, stage as FundingPipelineStage));
+    }
+  }
+  for (const r of appRows) {
+    const stage = String(r.pipeline_stage);
+    const bucket = appsByStage.get(stage);
+    if (bucket && bucket.length < limitPerStage) {
+      bucket.push(mapAppToBoardItem(r, stage as FundingPipelineStage));
+    }
+  }
 
-    const appRows = (await db.all(
-      `SELECT a.*, o.funder, o.deadline as opp_deadline
-       FROM grant_applications a LEFT JOIN grant_opportunities o ON o.id = a.opportunity_id
-       WHERE a.pipeline_stage = ? ORDER BY a.updated_at DESC LIMIT ?`,
-      stageKey,
-      limitPerStage
-    )) as Record<string, unknown>[];
-
-    const items: PipelineBoardItem[] = [
-      ...oppRows.map((r) => ({
-        id: String(r.id),
-        entityType: "opportunity" as const,
-        title: String(r.title),
-        funder: String(r.funder ?? "—"),
-        amount: Number(r.amount_max ?? 0),
-        pipelineStage: stageKey,
-        deadline: r.deadline ? String(r.deadline) : null,
-        matchScore: Number(r.composite_score ?? 0),
-        programFit: parseJsonArray(r.division_slugs),
-        priority: null,
-        updatedAt: r.updated_at ? String(r.updated_at) : null,
-      })),
-      ...appRows.map((r) => ({
-        id: String(r.id),
-        entityType: "application" as const,
-        title: String(r.title),
-        funder: String(r.funder ?? "—"),
-        amount: Number(r.amount_requested ?? 0),
-        pipelineStage: stageKey,
-        deadline: r.opp_deadline ? String(r.opp_deadline) : null,
-        matchScore: 0,
-        programFit: r.matched_program_slug ? [String(r.matched_program_slug)] : [],
-        priority: r.founder_priority ? String(r.founder_priority) : null,
-        updatedAt: r.updated_at ? String(r.updated_at) : null,
-      })),
-    ].slice(0, limitPerStage);
-
-    columns.push({
+  const columns = FUNDING_PIPELINE_STAGES.map((stageKey) => {
+    const stats = statsByStage.get(stageKey);
+    const items = [...(oppsByStage.get(stageKey) ?? []), ...(appsByStage.get(stageKey) ?? [])].slice(0, limitPerStage);
+    return {
       stageKey,
       label: FUNDING_PIPELINE_LABELS[stageKey],
-      count: countRow?.c ?? items.length,
-      value: countRow?.v ?? 0,
+      count: stats?.c ?? items.length,
+      value: stats?.v ?? 0,
       items,
-    });
-  }
+    };
+  });
 
   return { columns, stages: FUNDING_PIPELINE_STAGES, generatedAt: new Date().toISOString() };
 }
 
 export async function buildPipelineMetricsDashboard() {
   const db = await getDb();
-  await syncAllPipelineStages();
 
   const totalOpportunities = (await db.get<{ c: number }>(
     `SELECT COUNT(*) as c FROM grant_opportunities WHERE status IN ('open','active','researching')${productionGrantOpportunitySqlFilter()}`
@@ -306,7 +374,14 @@ export async function buildPipelineMetricsDashboard() {
 
   const successRate = decided.total > 0 ? Math.round((decided.awarded / decided.total) * 100) : 0;
 
-  const syncStatus = await db.all("SELECT provider, last_sync_at, last_status, records_imported FROM grant_feed_sync");
+  let syncStatus: Record<string, unknown>[] = [];
+  try {
+    syncStatus = (await db.all(
+      "SELECT provider, last_sync_at, last_status, records_imported FROM grant_feed_sync"
+    )) as Record<string, unknown>[];
+  } catch {
+    syncStatus = [];
+  }
 
   return {
     metrics: {
@@ -406,7 +481,6 @@ export type FounderCommandFilters = {
 
 export async function buildFounderCommandCenter(filters: FounderCommandFilters = {}) {
   const db = await getDb();
-  await syncAllPipelineStages();
   const limit = filters.limit ?? 50;
 
   let sql = `

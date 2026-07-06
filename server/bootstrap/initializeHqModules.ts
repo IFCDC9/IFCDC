@@ -66,12 +66,16 @@ export async function initializeHqModules(founder: FounderSeedConfig): Promise<v
   import("../hq/grantFundingPipelineEngine")
     .then(({ scheduleLivePipelineSync, runLivePipelineSync }) => {
       scheduleLivePipelineSync();
-      return runLivePipelineSync();
+      // Defer heavy feed+stage sync so dashboard reads are not blocked at boot.
+      setTimeout(() => {
+        void runLivePipelineSync()
+          .then((r) => {
+            if (r) console.log(`Enterprise Funding Pipeline boot sync: ${r.stagesSynced} stages, ${r.notifications} notifications`);
+          })
+          .catch((e) => console.warn("Funding pipeline boot sync skipped:", e?.message));
+      }, 120_000);
     })
-    .then((r) => {
-      if (r) console.log(`Enterprise Funding Pipeline boot sync: ${r.stagesSynced} stages, ${r.notifications} notifications`);
-    })
-    .catch((e) => console.warn("Funding pipeline boot sync skipped:", e?.message));
+    .catch((e) => console.warn("Funding pipeline scheduler skipped:", e?.message));
   if (process.env.NODE_ENV === "production") {
     import("../hq/twilioIntegrationEngine")
       .then(({ syncTwilioWebhooksIfNeeded }) => syncTwilioWebhooksIfNeeded())

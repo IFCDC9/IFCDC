@@ -1441,36 +1441,61 @@ router.get("/funding-engine/v5/pipeline/board", async (req, res) => {
 
 // ——— Enterprise Funding Pipeline ———
 router.get("/pipeline/enterprise/board", async (req, res) => {
-  const limit = req.query.limit ? Number(req.query.limit) : 20;
-  res.json(await buildEnterprisePipelineBoard(limit));
+  try {
+    const limit = req.query.limit ? Number(req.query.limit) : 20;
+    res.json(await buildEnterprisePipelineBoard(limit));
+  } catch (e) {
+    console.error("pipeline/enterprise/board:", e);
+    res.status(500).json({ error: e instanceof Error ? e.message : "Pipeline board failed" });
+  }
 });
 
 router.get("/pipeline/enterprise/metrics", async (_req, res) => {
-  res.json(await buildPipelineMetricsDashboard());
+  try {
+    res.json(await buildPipelineMetricsDashboard());
+  } catch (e) {
+    console.error("pipeline/enterprise/metrics:", e);
+    res.status(500).json({ error: e instanceof Error ? e.message : "Pipeline metrics failed" });
+  }
 });
 
 router.post("/pipeline/enterprise/sync", async (req: Request, res: Response) => {
-  res.json(await runLivePipelineSync({ actorEmail: req.hqUser?.email }));
+  try {
+    res.json(await runLivePipelineSync({ actorEmail: req.hqUser?.email }));
+  } catch (e) {
+    console.error("pipeline/enterprise/sync:", e);
+    res.status(500).json({ error: e instanceof Error ? e.message : "Pipeline sync failed" });
+  }
 });
 
 router.get("/pipeline/enterprise/intelligence/:opportunityId", async (req, res) => {
-  const intel = await buildOpportunityPipelineIntelligence(req.params.opportunityId, { actorEmail: req.hqUser?.email });
-  if (!intel) return res.status(404).json({ error: "Opportunity not found" });
-  res.json(intel);
+  try {
+    const intel = await buildOpportunityPipelineIntelligence(req.params.opportunityId, { actorEmail: req.hqUser?.email });
+    if (!intel) return res.status(404).json({ error: "Opportunity not found" });
+    res.json(intel);
+  } catch (e) {
+    console.error("pipeline/enterprise/intelligence:", e);
+    res.status(500).json({ error: e instanceof Error ? e.message : "Pipeline intelligence failed" });
+  }
 });
 
 router.get("/pipeline/enterprise/founder", async (req, res) => {
-  res.json(await buildFounderCommandCenter({
-    program: req.query.program ? String(req.query.program) : undefined,
-    agency: req.query.agency ? String(req.query.agency) : undefined,
-    minAmount: req.query.minAmount ? Number(req.query.minAmount) : undefined,
-    maxAmount: req.query.maxAmount ? Number(req.query.maxAmount) : undefined,
-    status: req.query.status ? String(req.query.status) as never : undefined,
-    deadlineWithinDays: req.query.deadlineWithinDays ? Number(req.query.deadlineWithinDays) : undefined,
-    priority: req.query.priority ? String(req.query.priority) : undefined,
-    q: req.query.q ? String(req.query.q) : undefined,
-    limit: req.query.limit ? Number(req.query.limit) : undefined,
-  }));
+  try {
+    res.json(await buildFounderCommandCenter({
+      program: req.query.program ? String(req.query.program) : undefined,
+      agency: req.query.agency ? String(req.query.agency) : undefined,
+      minAmount: req.query.minAmount ? Number(req.query.minAmount) : undefined,
+      maxAmount: req.query.maxAmount ? Number(req.query.maxAmount) : undefined,
+      status: req.query.status ? String(req.query.status) as never : undefined,
+      deadlineWithinDays: req.query.deadlineWithinDays ? Number(req.query.deadlineWithinDays) : undefined,
+      priority: req.query.priority ? String(req.query.priority) : undefined,
+      q: req.query.q ? String(req.query.q) : undefined,
+      limit: req.query.limit ? Number(req.query.limit) : undefined,
+    }));
+  } catch (e) {
+    console.error("pipeline/enterprise/founder:", e);
+    res.status(500).json({ error: e instanceof Error ? e.message : "Founder command center failed" });
+  }
 });
 
 router.post("/pipeline/enterprise/founder/:applicationId/decision", async (req: Request, res: Response) => {

@@ -119,11 +119,19 @@ async function main() {
     ["/api/hq/grants/funder-reports", "Funder reports"],
     ["/api/hq/grants/history", "History"],
     ["/api/hq/grants/funding-engine/v5/platform", "V5 intelligence"],
+    ["/api/hq/grants/pipeline/enterprise/metrics", "Enterprise pipeline metrics"],
+    ["/api/hq/grants/pipeline/enterprise/board", "Enterprise pipeline board"],
+    ["/api/hq/grants/pipeline/enterprise/founder", "Enterprise founder command"],
   ];
   for (const [path, label] of routes) {
+    const started = Date.now();
     const r = await jsonFetch(`${BASE}${path}`, auth);
+    const ms = Date.now() - started;
     const isJson = r.body && !String(r.body._raw ?? "").includes("<!DOCTYPE");
-    log(r.ok && isJson ? "pass" : "fail", `Route: ${label}`, `${r.res.status}`);
+    log(r.ok && isJson ? "pass" : "fail", `Route: ${label}`, `${r.res.status} (${ms}ms)`);
+    if (path.includes("pipeline/enterprise") && ms > 15_000) {
+      log("fail", `${label} response time`, `${ms}ms exceeds 15s budget`);
+    }
   }
 
   // Unauthenticated guard

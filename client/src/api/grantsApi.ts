@@ -1,10 +1,26 @@
-async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`/api/hq/grants${path}`, { credentials: "include", ...options });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || "Request failed");
+async function apiFetch<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  const { timeoutMs = 30_000, ...fetchOptions } = options ?? {};
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`/api/hq/grants${path}`, {
+      credentials: "include",
+      ...fetchOptions,
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || "Request failed");
+    }
+    return res.json();
+  } catch (e) {
+    if (e instanceof Error && e.name === "AbortError") {
+      throw new Error("Request timed out — headquarters took too long to respond.");
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
   }
-  return res.json();
 }
 
 export interface GrantOverview {
@@ -839,7 +855,8 @@ export const grantsApi = {
   // Enterprise Funding Pipeline
   pipelineBoard: (limit = 20) =>
     apiFetch<{ columns: { stageKey: string; label: string; count: number; value: number; items: Record<string, unknown>[] }[] }>(
-      `/pipeline/enterprise/board?limit=${limit}`
+      `/pipeline/enterprise/board?limit=${limit}`,
+      { timeoutMs: 25_000 }
     ),
   pipelineMetrics: () =>
     apiFetch<{
@@ -849,20 +866,23 @@ export const grantsApi = {
       byStatus: { label: string; count: number }[];
       upcomingDeadlines: Record<string, unknown>[];
       programs: { slug: string; label: string }[];
-    }>("/pipeline/enterprise/metrics"),
+      feedSync?: { provider: string; last_sync_at: string; last_status: string; records_imported: number }[];
+      generatedAt?: string;
+    }>("/pipeline/enterprise/metrics", { timeoutMs: 25_000 }),
   pipelineSync: () =>
     apiFetch<{ stagesSynced: number; notifications: number; syncedAt: string }>(
       "/pipeline/enterprise/sync",
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}), timeoutMs: 120_000 }
     ),
   pipelineIntelligence: (opportunityId: string) =>
-    apiFetch<Record<string, unknown>>(`/pipeline/enterprise/intelligence/${opportunityId}`),
+    apiFetch<Record<string, unknown>>(`/pipeline/enterprise/intelligence/${opportunityId}`, { timeoutMs: 45_000 }),
   founderCommandCenter: (params?: Record<string, string | undefined>) => {
     const qs = new URLSearchParams();
     if (params) Object.entries(params).forEach(([k, v]) => { if (v) qs.set(k, v); });
     const q = qs.toString();
     return apiFetch<{ applications: Record<string, unknown>[]; pendingApprovalCount: number }>(
-      `/pipeline/enterprise/founder${q ? `?${q}` : ""}`
+      `/pipeline/enterprise/founder${q ? `?${q}` : ""}`,
+      { timeoutMs: 25_000 }
     );
   },
   founderPipelineDecision: (applicationId: string, decision: "approve" | "reject", note?: string) =>
