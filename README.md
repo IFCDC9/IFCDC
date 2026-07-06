@@ -72,7 +72,7 @@ Enable features by setting the corresponding variables in `.env`. See `.env.exam
 - **Email:** `RESEND_API_KEY`, `RESEND_FROM_EMAIL`
 - **SMS:** `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_SMS_FROM`, `TWILIO_VOICE_FROM`
 - **Payments:** `STRIPE_SECRET_KEY`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`
-- **Grant feeds:** `GRANTS_GOV_API_KEY`, `SAM_GOV_API_KEY`, `SAM_GOV_UEI`
+- **Grant feeds:** `GRANTS_GOV_SEARCH_KEYWORD` (public search2 — no key), `SAM_GOV_API_KEY`, `SAM_GOV_UEI`
 - **Google login:** `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
 - **Software Division apps:** `HQ_*_LAUNCH_URL`, `HQ_*_HEALTH_URL`
 

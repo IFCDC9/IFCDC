@@ -157,7 +157,7 @@ function parseDeadline(raw: unknown): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
 }
 
-/** Grants.gov Search2 API — production requires GRANTS_GOV_API_KEY; RSS fallback dev-only */
+/** Grants.gov Search2 — public Applicant API (no API key required) */
 async function fetchGrantsGovFeed(): Promise<NormalizedGrantOpportunity[]> {
   const { searchGrantsGovLive } = await import("./grantsGovIntegrationEngine");
   try {

@@ -1,5 +1,8 @@
 /**
- * Grants.gov integration — live Search2 API probe, sync verification, Integrations Hub details.
+ * Grants.gov integration — public Applicant API (search2) probe, sync, Integrations Hub details.
+ *
+ * Official docs: https://grants.gov/api/api-guide
+ * search2 and fetchOpportunity do NOT require authentication or an API key.
  */
 import { getGrantFeedIntegrationStatus, syncGrantFeeds, countExternalFeedOpportunities } from "./grantFeedConnectors";
 
@@ -23,7 +26,7 @@ export type GrantsGovProbeResult = {
   source?: "search2" | "none";
 };
 
-function apiKey(): string | null {
+function optionalApiKey(): string | null {
   const key = (process.env.GRANTS_GOV_API_KEY || "").trim();
   return key || null;
 }
@@ -32,12 +35,22 @@ function searchKeyword(): string {
   return (process.env.GRANTS_GOV_SEARCH_KEYWORD || DEFAULT_KEYWORD).trim();
 }
 
-function searchHeaders(key: string): Record<string, string> {
-  return {
+function searchHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    "X-Api-Key": key,
     Accept: "application/json",
   };
+  const key = optionalApiKey();
+  if (key) headers["X-Api-Key"] = key;
+  return headers;
+}
+
+function searchBody(rows: number) {
+  return JSON.stringify({
+    rows,
+    keyword: searchKeyword(),
+    oppStatuses: "posted",
+  });
 }
 
 function parseSearchHits(data: unknown): Record<string, unknown>[] {
@@ -54,44 +67,27 @@ function parseSearchHits(data: unknown): Record<string, unknown>[] {
   return Array.isArray(hits) ? (hits as Record<string, unknown>[]) : [];
 }
 
-/** Live POST to Grants.gov Search2 — does not write to DB. */
+/** Live POST to Grants.gov Search2 (public Applicant API — no credentials required). */
 export async function probeGrantsGovApi(): Promise<GrantsGovProbeResult> {
-  const key = apiKey();
-  if (!key) {
-    return {
-      healthy: false,
-      apiReachable: false,
-      recordCount: 0,
-      latencyMs: 0,
-      message: "GRANTS_GOV_API_KEY not set on Render",
-      source: "none",
-    };
-  }
-
   const started = Date.now();
   try {
     const res = await fetch(SEARCH2_URL, {
       method: "POST",
-      headers: searchHeaders(key),
-      body: JSON.stringify({
-        rows: 10,
-        keyword: searchKeyword(),
-        oppStatuses: "posted",
-      }),
+      headers: searchHeaders(),
+      body: searchBody(10),
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
     const latencyMs = Date.now() - started;
 
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      const authHint = res.status === 401 || res.status === 403 ? " — verify API key" : "";
       return {
         healthy: false,
         apiReachable: false,
         recordCount: 0,
         latencyMs,
         httpStatus: res.status,
-        message: `Grants.gov Search2 returned ${res.status}${authHint}${body ? `: ${body.slice(0, 120)}` : ""}`,
+        message: `Grants.gov Search2 returned ${res.status}${body ? `: ${body.slice(0, 120)}` : ""}`,
         source: "none",
       };
     }
@@ -107,7 +103,7 @@ export async function probeGrantsGovApi(): Promise<GrantsGovProbeResult> {
       httpStatus: res.status,
       message:
         count > 0
-          ? `Grants.gov Search2 connected · ${count} opportunities in probe`
+          ? `Grants.gov Search2 connected (public API) · ${count} opportunities in probe`
           : "Grants.gov API reachable but returned zero opportunities — check search keyword",
       source: "search2",
     };
@@ -125,12 +121,11 @@ export async function probeGrantsGovApi(): Promise<GrantsGovProbeResult> {
 
 export function resolveGrantsGovHubStatus(
   probe: GrantsGovProbeResult,
-  feedConnected: boolean,
-  tokenConfigured: boolean
+  feedConnected: boolean
 ): "connected" | "degraded" | "not_configured" {
-  if (!tokenConfigured) return "not_configured";
   if (feedConnected && probe.healthy && probe.apiReachable) return "connected";
-  if (probe.apiReachable || tokenConfigured) return "degraded";
+  if (probe.apiReachable && probe.recordCount > 0) return feedConnected ? "connected" : "degraded";
+  if (probe.apiReachable) return "degraded";
   return "not_configured";
 }
 
@@ -142,8 +137,13 @@ export async function buildGrantsGovDetails(
   return [
     {
       label: "API endpoint",
-      value: "Grants.gov Search2 (live)",
+      value: "POST /v1/api/search2 (public)",
       status: probe.apiReachable ? "success" : "muted",
+    },
+    {
+      label: "Authentication",
+      value: "None required (Applicant API)",
+      status: "success",
     },
     {
       label: "Search keyword",
@@ -165,21 +165,15 @@ export async function buildGrantsGovDetails(
       value: feed?.lastSync ? new Date(feed.lastSync).toLocaleString() : "Not synced yet",
       status: feed?.lastSync ? "success" : "warning",
     },
-    {
-      label: "Feed status",
-      value: feed?.status === "connected" ? "Connected" : feed?.note ?? "Pending sync",
-      status: feed?.status === "connected" ? "success" : "warning",
-    },
   ];
 }
 
 export async function testGrantsGovIntegrationLive() {
-  const tokenConfigured = Boolean(apiKey());
   const probe = await probeGrantsGovApi();
 
   let syncMessage = "";
   let feedConnected = false;
-  if (tokenConfigured && probe.apiReachable) {
+  if (probe.apiReachable) {
     const syncResults = await syncGrantFeeds({ providers: ["grants_gov"] });
     const grantsSync = syncResults.find((r) => r.provider === "grants_gov");
     feedConnected = grantsSync?.status === "connected";
@@ -189,7 +183,7 @@ export async function testGrantsGovIntegrationLive() {
   }
 
   const feed = (await getGrantFeedIntegrationStatus()).grantsGov;
-  const status = resolveGrantsGovHubStatus(probe, feedConnected || feed.status === "connected", tokenConfigured);
+  const status = resolveGrantsGovHubStatus(probe, feedConnected || feed.status === "connected");
   const details = await buildGrantsGovDetails(probe, feed);
   const success = status === "connected";
 
@@ -208,6 +202,7 @@ export async function testGrantsGovIntegrationLive() {
       liveOpportunities: await countExternalFeedOpportunities().catch(() => 0),
       latencyMs: probe.latencyMs,
       feedStatus: feed.status,
+      authRequired: false,
     },
   };
 }
@@ -253,25 +248,12 @@ function parseGrantDeadline(raw: unknown): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
 }
 
+/** Public Search2 — no API key required per Grants.gov API Guide. */
 export async function searchGrantsGovLive(rows = 50) {
-  const key = apiKey();
-  const isProduction = process.env.NODE_ENV === "production";
-
-  if (!key) {
-    if (isProduction) {
-      throw new Error("GRANTS_GOV_API_KEY required in production");
-    }
-    return { opps: [] as ReturnType<typeof normalizeGrantsGovHits>, source: "none" as const };
-  }
-
   const res = await fetch(SEARCH2_URL, {
     method: "POST",
-    headers: searchHeaders(key),
-    body: JSON.stringify({
-      rows,
-      keyword: searchKeyword(),
-      oppStatuses: "posted",
-    }),
+    headers: searchHeaders(),
+    body: searchBody(rows),
     signal: AbortSignal.timeout(20_000),
   });
 

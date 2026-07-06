@@ -228,21 +228,16 @@ const IntegrationsHubPage: React.FC = () => {
                 {configuring.id === "grants_gov" && (
                   <div style={{ fontSize: "0.82rem", marginTop: "0.75rem", lineHeight: 1.5 }}>
                     <p style={{ margin: "0 0 0.5rem" }}>
-                      <strong>Grants.gov setup</strong>
+                      <strong>Grants.gov — public Applicant API</strong>
                     </p>
-                    <ol style={{ margin: 0, paddingLeft: "1.2rem" }}>
-                      <li>
-                        Register at{" "}
-                        <a href="https://www.grants.gov/api" target="_blank" rel="noopener noreferrer">
-                          grants.gov/api
-                        </a>{" "}
-                        and create an API key.
-                      </li>
-                      <li>
-                        In Render → <strong>ifcdc-hq</strong> → Environment, add <code>GRANTS_GOV_API_KEY</code>.
-                      </li>
-                      <li>Save and redeploy, then click <strong>Test Connection</strong> to sync live opportunities.</li>
-                    </ol>
+                    <p className="hq-muted-text" style={{ margin: 0 }}>
+                      IFCDC HQ uses <code>POST /v1/api/search2</code> only. Per the{" "}
+                      <a href="https://grants.gov/api/api-guide" target="_blank" rel="noopener noreferrer">
+                        official API Guide
+                      </a>
+                      , <strong>no API key or credentials are required</strong> for search2 or fetchOpportunity.
+                      Click <strong>Test Connection</strong> to probe the live public API and sync opportunities.
+                    </p>
                   </div>
                 )}
                 {configuring.id === "github" && (

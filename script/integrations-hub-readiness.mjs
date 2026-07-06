@@ -77,8 +77,8 @@ async function main() {
     log(Array.isArray(card.actions) && card.actions.length > 0 ? "pass" : "fail", `${id} actions`);
     if (id === "grants_gov") {
       const gg = integrations.find((i) => i.id === "grants_gov");
-      log(gg?.requiredCredentials?.every((c) => c.configured) ? "pass" : "fail", "Grants.gov GRANTS_GOV_API_KEY configured");
-      log(Array.isArray(gg?.details) && gg.details.length >= 6 ? "pass" : "fail", "Grants.gov details", `${gg?.details?.length ?? 0} rows`);
+      log(gg?.requiredCredentials?.some((c) => c.configured) ? "pass" : "warn", "Grants.gov public API (no key required)");
+      log(Array.isArray(gg?.details) && gg.details.length >= 5 ? "pass" : "fail", "Grants.gov details", `${gg?.details?.length ?? 0} rows`);
       log(gg?.status === "connected" ? "pass" : gg?.status === "degraded" ? "warn" : "fail", "Grants.gov status", gg?.status ?? "unknown");
       log(gg?.health?.healthy ? "pass" : "warn", "Grants.gov health probe", gg?.health?.message ?? "");
     }

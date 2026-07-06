@@ -51,10 +51,10 @@ services:
         sync: false
       - key: RESEND_FROM_EMAIL
         sync: false
-      - key: GRANTS_GOV_API_KEY
-        sync: false
       - key: GRANTS_GOV_SEARCH_KEYWORD
         value: "community development nonprofit"
+      # GRANTS_GOV_API_KEY is NOT required for search2/fetchOpportunity (public Applicant APIs).
+      # Only set if future S2S endpoints require X-Api-Key per https://grants.gov/api/api-guide
       - key: SAM_GOV_API_KEY
         sync: false
       - key: SAM_GOV_UEI

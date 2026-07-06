@@ -99,10 +99,8 @@ async function buildGrantsGovCard(feed: Awaited<ReturnType<typeof getGrantFeedIn
     resolveGrantsGovHubStatus,
   } = await import("./grantsGovIntegrationEngine");
 
-  const required = ["GRANTS_GOV_API_KEY"];
   const feedStatus = feed.grantsGov;
   const now = new Date().toISOString();
-  const tokenConfigured = envSet("GRANTS_GOV_API_KEY");
 
   const ggProbe = await probe("grants_gov", () => probeGrantsGovApi(), {
     healthy: false,
@@ -113,7 +111,7 @@ async function buildGrantsGovCard(feed: Awaited<ReturnType<typeof getGrantFeedIn
     source: "none" as const,
   });
 
-  const rawStatus = resolveGrantsGovHubStatus(ggProbe, feedStatus?.status === "connected", tokenConfigured);
+  const rawStatus = resolveGrantsGovHubStatus(ggProbe, feedStatus?.status === "connected");
   const status = normalizeHubStatus(rawStatus, ggProbe.healthy);
   const details = await buildGrantsGovDetails(ggProbe, feedStatus);
 
@@ -121,15 +119,21 @@ async function buildGrantsGovCard(feed: Awaited<ReturnType<typeof getGrantFeedIn
     id: "grants_gov",
     name: "Grants.gov",
     category: "Federal Grants",
-    description: "Live federal grant opportunity feed for Grant Center pipeline",
+    description: "Live federal opportunities via public Applicant API (search2) — no API key required",
     status,
     lastChecked: feedStatus?.lastSync ?? now,
     environmentReadiness: {
-      ready: tokenConfigured,
-      missing: required.filter((k) => !envSet(k)),
-      configured: required.filter((k) => envSet(k)),
+      ready: ggProbe.apiReachable,
+      missing: [],
+      configured: ggProbe.apiReachable ? ["Public Search2 API"] : [],
     },
-    requiredCredentials: required.map((k) => credential(k, "Grants.gov API key")),
+    requiredCredentials: [
+      {
+        key: "PUBLIC_SEARCH2",
+        label: "Public Applicant API (no key required)",
+        configured: true,
+      },
+    ],
     health: {
       healthy: status === "connected",
       latencyMs: ggProbe.latencyMs,
@@ -140,26 +144,19 @@ async function buildGrantsGovCard(feed: Awaited<ReturnType<typeof getGrantFeedIn
       { id: "open-grants", label: "Open Grant Center", kind: "primary", action: "link", href: "/hq/grants" },
       { id: "test", label: "Test Connection", kind: "secondary", action: "test" },
       {
+        id: "docs",
+        label: "API Guide",
+        kind: "secondary",
+        action: "link",
+        href: "https://grants.gov/api/api-guide",
+      },
+      {
         id: "sync",
         label: "Sync Feed",
         kind: "secondary",
         action: "link",
         href: "/hq/grants",
         reason: "Grant Center → Overview → Sync feeds",
-      },
-      {
-        id: "configure",
-        label: tokenConfigured ? "Configured" : "Configure",
-        kind: "secondary",
-        action: "configure",
-        reason: tokenConfigured ? "GRANTS_GOV_API_KEY detected on Render" : "Set GRANTS_GOV_API_KEY in Render environment",
-      },
-      {
-        id: "render-env",
-        label: "Open Render Environment",
-        kind: "secondary",
-        action: "link",
-        href: renderEnvDashboardUrl(),
       },
     ],
   };
