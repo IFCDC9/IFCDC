@@ -11,17 +11,21 @@ import { buildAuraExecutiveContext } from "./auraExecutiveContext";
 import { logHqAudit } from "./hqAuditLog";
 
 export const IFCDC_FUNDING_DIVISIONS = [
-  { slug: "housing", label: "Housing", programs: ["transitional_housing", "housing"] },
-  { slug: "anti_gang", label: "Anti-Gang", programs: ["violence_prevention", "community_safety"] },
+  { slug: "housing", label: "Transitional Housing", programs: ["transitional_housing", "housing", "shelter"] },
+  { slug: "anti_gang", label: "Anti-Gang Program", programs: ["violence_prevention", "community_safety", "gang_prevention"] },
+  { slug: "youth_development", label: "Youth Development", programs: ["youth", "young_adults", "teen"] },
+  { slug: "tapis", label: "Mentorship", programs: ["mentorship", "youth_mentorship", "tapis"] },
   { slug: "scholarships", label: "Scholarships", programs: ["scholarships", "education"] },
-  { slug: "economic_development", label: "Economic Development", programs: ["workforce", "economic_development"] },
-  { slug: "productions", label: "Productions & Media", programs: ["media", "productions"] },
+  { slug: "economic_development", label: "Economic Development", programs: ["economic_development", "community_development"] },
+  { slug: "workforce_development", label: "Workforce Development", programs: ["workforce", "job_training", "vocational"] },
+  { slug: "small_business", label: "Small Business Assistance", programs: ["small_business", "entrepreneurship", "microenterprise"] },
+  { slug: "community_programs", label: "Community Programs", programs: ["community", "outreach"] },
   { slug: "radio", label: "IFCDC Radio", programs: ["radio", "broadcast"] },
+  { slug: "productions", label: "IFCDC Productions", programs: ["media", "productions", "film"] },
+  { slug: "software_division", label: "IFCDC Software Division", programs: ["technology", "software", "digital_literacy"] },
   { slug: "music", label: "IFCDC Music", programs: ["music", "arts"] },
   { slug: "barbers", label: "IFCDC Barbers", programs: ["workforce", "vocational_training"], readOnly: true },
-  { slug: "tapis", label: "TAPIS Mentorship", programs: ["mentorship", "youth"] },
   { slug: "inclusive", label: "Inclusive Community", programs: ["inclusive", "mental_health"] },
-  { slug: "community_programs", label: "Community Programs", programs: ["community", "outreach"] },
 ] as const;
 
 export type OpportunitySearchFilters = {

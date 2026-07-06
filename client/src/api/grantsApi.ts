@@ -747,6 +747,73 @@ export const grantsApi = {
     apiFetch<{ content?: string; narrative?: string }>(`/writer-studio/${applicationId}/sections/${sectionKey}/ai-assist`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt }),
     }),
+
+  // Grant Intelligence Engine
+  intelligenceDashboard: () =>
+    apiFetch<{
+      summary: {
+        newOpportunities: number;
+        grantsBeingWritten: number;
+        drafts: number;
+        submitted: number;
+        awards: number;
+        rejections: number;
+        totalPipelineValue: number;
+        totalFundingSecured: number;
+        openOpportunities: number;
+        upcomingDeadlines: number;
+      };
+      liveFeed: Record<string, unknown>[];
+      programs: { slug: string; label: string }[];
+      lastSync: string | null;
+    }>("/intelligence/dashboard"),
+  intelligenceFeed: (params?: { sinceHours?: number; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.sinceHours) qs.set("sinceHours", String(params.sinceHours));
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return apiFetch<{ opportunities: Record<string, unknown>[]; lastGrantsGovSync: string | null }>(
+      `/intelligence/feed${q ? `?${q}` : ""}`
+    );
+  },
+  intelligenceSync: () =>
+    apiFetch<{ feedResults: { provider: string; status: string; imported: number }[]; enriched: number }>(
+      "/intelligence/sync",
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }
+    ),
+  scoreOpportunityIntelligence: (opportunityId: string, divisionSlug?: string) =>
+    apiFetch<{ intelligence: Record<string, unknown> }>(`/opportunities/${opportunityId}/score-intelligence`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ divisionSlug }),
+    }),
+  startGrantApplication: (opportunityId: string, generateDrafts = false) =>
+    apiFetch<{ ok: boolean; applicationId: string; existing: boolean; humanReviewRequired: boolean; message: string }>(
+      `/opportunities/${opportunityId}/start-application`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ generateDrafts }),
+      }
+    ),
+  generateFullProposalDraft: (applicationId: string, sections?: string[]) =>
+    apiFetch<{ applicationId: string; completed: number; total: number; humanReviewRequired: boolean }>(
+      `/applications/${applicationId}/generate-full-draft`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sections }),
+      }
+    ),
+  askGrantAura: (question: string) =>
+    apiFetch<{ answer: string; offline?: boolean; dashboard: Record<string, unknown> }>(
+      "/intelligence/aura/ask",
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question }) }
+    ),
+  programGrantMatches: (programSlug: string) =>
+    apiFetch<{ programSlug: string; programLabel: string; matches: Record<string, unknown>[] }>(
+      `/intelligence/programs/${programSlug}/matches`
+    ),
 };
 
 export interface GrantFunder {

@@ -11,7 +11,7 @@ import { HqLoading } from "../../components/hq/HqLoading";
 import { formatCurrency } from "../../utils/safeFormat";
 import { lazyWithRetry } from "../../utils/lazyWithRetry";
 import { GrantApplicationWorkflowPanel } from "../../components/hq/grants/GrantApplicationWorkflowPanel";
-import { GrantLibraryPanel, GrantWriterStudioPanel, GrantOpportunityFinderPanel } from "../../components/hq/grants/GrantCenterEnterprisePanels";
+import { GrantLibraryPanel, GrantWriterStudioPanel, GrantOpportunityFinderPanel, GrantIntelligencePanel } from "../../components/hq/grants/GrantCenterEnterprisePanels";
 import { GrantReadOnlyBanner } from "../../components/hq/grants/GrantReadOnlyBanner";
 import { GrantQueryBoundary } from "../../components/hq/grants/GrantQueryBoundary";
 import { GrantSubNav } from "../../components/hq/grants/GrantSubNav";
@@ -175,6 +175,13 @@ const GrantCenterPage: React.FC = () => {
     window.history.replaceState(null, "", `/hq/grants?${params.toString()}`);
   };
 
+  const handleStartApplication = (applicationId: string) => {
+    setSelectedApplicationId(applicationId);
+    setAppsSection("studio");
+    selectTab("applications");
+    qc.invalidateQueries({ queryKey: ["grant-writer-studio", applicationId] });
+  };
+
   const dashboard = useQuery({ queryKey: ["grants-dashboard"], queryFn: grantsApi.dashboard, enabled: tab === "overview" });
   const grantPlatform = useQuery({ queryKey: ["grant-center-platform"], queryFn: grantsApi.grantCenterPlatform, enabled: tab === "overview" });
   const syncFeeds = useMutation({
@@ -319,7 +326,10 @@ const GrantCenterPage: React.FC = () => {
       <div className="hq-tab-content hq-fade-in">
         {tab === "overview" && (
           <>
-            <GrantV5FundingIntelligenceDashboard />
+            <GrantIntelligencePanel onStartApplication={handleStartApplication} />
+            <div style={{ marginTop: "1.25rem" }}>
+              <GrantV5FundingIntelligenceDashboard />
+            </div>
             {grantPlatform.data && (
               <div style={{ marginTop: "1.25rem" }}>
               <HqPanel title="Grant Center Modules" subtitle={`Platform ${grantPlatform.data.version} — modular command hub`}>
@@ -543,7 +553,10 @@ const GrantCenterPage: React.FC = () => {
         {tab === "discover" && (
           <>
             <div style={{ marginBottom: "1.25rem" }}>
-              <GrantOpportunityFinderPanel />
+              <GrantIntelligencePanel onStartApplication={handleStartApplication} />
+            </div>
+            <div style={{ marginBottom: "1.25rem" }}>
+              <GrantOpportunityFinderPanel onStartApplication={handleStartApplication} />
             </div>
             <div style={{ marginBottom: "1.25rem" }}>
               <Suspense fallback={<TabFallback />}><GrantV5NationalDatabase /></Suspense>

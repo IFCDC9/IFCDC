@@ -95,6 +95,15 @@ export async function buildDynamicOrgKnowledge(): Promise<string> {
 
     const grantCount = (await db.get<{ c: number }>("SELECT COUNT(*) as c FROM grant_opportunities WHERE status != 'closed'"))?.c ?? 0;
     if (grantCount) lines.push(`Open grant opportunities in HQ: ${grantCount}`);
+    try {
+      const { buildGrantIntelligenceDashboard } = await import("./grantIntelligenceEngine");
+      const intel = await buildGrantIntelligenceDashboard();
+      lines.push(
+        `Grant pipeline: $${intel.summary.totalPipelineValue.toLocaleString()} · Secured: $${intel.summary.totalFundingSecured.toLocaleString()} · ${intel.summary.newOpportunities} new this week · ${intel.summary.grantsBeingWritten} in draft`
+      );
+    } catch {
+      /* grant intelligence optional */
+    }
 
     const openTasks = (await db.get<{ c: number }>("SELECT COUNT(*) as c FROM outreach_tasks WHERE status = 'OPEN'"))?.c ?? 0;
     if (openTasks) lines.push(`Open outreach follow-ups: ${openTasks}`);

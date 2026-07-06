@@ -37,6 +37,7 @@ export const WRITER_SECTIONS = [
   { key: "sustainability", label: "Sustainability", sort: 7 },
   { key: "organizational_capacity", label: "Organizational Capacity", sort: 8 },
   { key: "budget_narrative", label: "Budget Narrative", sort: 9 },
+  { key: "attachments_checklist", label: "Attachments Checklist", sort: 10 },
 ] as const;
 
 const DEFAULT_TEMPLATES = [

@@ -115,6 +115,17 @@ import {
   buildFundingAnalyticsDashboard,
 } from "../hq/grantCenterEngine";
 import { syncGrantFeeds, getGrantFeedIntegrationStatus } from "../hq/grantFeedConnectors";
+import {
+  buildGrantIntelligenceDashboard,
+  getLiveOpportunityFeed,
+  runGrantIntelligenceSync,
+  scoreOpportunityIntelligence,
+  startGrantApplicationWorkflow,
+  generateFullProposalDraft,
+  askGrantAura,
+  matchOpportunitiesForProgram,
+  IFCDC_PROGRAM_CATALOG,
+} from "../hq/grantIntelligenceEngine";
 import { getGrantCenterQaReport, grantCenterQaEnvReady } from "../hq/grantCenterQaCache";
 import { runGrantCenterProductionQa } from "../hq/grantCenterProductionQaRunner";
 
@@ -213,6 +224,62 @@ router.post("/feeds/sync", async (req, res) => {
   const providers = req.body?.providers;
   const results = await syncGrantFeeds(Array.isArray(providers) ? { providers } : undefined);
   res.json({ results, integrations: await getGrantFeedIntegrationStatus() });
+});
+
+// ——— Grant Intelligence Engine ———
+router.get("/intelligence/dashboard", async (_req, res) => {
+  res.json(await buildGrantIntelligenceDashboard());
+});
+
+router.get("/intelligence/feed", async (req, res) => {
+  const sinceHours = req.query.sinceHours ? Number(req.query.sinceHours) : undefined;
+  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  res.json(await getLiveOpportunityFeed({ sinceHours, limit }));
+});
+
+router.get("/intelligence/programs", async (_req, res) => {
+  res.json({ programs: IFCDC_PROGRAM_CATALOG.map((p) => ({ slug: p.slug, label: p.label })) });
+});
+
+router.get("/intelligence/programs/:slug/matches", async (req, res) => {
+  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  res.json(await matchOpportunitiesForProgram(req.params.slug, limit ?? 25));
+});
+
+router.post("/intelligence/sync", async (req: Request, res: Response) => {
+  res.json(await runGrantIntelligenceSync({ actorEmail: req.hqUser?.email }));
+});
+
+router.post("/intelligence/aura/ask", async (req: Request, res: Response) => {
+  const question = String(req.body?.question ?? "").trim();
+  if (!question) return res.status(400).json({ error: "question required" });
+  res.json(await askGrantAura(question, { actorEmail: req.hqUser?.email }));
+});
+
+router.post("/opportunities/:id/score-intelligence", async (req: Request, res: Response) => {
+  const score = await scoreOpportunityIntelligence(req.params.id, {
+    divisionSlug: req.body?.divisionSlug,
+    actorEmail: req.hqUser?.email,
+  });
+  if (!score) return res.status(404).json({ error: "Opportunity not found" });
+  res.json({ intelligence: score });
+});
+
+router.post("/opportunities/:id/start-application", async (req: Request, res: Response) => {
+  const result = await startGrantApplicationWorkflow(req.params.id, {
+    actorEmail: req.hqUser?.email,
+    generateDrafts: req.body?.generateDrafts === true,
+  });
+  if (!result.ok) return res.status(404).json(result);
+  res.status(result.existing ? 200 : 201).json(result);
+});
+
+router.post("/applications/:id/generate-full-draft", async (req: Request, res: Response) => {
+  const sections = Array.isArray(req.body?.sections) ? req.body.sections.map(String) : undefined;
+  res.json(await generateFullProposalDraft(req.params.id, {
+    actorEmail: req.hqUser?.email,
+    sections,
+  }));
 });
 
 router.get("/center/executive-summary", async (_req, res) => {
