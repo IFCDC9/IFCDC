@@ -3,7 +3,31 @@ import type { AnalyticsOverview } from "../api/analyticsApi";
 import type { OperationsOverview } from "../api/operationsApi";
 import type { ActivityItem } from "../api/hqApi";
 
-/** Safe defaults so Founder Dashboard always renders even when APIs fail */
+/** Executive Dashboard must render within 5s — fail fast with safe empty state. */
+export const EXECUTIVE_OVERVIEW_FETCH_TIMEOUT_MS = 5_000;
+
+/** Production-safe empty executive snapshot — zeros only, never demo seed numbers. */
+export const EMPTY_EXECUTIVE_OVERVIEW: ExecutiveOverview = {
+  organizationHealthScore: 0,
+  organizationHealth: { overall: 0, grade: "—", factors: [] },
+  metrics: {
+    totalEmployees: 0,
+    activeEmployees: 0,
+    activeVolunteers: 0,
+    activeGrants: 0,
+    donationRevenue: 0,
+    monthlyDonations: 0,
+    monthlyExpenses: 0,
+    programsRunning: 0,
+  },
+  monthlyTrend: [],
+  recentActivity: [],
+  softwareDivision: { total: 0, healthy: 0, operational: 0, production: 0, inDevelopment: 0 },
+  platformServices: { total: 0, healthy: 0, details: {} },
+  timestamp: new Date().toISOString(),
+};
+
+/** Safe defaults so Founder Dashboard always renders even when APIs fail (development only) */
 export const DEFAULT_EXECUTIVE_OVERVIEW: ExecutiveOverview = {
   organizationHealthScore: 82,
   organizationHealth: {
@@ -159,18 +183,21 @@ export function normalizeOperationsOverview(data?: Partial<OperationsOverview> |
   };
 }
 
-export function normalizeExecutiveOverview(data?: Partial<ExecutiveOverview> | null): ExecutiveOverview | null {
-  if (!data) return isProductionClient ? null : DEFAULT_EXECUTIVE_OVERVIEW;
+export function normalizeExecutiveOverview(data?: Partial<ExecutiveOverview> | null): ExecutiveOverview {
+  if (!data) return isProductionClient ? { ...EMPTY_EXECUTIVE_OVERVIEW } : DEFAULT_EXECUTIVE_OVERVIEW;
   if (isProductionClient) {
+    const base = EMPTY_EXECUTIVE_OVERVIEW;
     return {
-      ...data,
-      organizationHealth: data.organizationHealth,
-      organizationHealthScore:
-        data.organizationHealthScore ?? data.organizationHealth?.overall ?? 0,
-      metrics: data.metrics!,
-      recentActivity: data.recentActivity ?? [],
-      softwareDivision: data.softwareDivision,
-      platformServices: data.platformServices ?? [],
+      organizationHealthScore: data.organizationHealthScore ?? data.organizationHealth?.overall ?? base.organizationHealthScore,
+      organizationHealth: data.organizationHealth ?? base.organizationHealth,
+      metrics: { ...base.metrics, ...data.metrics },
+      monthlyTrend: data.monthlyTrend ?? base.monthlyTrend,
+      recentActivity: data.recentActivity ?? base.recentActivity,
+      softwareDivision: { ...base.softwareDivision, ...data.softwareDivision },
+      platformServices: data.platformServices ?? base.platformServices,
+      timestamp: data.timestamp ?? new Date().toISOString(),
+      degraded: (data as { degraded?: boolean }).degraded,
+      warning: (data as { warning?: string | null }).warning ?? undefined,
     } as ExecutiveOverview;
   }
   const orgHealth = data.organizationHealth

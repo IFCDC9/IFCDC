@@ -41,6 +41,8 @@ export interface ExecutiveOverview {
     healthy: number;
     details: Record<string, boolean>;
   };
+  degraded?: boolean;
+  warning?: string | null;
   timestamp: string;
 }
 
@@ -98,13 +100,17 @@ export interface SoftwareDivisionFramework {
   timestamp: string;
 }
 
+import { hqApiFetch } from "./hqApiFetch";
+import { EXECUTIVE_OVERVIEW_FETCH_TIMEOUT_MS } from "../data/founderDashboardDefaults";
+
 async function hqFetch<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
   const { timeoutMs, ...init } = options ?? {};
   return hqApiFetch<T>(`/api/hq${path}`, { ...init, timeoutMs });
 }
 
 export const hqApi = {
-  executiveOverview: () => hqFetch<ExecutiveOverview>("/executive/overview"),
+  executiveOverview: () =>
+    hqFetch<ExecutiveOverview>("/executive/overview", { timeoutMs: EXECUTIVE_OVERVIEW_FETCH_TIMEOUT_MS }),
   softwareDivision: () => hqFetch<{ apps: SoftwareAppEntry[] }>("/software-division"),
   auraChat: (message: string, context?: string, mode?: string) =>
     hqFetch<{ response: string }>("/aura/chat", {

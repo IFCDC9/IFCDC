@@ -110,94 +110,17 @@ router.get("/platform/services", hqAuthRequired, async (_req, res) => {
 
 router.get("/executive/overview", hqAuthRequired, requireHQModule("executive"), async (req, res) => {
   try {
-    const apps = await pollAllApps();
-    const services = await checkIfcdcServices();
-    const metrics = await getOrganizationMetrics();
-    const [recentActivity, monthlyTrend, orgHealth, softwareHealth] = await Promise.all([
-      buildHeadquartersActivityFeed(12),
-      getMonthlyTrend(),
-      buildOrganizationHealthScore(),
-      buildSoftwareDivisionHealthScore(apps),
-    ]);
-    const healthyApps = softwareHealth.operational;
-    const healthyServices = Object.values(services).filter(Boolean).length;
-    const orgHealthScore = orgHealth.overall;
-
-    res.json({
-      organizationHealthScore: orgHealthScore,
-      organizationHealth: orgHealth,
-      metrics,
-      monthlyTrend,
-      recentActivity,
-      softwareDivision: {
-        total: softwareHealth.total,
-        healthy: healthyApps,
-        operational: healthyApps,
-        polledHealthy: apps.filter((a) => a.healthy).length,
-        production: SOFTWARE_DIVISION_APPS.filter((a) => a.status === "locked" || a.status === "production").length,
-        inDevelopment: SOFTWARE_DIVISION_APPS.filter((a) => a.status === "development" || a.status === "mvp").length,
-      },
-      platformServices: {
-        total: Object.keys(services).length,
-        healthy: healthyServices,
-        details: services,
-      },
-      modules: Object.keys(HQ_MODULE_PERMISSIONS),
-      user: {
+    const { buildExecutiveOverviewSafe } = await import("../hq/executiveOverviewEngine");
+    res.json(await buildExecutiveOverviewSafe(req.hqUser));
+  } catch (error) {
+    console.error("Executive overview route error:", error);
+    const { emptyExecutiveOverview } = await import("../hq/executiveOverviewEngine");
+    res.json(
+      emptyExecutiveOverview({
         role: req.hqUser?.role,
         hqRole: req.hqUser ? toHQRole(req.hqUser.role) : null,
-      },
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error("Executive overview error:", error);
-    if (process.env.NODE_ENV === "production") {
-      res.status(503).json({
-        error: "Executive overview unavailable",
-        message: error instanceof Error ? error.message : "Failed to load live organization metrics",
-        liveDataOnly: true,
-      });
-      return;
-    }
-    const [metrics, orgHealth, recentActivity] = await Promise.all([
-      getOrganizationMetrics().catch(() => ({
-        totalEmployees: 24,
-        activeEmployees: 22,
-        activeVolunteers: 18,
-        activeGrants: 6,
-        donationRevenue: 485000,
-        monthlyDonations: 42000,
-        monthlyExpenses: 38500,
-        programsRunning: 8,
-      })),
-      buildOrganizationHealthScore().catch(() => null),
-      buildHeadquartersActivityFeed(8).catch(() => []),
-    ]);
-    const orgHealthScore = orgHealth?.overall ?? 0;
-    res.json({
-      organizationHealthScore: orgHealthScore,
-      organizationHealth: orgHealth ?? {
-        overall: orgHealthScore,
-        grade: "Unknown",
-        factors: [],
-      },
-      metrics,
-      monthlyTrend: [
-        { month: "Jan", donations: 32000, expenses: 28000 },
-        { month: "Feb", donations: 35000, expenses: 30000 },
-        { month: "Mar", donations: 38000, expenses: 31000 },
-        { month: "Apr", donations: 40000, expenses: 33000 },
-        { month: "May", donations: 41000, expenses: 36000 },
-        { month: "Jun", donations: 42000, expenses: 38500 },
-      ],
-      recentActivity,
-      softwareDivision: { total: 5, healthy: 4, production: 2, inDevelopment: 2 },
-      platformServices: { total: 4, healthy: 4, details: {} },
-      modules: Object.keys(HQ_MODULE_PERMISSIONS),
-      user: { role: req.hqUser?.role, hqRole: req.hqUser ? toHQRole(req.hqUser.role) : null },
-      timestamp: new Date().toISOString(),
-      seeded: true,
-    });
+      })
+    );
   }
 });
 

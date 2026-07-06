@@ -20,6 +20,7 @@ import {
   Shield,
   Calendar,
   Bell,
+  AlertTriangle,
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from "recharts";
 import { grantsApi } from "../../api/grantsApi";
@@ -43,6 +44,7 @@ import { hqApi } from "../../api/hqApi";
 import { saveDashboardModeLocal, loadDashboardModeLocal, loadExecutiveWidgetsLocal } from "../../config/executiveWidgets";
 import {
   DEFAULT_EXECUTIVE_OVERVIEW,
+  EMPTY_EXECUTIVE_OVERVIEW,
   DEFAULT_ANALYTICS_OVERVIEW,
   DEFAULT_OPERATIONS_OVERVIEW,
   DEFAULT_AURA_INSIGHT,
@@ -57,7 +59,6 @@ import { resolveOrganizationHealth, formatHealthScore } from "../../utils/organi
 import { intelligenceApi } from "../../api/intelligenceApi";
 import { peopleApi } from "../../api/peopleApi";
 import { HqWidgetErrorBoundary } from "../../components/hq/HqErrorBoundary";
-import { HqDataUnavailable } from "../../components/hq/HqDataUnavailable";
 import { isProductionClient, devPlaceholder, strictApiCall } from "../../utils/productionDataPolicy";
 
 const ExecutiveWidgetDashboard = lazyWithRetry(
@@ -111,9 +112,17 @@ const ExecutiveDashboard: React.FC = () => {
   }, []);
   const { data: rawData, isLoading, isError, isFetched: executiveFetched } = useQuery({
     queryKey: ["hq-executive-overview"],
-    queryFn: () => hqApi.executiveOverview(),
+    queryFn: async () => {
+      try {
+        return await hqApi.executiveOverview();
+      } catch (err) {
+        console.warn("[executive-dashboard] overview degraded:", err);
+        return { ...EMPTY_EXECUTIVE_OVERVIEW, degraded: true, warning: "Executive overview API did not respond in time." };
+      }
+    },
+    placeholderData: EMPTY_EXECUTIVE_OVERVIEW,
     staleTime: 120_000,
-    retry: 1,
+    retry: 0,
   });
 
   const analytics = useQuery({
@@ -303,9 +312,12 @@ const ExecutiveDashboard: React.FC = () => {
     enabled: viewMode === "standard",
   });
 
-  const data = normalizeExecutiveOverview(
-    rawData ?? (isProductionClient ? null : executiveFetched ? null : DEFAULT_EXECUTIVE_OVERVIEW)
-  );
+  const data = normalizeExecutiveOverview(rawData ?? EMPTY_EXECUTIVE_OVERVIEW);
+  const executiveDegraded = Boolean((rawData as { degraded?: boolean })?.degraded) || isError;
+  const executiveWarning =
+    (rawData as { warning?: string | null })?.warning ??
+    (isError ? "GET /api/hq/executive/overview failed — showing safe empty metrics." : null);
+
   const analyticsData = analytics.data
     ? normalizeAnalyticsOverview(analytics.data)
     : normalizeAnalyticsOverview(
@@ -313,26 +325,7 @@ const ExecutiveDashboard: React.FC = () => {
       );
   const opsData = normalizeOperationsOverview(ops.data);
 
-  const executiveCoreFailed =
-    isProductionClient && (isError || (executiveFetched && !rawData) || !data);
   const analyticsCoreFailed = isProductionClient && analytics.isError && !analyticsData;
-
-  if (isProductionClient && isLoading && !rawData) {
-    return <HqLoading message="Loading executive command center…" />;
-  }
-
-  if (executiveCoreFailed) {
-    return (
-      <HqDataUnavailable
-        message="Executive overview could not be loaded from production APIs. Demo metrics are disabled in production."
-        detail={isError ? "GET /api/hq/executive/overview failed" : undefined}
-        onRetry={() => {
-          void queryClient.invalidateQueries({ queryKey: ["hq-executive-overview"] });
-          void queryClient.invalidateQueries({ queryKey: ["hq-founder-analytics"] });
-        }}
-      />
-    );
-  }
 
   const healthLoading = !analytics.isFetched && !executiveFetched;
   const health = resolveOrganizationHealth(analyticsData, data) ?? (healthLoading ? null : data?.organizationHealth ?? null);
@@ -368,6 +361,27 @@ const ExecutiveDashboard: React.FC = () => {
           <HqLiveIndicator intervalSec={0} connected={realtimeConnected} />
         </div>
       </div>
+
+      {executiveDegraded && (
+        <div className="hq-anomaly-alert hq-sev-medium hq-fade-in" style={{ marginBottom: "1rem" }} role="status">
+          <AlertTriangle size={16} />
+          <div>
+            <strong>Degraded mode</strong>
+            <span>
+              {executiveWarning ??
+                "Live executive metrics are still loading or temporarily unavailable. Showing safe empty cards — data will refresh when APIs respond."}
+            </span>
+            <button
+              type="button"
+              className="hq-btn hq-btn-sm hq-btn-ghost"
+              style={{ marginLeft: "0.75rem" }}
+              onClick={() => void queryClient.invalidateQueries({ queryKey: ["hq-executive-overview"] })}
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
 
       {anomalyAlerts.length > 0 && (
         <div className="hq-anomaly-alert-strip hq-fade-in" role="alert">
@@ -449,7 +463,7 @@ const ExecutiveDashboard: React.FC = () => {
         <Link to="/hq/aura"><Sparkles size={14} /> AURA</Link>
       </nav>
 
-      {viewMode === "standard" && isLoading && (
+      {viewMode === "standard" && isLoading && !rawData && (
         <HqLoading message="Refreshing enterprise metrics…" />
       )}
       {viewMode === "standard" && analyticsCoreFailed && (
