@@ -25,15 +25,6 @@ const MAX_VOICE_TURNS = 12;
 const RADIO_NUMBER = "+18587588791";
 const VOICE = "Polly.Joanna" as const;
 
-function escapeXml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
-
 function truncateForSpeech(text: string, max = 520): string {
   const plain = text
     .replace(/[*_#`[\]]/g, "")
@@ -44,6 +35,10 @@ function truncateForSpeech(text: string, max = 520): string {
   const cut = plain.slice(0, max);
   const lastPeriod = cut.lastIndexOf(".");
   return lastPeriod > max * 0.45 ? cut.slice(0, lastPeriod + 1) : `${cut}.`;
+}
+
+function sayNatural(twiml: InstanceType<typeof VoiceResponse>, text: string): void {
+  twiml.say({ voice: VOICE, language: "en-US" }, truncateForSpeech(text));
 }
 
 function truncateForSms(text: string, max = 1500): string {
@@ -68,17 +63,6 @@ function buildGatherUrl(turn: number, callSid?: string): string {
   const qs = new URLSearchParams({ turn: String(turn) });
   if (callSid) qs.set("CallSid", callSid);
   return `${base}/api/twilio/aura/voice/respond?${qs.toString()}`;
-}
-
-function sayNatural(twiml: InstanceType<typeof VoiceResponse>, text: string): void {
-  const spoken = truncateForSpeech(text);
-  twiml.say(
-    {
-      voice: VOICE,
-      language: "en-US",
-    },
-    `<speak><prosody rate="95%" volume="medium"><break time="200ms"/>${escapeXml(spoken)}</prosody></speak>`
-  );
 }
 
 function appendGather(twiml: InstanceType<typeof VoiceResponse>, turn: number, callSid?: string): void {
