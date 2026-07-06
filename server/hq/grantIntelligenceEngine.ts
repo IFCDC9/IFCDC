@@ -15,9 +15,367 @@ import {
   seedWriterSectionsForApplication,
   assistWriterSection,
   updateWriterSection,
+  listWriterSections,
 } from "./grantCenterEngine";
 import { buildGrantExecutiveDashboard } from "./grantReporting";
 import { productionGrantOpportunitySqlFilter } from "./grantProductionPolicy";
+import { buildApplicationWorkspace } from "./grantFundingEngineV5";
+import { getApplicationWorkflow } from "./grantFundingEngine";
+import { fetchGrantsGovOpportunityDeadline } from "./grantsGovIntegrationEngine";
+
+/** User-facing grant lifecycle workflow (human approval gate before submit). */
+export const GRANT_DISPLAY_WORKFLOW = [
+  { key: "discovered", label: "Discovered" },
+  { key: "matched", label: "Matched" },
+  { key: "drafting", label: "Drafting" },
+  { key: "founder_review", label: "Founder Review" },
+  { key: "ready_to_submit", label: "Ready to Submit" },
+  { key: "submitted", label: "Submitted" },
+  { key: "awarded", label: "Awarded" },
+  { key: "rejected", label: "Rejected" },
+] as const;
+
+export type EnrichedOpportunityRow = {
+  id: string;
+  title: string;
+  funder: string;
+  fundingAmount: { min: number | null; max: number | null; label: string };
+  eligibility: string;
+  matchScore: number;
+  deadline: string | null;
+  deadlineLabel: string;
+  programFit: { slugs: string[]; labels: string[] };
+  status: string;
+  statusLabel: string;
+  lastSynced: string | null;
+  sourceType: string;
+  dataSourceLabel: string;
+  url: string | null;
+  compositeScore: number;
+};
+
+function formatFundingLabel(min: number | null, max: number | null): string {
+  if (max != null && min != null && min !== max) return `$${min.toLocaleString()} – $${max.toLocaleString()}`;
+  if (max != null) return `Up to $${max.toLocaleString()}`;
+  if (min != null) return `From $${min.toLocaleString()}`;
+  return "Amount TBD";
+}
+
+function deadlineLabel(deadline: string | null | undefined): string {
+  if (!deadline?.trim()) return "No deadline listed";
+  const d = new Date(deadline);
+  if (Number.isNaN(d.getTime())) return "No deadline listed";
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function sourceLabel(sourceType: string | null | undefined): string {
+  const map: Record<string, string> = {
+    grants_gov: "Grants.gov",
+    sam_gov: "SAM.gov",
+    foundation_directory: "Foundation Directory",
+    corporate_csr: "Corporate CSR",
+    manual: "Manual entry",
+  };
+  return map[String(sourceType ?? "")] ?? "IFCDC HQ";
+}
+
+function displayStatusForOpportunity(row: Record<string, unknown>, matchScore: number): { status: string; label: string } {
+  const fundingStatus = String(row.funding_status ?? "identified");
+  const lifecycle = String(row.lifecycle_stage ?? "prospect");
+  if (fundingStatus === "awarded" || lifecycle === "awarded") return { status: "awarded", label: "Awarded" };
+  if (fundingStatus === "declined") return { status: "rejected", label: "Rejected" };
+  if (fundingStatus === "submitted") return { status: "submitted", label: "Submitted" };
+  if (fundingStatus === "eligible" || matchScore >= 60) return { status: "matched", label: "Matched" };
+  if (fundingStatus === "reviewing") return { status: "matched", label: "Matched" };
+  return { status: "discovered", label: "Discovered" };
+}
+
+function displayStatusForApplication(app: Record<string, unknown>): { status: string; label: string } {
+  const status = String(app.status ?? "draft");
+  const founder = String(app.founder_approval_status ?? "pending");
+  const ready = Number(app.ready_to_submit ?? 0) === 1;
+  if (status === "awarded") return { status: "awarded", label: "Awarded" };
+  if (status === "denied") return { status: "rejected", label: "Rejected" };
+  if (status === "submitted" || status === "under_review") return { status: "submitted", label: "Submitted" };
+  if (founder === "approved" && ready) return { status: "ready_to_submit", label: "Ready to Submit" };
+  if (founder === "approved") return { status: "founder_review", label: "Founder Review" };
+  if (founder === "changes_requested") return { status: "drafting", label: "Drafting" };
+  if (status === "draft") return { status: "drafting", label: "Drafting" };
+  return { status: "drafting", label: "Drafting" };
+}
+
+async function mapOpportunityRow(row: Record<string, unknown>): Promise<EnrichedOpportunityRow> {
+  await enrichOpportunityPrograms(String(row.id));
+  const fresh = (await getDb().then((db) =>
+    db.get<Record<string, unknown>>("SELECT * FROM grant_opportunities WHERE id = ?", row.id)
+  )) ?? row;
+  const inferred = inferProgramMatches(fresh);
+  const slugs = parseJsonArray(fresh.division_slugs).length ? parseJsonArray(fresh.division_slugs) : inferred.divisionSlugs;
+  const labels = slugs.map((s) => IFCDC_PROGRAM_CATALOG.find((p) => p.slug === s)?.label ?? s.replace(/_/g, " "));
+  const composite = fresh.composite_score != null
+    ? Number(fresh.composite_score)
+    : inferred.matchScore;
+  const matchScore = composite || inferred.matchScore;
+  const disp = displayStatusForOpportunity(fresh, matchScore);
+  const syncRow = await getDb().then((db) =>
+    db.get<{ last_sync_at: string }>("SELECT last_sync_at FROM grant_feed_sync WHERE provider = ?", String(fresh.source_type ?? "grants_gov"))
+  );
+
+  return {
+    id: String(fresh.id),
+    title: String(fresh.title ?? ""),
+    funder: String(fresh.funder ?? "—"),
+    fundingAmount: {
+      min: fresh.amount_min != null ? Number(fresh.amount_min) : null,
+      max: fresh.amount_max != null ? Number(fresh.amount_max) : null,
+      label: formatFundingLabel(
+        fresh.amount_min != null ? Number(fresh.amount_min) : null,
+        fresh.amount_max != null ? Number(fresh.amount_max) : null
+      ),
+    },
+    eligibility: String(fresh.eligibility ?? "See opportunity listing"),
+    matchScore,
+    deadline: fresh.deadline ? String(fresh.deadline) : null,
+    deadlineLabel: deadlineLabel(fresh.deadline ? String(fresh.deadline) : null),
+    programFit: { slugs, labels },
+    status: disp.status,
+    statusLabel: disp.label,
+    lastSynced: syncRow?.last_sync_at ?? (fresh.updated_at ? String(fresh.updated_at) : null),
+    sourceType: String(fresh.source_type ?? "manual"),
+    dataSourceLabel: sourceLabel(fresh.source_type ? String(fresh.source_type) : null),
+    url: fresh.url ? String(fresh.url) : null,
+    compositeScore: matchScore,
+  };
+}
+
+/** Enriched opportunity list for Discover / Matched / Program views. */
+export async function buildEnrichedOpportunityList(opts?: {
+  filter?: "all" | "matched" | "program";
+  programSlug?: string;
+  q?: string;
+  limit?: number;
+}) {
+  const db = await getDb();
+  const limit = opts?.limit ?? 100;
+  let sql = `
+    SELECT o.*,
+      (SELECT composite_score FROM grant_opportunity_scores WHERE opportunity_id = o.id ORDER BY created_at DESC LIMIT 1) as composite_score
+    FROM grant_opportunities o
+    WHERE o.status IN ('open','active','researching')${productionGrantOpportunitySqlFilter("o")}`;
+  const params: unknown[] = [];
+
+  if (opts?.q) {
+    sql += " AND (o.title LIKE ? OR o.funder LIKE ? OR o.description LIKE ?)";
+    const like = `%${opts.q}%`;
+    params.push(like, like, like);
+  }
+  if (opts?.filter === "program" && opts.programSlug) {
+    const like = `%${opts.programSlug}%`;
+    sql += " AND (o.division_slugs LIKE ? OR o.program_areas LIKE ? OR o.title LIKE ? OR o.description LIKE ?)";
+    params.push(like, like, like, like);
+  }
+  sql += " ORDER BY o.updated_at DESC LIMIT ?";
+  params.push(limit);
+
+  const rows = (await db.all(sql, ...params)) as Record<string, unknown>[];
+  let enriched = await Promise.all(rows.map((r) => mapOpportunityRow(r)));
+
+  if (opts?.filter === "matched") {
+    enriched = enriched.filter((o) => o.matchScore >= 55 || o.programFit.slugs.length > 0);
+  }
+
+  return {
+    opportunities: enriched,
+    filter: opts?.filter ?? "all",
+    programSlug: opts?.programSlug ?? null,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+/** Backfill missing deadlines from Grants.gov fetchOpportunity. */
+export async function enrichMissingDeadlines(limit = 30): Promise<number> {
+  const db = await getDb();
+  const rows = (await db.all(
+    `SELECT id, external_id, source_type FROM grant_opportunities
+     WHERE (deadline IS NULL OR deadline = '') AND source_type = 'grants_gov' AND external_id IS NOT NULL
+     ORDER BY updated_at DESC LIMIT ?`,
+    limit
+  )) as { id: string; external_id: string }[];
+
+  let updated = 0;
+  for (const row of rows) {
+    const deadline = await fetchGrantsGovOpportunityDeadline(row.external_id);
+    if (!deadline) continue;
+    await db.run("UPDATE grant_opportunities SET deadline = ?, updated_at = ? WHERE id = ?", deadline, new Date().toISOString(), row.id);
+    updated++;
+  }
+  return updated;
+}
+
+async function ensureApplicationDeadlineRecord(
+  opportunityId: string,
+  applicationId: string,
+  deadline: string | null,
+  title: string
+): Promise<void> {
+  if (!deadline) return;
+  const db = await getDb();
+  const existing = await db.get("SELECT id FROM grant_deadlines WHERE application_id = ? AND deadline_type = 'submission'", applicationId);
+  if (existing) return;
+  const now = new Date().toISOString();
+  await db.run(
+    `INSERT INTO grant_deadlines (id, opportunity_id, application_id, title, due_date, deadline_type, completed, reminder_days, created_at)
+     VALUES (?, ?, ?, ?, ?, 'submission', 0, 14, ?)`,
+    grantId(),
+    opportunityId,
+    applicationId,
+    `Submit: ${title.slice(0, 80)}`,
+    deadline,
+    now
+  );
+}
+
+/** Full application workspace for Grant Center UI. */
+export async function buildFullApplicationWorkspace(applicationId: string, opts?: { actorEmail?: string }) {
+  const [base, workflow, sections, intel] = await Promise.all([
+    buildApplicationWorkspace(applicationId, opts),
+    getApplicationWorkflow(applicationId),
+    listWriterSections(applicationId),
+    (async () => {
+      const db = await getDb();
+      const app = await db.get<{ opportunity_id: string | null }>("SELECT opportunity_id FROM grant_applications WHERE id = ?", applicationId);
+      if (!app?.opportunity_id) return null;
+      return scoreOpportunityIntelligence(app.opportunity_id, { actorEmail: opts?.actorEmail });
+    })(),
+  ]);
+
+  if (!base) return null;
+
+  const app = base.application as Record<string, unknown>;
+  const db = await getDb();
+  const deadlines = await db.all(
+    "SELECT * FROM grant_deadlines WHERE application_id = ? OR opportunity_id = ? ORDER BY due_date ASC",
+    applicationId,
+    app.opportunity_id ?? ""
+  );
+  const matchedSlug = String(app.matched_program_slug ?? intel?.matchedPrograms?.[0]?.slug ?? "");
+  const matchedLabel = IFCDC_PROGRAM_CATALOG.find((p) => p.slug === matchedSlug)?.label
+    ?? (matchedSlug ? matchedSlug.replace(/_/g, " ") : "—");
+  const disp = displayStatusForApplication(app);
+  const narrativeSection = (sections.sections as { section_key: string; content: string }[]).find((s) => s.section_key === "executive_summary");
+  const budget = base.proposalBudget as Record<string, unknown>;
+
+  const tasks = (workflow.steps as { step_key: string; step_label: string; status: string }[]).map((s) => ({
+    key: s.step_key,
+    label: s.step_label,
+    done: s.status === "completed",
+  }));
+
+  return {
+    ...base,
+    displayWorkflow: GRANT_DISPLAY_WORKFLOW,
+    currentWorkflowStage: disp,
+    opportunity: {
+      id: app.opportunity_id,
+      title: app.opportunity_title,
+      funder: app.funder,
+      deadline: app.deadline,
+      deadlineLabel: deadlineLabel(app.deadline ? String(app.deadline) : null),
+      amountMax: app.amount_max,
+      eligibility: app.eligibility,
+    },
+    matchedProgram: { slug: matchedSlug, label: matchedLabel },
+    intelligence: intel,
+    writerSections: sections,
+    narrativeDraft: narrativeSection?.content ?? "",
+    budgetDraft: budget,
+    taskChecklist: tasks,
+    deadlineTracker: deadlines,
+    founderApproval: {
+      status: String(app.founder_approval_status ?? "pending"),
+      approvedAt: app.founder_approved_at ?? null,
+      approvedBy: app.founder_approved_by ?? null,
+      readyToSubmit: Number(app.ready_to_submit ?? 0) === 1,
+    },
+    humanReviewRequired: true,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+export async function setFounderApproval(
+  applicationId: string,
+  action: "approve" | "request_changes" | "mark_ready",
+  opts?: { actorEmail?: string; note?: string }
+) {
+  const db = await getDb();
+  const app = await db.get<{ id: string; status: string }>("SELECT id, status FROM grant_applications WHERE id = ?", applicationId);
+  if (!app) return { ok: false, error: "Application not found" };
+
+  const now = new Date().toISOString();
+  if (action === "approve") {
+    await db.run(
+      `UPDATE grant_applications SET founder_approval_status = 'approved', founder_approved_at = ?, founder_approved_by = ?, ready_to_submit = 1, lifecycle_stage = 'internal_approval', updated_at = ? WHERE id = ?`,
+      now,
+      opts?.actorEmail ?? null,
+      now,
+      applicationId
+    );
+  } else if (action === "request_changes") {
+    await db.run(
+      `UPDATE grant_applications SET founder_approval_status = 'changes_requested', ready_to_submit = 0, updated_at = ? WHERE id = ?`,
+      now,
+      applicationId
+    );
+  } else if (action === "mark_ready") {
+    const approval = await db.get<{ founder_approval_status: string }>(
+      "SELECT founder_approval_status FROM grant_applications WHERE id = ?",
+      applicationId
+    );
+    if (approval?.founder_approval_status !== "approved") {
+      return { ok: false, error: "Founder must approve before marking ready to submit." };
+    }
+    await db.run(
+      `UPDATE grant_applications SET ready_to_submit = 1, lifecycle_stage = 'application_drafting', updated_at = ? WHERE id = ?`,
+      now,
+      applicationId
+    );
+  }
+
+  await logGrantActivity("application", applicationId, `founder_${action}`, opts?.note ?? action, opts?.actorEmail);
+  return { ok: true, workspace: await buildFullApplicationWorkspace(applicationId, opts) };
+}
+
+export async function listEnrichedApplications(opts?: { status?: string; limit?: number }) {
+  const db = await getDb();
+  let sql = `
+    SELECT a.*, o.title as opportunity_title, o.funder, o.deadline as opportunity_deadline, o.amount_max
+    FROM grant_applications a
+    LEFT JOIN grant_opportunities o ON o.id = a.opportunity_id
+    WHERE 1=1`;
+  const params: unknown[] = [];
+
+  if (opts?.status === "drafts") {
+    sql += " AND a.status = 'draft'";
+  } else if (opts?.status === "submitted") {
+    sql += " AND a.status IN ('submitted', 'under_review')";
+  } else if (opts?.status === "awards") {
+    sql += " AND a.status = 'awarded'";
+  } else if (opts?.status === "rejected") {
+    sql += " AND a.status = 'denied'";
+  }
+  sql += " ORDER BY a.updated_at DESC LIMIT ?";
+  params.push(opts?.limit ?? 100);
+
+  const rows = (await db.all(sql, ...params)) as Record<string, unknown>[];
+  return {
+    applications: rows.map((a) => ({
+      ...a,
+      workflowStage: displayStatusForApplication(a),
+      deadlineLabel: deadlineLabel(a.opportunity_deadline ? String(a.opportunity_deadline) : null),
+    })),
+    generatedAt: new Date().toISOString(),
+  };
+}
 
 const SYNC_INTERVAL_MS = 6 * 60 * 60_000;
 let syncTimer: ReturnType<typeof setInterval> | null = null;
@@ -385,11 +743,13 @@ export async function startGrantApplicationWorkflow(
   if (existing) {
     const intel = await scoreOpportunityIntelligence(opportunityId, { actorEmail: opts?.actorEmail });
     await seedWriterSectionsForApplication(existing.id);
+    const workspace = await buildFullApplicationWorkspace(existing.id, { actorEmail: opts?.actorEmail });
     return {
       ok: true,
       applicationId: existing.id,
       existing: true,
       intelligence: intel,
+      workspace,
       message: "Existing draft application resumed — human review required before federal submission.",
     };
   }
@@ -398,21 +758,29 @@ export async function startGrantApplicationWorkflow(
   const now = new Date().toISOString();
   const appId = grantId();
   const title = `Application: ${String(opp.title)}`;
+  const matchedSlug = intel?.matchedPrograms?.[0]?.slug ?? inferProgramMatches(opp).divisionSlugs[0] ?? null;
 
   await db.run(
-    `INSERT INTO grant_applications (id, opportunity_id, title, status, amount_requested, assigned_to, notes, workflow_stage, created_at, updated_at)
-     VALUES (?, ?, ?, 'draft', ?, ?, ?, 'intake', ?, ?)`,
+    `INSERT INTO grant_applications (id, opportunity_id, title, status, amount_requested, assigned_to, notes, workflow_stage, lifecycle_stage, matched_program_slug, founder_approval_status, created_at, updated_at)
+     VALUES (?, ?, ?, 'draft', ?, ?, ?, 'intake', 'application_drafting', ?, 'pending', ?, ?)`,
     appId,
     opportunityId,
     title,
     opp.amount_max != null ? Number(opp.amount_max) : null,
     opts?.actorEmail ?? "",
     "Created via Grant Intelligence Engine — requires human review before submission.",
+    matchedSlug,
     now,
     now
   );
 
   await ensureApplicationWorkflow(appId);
+  await ensureApplicationDeadlineRecord(
+    opportunityId,
+    appId,
+    opp.deadline ? String(opp.deadline) : null,
+    String(opp.title)
+  );
   const sections = await seedWriterSectionsForApplication(appId);
 
   const attachments = parseAttachments(String(opp.requirements ?? ""));
@@ -425,10 +793,12 @@ export async function startGrantApplicationWorkflow(
 
   await logGrantActivity("application", appId, "intelligence_workflow_started", title, opts?.actorEmail);
   await db.run(
-    `UPDATE grant_opportunities SET funding_status = 'reviewing', lifecycle_stage = 'application_prep', updated_at = ? WHERE id = ?`,
+    `UPDATE grant_opportunities SET funding_status = 'eligible', lifecycle_stage = 'eligibility_review', updated_at = ? WHERE id = ?`,
     now,
     opportunityId
   );
+
+  const workspace = await buildFullApplicationWorkspace(appId, { actorEmail: opts?.actorEmail });
 
   return {
     ok: true,
@@ -436,6 +806,7 @@ export async function startGrantApplicationWorkflow(
     existing: false,
     intelligence: intel,
     writerSections: sections,
+    workspace,
     humanReviewRequired: true,
     message: "Application draft created. Review all sections before submitting to the funder.",
   };
@@ -531,8 +902,9 @@ export async function askGrantAura(question: string, opts?: { actorEmail?: strin
 
 /** Sync feeds + enrich + optional broadcast. */
 export async function runGrantIntelligenceSync(opts?: { actorEmail?: string }) {
-  const feedResults = await syncGrantFeeds({ providers: ["grants_gov"] });
+  const feedResults = await syncGrantFeeds({ providers: ["grants_gov", "sam_gov"] });
   const enriched = await enrichAllOpportunities(150);
+  const deadlinesFilled = await enrichMissingDeadlines(40);
 
   try {
     const { notifyHqDataChange } = await import("./hqRealtimeEvents");
@@ -544,6 +916,7 @@ export async function runGrantIntelligenceSync(opts?: { actorEmail?: string }) {
   return {
     feedResults,
     enriched,
+    deadlinesFilled,
     syncedAt: new Date().toISOString(),
     actor: opts?.actorEmail ?? null,
   };

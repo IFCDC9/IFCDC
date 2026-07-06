@@ -125,6 +125,11 @@ import {
   askGrantAura,
   matchOpportunitiesForProgram,
   IFCDC_PROGRAM_CATALOG,
+  buildEnrichedOpportunityList,
+  buildFullApplicationWorkspace,
+  setFounderApproval,
+  listEnrichedApplications,
+  GRANT_DISPLAY_WORKFLOW,
 } from "../hq/grantIntelligenceEngine";
 import { getGrantCenterQaReport, grantCenterQaEnvReady } from "../hq/grantCenterQaCache";
 import { runGrantCenterProductionQa } from "../hq/grantCenterProductionQaRunner";
@@ -244,6 +249,48 @@ router.get("/intelligence/programs", async (_req, res) => {
 router.get("/intelligence/programs/:slug/matches", async (req, res) => {
   const limit = req.query.limit ? Number(req.query.limit) : undefined;
   res.json(await matchOpportunitiesForProgram(req.params.slug, limit ?? 25));
+});
+
+router.get("/intelligence/opportunities", async (req, res) => {
+  const filter = req.query.filter ? String(req.query.filter) : "all";
+  const programSlug = req.query.programSlug ? String(req.query.programSlug) : undefined;
+  const q = req.query.q ? String(req.query.q) : undefined;
+  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  res.json(await buildEnrichedOpportunityList({
+    filter: filter as "all" | "matched" | "program",
+    programSlug,
+    q,
+    limit,
+  }));
+});
+
+router.get("/intelligence/workflow-stages", async (_req, res) => {
+  res.json({ stages: GRANT_DISPLAY_WORKFLOW });
+});
+
+router.get("/applications/enriched", async (req, res) => {
+  const status = req.query.status ? String(req.query.status) : undefined;
+  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  res.json(await listEnrichedApplications({ status, limit }));
+});
+
+router.post("/applications/:id/founder-approval", async (req: Request, res: Response) => {
+  const action = req.body?.action;
+  if (!["approve", "request_changes", "mark_ready"].includes(action)) {
+    return res.status(400).json({ error: "action must be approve, request_changes, or mark_ready" });
+  }
+  const result = await setFounderApproval(req.params.id, action, {
+    actorEmail: req.hqUser?.email,
+    note: req.body?.note,
+  });
+  if (!result.ok) return res.status(400).json(result);
+  res.json(result);
+});
+
+router.get("/applications/:id/full-workspace", async (req, res) => {
+  const workspace = await buildFullApplicationWorkspace(req.params.id, { actorEmail: req.hqUser?.email });
+  if (!workspace) return res.status(404).json({ error: "Application not found" });
+  res.json(workspace);
 });
 
 router.post("/intelligence/sync", async (req: Request, res: Response) => {
@@ -1313,7 +1360,7 @@ router.post("/opportunities/:id/score-v5", async (req, res) => {
 });
 
 router.get("/applications/:id/workspace", async (req, res) => {
-  const workspace = await buildApplicationWorkspace(req.params.id, { actorEmail: req.hqUser?.email });
+  const workspace = await buildFullApplicationWorkspace(req.params.id, { actorEmail: req.hqUser?.email });
   if (!workspace) return res.status(404).json({ error: "Application not found" });
   res.json(workspace);
 });

@@ -814,6 +814,27 @@ export const grantsApi = {
     apiFetch<{ programSlug: string; programLabel: string; matches: Record<string, unknown>[] }>(
       `/intelligence/programs/${programSlug}/matches`
     ),
+  enrichedOpportunities: (params?: { filter?: string; programSlug?: string; q?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.filter) qs.set("filter", params.filter);
+    if (params?.programSlug) qs.set("programSlug", params.programSlug);
+    if (params?.q) qs.set("q", params.q);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return apiFetch<{ opportunities: Record<string, unknown>[] }>(`/intelligence/opportunities${q ? `?${q}` : ""}`);
+  },
+  enrichedApplications: (status?: string) =>
+    apiFetch<{ applications: Record<string, unknown>[] }>(
+      `/applications/enriched${status ? `?status=${status}` : ""}`
+    ),
+  fullApplicationWorkspace: (applicationId: string) =>
+    apiFetch<Record<string, unknown>>(`/applications/${applicationId}/full-workspace`),
+  founderApproval: (applicationId: string, action: "approve" | "request_changes" | "mark_ready", note?: string) =>
+    apiFetch<{ ok: boolean; workspace?: Record<string, unknown> }>(
+      `/applications/${applicationId}/founder-approval`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, note }) }
+    ),
+  workflowStages: () => apiFetch<{ stages: { key: string; label: string }[] }>("/intelligence/workflow-stages"),
 };
 
 export interface GrantFunder {

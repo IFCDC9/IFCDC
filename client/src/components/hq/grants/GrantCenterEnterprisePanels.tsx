@@ -7,6 +7,7 @@ import { StatusBadge } from "../StatusBadge";
 import { HqLoading } from "../HqLoading";
 import { KpiCard } from "../KpiCard";
 import { formatCurrency } from "../../../utils/safeFormat";
+import { fmtGrantDeadline, fmtGrantSyncDate } from "../../../utils/grantFormat";
 import { useDebouncedValue } from "../../../hooks/useDebouncedValue";
 import { useGrantManage } from "../../../hooks/useGrantManage";
 
@@ -278,7 +279,7 @@ export const GrantIntelligencePanel: React.FC<{
                       <td>{String(o.title ?? "")}</td>
                       <td>{String(o.funder ?? "")}</td>
                       <td><StatusBadge label={`${Number(o.compositeScore ?? 0)}%`} variant={Number(o.compositeScore) >= 70 ? "success" : "warning"} /></td>
-                      <td>{o.deadline ? String(o.deadline) : "—"}</td>
+                      <td>{fmtGrantDeadline(o.deadline ? String(o.deadline) : null)}</td>
                       <td>
                         {canManage && (
                           <button
@@ -404,7 +405,7 @@ export const GrantOpportunityFinderPanel: React.FC<{
                   <td>{o.title}</td>
                   <td>{o.funder}</td>
                   <td><span className="hq-muted-text" style={{ fontSize: "0.75rem" }}>{o.dataSourceLabel ?? "—"}</span></td>
-                  <td>{o.deadline ?? "—"}</td>
+                  <td>{fmtGrantDeadline(o.deadline ? String(o.deadline) : null)}</td>
                   <td>{o.amount_max ? `$${o.amount_max.toLocaleString()}` : "—"}</td>
                   <td>
                     {intel ? (

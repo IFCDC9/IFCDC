@@ -127,6 +127,7 @@ export async function ensureGrantTables(): Promise<void> {
   await migrateGrantPhase6();
   await migrateGrantPhase7();
   await migrateGrantPhase8();
+  await migrateGrantPhase9();
   if (!allowGrantDemoSeed()) {
     return;
   }
@@ -631,6 +632,27 @@ async function migrateGrantPhase8(): Promise<void> {
     UPDATE grant_opportunities SET is_national = 1
     WHERE funder LIKE '%Department%' OR funder LIKE '%U.S.%' OR funder LIKE '%Federal%'
       OR funder LIKE '%SAMHSA%' OR funder LIKE '%NIH%' OR funder_type = 'federal'
+  `);
+}
+
+/** Phase 9 — Grant Intelligence Engine: founder approval + program matching on applications. */
+async function migrateGrantPhase9(): Promise<void> {
+  const db = await getDb();
+  const addCol = async (table: string, col: string, type: string) => {
+    try {
+      await db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+    } catch {
+      /* exists */
+    }
+  };
+  await addCol("grant_applications", "founder_approval_status", "TEXT DEFAULT 'pending'");
+  await addCol("grant_applications", "founder_approved_at", "TEXT");
+  await addCol("grant_applications", "founder_approved_by", "TEXT");
+  await addCol("grant_applications", "matched_program_slug", "TEXT");
+  await addCol("grant_applications", "ready_to_submit", "INTEGER DEFAULT 0");
+  await db.run(`
+    UPDATE grant_applications SET founder_approval_status = 'pending'
+    WHERE founder_approval_status IS NULL AND status IN ('draft', 'under_review')
   `);
 }
 

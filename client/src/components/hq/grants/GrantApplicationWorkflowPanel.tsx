@@ -51,7 +51,12 @@ export const GrantApplicationWorkflowPanel: React.FC<{
   if (status === "under_review") availableActions.push("award", "deny");
 
   return (
-    <HqPanel title="Application Workflow" subtitle={`Current status: ${status.replace(/_/g, " ")}`}>
+    <HqPanel title="Application Workflow" subtitle={`Lifecycle: ${status.replace(/_/g, " ")} · Founder approval required before federal submit`}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", marginBottom: "1rem" }}>
+        {["Discovered", "Matched", "Drafting", "Founder Review", "Ready to Submit", "Submitted", "Awarded", "Rejected"].map((label, i) => (
+          <StatusBadge key={label} label={label} variant={i <= 2 && status === "draft" ? "warning" : "muted"} />
+        ))}
+      </div>
       <ol style={{ margin: "0 0 1rem", paddingLeft: "1.2rem", fontSize: "0.85rem" }}>
         {steps.map((s) => (
           <li key={s.step_key} style={{ marginBottom: "0.35rem" }}>
@@ -93,6 +98,9 @@ export const GrantApplicationWorkflowPanel: React.FC<{
           {(advance.error as Error)?.message ?? "Workflow action failed"}
         </p>
       )}
+      <p className="hq-muted-text" style={{ fontSize: "0.75rem", marginTop: "0.75rem" }}>
+        Submit to funder is blocked until founder approval is recorded in the workspace above.
+      </p>
     </HqPanel>
   );
 };

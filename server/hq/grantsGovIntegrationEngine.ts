@@ -243,9 +243,45 @@ function parseGrantAmount(raw: unknown): number | null {
 }
 
 function parseGrantDeadline(raw: unknown): string | null {
-  if (!raw) return null;
-  const d = new Date(String(raw));
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s || s.toLowerCase() === "null") return null;
+  const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (mdy) {
+    const iso = `${mdy[3]}-${mdy[1].padStart(2, "0")}-${mdy[2].padStart(2, "0")}`;
+    const d = new Date(iso);
+    if (!Number.isNaN(d.getTime())) return iso;
+  }
+  const ymd = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (ymd) return `${ymd[1]}-${ymd[2]}-${ymd[3]}`;
+  const d = new Date(s);
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
+
+/** Fetch single opportunity from Grants.gov when Search2 row lacks a deadline. */
+export async function fetchGrantsGovOpportunityDeadline(externalId: string): Promise<string | null> {
+  if (!externalId?.trim()) return null;
+  try {
+    const res = await fetch("https://api.grants.gov/v1/api/fetchOpportunity", {
+      method: "POST",
+      headers: searchHeaders(),
+      body: JSON.stringify({ opportunityId: externalId }),
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as Record<string, unknown>;
+    const nested = (data.data ?? data.opportunity ?? data) as Record<string, unknown>;
+    const syn = (nested.synopsis ?? nested) as Record<string, unknown>;
+    return parseGrantDeadline(
+      syn.closeDate ??
+        syn.responseDate ??
+        nested.closeDate ??
+        nested.applicationDueDate ??
+        nested.closeDateFormatted
+    );
+  } catch {
+    return null;
+  }
 }
 
 /** Public Search2 — no API key required per Grants.gov API Guide. */

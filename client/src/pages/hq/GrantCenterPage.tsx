@@ -10,8 +10,10 @@ import { StatusBadge } from "../../components/hq/StatusBadge";
 import { HqLoading } from "../../components/hq/HqLoading";
 import { formatCurrency } from "../../utils/safeFormat";
 import { lazyWithRetry } from "../../utils/lazyWithRetry";
-import { GrantApplicationWorkflowPanel } from "../../components/hq/grants/GrantApplicationWorkflowPanel";
-import { GrantLibraryPanel, GrantWriterStudioPanel, GrantOpportunityFinderPanel, GrantIntelligencePanel } from "../../components/hq/grants/GrantCenterEnterprisePanels";
+import { GrantLibraryPanel, GrantWriterStudioPanel, GrantIntelligencePanel } from "../../components/hq/grants/GrantCenterEnterprisePanels";
+import { GrantDiscoverHub, GrantApplicationsHub } from "../../components/hq/grants/GrantLifecycleHub";
+import { GrantFullApplicationWorkspace } from "../../components/hq/grants/GrantFullApplicationWorkspace";
+import { fmtGrantDeadline } from "../../utils/grantFormat";
 import { GrantReadOnlyBanner } from "../../components/hq/grants/GrantReadOnlyBanner";
 import { GrantQueryBoundary } from "../../components/hq/grants/GrantQueryBoundary";
 import { GrantSubNav } from "../../components/hq/grants/GrantSubNav";
@@ -26,10 +28,6 @@ const GrantV5FundingIntelligenceDashboard = lazyWithRetry(
 const GrantV5NationalDatabase = lazyWithRetry(
   () => import("../../components/hq/grants/GrantV5NationalDatabase").then((m) => ({ default: m.GrantV5NationalDatabase })),
   "GrantV5NationalDatabase"
-);
-const GrantV5ApplicationWorkspace = lazyWithRetry(
-  () => import("../../components/hq/grants/GrantV5ApplicationWorkspace").then((m) => ({ default: m.GrantV5ApplicationWorkspace })),
-  "GrantV5ApplicationWorkspace"
 );
 const GrantV5ComplianceDashboard = lazyWithRetry(
   () => import("../../components/hq/grants/GrantV5ComplianceDashboard").then((m) => ({ default: m.GrantV5ComplianceDashboard })),
@@ -109,8 +107,7 @@ function fmt(n: number | null | undefined): string {
 }
 
 function fmtDate(d: string | null | undefined): string {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return fmtGrantDeadline(d);
 }
 
 const GrantCenterPage: React.FC = () => {
@@ -180,6 +177,8 @@ const GrantCenterPage: React.FC = () => {
     setAppsSection("studio");
     selectTab("applications");
     qc.invalidateQueries({ queryKey: ["grant-writer-studio", applicationId] });
+    qc.invalidateQueries({ queryKey: ["grant-full-workspace", applicationId] });
+    qc.invalidateQueries({ queryKey: ["grant-enriched-applications"] });
   };
 
   const dashboard = useQuery({ queryKey: ["grants-dashboard"], queryFn: grantsApi.dashboard, enabled: tab === "overview" });
@@ -556,7 +555,7 @@ const GrantCenterPage: React.FC = () => {
               <GrantIntelligencePanel onStartApplication={handleStartApplication} />
             </div>
             <div style={{ marginBottom: "1.25rem" }}>
-              <GrantOpportunityFinderPanel onStartApplication={handleStartApplication} />
+              <GrantDiscoverHub onStartApplication={handleStartApplication} />
             </div>
             <div style={{ marginBottom: "1.25rem" }}>
               <Suspense fallback={<TabFallback />}><GrantV5NationalDatabase /></Suspense>
@@ -633,19 +632,64 @@ const GrantCenterPage: React.FC = () => {
           <>
             <GrantSubNav
               items={[
-                { id: "list", label: "Applications" },
+                { id: "list", label: "Applications Hub" },
                 { id: "studio", label: "Writer Studio" },
                 { id: "library", label: "Grant Library" },
               ]}
               active={appsSection}
               onChange={(id) => setAppsSection(id as typeof appsSection)}
             />
+            {appsSection === "list" && (
+              <>
+                {canManage && (
+                  <div style={{ marginBottom: "1rem", display: "flex", justifyContent: "flex-end" }}>
+                    <button type="button" className="hq-btn hq-btn-primary" onClick={() => setShowNewApp(!showNewApp)}><Plus size={16} /> New Application</button>
+                  </div>
+                )}
+                {canManage && showNewApp && (
+                  <div className="hq-panel hq-fade-in" style={{ marginBottom: "1rem", padding: "1.25rem" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: "0.75rem", alignItems: "end" }}>
+                      <div><label style={{ fontSize: "0.75rem", color: "var(--hq-text-muted)" }}>Title</label>
+                        <input className="hq-aura-input" value={newApp.title} onChange={(e) => setNewApp({ ...newApp, title: e.target.value })} /></div>
+                      <div><label style={{ fontSize: "0.75rem", color: "var(--hq-text-muted)" }}>Opportunity</label>
+                        <select className="hq-aura-input" value={newApp.opportunity_id} onChange={(e) => setNewApp({ ...newApp, opportunity_id: e.target.value })}>
+                          <option value="">Select…</option>{opps.map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}
+                        </select></div>
+                      <div><label style={{ fontSize: "0.75rem", color: "var(--hq-text-muted)" }}>Amount Requested</label>
+                        <input className="hq-aura-input" type="number" value={newApp.amount_requested} onChange={(e) => setNewApp({ ...newApp, amount_requested: e.target.value })} /></div>
+                      <button type="button" className="hq-btn hq-btn-primary" disabled={createApp.isPending} onClick={() => createApp.mutate({ title: newApp.title, opportunity_id: newApp.opportunity_id || undefined, amount_requested: newApp.amount_requested ? Number(newApp.amount_requested) : undefined })}>Create</button>
+                    </div>
+                  </div>
+                )}
+                <div style={{ marginBottom: "1.25rem" }}>
+                  <GrantApplicationsHub onOpenApplication={(id) => { setSelectedApplicationId(id); setAppsSection("studio"); }} />
+                </div>
+                <GrantFullApplicationWorkspace
+                  applicationId={selectedApplicationId}
+                  onUpdated={() => {
+                    qc.invalidateQueries({ queryKey: ["grants-applications"] });
+                    qc.invalidateQueries({ queryKey: ["grant-enriched-applications"] });
+                  }}
+                />
+              </>
+            )}
             {appsSection === "studio" && (
+              <>
               <GrantWriterStudioPanel
                 applications={(applications.data?.applications ?? []).map((a) => ({ id: a.id, title: a.title }))}
                 selectedApplicationId={selectedApplicationId}
                 onSelectApplication={(id) => setSelectedApplicationId(id || null)}
               />
+              <div style={{ marginTop: "1.25rem" }}>
+                <GrantFullApplicationWorkspace
+                  applicationId={selectedApplicationId}
+                  onUpdated={() => {
+                    qc.invalidateQueries({ queryKey: ["grants-applications"] });
+                    qc.invalidateQueries({ queryKey: ["grant-enriched-applications"] });
+                  }}
+                />
+              </div>
+              </>
             )}
             {appsSection === "library" && (
               <GrantLibraryPanel
@@ -662,68 +706,6 @@ const GrantCenterPage: React.FC = () => {
                   }
                 } : undefined}
               />
-            )}
-            {appsSection === "list" && (
-          <>
-            {canManage && (
-            <div style={{ marginBottom: "1rem", display: "flex", justifyContent: "flex-end" }}>
-              <button type="button" className="hq-btn hq-btn-primary" onClick={() => setShowNewApp(!showNewApp)}><Plus size={16} /> New Application</button>
-            </div>
-            )}
-            {canManage && showNewApp && (
-              <div className="hq-panel hq-fade-in" style={{ marginBottom: "1rem", padding: "1.25rem" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: "0.75rem", alignItems: "end" }}>
-                  <div><label style={{ fontSize: "0.75rem", color: "var(--hq-text-muted)" }}>Title</label>
-                    <input className="hq-aura-input" value={newApp.title} onChange={(e) => setNewApp({ ...newApp, title: e.target.value })} /></div>
-                  <div><label style={{ fontSize: "0.75rem", color: "var(--hq-text-muted)" }}>Opportunity</label>
-                    <select className="hq-aura-input" value={newApp.opportunity_id} onChange={(e) => setNewApp({ ...newApp, opportunity_id: e.target.value })}>
-                      <option value="">Select…</option>{opps.map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}
-                    </select></div>
-                  <div><label style={{ fontSize: "0.75rem", color: "var(--hq-text-muted)" }}>Amount Requested</label>
-                    <input className="hq-aura-input" type="number" value={newApp.amount_requested} onChange={(e) => setNewApp({ ...newApp, amount_requested: e.target.value })} /></div>
-                  <button type="button" className="hq-btn hq-btn-primary" disabled={createApp.isPending} onClick={() => createApp.mutate({ title: newApp.title, opportunity_id: newApp.opportunity_id || undefined, amount_requested: newApp.amount_requested ? Number(newApp.amount_requested) : undefined })}>Create</button>
-                </div>
-              </div>
-            )}
-            <div className="hq-panel">
-              <table className="hq-table">
-                <thead><tr><th>Application</th><th>Funder</th><th>Status</th><th>Requested</th><th></th></tr></thead>
-                <tbody>
-                  {(applications.data?.applications ?? []).map((a) => (
-                    <tr
-                      key={a.id}
-                      onClick={() => setSelectedApplicationId(a.id)}
-                      style={{ cursor: "pointer", background: selectedApplicationId === a.id ? "rgba(212,175,55,0.08)" : undefined }}
-                    >
-                      <td><strong>{a.title}</strong></td><td>{a.funder ?? "—"}</td>
-                      <td><StatusBadge label={a.status} variant={STATUS_VARIANT[a.status] ?? "muted"} /></td>
-                      <td>{fmt(a.amount_requested)}</td>
-                      <td className="hq-muted-text" style={{ fontSize: "0.78rem" }}>{selectedApplicationId === a.id ? "Selected" : "Click for workflow"}</td>
-                    </tr>
-                  ))}
-                  {!(applications.data?.applications ?? []).length && (
-                    <tr><td colSpan={5} className="hq-empty-cell">No applications yet — create one to open the Writer Studio.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            <div style={{ marginTop: "1.25rem" }}>
-              <Suspense fallback={<TabFallback />}>
-                <GrantV5ApplicationWorkspace applications={(applications.data?.applications ?? []).map((a) => ({ id: a.id, title: a.title }))} />
-              </Suspense>
-            </div>
-            <div style={{ marginTop: "1.25rem" }}>
-              <GrantApplicationWorkflowPanel
-                applicationId={selectedApplicationId}
-                onUpdated={() => {
-                  qc.invalidateQueries({ queryKey: ["grants-applications"] });
-                  qc.invalidateQueries({ queryKey: ["grants-awards"] });
-                  qc.invalidateQueries({ queryKey: ["grant-funding-outcomes"] });
-                  qc.invalidateQueries({ queryKey: ["grant-funding-engine"] });
-                }}
-              />
-            </div>
-          </>
             )}
           </>
         )}

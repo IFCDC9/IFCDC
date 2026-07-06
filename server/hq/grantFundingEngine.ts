@@ -278,6 +278,19 @@ export async function advanceApplicationWorkflow(
     return { ok: false, error: `Cannot ${action} from status ${app.status}` };
   }
 
+  if (action === "submit") {
+    const approval = await db.get<{ founder_approval_status: string | null }>(
+      "SELECT founder_approval_status FROM grant_applications WHERE id = ?",
+      applicationId
+    );
+    if (approval?.founder_approval_status && approval.founder_approval_status !== "approved") {
+      return {
+        ok: false,
+        error: "Founder approval required before submitting to the funder. Request founder review in the application workspace.",
+      };
+    }
+  }
+
   const now = new Date().toISOString();
   await db.run(
     `UPDATE grant_applications SET status = ?, workflow_stage = ?, updated_at = ?,
