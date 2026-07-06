@@ -54,5 +54,13 @@ export async function initializeHqModules(founder: FounderSeedConfig): Promise<v
     const connected = results.filter((r) => r.status === "connected").length;
     console.log(`Grant feed sync complete: ${connected}/${results.length} feeds connected`);
   }).catch((e) => console.warn("Grant feed sync skipped:", e?.message));
+  if (process.env.NODE_ENV === "production") {
+    import("../hq/twilioIntegrationEngine")
+      .then(({ syncTwilioWebhooksIfNeeded }) => syncTwilioWebhooksIfNeeded())
+      .then((result) => {
+        if (result?.synced) console.log(`Twilio startup webhook sync: ${result.message}`);
+      })
+      .catch((e) => console.warn("Twilio webhook sync skipped:", e?.message));
+  }
   console.log("IFCDC HQ database and modules initialized");
 }

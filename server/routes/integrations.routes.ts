@@ -94,6 +94,12 @@ router.post("/:provider/configure", async (req: Request, res: Response) => {
 
 router.post("/:provider/test", async (req, res) => {
   const provider = req.params.provider;
+  if (provider === "twilio" && req.query.sync === "webhooks") {
+    const { syncTwilioWebhooksToProduction, probeTwilioApi } = await import("../hq/twilioIntegrationEngine");
+    const sync = await syncTwilioWebhooksToProduction();
+    const probe = await probeTwilioApi();
+    return res.json({ ...sync, probe: { healthy: probe.healthy, message: probe.message, phone: probe.phone } });
+  }
   if (provider === "quickbooks") {
     const summary = await getQuickBooksSyncSummary();
     return res.json({

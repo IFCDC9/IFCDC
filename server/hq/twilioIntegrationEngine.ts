@@ -127,6 +127,187 @@ async function getTwilioClient() {
   return twilio.default(sid, token);
 }
 
+/** Detect dev tunnel URLs that must not remain on production Twilio numbers. */
+export function isTemporaryWebhookUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  return /ngrok|loca\.lt|trycloudflare|serveo|localhost|127\.0\.0\.1|\.loca\.lt/i.test(url);
+}
+
+function normalizeWebhookUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  return url.trim().replace(/\/$/, "");
+}
+
+/** HQ accepts canonical Render AURA endpoints or legacy /twiml aliases on production host. */
+export function isAcceptedVoiceWebhook(
+  url: string | null | undefined,
+  expected: string
+): boolean {
+  const actual = normalizeWebhookUrl(url);
+  if (!actual || isTemporaryWebhookUrl(actual)) return false;
+  const exp = normalizeWebhookUrl(expected);
+  if (actual === exp) return true;
+  return actual.endsWith("/twiml/voice") || actual.endsWith("/api/twilio/aura/voice");
+}
+
+export function isAcceptedSmsWebhook(url: string | null | undefined, expected: string): boolean {
+  const actual = normalizeWebhookUrl(url);
+  if (!actual || isTemporaryWebhookUrl(actual)) return false;
+  const exp = normalizeWebhookUrl(expected);
+  if (actual === exp) return true;
+  return actual.endsWith("/twiml/sms") || actual.endsWith("/api/twilio/aura/sms");
+}
+
+export type TwilioWebhookSyncResult = {
+  success: boolean;
+  message: string;
+  synced: boolean;
+  previous?: { voice: string | null; sms: string | null; status: string | null };
+  updated?: { voice: string; sms: string; status: string };
+};
+
+let lastWebhookSync: TwilioWebhookSyncResult | null = null;
+
+export function getLastTwilioWebhookSync(): TwilioWebhookSyncResult | null {
+  return lastWebhookSync;
+}
+
+/** Push production Render webhook URLs to the Twilio incoming phone number (removes ngrok/dev URLs). */
+export async function syncTwilioWebhooksToProduction(): Promise<TwilioWebhookSyncResult> {
+  const envStatus = getTwilioEnvStatus();
+  const urls = getTwilioWebhookUrls();
+  const targetPhone = envStatus.phoneNumber || IFCDC_HQ_PHONE_E164;
+
+  if (!envStatus.accountSidConfigured || !envStatus.authTokenConfigured) {
+    const result: TwilioWebhookSyncResult = {
+      success: false,
+      synced: false,
+      message: "Twilio credentials missing — cannot sync webhooks",
+    };
+    lastWebhookSync = result;
+    return result;
+  }
+
+  if (!urls.incomingVoice.startsWith("https://")) {
+    const result: TwilioWebhookSyncResult = {
+      success: false,
+      synced: false,
+      message: "PUBLIC_BASE_URL not set — cannot determine production webhook URLs",
+    };
+    lastWebhookSync = result;
+    return result;
+  }
+
+  try {
+    const client = await getTwilioClient();
+    if (!client) {
+      const result: TwilioWebhookSyncResult = {
+        success: false,
+        synced: false,
+        message: "Twilio client unavailable",
+      };
+      lastWebhookSync = result;
+      return result;
+    }
+
+    const numbers = await client.incomingPhoneNumbers.list({ phoneNumber: targetPhone, limit: 1 });
+    const num = numbers[0];
+    if (!num) {
+      const result: TwilioWebhookSyncResult = {
+        success: false,
+        synced: false,
+        message: `Phone number ${targetPhone} not found in Twilio account`,
+      };
+      lastWebhookSync = result;
+      return result;
+    }
+
+    const previous = {
+      voice: num.voiceUrl ?? null,
+      sms: num.smsUrl ?? null,
+      status: num.statusCallback ?? null,
+    };
+
+    const voiceOk = isAcceptedVoiceWebhook(previous.voice, urls.incomingVoice);
+    const smsOk = isAcceptedSmsWebhook(previous.sms, urls.incomingSms);
+    const statusOk =
+      !previous.status ||
+      normalizeWebhookUrl(previous.status) === normalizeWebhookUrl(urls.voiceStatus);
+
+    if (voiceOk && smsOk && statusOk && !isTemporaryWebhookUrl(previous.voice) && !isTemporaryWebhookUrl(previous.sms)) {
+      const result: TwilioWebhookSyncResult = {
+        success: true,
+        synced: false,
+        message: "Twilio webhooks already point to production Render endpoints",
+        previous,
+        updated: {
+          voice: urls.incomingVoice,
+          sms: urls.incomingSms,
+          status: urls.voiceStatus,
+        },
+      };
+      lastWebhookSync = result;
+      return result;
+    }
+
+    await client.incomingPhoneNumbers(num.sid).update({
+      voiceUrl: urls.incomingVoice,
+      voiceMethod: "POST",
+      voiceFallbackUrl: urls.incomingVoice,
+      voiceFallbackMethod: "POST",
+      statusCallback: urls.voiceStatus,
+      statusCallbackMethod: "POST",
+      smsUrl: urls.incomingSms,
+      smsMethod: "POST",
+      smsFallbackUrl: urls.incomingSms,
+      smsFallbackMethod: "POST",
+    });
+
+    const result: TwilioWebhookSyncResult = {
+      success: true,
+      synced: true,
+      message: `Webhooks synced to production · voice ${urls.incomingVoice} · SMS ${urls.incomingSms}`,
+      previous,
+      updated: {
+        voice: urls.incomingVoice,
+        sms: urls.incomingSms,
+        status: urls.voiceStatus,
+      },
+    };
+    lastWebhookSync = result;
+    console.log(`Twilio webhook sync: ${result.message}`);
+    if (previous.voice && isTemporaryWebhookUrl(previous.voice)) {
+      console.log(`  Removed temporary voice URL: ${previous.voice}`);
+    }
+    if (previous.sms && isTemporaryWebhookUrl(previous.sms)) {
+      console.log(`  Removed temporary SMS URL: ${previous.sms}`);
+    }
+    return result;
+  } catch (err) {
+    const result: TwilioWebhookSyncResult = {
+      success: false,
+      synced: false,
+      message: err instanceof Error ? err.message : "Twilio webhook sync failed",
+    };
+    lastWebhookSync = result;
+    return result;
+  }
+}
+
+/** Sync webhooks on startup when misconfigured (ngrok or wrong host). */
+export async function syncTwilioWebhooksIfNeeded(): Promise<TwilioWebhookSyncResult | null> {
+  const envStatus = getTwilioEnvStatus();
+  if (!envStatus.ready) return null;
+  const probe = await probeTwilioApi();
+  const urls = getTwilioWebhookUrls();
+  const voiceOk = isAcceptedVoiceWebhook(probe.phone.voiceWebhook, urls.incomingVoice);
+  const smsOk = isAcceptedSmsWebhook(probe.phone.smsWebhook, urls.incomingSms);
+  const hasTemp =
+    isTemporaryWebhookUrl(probe.phone.voiceWebhook) || isTemporaryWebhookUrl(probe.phone.smsWebhook);
+  if (voiceOk && smsOk && !hasTemp) return null;
+  return syncTwilioWebhooksToProduction();
+}
+
 /** Live Twilio REST probe — account + incoming phone number lookup. */
 export async function probeTwilioApi(): Promise<TwilioProbeResult> {
   const envStatus = getTwilioEnvStatus();
@@ -193,14 +374,8 @@ export async function probeTwilioApi(): Promise<TwilioProbeResult> {
         }
       : { ...emptyPhone, status: "not_found" };
 
-    const voiceWebhookOk =
-      !phone.voiceWebhook ||
-      phone.voiceWebhook.includes("/api/twilio/aura/voice") ||
-      phone.voiceWebhook.includes("/twiml/voice");
-    const smsWebhookOk =
-      !phone.smsWebhook ||
-      phone.smsWebhook.includes("/api/twilio/aura/sms") ||
-      phone.smsWebhook.includes("/twiml/sms");
+    const voiceWebhookOk = isAcceptedVoiceWebhook(phone.voiceWebhook, webhookUrls.incomingVoice);
+    const smsWebhookOk = isAcceptedSmsWebhook(phone.smsWebhook, webhookUrls.incomingSms);
 
     const healthy =
       !accountSuspended &&
@@ -220,8 +395,22 @@ export async function probeTwilioApi(): Promise<TwilioProbeResult> {
       parts.push(`${targetPhone} not found in Twilio account`);
     }
     if (!envStatus.auraConfigured) parts.push("OPENAI_API_KEY missing for AURA voice");
-    if (phone.found && !voiceWebhookOk) parts.push("voice webhook URL mismatch");
-    if (phone.found && !smsWebhookOk) parts.push("SMS webhook URL mismatch");
+    if (phone.found && !voiceWebhookOk) {
+      const v = phone.voiceWebhook ?? "(not set)";
+      parts.push(
+        isTemporaryWebhookUrl(phone.voiceWebhook)
+          ? `voice webhook uses temporary URL (${v}) — sync to ${webhookUrls.incomingVoice}`
+          : `voice webhook mismatch (${v})`
+      );
+    }
+    if (phone.found && !smsWebhookOk) {
+      const s = phone.smsWebhook ?? "(not set)";
+      parts.push(
+        isTemporaryWebhookUrl(phone.smsWebhook)
+          ? `SMS webhook uses temporary URL (${s}) — sync to ${webhookUrls.incomingSms}`
+          : `SMS webhook mismatch (${s})`
+      );
+    }
 
     return {
       healthy,
@@ -323,17 +512,19 @@ export function buildTwilioDetails(
     {
       label: "Voice webhook",
       value: probe.phone.voiceWebhook ?? urls.incomingVoice,
-      status:
-        probe.phone.voiceWebhook?.includes("/aura/voice") || probe.phone.voiceWebhook?.includes("/twiml/voice")
-          ? "success"
+      status: isAcceptedVoiceWebhook(probe.phone.voiceWebhook, urls.incomingVoice)
+        ? "success"
+        : isTemporaryWebhookUrl(probe.phone.voiceWebhook)
+          ? "danger"
           : "warning",
     },
     {
       label: "SMS webhook",
       value: probe.phone.smsWebhook ?? urls.incomingSms,
-      status:
-        probe.phone.smsWebhook?.includes("/aura/sms") || probe.phone.smsWebhook?.includes("/twiml/sms")
-          ? "success"
+      status: isAcceptedSmsWebhook(probe.phone.smsWebhook, urls.incomingSms)
+        ? "success"
+        : isTemporaryWebhookUrl(probe.phone.smsWebhook)
+          ? "danger"
           : "warning",
     },
     {
@@ -357,7 +548,23 @@ export function getLastTwilioSuccessfulTestAt(): string | null {
 
 export async function testTwilioIntegrationLive() {
   const envStatus = getTwilioEnvStatus();
-  const probe = await probeTwilioApi();
+  let syncResult: TwilioWebhookSyncResult | null = null;
+
+  let probe = await probeTwilioApi();
+  const urls = probe.webhookUrls;
+  const needsSync =
+    envStatus.ready &&
+    probe.phone.found &&
+    (!isAcceptedVoiceWebhook(probe.phone.voiceWebhook, urls.incomingVoice) ||
+      !isAcceptedSmsWebhook(probe.phone.smsWebhook, urls.incomingSms) ||
+      isTemporaryWebhookUrl(probe.phone.voiceWebhook) ||
+      isTemporaryWebhookUrl(probe.phone.smsWebhook));
+
+  if (needsSync) {
+    syncResult = await syncTwilioWebhooksToProduction();
+    probe = await probeTwilioApi();
+  }
+
   const eventCount = await countTwilioCommunicationEvents();
   const lastEventAt = await getLastTwilioEventAt();
   const status = resolveTwilioHubStatus(probe, envStatus.ready);
@@ -370,9 +577,13 @@ export async function testTwilioIntegrationLive() {
   const success = status === "connected";
   if (success) lastSuccessfulTestAt = testedAt;
 
+  const messageParts = [probe.message];
+  if (syncResult?.synced) messageParts.unshift(syncResult.message);
+  else if (syncResult && !syncResult.success) messageParts.push(`Webhook sync: ${syncResult.message}`);
+
   return {
     success,
-    message: probe.message,
+    message: messageParts.join(" · "),
     provider: "twilio",
     status,
     testedAt,
@@ -386,6 +597,9 @@ export async function testTwilioIntegrationLive() {
       eventCount,
       latencyMs: probe.latencyMs,
       webhookUrls: probe.webhookUrls,
+      voiceWebhook: probe.phone.voiceWebhook,
+      smsWebhook: probe.phone.smsWebhook,
+      webhookSync: syncResult,
     },
   };
 }
