@@ -63,6 +63,15 @@ export async function initializeHqModules(founder: FounderSeedConfig): Promise<v
       if (r) console.log(`Grant Intelligence Engine boot sync: enriched ${r.enriched} opportunities`);
     })
     .catch((e) => console.warn("Grant intelligence boot sync skipped:", e?.message));
+  import("../hq/grantFundingPipelineEngine")
+    .then(({ scheduleLivePipelineSync, runLivePipelineSync }) => {
+      scheduleLivePipelineSync();
+      return runLivePipelineSync();
+    })
+    .then((r) => {
+      if (r) console.log(`Enterprise Funding Pipeline boot sync: ${r.stagesSynced} stages, ${r.notifications} notifications`);
+    })
+    .catch((e) => console.warn("Funding pipeline boot sync skipped:", e?.message));
   if (process.env.NODE_ENV === "production") {
     import("../hq/twilioIntegrationEngine")
       .then(({ syncTwilioWebhooksIfNeeded }) => syncTwilioWebhooksIfNeeded())

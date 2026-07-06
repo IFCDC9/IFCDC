@@ -761,8 +761,8 @@ export async function startGrantApplicationWorkflow(
   const matchedSlug = intel?.matchedPrograms?.[0]?.slug ?? inferProgramMatches(opp).divisionSlugs[0] ?? null;
 
   await db.run(
-    `INSERT INTO grant_applications (id, opportunity_id, title, status, amount_requested, assigned_to, notes, workflow_stage, lifecycle_stage, matched_program_slug, founder_approval_status, created_at, updated_at)
-     VALUES (?, ?, ?, 'draft', ?, ?, ?, 'intake', 'application_drafting', ?, 'pending', ?, ?)`,
+    `INSERT INTO grant_applications (id, opportunity_id, title, status, amount_requested, assigned_to, notes, workflow_stage, lifecycle_stage, matched_program_slug, founder_approval_status, pipeline_stage, created_at, updated_at)
+     VALUES (?, ?, ?, 'draft', ?, ?, ?, 'intake', 'application_drafting', ?, 'pending', 'drafting', ?, ?)`,
     appId,
     opportunityId,
     title,

@@ -20,6 +20,7 @@ export const IFCDC_FUNDING_DIVISIONS = [
   { slug: "workforce_development", label: "Workforce Development", programs: ["workforce", "job_training", "vocational"] },
   { slug: "small_business", label: "Small Business Assistance", programs: ["small_business", "entrepreneurship", "microenterprise"] },
   { slug: "community_programs", label: "Community Programs", programs: ["community", "outreach"] },
+  { slug: "community_development", label: "Community Development", programs: ["community_development", "cdc", "neighborhood"] },
   { slug: "radio", label: "IFCDC Radio", programs: ["radio", "broadcast"] },
   { slug: "productions", label: "IFCDC Productions", programs: ["media", "productions", "film"] },
   { slug: "software_division", label: "IFCDC Software Division", programs: ["technology", "software", "digital_literacy"] },

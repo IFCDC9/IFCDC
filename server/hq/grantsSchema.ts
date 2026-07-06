@@ -128,6 +128,7 @@ export async function ensureGrantTables(): Promise<void> {
   await migrateGrantPhase7();
   await migrateGrantPhase8();
   await migrateGrantPhase9();
+  await migrateGrantPhase10();
   if (!allowGrantDemoSeed()) {
     return;
   }
@@ -654,6 +655,25 @@ async function migrateGrantPhase9(): Promise<void> {
     UPDATE grant_applications SET founder_approval_status = 'pending'
     WHERE founder_approval_status IS NULL AND status IN ('draft', 'under_review')
   `);
+}
+
+/** Phase 10 — Enterprise Funding Pipeline stages and founder priorities. */
+async function migrateGrantPhase10(): Promise<void> {
+  const db = await getDb();
+  const addCol = async (table: string, col: string, type: string) => {
+    try {
+      await db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+    } catch {
+      /* exists */
+    }
+  };
+  await addCol("grant_opportunities", "pipeline_stage", "TEXT DEFAULT 'discovered'");
+  await addCol("grant_applications", "pipeline_stage", "TEXT");
+  await addCol("grant_applications", "founder_priority", "TEXT DEFAULT 'medium'");
+  await addCol("grant_awards", "pipeline_stage", "TEXT DEFAULT 'awarded'");
+  await db.run(`UPDATE grant_opportunities SET pipeline_stage = 'discovered' WHERE pipeline_stage IS NULL`);
+  await db.run(`UPDATE grant_applications SET pipeline_stage = 'drafting' WHERE pipeline_stage IS NULL AND status = 'draft'`);
+  await db.run(`UPDATE grant_applications SET founder_priority = 'medium' WHERE founder_priority IS NULL`);
 }
 
 async function enrichSeedOpportunities(): Promise<void> {

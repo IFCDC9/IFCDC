@@ -835,6 +835,54 @@ export const grantsApi = {
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, note }) }
     ),
   workflowStages: () => apiFetch<{ stages: { key: string; label: string }[] }>("/intelligence/workflow-stages"),
+
+  // Enterprise Funding Pipeline
+  pipelineBoard: (limit = 20) =>
+    apiFetch<{ columns: { stageKey: string; label: string; count: number; value: number; items: Record<string, unknown>[] }[] }>(
+      `/pipeline/enterprise/board?limit=${limit}`
+    ),
+  pipelineMetrics: () =>
+    apiFetch<{
+      metrics: Record<string, number>;
+      byProgram: { label: string; count: number; value: number }[];
+      byAgency: { agency: string; count: number; value: number }[];
+      byStatus: { label: string; count: number }[];
+      upcomingDeadlines: Record<string, unknown>[];
+      programs: { slug: string; label: string }[];
+    }>("/pipeline/enterprise/metrics"),
+  pipelineSync: () =>
+    apiFetch<{ stagesSynced: number; notifications: number; syncedAt: string }>(
+      "/pipeline/enterprise/sync",
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }
+    ),
+  pipelineIntelligence: (opportunityId: string) =>
+    apiFetch<Record<string, unknown>>(`/pipeline/enterprise/intelligence/${opportunityId}`),
+  founderCommandCenter: (params?: Record<string, string | undefined>) => {
+    const qs = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => { if (v) qs.set(k, v); });
+    const q = qs.toString();
+    return apiFetch<{ applications: Record<string, unknown>[]; pendingApprovalCount: number }>(
+      `/pipeline/enterprise/founder${q ? `?${q}` : ""}`
+    );
+  },
+  founderPipelineDecision: (applicationId: string, decision: "approve" | "reject", note?: string) =>
+    apiFetch(`/pipeline/enterprise/founder/${applicationId}/decision`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision, note }),
+    }),
+  setPipelinePriority: (applicationId: string, priority: "high" | "medium" | "low") =>
+    apiFetch(`/pipeline/enterprise/applications/${applicationId}/priority`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ priority }),
+    }),
+  pipelineTransition: (entityType: string, entityId: string, toStage: string) =>
+    apiFetch("/pipeline/enterprise/transition", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entityType, entityId, toStage }),
+    }),
 };
 
 export interface GrantFunder {

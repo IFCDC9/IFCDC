@@ -13,6 +13,7 @@ import { lazyWithRetry } from "../../utils/lazyWithRetry";
 import { GrantLibraryPanel, GrantWriterStudioPanel, GrantIntelligencePanel } from "../../components/hq/grants/GrantCenterEnterprisePanels";
 import { GrantDiscoverHub, GrantApplicationsHub } from "../../components/hq/grants/GrantLifecycleHub";
 import { GrantFullApplicationWorkspace } from "../../components/hq/grants/GrantFullApplicationWorkspace";
+import { GrantEnterprisePipelineHub } from "../../components/hq/grants/GrantEnterprisePipelineHub";
 import { fmtGrantDeadline } from "../../utils/grantFormat";
 import { GrantReadOnlyBanner } from "../../components/hq/grants/GrantReadOnlyBanner";
 import { GrantQueryBoundary } from "../../components/hq/grants/GrantQueryBoundary";
@@ -432,7 +433,16 @@ const GrantCenterPage: React.FC = () => {
 
         {tab === "pipeline" && (
           <Suspense fallback={<TabFallback />}>
-            <GrantV5PipelineKanban />
+            <GrantEnterprisePipelineHub
+              onOpenApplication={(id) => {
+                setSelectedApplicationId(id);
+                selectTab("applications");
+                setAppsSection("studio");
+              }}
+            />
+            <div style={{ marginTop: "1.25rem" }}>
+              <GrantV5PipelineKanban />
+            </div>
             <div style={{ marginTop: "1.25rem" }}>
               <GrantEconomicDevelopmentPanel />
             </div>

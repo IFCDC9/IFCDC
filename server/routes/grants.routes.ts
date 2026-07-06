@@ -96,6 +96,19 @@ import {
   getV5DocumentCenter,
 } from "../hq/grantFundingEngineV5";
 import { buildPipelineKanbanBoard, transitionPipelineEntity } from "../hq/grantPipelineEngine";
+import {
+  buildEnterprisePipelineBoard,
+  buildPipelineMetricsDashboard,
+  buildOpportunityPipelineIntelligence,
+  buildFounderCommandCenter,
+  setFounderPipelineDecision,
+  setApplicationPriority,
+  transitionFundingPipelineStage,
+  runLivePipelineSync,
+  runPipelineNotificationScan,
+  FUNDING_PIPELINE_STAGES,
+  FUNDING_PIPELINE_LABELS,
+} from "../hq/grantFundingPipelineEngine";
 import { buildDivisionConnectorManifest } from "../hq/divisionConnectors";
 import {
   listPipelineAutomationRules,
@@ -1424,6 +1437,76 @@ router.post("/funding-engine/v5/aura", async (req, res) => {
 router.get("/funding-engine/v5/pipeline/board", async (req, res) => {
   const limit = req.query.limit ? Number(req.query.limit) : 25;
   res.json(await buildPipelineKanbanBoard(limit));
+});
+
+// ——— Enterprise Funding Pipeline ———
+router.get("/pipeline/enterprise/board", async (req, res) => {
+  const limit = req.query.limit ? Number(req.query.limit) : 20;
+  res.json(await buildEnterprisePipelineBoard(limit));
+});
+
+router.get("/pipeline/enterprise/metrics", async (_req, res) => {
+  res.json(await buildPipelineMetricsDashboard());
+});
+
+router.post("/pipeline/enterprise/sync", async (req: Request, res: Response) => {
+  res.json(await runLivePipelineSync({ actorEmail: req.hqUser?.email }));
+});
+
+router.get("/pipeline/enterprise/intelligence/:opportunityId", async (req, res) => {
+  const intel = await buildOpportunityPipelineIntelligence(req.params.opportunityId, { actorEmail: req.hqUser?.email });
+  if (!intel) return res.status(404).json({ error: "Opportunity not found" });
+  res.json(intel);
+});
+
+router.get("/pipeline/enterprise/founder", async (req, res) => {
+  res.json(await buildFounderCommandCenter({
+    program: req.query.program ? String(req.query.program) : undefined,
+    agency: req.query.agency ? String(req.query.agency) : undefined,
+    minAmount: req.query.minAmount ? Number(req.query.minAmount) : undefined,
+    maxAmount: req.query.maxAmount ? Number(req.query.maxAmount) : undefined,
+    status: req.query.status ? String(req.query.status) as never : undefined,
+    deadlineWithinDays: req.query.deadlineWithinDays ? Number(req.query.deadlineWithinDays) : undefined,
+    priority: req.query.priority ? String(req.query.priority) : undefined,
+    q: req.query.q ? String(req.query.q) : undefined,
+    limit: req.query.limit ? Number(req.query.limit) : undefined,
+  }));
+});
+
+router.post("/pipeline/enterprise/founder/:applicationId/decision", async (req: Request, res: Response) => {
+  const decision = req.body?.decision;
+  if (!["approve", "reject"].includes(decision)) return res.status(400).json({ error: "decision must be approve or reject" });
+  res.json(await setFounderPipelineDecision(req.params.applicationId, decision, {
+    actorEmail: req.hqUser?.email,
+    note: req.body?.note,
+    priority: req.body?.priority,
+  }));
+});
+
+router.post("/pipeline/enterprise/applications/:id/priority", async (req: Request, res: Response) => {
+  const priority = req.body?.priority;
+  if (!["high", "medium", "low"].includes(priority)) return res.status(400).json({ error: "priority must be high, medium, or low" });
+  res.json(await setApplicationPriority(req.params.id, priority, req.hqUser?.email));
+});
+
+router.post("/pipeline/enterprise/transition", async (req: Request, res: Response) => {
+  const { entityType, entityId, toStage, note } = req.body ?? {};
+  if (!entityType || !entityId || !toStage) return res.status(400).json({ error: "entityType, entityId, toStage required" });
+  res.json(await transitionFundingPipelineStage({
+    entityType,
+    entityId: String(entityId),
+    toStage: String(toStage) as never,
+    actorEmail: req.hqUser?.email,
+    note,
+  }));
+});
+
+router.get("/pipeline/enterprise/stages", async (_req, res) => {
+  res.json({ stages: FUNDING_PIPELINE_STAGES, labels: FUNDING_PIPELINE_LABELS });
+});
+
+router.post("/pipeline/enterprise/notifications/scan", async (_req, res) => {
+  res.json({ created: await runPipelineNotificationScan() });
 });
 
 router.post("/funding-engine/v5/pipeline/transition", async (req, res) => {
