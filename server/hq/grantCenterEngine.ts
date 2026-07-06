@@ -11,7 +11,7 @@ import { discoverAndRankGrants } from "./grantFundingEngineV3";
 import { buildFundingOperationsCalendar } from "./grantFundingEngineV4";
 import { getGrantFeedIntegrationStatus, countExternalFeedOpportunities } from "./grantFeedConnectors";
 import { annotateOpportunity, summarizeGrantDataSources, resolveFeedAggregateSource } from "./grantDataSource";
-import { allowGrantDemoSeed } from "./grantProductionPolicy";
+import { allowGrantDemoSeed, productionGrantOpportunitySqlFilter } from "./grantProductionPolicy";
 
 export const GRANT_CENTER_MODULES = [
   { id: "executive-dashboard", label: "Executive Funding Dashboard", tab: "overview", status: "live" },
@@ -283,7 +283,7 @@ export async function buildOpportunityFinder(filters?: { category?: string; geog
          WHEN o.funder LIKE '%State%' OR o.funder LIKE '%NJ%' THEN 'state'
          WHEN o.funder LIKE '%Foundation%' THEN 'foundation'
          ELSE 'corporate' END as funder_category
-    FROM grant_opportunities o WHERE o.status != 'closed'`;
+    FROM grant_opportunities o WHERE o.status != 'closed'${productionGrantOpportunitySqlFilter("o")}`;
   const params: string[] = [];
   if (filters?.q) { sql += " AND (o.title LIKE ? OR o.funder LIKE ? OR o.description LIKE ?)"; const q = `%${filters.q}%`; params.push(q, q, q); }
   if (filters?.geography) { sql += " AND o.geography = ?"; params.push(filters.geography); }

@@ -53,6 +53,8 @@ services:
         sync: false
       - key: GRANTS_GOV_API_KEY
         sync: false
+      - key: GRANTS_GOV_SEARCH_KEYWORD
+        value: "community development nonprofit"
       - key: SAM_GOV_API_KEY
         sync: false
       - key: SAM_GOV_UEI

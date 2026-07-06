@@ -80,48 +80,86 @@ async function probe<T>(label: string, fn: () => Promise<T>, fallback: T): Promi
 
 function statusFromEnv(required: string[], optional: string[] = []): IntegrationHubStatus {
   const missingRequired = required.filter((k) => !envSet(k));
-  if (missingRequired.length === 0) return optional.some((k) => envSet(k)) || required.length > 0 ? "configured" : "not_configured";
+  if (missingRequired.length === 0) return optional.some((k) => envSet(k)) || required.length > 0 ? "connected" : "not_configured";
   if (required.some((k) => envSet(k))) return "degraded";
   return "not_configured";
 }
 
+/** Enterprise hub states: Connected · Degraded · Not Configured */
+function normalizeHubStatus(status: IntegrationHubStatus, healthy: boolean): IntegrationHubStatus {
+  if (status === "coming_soon") return "not_configured";
+  if (status === "configured") return healthy ? "connected" : "degraded";
+  return status;
+}
+
 async function buildGrantsGovCard(feed: Awaited<ReturnType<typeof getGrantFeedIntegrationStatus>>): Promise<IntegrationHubCard> {
+  const {
+    probeGrantsGovApi,
+    buildGrantsGovDetails,
+    resolveGrantsGovHubStatus,
+  } = await import("./grantsGovIntegrationEngine");
+
   const required = ["GRANTS_GOV_API_KEY"];
   const feedStatus = feed.grantsGov;
   const now = new Date().toISOString();
-  const health = await probe("grants_gov", async () => {
-    if (!envSet("GRANTS_GOV_API_KEY")) {
-      return { healthy: false, message: "GRANTS_GOV_API_KEY not set on Render" };
-    }
-    return {
-      healthy: feedStatus?.status === "connected",
-      message: feedStatus?.note ?? "API key present — run Grant Center feed sync to verify",
-    };
-  }, { healthy: false, message: "Health probe timed out" });
+  const tokenConfigured = envSet("GRANTS_GOV_API_KEY");
+
+  const ggProbe = await probe("grants_gov", () => probeGrantsGovApi(), {
+    healthy: false,
+    apiReachable: false,
+    recordCount: 0,
+    latencyMs: 0,
+    message: "Grants.gov probe timed out",
+    source: "none" as const,
+  });
+
+  const rawStatus = resolveGrantsGovHubStatus(ggProbe, feedStatus?.status === "connected", tokenConfigured);
+  const status = normalizeHubStatus(rawStatus, ggProbe.healthy);
+  const details = await buildGrantsGovDetails(ggProbe, feedStatus);
 
   return {
     id: "grants_gov",
     name: "Grants.gov",
     category: "Federal Grants",
-    description: "Federal grant opportunity feed for Grant Center pipeline",
-    status: feedStatus?.status === "connected" ? "connected" : statusFromEnv(required),
+    description: "Live federal grant opportunity feed for Grant Center pipeline",
+    status,
     lastChecked: feedStatus?.lastSync ?? now,
     environmentReadiness: {
-      ready: envSet("GRANTS_GOV_API_KEY"),
+      ready: tokenConfigured,
       missing: required.filter((k) => !envSet(k)),
       configured: required.filter((k) => envSet(k)),
     },
-    requiredCredentials: required.map((k) => credential(k, k.replace(/_/g, " "))),
-    health,
+    requiredCredentials: required.map((k) => credential(k, "Grants.gov API key")),
+    health: {
+      healthy: status === "connected",
+      latencyMs: ggProbe.latencyMs,
+      message: ggProbe.message,
+    },
+    details,
     actions: [
       { id: "open-grants", label: "Open Grant Center", kind: "primary", action: "link", href: "/hq/grants" },
       { id: "test", label: "Test Connection", kind: "secondary", action: "test" },
       {
+        id: "sync",
+        label: "Sync Feed",
+        kind: "secondary",
+        action: "link",
+        href: "/hq/grants",
+        reason: "Grant Center → Overview → Sync feeds",
+      },
+      {
         id: "configure",
-        label: envSet("GRANTS_GOV_API_KEY") ? "Configured on Render" : "Not configured",
-        kind: envSet("GRANTS_GOV_API_KEY") ? "secondary" : "disabled",
+        label: tokenConfigured ? "Configured" : "Configure",
+        kind: "secondary",
         action: "configure",
-        reason: envSet("GRANTS_GOV_API_KEY") ? undefined : "Set GRANTS_GOV_API_KEY in Render environment",
+        reason: tokenConfigured ? "GRANTS_GOV_API_KEY detected on Render" : "Set GRANTS_GOV_API_KEY in Render environment",
+      },
+      {
+        id: "render-env",
+        label: "Open Render Environment",
+        kind: "secondary",
+        action: "link",
+        href: renderEnvDashboardUrl(),
       },
     ],
   };
@@ -675,7 +713,7 @@ async function buildIntegrationsHubUncached() {
   ]);
 
   const connectedCount = integrations.filter((i) => i.status === "connected").length;
-  const configuredCount = integrations.filter((i) => i.status === "configured" || i.status === "connected").length;
+  const configuredCount = integrations.filter((i) => i.status === "connected" || i.status === "degraded").length;
 
   const payload = {
     integrations,
@@ -709,10 +747,18 @@ export async function buildIntegrationsHubSafe() {
   return data;
 }
 
+export function invalidateIntegrationsHubCache(): void {
+  hubCache = null;
+}
+
 export async function testIntegrationHubProvider(provider: string) {
   if (provider === "github") {
     const { testGitHubIntegrationLive } = await import("./githubIntegrationEngine");
     return testGitHubIntegrationLive();
+  }
+  if (provider === "grants_gov") {
+    const { testGrantsGovIntegrationLive } = await import("./grantsGovIntegrationEngine");
+    return testGrantsGovIntegrationLive();
   }
   const hub = await buildIntegrationsHubSafe();
   const card = hub.integrations.find((i) => i.id === provider);

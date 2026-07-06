@@ -75,6 +75,13 @@ async function main() {
     log(card.health?.message ? "pass" : "warn", `${id} health message`);
     log(Array.isArray(card.requiredCredentials) ? "pass" : "fail", `${id} credentials list`);
     log(Array.isArray(card.actions) && card.actions.length > 0 ? "pass" : "fail", `${id} actions`);
+    if (id === "grants_gov") {
+      const gg = integrations.find((i) => i.id === "grants_gov");
+      log(gg?.requiredCredentials?.every((c) => c.configured) ? "pass" : "fail", "Grants.gov GRANTS_GOV_API_KEY configured");
+      log(Array.isArray(gg?.details) && gg.details.length >= 6 ? "pass" : "fail", "Grants.gov details", `${gg?.details?.length ?? 0} rows`);
+      log(gg?.status === "connected" ? "pass" : gg?.status === "degraded" ? "warn" : "fail", "Grants.gov status", gg?.status ?? "unknown");
+      log(gg?.health?.healthy ? "pass" : "warn", "Grants.gov health probe", gg?.health?.message ?? "");
+    }
     if (id === "github") {
       const gh = integrations.find((i) => i.id === "github");
       log(gh?.requiredCredentials?.every((c) => c.configured) ? "pass" : "fail", "GitHub GITHUB_TOKEN configured");
@@ -82,6 +89,17 @@ async function main() {
       log(gh?.status === "connected" ? "pass" : gh?.status === "configured" ? "warn" : "fail", "GitHub status", gh?.status ?? "unknown");
       log(gh?.health?.healthy ? "pass" : "warn", "GitHub health probe", gh?.health?.message ?? "");
     }
+  }
+
+  const grantsGov = integrations.find((i) => i.id === "grants_gov");
+  if (grantsGov) {
+    const ggTest = await timedFetch(`${BASE}/api/hq/integrations/grants_gov/test`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: "{}",
+    });
+    log(ggTest.ok && ggTest.body?.success ? "pass" : "fail", "POST grants_gov/test", ggTest.body?.message ?? String(ggTest.res.status));
+    log(ggTest.body?.status === "connected" ? "pass" : "warn", "Grants.gov test status", ggTest.body?.status ?? "");
   }
 
   const github = integrations.find((i) => i.id === "github");

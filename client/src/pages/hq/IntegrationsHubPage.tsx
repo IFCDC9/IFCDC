@@ -85,6 +85,10 @@ const IntegrationsHubPage: React.FC = () => {
       if (provider === "github" && data.success) {
         void qc.invalidateQueries({ queryKey: ["integrations-hub"] });
       }
+      if (provider === "grants_gov" && data.success) {
+        void qc.invalidateQueries({ queryKey: ["integrations-hub"] });
+        void qc.invalidateQueries({ queryKey: ["grant-opportunity-finder"] });
+      }
     },
     onError: (err: Error, provider) => {
       setTestResults((prev) => ({ ...prev, [provider]: err.message }));
@@ -220,6 +224,26 @@ const IntegrationsHubPage: React.FC = () => {
                   <p className="hq-muted-text" style={{ fontSize: "0.8rem" }}>
                     {configuring.actions.find((a) => a.reason)?.reason}
                   </p>
+                )}
+                {configuring.id === "grants_gov" && (
+                  <div style={{ fontSize: "0.82rem", marginTop: "0.75rem", lineHeight: 1.5 }}>
+                    <p style={{ margin: "0 0 0.5rem" }}>
+                      <strong>Grants.gov setup</strong>
+                    </p>
+                    <ol style={{ margin: 0, paddingLeft: "1.2rem" }}>
+                      <li>
+                        Register at{" "}
+                        <a href="https://www.grants.gov/api" target="_blank" rel="noopener noreferrer">
+                          grants.gov/api
+                        </a>{" "}
+                        and create an API key.
+                      </li>
+                      <li>
+                        In Render → <strong>ifcdc-hq</strong> → Environment, add <code>GRANTS_GOV_API_KEY</code>.
+                      </li>
+                      <li>Save and redeploy, then click <strong>Test Connection</strong> to sync live opportunities.</li>
+                    </ol>
+                  </div>
                 )}
                 {configuring.id === "github" && (
                   <div style={{ fontSize: "0.82rem", marginTop: "0.75rem", lineHeight: 1.5 }}>

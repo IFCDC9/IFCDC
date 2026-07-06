@@ -8,3 +8,14 @@ export function allowGrantDemoSeed(): boolean {
 export function allowStaticCsrFeedSync(): boolean {
   return process.env.NODE_ENV !== "production" || process.env.ALLOW_STATIC_CSR_FEED === "true";
 }
+
+/** RSS fallback for Grants.gov — disabled in production unless explicitly allowed. */
+export function allowGrantsGovRssFallback(): boolean {
+  return process.env.NODE_ENV !== "production" || process.env.ALLOW_GRANTS_GOV_RSS_FALLBACK === "true";
+}
+
+/** SQL fragment excluding demo/seed rows in production. */
+export function productionGrantOpportunitySqlFilter(alias = "o"): string {
+  if (process.env.NODE_ENV !== "production") return "";
+  return ` AND ${alias}.source_type != 'dev_seed' AND COALESCE(${alias}.import_status, '') NOT IN ('seed', 'static')`;
+}

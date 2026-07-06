@@ -4,7 +4,7 @@
  */
 import { getDb } from "../db";
 import { grantId } from "./grantsSchema";
-import { allowStaticCsrFeedSync } from "./grantProductionPolicy";
+import { allowStaticCsrFeedSync, allowGrantsGovRssFallback } from "./grantProductionPolicy";
 
 export type GrantFeedProvider = "grants_gov" | "sam_gov" | "foundation_directory" | "corporate_csr";
 
@@ -157,49 +157,29 @@ function parseDeadline(raw: unknown): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
 }
 
-/** Grants.gov Search2 API + RSS fallback */
+/** Grants.gov Search2 API — production requires GRANTS_GOV_API_KEY; RSS fallback dev-only */
 async function fetchGrantsGovFeed(): Promise<NormalizedGrantOpportunity[]> {
-  const apiKey = process.env.GRANTS_GOV_API_KEY;
+  const { searchGrantsGovLive } = await import("./grantsGovIntegrationEngine");
   try {
-    const res = await fetch("https://api.grants.gov/v1/api/search2", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(apiKey ? { "X-Api-Key": apiKey } : {}),
-      },
-      body: JSON.stringify({
-        rows: 50,
-        keyword: "community development nonprofit",
-        oppStatuses: "posted",
-      }),
-      signal: AbortSignal.timeout(20000),
-    });
-    if (res.ok) {
-      const data = (await res.json()) as { oppHits?: Record<string, unknown>[]; data?: { oppHits?: Record<string, unknown>[] } };
-      const hits = data.oppHits ?? data.data?.oppHits ?? [];
-      return hits.map((hit) => {
-        const id = String(hit.id ?? hit.opportunityId ?? hit.number ?? grantId());
-        return {
-          external_id: id,
-          source_type: "grants_gov",
-          title: String(hit.title ?? hit.opportunityTitle ?? "Federal Grant Opportunity"),
-          funder: String(hit.agencyName ?? hit.agency ?? "U.S. Federal Agency"),
-          description: String(hit.description ?? hit.synopsis ?? "").slice(0, 4000),
-          amount_min: parseAmount(hit.awardFloor ?? hit.estimatedFunding),
-          amount_max: parseAmount(hit.awardCeiling ?? hit.estimatedFunding),
-          deadline: parseDeadline(hit.closeDate ?? hit.applicationDueDate),
-          url: String(hit.opportunityUrl ?? hit.url ?? `https://www.grants.gov/search-results-detail/${id}`),
-          funder_type: "federal",
-          geography: "US",
-          eligibility: String(hit.eligibility ?? "See opportunity listing"),
-          requirements: String(hit.requirements ?? "Federal grant application requirements apply"),
-          is_live: 1,
-          is_national: 1,
-        };
-      });
+    const { opps, source } = await searchGrantsGovLive(50);
+    if (opps.length > 0) {
+      console.info(`[grants-gov] Search2 sync: ${opps.length} opportunities (${source})`);
+      return opps;
+    }
+    if (process.env.NODE_ENV === "production") {
+      console.warn("[grants-gov] Search2 returned zero opportunities in production");
+      return [];
     }
   } catch (err) {
-    console.warn("Grants.gov API fetch failed, trying RSS fallback:", err instanceof Error ? err.message : err);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn("[grants-gov] Search2 failed:", msg);
+    if (process.env.NODE_ENV === "production" || !allowGrantsGovRssFallback()) {
+      throw new Error(msg);
+    }
+  }
+
+  if (!allowGrantsGovRssFallback()) {
+    return [];
   }
 
   try {
@@ -207,6 +187,7 @@ async function fetchGrantsGovFeed(): Promise<NormalizedGrantOpportunity[]> {
     if (!rss.ok) return [];
     const xml = await rss.text();
     const items = Array.from(xml.matchAll(/<item>([\s\S]*?)<\/item>/gi));
+    console.info(`[grants-gov] RSS fallback: ${items.length} items (non-production)`);
     return items.slice(0, 40).map((match, idx) => {
       const block = match[1] ?? "";
       const title = block.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>|<title>(.*?)<\/title>/i)?.[1]
@@ -220,6 +201,7 @@ async function fetchGrantsGovFeed(): Promise<NormalizedGrantOpportunity[]> {
       return {
         external_id: guid.slice(0, 120),
         source_type: "grants_gov",
+        import_status: "rss_fallback",
         title: title.replace(/<[^>]+>/g, "").trim(),
         funder: "U.S. Federal Agency (Grants.gov RSS)",
         description: desc.replace(/<[^>]+>/g, "").slice(0, 4000),
@@ -231,7 +213,7 @@ async function fetchGrantsGovFeed(): Promise<NormalizedGrantOpportunity[]> {
         geography: "US",
         eligibility: "See Grants.gov listing",
         requirements: "Federal application requirements",
-        is_live: 1,
+        is_live: 0,
         is_national: 1,
       };
     });
@@ -491,7 +473,7 @@ export async function countExternalFeedOpportunities(): Promise<number> {
   return (
     (await db.get<{ c: number }>(
       `SELECT COUNT(*) as c FROM grant_opportunities
-       WHERE source_type IN ('grants_gov', 'foundation_directory')
+       WHERE source_type = 'grants_gov'
          AND import_status = 'imported'
          AND COALESCE(is_live, 0) = 1`
     ))?.c ?? 0
