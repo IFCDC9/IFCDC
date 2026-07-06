@@ -75,9 +75,25 @@ async function main() {
     log(card.health?.message ? "pass" : "warn", `${id} health message`);
     log(Array.isArray(card.requiredCredentials) ? "pass" : "fail", `${id} credentials list`);
     log(Array.isArray(card.actions) && card.actions.length > 0 ? "pass" : "fail", `${id} actions`);
+    if (id === "github") {
+      const gh = integrations.find((i) => i.id === "github");
+      log(gh?.requiredCredentials?.every((c) => c.configured) ? "pass" : "fail", "GitHub GITHUB_TOKEN configured");
+      log(Array.isArray(gh?.details) && gh.details.length >= 6 ? "pass" : "fail", "GitHub repository details", `${gh?.details?.length ?? 0} rows`);
+      log(gh?.status === "connected" ? "pass" : gh?.status === "configured" ? "warn" : "fail", "GitHub status", gh?.status ?? "unknown");
+      log(gh?.health?.healthy ? "pass" : "warn", "GitHub health probe", gh?.health?.message ?? "");
+    }
   }
 
-  if (integrations[0]) {
+  const github = integrations.find((i) => i.id === "github");
+  if (github) {
+    const ghTest = await timedFetch(`${BASE}/api/hq/integrations/github/test`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: "{}",
+    });
+    log(ghTest.ok && ghTest.body?.success ? "pass" : "fail", "POST github/test", ghTest.body?.message ?? String(ghTest.res.status));
+    log(ghTest.body?.status === "connected" ? "pass" : "warn", "GitHub test status", ghTest.body?.status ?? "");
+  } else if (integrations[0]) {
     const test = await timedFetch(`${BASE}/api/hq/integrations/${integrations[0].id}/test`, {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },

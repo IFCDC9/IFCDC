@@ -77,7 +77,14 @@ const IntegrationsHubPage: React.FC = () => {
   const test = useMutation({
     mutationFn: integrationsApi.test,
     onSuccess: (data, provider) => {
-      setTestResults((prev) => ({ ...prev, [provider]: data.message }));
+      const detailLines = Array.isArray((data as { details?: { label: string; value: string }[] }).details)
+        ? (data as { details: { label: string; value: string }[] }).details.map((d) => `${d.label}: ${d.value}`).join(" · ")
+        : "";
+      const msg = [data.message, detailLines].filter(Boolean).join(" — ");
+      setTestResults((prev) => ({ ...prev, [provider]: msg || data.message }));
+      if (provider === "github" && data.success) {
+        void qc.invalidateQueries({ queryKey: ["integrations-hub"] });
+      }
     },
     onError: (err: Error, provider) => {
       setTestResults((prev) => ({ ...prev, [provider]: err.message }));
@@ -214,7 +221,41 @@ const IntegrationsHubPage: React.FC = () => {
                     {configuring.actions.find((a) => a.reason)?.reason}
                   </p>
                 )}
+                {configuring.id === "github" && (
+                  <div style={{ fontSize: "0.82rem", marginTop: "0.75rem", lineHeight: 1.5 }}>
+                    <p style={{ margin: "0 0 0.5rem" }}>
+                      <strong>Setup (one-time)</strong>
+                    </p>
+                    <ol style={{ margin: 0, paddingLeft: "1.2rem" }}>
+                      <li>
+                        Create a token at{" "}
+                        <a href="https://github.com/settings/tokens/new?scopes=repo" target="_blank" rel="noopener noreferrer">
+                          github.com/settings/tokens
+                        </a>{" "}
+                        (classic <code>repo</code> read, or fine-grained read on <code>IFCDC9/IFCDC</code>).
+                      </li>
+                      <li>
+                        In Render → <strong>ifcdc-hq</strong> → Environment, add{" "}
+                        <code>GITHUB_TOKEN</code> = your token (secret).
+                      </li>
+                      <li>Save — Render redeploys automatically. Return here and click <strong>Test Connection</strong>.</li>
+                    </ol>
+                    <p className="hq-muted-text" style={{ marginTop: "0.5rem", fontSize: "0.78rem" }}>
+                      Note: Render already deploys from GitHub without this token. This only powers HQ Integrations Hub health checks.
+                    </p>
+                  </div>
+                )}
                 <div className="hq-modal-actions">
+                  {configuring.actions.find((a) => a.id === "render-env" && a.href)?.href && (
+                    <a
+                      href={configuring.actions.find((a) => a.id === "render-env")!.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hq-btn hq-btn-primary"
+                    >
+                      Open Render Environment
+                    </a>
+                  )}
                   <button type="button" className="hq-btn hq-btn-secondary" onClick={() => setConfiguring(null)}>
                     Close
                   </button>

@@ -67,6 +67,15 @@ services:
         sync: false
       - key: HQ_CRYPTO_LAUNCH_URL
         sync: false
+      # Integrations Hub — GitHub API health probe (optional; deploy still uses Render native GitHub link)
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GITHUB_OWNER
+        value: IFCDC9
+      - key: GITHUB_REPO
+        value: IFCDC
+      - key: GITHUB_BRANCH
+        value: main
 
     disk:
       name: ifcdc-hq-data

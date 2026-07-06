@@ -21,6 +21,13 @@ function formatChecked(iso: string): string {
   }
 }
 
+const DETAIL_COLOR: Record<string, string> = {
+  success: "var(--hq-success)",
+  warning: "var(--hq-warning)",
+  danger: "var(--hq-danger)",
+  muted: "var(--hq-text-muted)",
+};
+
 export const IntegrationHubCardView: React.FC<{
   card: Card;
   testMessage?: string;
@@ -121,6 +128,35 @@ export const IntegrationHubCardView: React.FC<{
           </span>
         </div>
       </div>
+
+      {card.details && card.details.length > 0 && (
+        <div
+          style={{
+            display: "grid",
+            gap: "0.3rem",
+            fontSize: "0.72rem",
+            padding: "0.5rem 0.65rem",
+            borderRadius: "6px",
+            background: "rgba(255,255,255,0.03)",
+            border: "1px solid var(--hq-border)",
+          }}
+        >
+          {card.details.map((row) => (
+            <div key={row.label} style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem" }}>
+              <span className="hq-muted-text">{row.label}</span>
+              <span
+                style={{
+                  textAlign: "right",
+                  color: row.status ? DETAIL_COLOR[row.status] ?? "var(--hq-text)" : "var(--hq-text)",
+                  fontFamily: row.label.toLowerCase().includes("commit") ? "monospace" : "inherit",
+                }}
+              >
+                {row.value}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div>
         <div className="hq-muted-text" style={{ fontSize: "0.7rem", marginBottom: "0.35rem", display: "flex", alignItems: "center", gap: "0.25rem" }}>

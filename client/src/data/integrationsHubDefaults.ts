@@ -10,6 +10,12 @@ export type IntegrationHubAction = {
   reason?: string;
 };
 
+export type IntegrationHubDetail = {
+  label: string;
+  value: string;
+  status?: "success" | "warning" | "muted" | "danger";
+};
+
 export type IntegrationHubCard = {
   id: string;
   name: string;
@@ -20,6 +26,7 @@ export type IntegrationHubCard = {
   environmentReadiness: { ready: boolean; missing: string[]; configured: string[] };
   requiredCredentials: { key: string; label: string; configured: boolean }[];
   health: { healthy: boolean; latencyMs?: number; message: string };
+  details?: IntegrationHubDetail[];
   actions: IntegrationHubAction[];
 };
 

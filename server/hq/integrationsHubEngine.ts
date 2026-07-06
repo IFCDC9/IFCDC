@@ -22,6 +22,12 @@ export type IntegrationHubAction = {
   reason?: string;
 };
 
+export type IntegrationHubDetail = {
+  label: string;
+  value: string;
+  status?: "success" | "warning" | "muted" | "danger";
+};
+
 export type IntegrationHubCard = {
   id: string;
   name: string;
@@ -36,6 +42,7 @@ export type IntegrationHubCard = {
   };
   requiredCredentials: { key: string; label: string; configured: boolean }[];
   health: { healthy: boolean; latencyMs?: number; message: string };
+  details?: IntegrationHubDetail[];
   actions: IntegrationHubAction[];
 };
 
@@ -48,6 +55,12 @@ function envSet(key: string): boolean {
 
 function credential(key: string, label: string) {
   return { key, label, configured: envSet(key) };
+}
+
+/** Deep link to Render env vars when running on Render (RENDER_SERVICE_ID is auto-injected). */
+function renderEnvDashboardUrl(): string {
+  const serviceId = process.env.RENDER_SERVICE_ID?.trim();
+  return serviceId ? `https://dashboard.render.com/web/${serviceId}/env` : "https://dashboard.render.com";
 }
 
 async function probe<T>(label: string, fn: () => Promise<T>, fallback: T): Promise<T> {
@@ -339,53 +352,91 @@ async function buildRenderCard(): Promise<IntegrationHubCard> {
 }
 
 async function buildGitHubCard(): Promise<IntegrationHubCard> {
+  const {
+    fetchGitHubIntegrationSnapshot,
+    buildGitHubDetails,
+    resolveGitHubHubStatus,
+  } = await import("./githubIntegrationEngine");
+
   const required = ["GITHUB_TOKEN"];
   const now = new Date().toISOString();
-  const health = await probe("github", async () => {
-    if (!envSet("GITHUB_TOKEN")) {
-      return { healthy: false, message: "GITHUB_TOKEN not set (optional for deploy hooks)" };
+  const tokenConfigured = envSet("GITHUB_TOKEN");
+
+  const snapshot = await probe(
+    "github",
+    () => fetchGitHubIntegrationSnapshot(),
+    {
+      repository: "IFCDC9/IFCDC",
+      branch: "main",
+      latestCommit: null,
+      latestCommitFull: null,
+      latestCommitAt: null,
+      lastPushAt: null,
+      repositoryHealth: "unavailable" as const,
+      deploymentStatus: "unknown" as const,
+      liveCommit: process.env.RENDER_GIT_COMMIT?.slice(0, 7) ?? null,
+      defaultBranch: null,
+      archived: false,
+      apiReachable: false,
+      message: "GitHub probe timed out",
     }
-    const started = Date.now();
-    const res = await fetch("https://api.github.com/rate_limit", {
-      headers: { Authorization: `Bearer ${process.env.GITHUB_TOKEN}`, Accept: "application/vnd.github+json" },
-      signal: AbortSignal.timeout(2000),
-    });
-    return {
-      healthy: res.ok,
-      latencyMs: Date.now() - started,
-      message: res.ok ? "GitHub API reachable" : `GitHub API returned ${res.status}`,
-    };
-  }, { healthy: false, message: "Health probe timed out" });
+  );
+
+  const status = resolveGitHubHubStatus(snapshot, tokenConfigured);
+  const healthy =
+    status === "connected" &&
+    snapshot.repositoryHealth === "healthy" &&
+    snapshot.apiReachable;
 
   return {
     id: "github",
     name: "GitHub",
     category: "Infrastructure",
     description: "Source control and CI/CD for IFCDC Headquarters (IFCDC9/IFCDC)",
-    status: health.healthy ? "connected" : envSet("GITHUB_TOKEN") ? "degraded" : "not_configured",
+    status,
     lastChecked: now,
     environmentReadiness: {
-      ready: envSet("GITHUB_TOKEN"),
+      ready: tokenConfigured,
       missing: required.filter((k) => !envSet(k)),
       configured: required.filter((k) => envSet(k)),
     },
     requiredCredentials: required.map((k) => credential(k, "GitHub personal access token")),
-    health,
+    health: {
+      healthy,
+      latencyMs: snapshot.latencyMs,
+      message: snapshot.message,
+    },
+    details: buildGitHubDetails(snapshot),
     actions: [
       {
         id: "repo",
         label: "Open Repository",
         kind: "primary",
         action: "link",
-        href: "https://github.com/IFCDC9/IFCDC",
+        href: `https://github.com/${snapshot.repository}`,
       },
       { id: "test", label: "Test Connection", kind: "secondary", action: "test" },
       {
+        id: "verify",
+        label: "Verify Deploy",
+        kind: "secondary",
+        action: "link",
+        href: "/api/health",
+        reason: "Compare live Render commit with GitHub main",
+      },
+      {
         id: "configure",
-        label: envSet("GITHUB_TOKEN") ? "Configured on Render" : "Coming soon / Not configured",
-        kind: envSet("GITHUB_TOKEN") ? "secondary" : "disabled",
+        label: tokenConfigured ? "Configured" : "Configure",
+        kind: tokenConfigured ? "secondary" : "secondary",
         action: "configure",
-        reason: "Optional — set GITHUB_TOKEN for API health checks",
+        reason: tokenConfigured ? "GITHUB_TOKEN detected on Render" : "Add GITHUB_TOKEN in Render → Environment",
+      },
+      {
+        id: "render-env",
+        label: "Open Render Environment",
+        kind: "secondary",
+        action: "link",
+        href: renderEnvDashboardUrl(),
       },
     ],
   };
@@ -659,6 +710,10 @@ export async function buildIntegrationsHubSafe() {
 }
 
 export async function testIntegrationHubProvider(provider: string) {
+  if (provider === "github") {
+    const { testGitHubIntegrationLive } = await import("./githubIntegrationEngine");
+    return testGitHubIntegrationLive();
+  }
   const hub = await buildIntegrationsHubSafe();
   const card = hub.integrations.find((i) => i.id === provider);
   if (!card) return { success: false, message: "Unknown integration", provider, testedAt: new Date().toISOString() };
@@ -668,5 +723,6 @@ export async function testIntegrationHubProvider(provider: string) {
     provider,
     status: card.status,
     testedAt: new Date().toISOString(),
+    details: card.details,
   };
 }
