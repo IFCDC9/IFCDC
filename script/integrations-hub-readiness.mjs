@@ -75,6 +75,13 @@ async function main() {
     log(card.health?.message ? "pass" : "warn", `${id} health message`);
     log(Array.isArray(card.requiredCredentials) ? "pass" : "fail", `${id} credentials list`);
     log(Array.isArray(card.actions) && card.actions.length > 0 ? "pass" : "fail", `${id} actions`);
+    if (id === "paypal") {
+      const pp = integrations.find((i) => i.id === "paypal");
+      log(pp?.requiredCredentials?.some((c) => c.key === "PAYPAL_CLIENT_ID" && c.configured) ? "pass" : "fail", "PayPal CLIENT_ID configured");
+      log(pp?.requiredCredentials?.some((c) => c.key === "PAYPAL_CLIENT_SECRET" && c.configured) ? "pass" : "fail", "PayPal CLIENT_SECRET configured");
+      log(Array.isArray(pp?.details) && pp.details.length >= 5 ? "pass" : "fail", "PayPal details", `${pp?.details?.length ?? 0} rows`);
+      log(pp?.status === "connected" ? "pass" : pp?.status === "degraded" ? "warn" : "fail", "PayPal status", pp?.status ?? "unknown");
+    }
     if (id === "grants_gov") {
       const gg = integrations.find((i) => i.id === "grants_gov");
       log(gg?.requiredCredentials?.some((c) => c.configured) ? "pass" : "warn", "Grants.gov public API (no key required)");
@@ -89,6 +96,17 @@ async function main() {
       log(gh?.status === "connected" ? "pass" : gh?.status === "configured" ? "warn" : "fail", "GitHub status", gh?.status ?? "unknown");
       log(gh?.health?.healthy ? "pass" : "warn", "GitHub health probe", gh?.health?.message ?? "");
     }
+  }
+
+  const paypal = integrations.find((i) => i.id === "paypal");
+  if (paypal) {
+    const ppTest = await timedFetch(`${BASE}/api/hq/integrations/paypal/test`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: "{}",
+    });
+    log(ppTest.ok && ppTest.body?.success ? "pass" : "fail", "POST paypal/test", ppTest.body?.message ?? String(ppTest.res.status));
+    log(ppTest.body?.status === "connected" ? "pass" : "warn", "PayPal test status", ppTest.body?.status ?? "");
   }
 
   const grantsGov = integrations.find((i) => i.id === "grants_gov");

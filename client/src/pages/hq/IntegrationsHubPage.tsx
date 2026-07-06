@@ -89,6 +89,10 @@ const IntegrationsHubPage: React.FC = () => {
         void qc.invalidateQueries({ queryKey: ["integrations-hub"] });
         void qc.invalidateQueries({ queryKey: ["grant-opportunity-finder"] });
       }
+      if (provider === "paypal" && data.success) {
+        void qc.invalidateQueries({ queryKey: ["integrations-hub"] });
+        void qc.invalidateQueries({ queryKey: ["finance-payments"] });
+      }
     },
     onError: (err: Error, provider) => {
       setTestResults((prev) => ({ ...prev, [provider]: err.message }));
@@ -224,6 +228,26 @@ const IntegrationsHubPage: React.FC = () => {
                   <p className="hq-muted-text" style={{ fontSize: "0.8rem" }}>
                     {configuring.actions.find((a) => a.reason)?.reason}
                   </p>
+                )}
+                {configuring.id === "paypal" && (
+                  <div style={{ fontSize: "0.82rem", marginTop: "0.75rem", lineHeight: 1.5 }}>
+                    <p style={{ margin: "0 0 0.5rem" }}>
+                      <strong>PayPal production setup</strong>
+                    </p>
+                    <ol style={{ margin: 0, paddingLeft: "1.2rem" }}>
+                      <li>
+                        In Render → <strong>ifcdc-hq</strong> → Environment, set{" "}
+                        <code>PAYPAL_CLIENT_ID</code>, <code>PAYPAL_CLIENT_SECRET</code>, and{" "}
+                        <code>PAYPAL_ENV=live</code> (or <code>LIVE</code> — both work).
+                      </li>
+                      <li>Save and redeploy so the service loads the new variables.</li>
+                      <li>
+                        Register webhook URL in PayPal Developer Dashboard:{" "}
+                        <code>https://ifcdc-hq-wst6.onrender.com/api/paypal/webhook-log</code>
+                      </li>
+                      <li>Click <strong>Test Connection</strong> to verify OAuth and order creation.</li>
+                    </ol>
+                  </div>
                 )}
                 {configuring.id === "grants_gov" && (
                   <div style={{ fontSize: "0.82rem", marginTop: "0.75rem", lineHeight: 1.5 }}>

@@ -1,6 +1,12 @@
 import { Router } from "express";
 import { getMonolithDb } from "../../monolith/dbAccess";
 import { cryptoRandomId } from "../../monolith/constants";
+import {
+  getPayPalAccessTokenForRoutes,
+  getPayPalBaseUrl,
+  getPayPalEnvStatus,
+  resolvePayPalEnvironment,
+} from "../../hq/paypalIntegrationEngine";
 
 export function createPaypalRouter(): Router {
   const router = Router();
@@ -10,7 +16,10 @@ export function createPaypalRouter(): Router {
     if (!clientId) {
       return res.status(500).json({ error: "PayPal not configured" });
     }
-    res.json({ clientId });
+    res.json({
+      clientId,
+      environment: resolvePayPalEnvironment(),
+    });
   });
 
   router.post("/paypal/create-order", async (req, res) => {
@@ -21,35 +30,19 @@ export function createPaypalRouter(): Router {
         return res.status(400).json({ error: "Invalid amount" });
       }
 
-      const clientId = process.env.PAYPAL_CLIENT_ID;
-      const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
-      const isLive = process.env.PAYPAL_ENV === "live";
-
-      if (!clientId || !clientSecret) {
+      const envStatus = getPayPalEnvStatus();
+      if (!envStatus.ready) {
         return res.status(500).json({ error: "PayPal not configured" });
       }
 
-      const baseUrl = isLive ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
-
-      const authRes = await fetch(`${baseUrl}/v1/oauth2/token`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
-        },
-        body: "grant_type=client_credentials",
-      });
-
-      const authData = (await authRes.json()) as { access_token?: string };
-      if (!authData.access_token) {
-        throw new Error("Failed to get PayPal access token");
-      }
+      const baseUrl = getPayPalBaseUrl();
+      const accessToken = await getPayPalAccessTokenForRoutes();
 
       const orderRes = await fetch(`${baseUrl}/v2/checkout/orders`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${authData.access_token}`,
+          Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
           intent: "CAPTURE",
@@ -65,10 +58,13 @@ export function createPaypalRouter(): Router {
       });
 
       const orderData = await orderRes.json();
+      if (!orderRes.ok) {
+        return res.status(orderRes.status).json(orderData);
+      }
       res.json(orderData);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("PayPal create order error:", err);
-      res.status(500).json({ error: "Failed to create PayPal order" });
+      res.status(500).json({ error: err instanceof Error ? err.message : "Failed to create PayPal order" });
     }
   });
 
@@ -81,6 +77,10 @@ export function createPaypalRouter(): Router {
       const currency = payload.purchase_units?.[0]?.amount?.currency_code || "USD";
       const transactionId = payload.id || null;
 
+      if (!transactionId || amount == null) {
+        return res.status(400).json({ error: "Invalid PayPal webhook payload" });
+      }
+
       console.log("PayPal donation received:", transactionId);
 
       const db = getMonolithDb();
@@ -89,15 +89,17 @@ export function createPaypalRouter(): Router {
 
       await db.run(
         `
-      INSERT INTO funding_events (source_key, intent, amount_cents, currency, external_id, metadata)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO funding_events (id, source_key, intent, amount_cents, currency, external_id, metadata, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `,
+        cryptoRandomId(),
         "paypal",
         "donation",
-        Math.round(parseFloat(amount) * 100),
+        Math.round(parseFloat(String(amount)) * 100),
         currency,
         transactionId,
         JSON.stringify(payload),
+        now,
       );
 
       await db.run(
@@ -137,43 +139,30 @@ export function createPaypalRouter(): Router {
     try {
       const { orderId } = req.params;
 
-      const clientId = process.env.PAYPAL_CLIENT_ID;
-      const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
-      const isLive = process.env.PAYPAL_ENV === "live";
-
-      if (!clientId || !clientSecret) {
+      const envStatus = getPayPalEnvStatus();
+      if (!envStatus.ready) {
         return res.status(500).json({ error: "PayPal not configured" });
       }
 
-      const baseUrl = isLive ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
-
-      const authRes = await fetch(`${baseUrl}/v1/oauth2/token`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
-        },
-        body: "grant_type=client_credentials",
-      });
-
-      const authData = (await authRes.json()) as { access_token?: string };
-      if (!authData.access_token) {
-        throw new Error("Failed to get PayPal access token");
-      }
+      const baseUrl = getPayPalBaseUrl();
+      const accessToken = await getPayPalAccessTokenForRoutes();
 
       const captureRes = await fetch(`${baseUrl}/v2/checkout/orders/${orderId}/capture`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${authData.access_token}`,
+          Authorization: `Bearer ${accessToken}`,
         },
       });
 
       const captureData = await captureRes.json();
+      if (!captureRes.ok) {
+        return res.status(captureRes.status).json(captureData);
+      }
       res.json(captureData);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("PayPal capture order error:", err);
-      res.status(500).json({ error: "Failed to capture PayPal order" });
+      res.status(500).json({ error: err instanceof Error ? err.message : "Failed to capture PayPal order" });
     }
   });
 

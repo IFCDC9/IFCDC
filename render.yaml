@@ -78,6 +78,12 @@ services:
         value: IFCDC
       - key: GITHUB_BRANCH
         value: main
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_ENV
+        value: live
 
     disk:
       name: ifcdc-hq-data

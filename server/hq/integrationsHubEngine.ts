@@ -204,33 +204,66 @@ async function buildSamGovCard(feed: Awaited<ReturnType<typeof getGrantFeedInteg
 }
 
 async function buildPayPalCard(): Promise<IntegrationHubCard> {
-  const required = ["PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET"];
+  const {
+    probePayPalApi,
+    buildPayPalDetails,
+    resolvePayPalHubStatus,
+    getPayPalEnvStatus,
+    countPayPalFundingEvents,
+  } = await import("./paypalIntegrationEngine");
+
+  const envStatus = getPayPalEnvStatus();
   const now = new Date().toISOString();
-  const health = await probe("paypal", async () => {
-    if (!required.every((k) => envSet(k))) {
-      return { healthy: false, message: "PayPal credentials not configured" };
-    }
-    const isLive = process.env.PAYPAL_ENV === "live";
-    return { healthy: true, message: `PayPal ${isLive ? "live" : "sandbox"} credentials present` };
-  }, { healthy: false, message: "Health probe timed out" });
+
+  const ppProbe = await probe("paypal", () => probePayPalApi(), {
+    healthy: false,
+    authenticated: false,
+    orderCreationOk: false,
+    latencyMs: 0,
+    message: "PayPal probe timed out",
+    environment: "sandbox" as const,
+    webhookEndpoint: "",
+  });
+
+  const paypalEvents = await countPayPalFundingEvents().catch(() => 0);
+  const rawStatus = resolvePayPalHubStatus(ppProbe, envStatus.ready);
+  const status = normalizeHubStatus(rawStatus, ppProbe.healthy);
+  const details = buildPayPalDetails(ppProbe, envStatus, paypalEvents);
 
   return {
     id: "paypal",
     name: "PayPal",
     category: "Payments",
     description: "Donations and payment processing via PayPal REST API",
-    status: health.healthy ? "configured" : statusFromEnv(required),
+    status,
     lastChecked: now,
     environmentReadiness: {
-      ready: required.every((k) => envSet(k)),
-      missing: required.filter((k) => !envSet(k)),
-      configured: required.filter((k) => envSet(k)),
+      ready: envStatus.ready,
+      missing: [
+        !envStatus.clientIdConfigured ? "PAYPAL_CLIENT_ID" : null,
+        !envStatus.clientSecretConfigured ? "PAYPAL_CLIENT_SECRET" : null,
+      ].filter(Boolean) as string[],
+      configured: [
+        ...(envStatus.clientIdConfigured ? ["PAYPAL_CLIENT_ID"] : []),
+        ...(envStatus.clientSecretConfigured ? ["PAYPAL_CLIENT_SECRET"] : []),
+        ...(envStatus.envConfigured ? ["PAYPAL_ENV"] : []),
+      ],
     },
     requiredCredentials: [
-      ...required.map((k) => credential(k, k.replace(/_/g, " "))),
-      credential("PAYPAL_ENV", "PAYPAL_ENV (sandbox or live)"),
+      credential("PAYPAL_CLIENT_ID", "PayPal Client ID"),
+      credential("PAYPAL_CLIENT_SECRET", "PayPal Client Secret"),
+      {
+        key: "PAYPAL_ENV",
+        label: `PAYPAL_ENV (${envStatus.environment})`,
+        configured: envStatus.envConfigured,
+      },
     ],
-    health,
+    health: {
+      healthy: status === "connected",
+      latencyMs: ppProbe.latencyMs,
+      message: ppProbe.message,
+    },
+    details,
     actions: [
       { id: "test", label: "Test Connection", kind: "primary", action: "test" },
       {
@@ -238,14 +271,21 @@ async function buildPayPalCard(): Promise<IntegrationHubCard> {
         label: "Payments dashboard",
         kind: "secondary",
         action: "link",
-        href: "/hq/finance",
+        href: "/hq/finance?tab=payments",
       },
       {
         id: "configure",
-        label: required.every((k) => envSet(k)) ? "Configured on Render" : "Not configured",
-        kind: required.every((k) => envSet(k)) ? "secondary" : "disabled",
+        label: envStatus.ready ? "Configured" : "Configure",
+        kind: "secondary",
         action: "configure",
-        reason: "Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET on Render",
+        reason: envStatus.ready ? "PayPal credentials detected on Render" : "Set PayPal credentials on Render",
+      },
+      {
+        id: "render-env",
+        label: "Open Render Environment",
+        kind: "secondary",
+        action: "link",
+        href: renderEnvDashboardUrl(),
       },
     ],
   };
@@ -756,6 +796,10 @@ export async function testIntegrationHubProvider(provider: string) {
   if (provider === "grants_gov") {
     const { testGrantsGovIntegrationLive } = await import("./grantsGovIntegrationEngine");
     return testGrantsGovIntegrationLive();
+  }
+  if (provider === "paypal") {
+    const { testPayPalIntegrationLive } = await import("./paypalIntegrationEngine");
+    return testPayPalIntegrationLive();
   }
   const hub = await buildIntegrationsHubSafe();
   const card = hub.integrations.find((i) => i.id === provider);

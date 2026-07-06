@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { getBuildInfo } from "../../buildInfo";
 import { isApplicationReady } from "../../bootstrap/applicationState";
 import { getGrantCenterQaReport, grantCenterQaEnvReady } from "../../hq/grantCenterQaCache";
+import { getPayPalEnvStatus } from "../../hq/paypalIntegrationEngine";
 import {
   credentialsAreSeparated,
   getGrantsOperatorEmail,
@@ -18,6 +19,7 @@ export function registerHealthRoutes(app: Express): void {
       null;
     const qaEnv = grantCenterQaEnvReady();
     const qaReport = getGrantCenterQaReport();
+    const paypalEnv = getPayPalEnvStatus();
     res.json({
       app: "ifcdc-headquarters",
       status: "healthy",
@@ -43,6 +45,15 @@ export function registerHealthRoutes(app: Express): void {
         superAdminEmail: getSuperAdminEmail(),
         grantsOperatorEmail: getGrantsOperatorEmail(),
         separated: credentialsAreSeparated(),
+      },
+      integrations: {
+        paypal: {
+          clientIdConfigured: paypalEnv.clientIdConfigured,
+          clientSecretConfigured: paypalEnv.clientSecretConfigured,
+          environment: paypalEnv.environment,
+          envRaw: paypalEnv.envRaw,
+          ready: paypalEnv.ready,
+        },
       },
     });
   });
