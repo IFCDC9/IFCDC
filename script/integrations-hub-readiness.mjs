@@ -96,6 +96,13 @@ async function main() {
       log(gh?.status === "connected" ? "pass" : gh?.status === "configured" ? "warn" : "fail", "GitHub status", gh?.status ?? "unknown");
       log(gh?.health?.healthy ? "pass" : "warn", "GitHub health probe", gh?.health?.message ?? "");
     }
+    if (id === "twilio") {
+      const tw = integrations.find((i) => i.id === "twilio");
+      log(tw?.requiredCredentials?.some((c) => c.key === "TWILIO_ACCOUNT_SID" && c.configured) ? "pass" : "fail", "Twilio ACCOUNT_SID configured");
+      log(tw?.requiredCredentials?.some((c) => c.key === "OPENAI_API_KEY" && c.configured) ? "pass" : "fail", "AURA OPENAI_API_KEY configured");
+      log(Array.isArray(tw?.details) && tw.details.length >= 6 ? "pass" : "fail", "Twilio details", `${tw?.details?.length ?? 0} rows`);
+      log(tw?.status === "connected" ? "pass" : tw?.status === "degraded" ? "warn" : "fail", "Twilio status", tw?.status ?? "unknown");
+    }
   }
 
   const paypal = integrations.find((i) => i.id === "paypal");
@@ -129,6 +136,17 @@ async function main() {
     });
     log(ghTest.ok && ghTest.body?.success ? "pass" : "fail", "POST github/test", ghTest.body?.message ?? String(ghTest.res.status));
     log(ghTest.body?.status === "connected" ? "pass" : "warn", "GitHub test status", ghTest.body?.status ?? "");
+  }
+
+  const twilio = integrations.find((i) => i.id === "twilio");
+  if (twilio) {
+    const twTest = await timedFetch(`${BASE}/api/hq/integrations/twilio/test`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: "{}",
+    });
+    log(twTest.ok && twTest.body?.success ? "pass" : "fail", "POST twilio/test", twTest.body?.message ?? String(twTest.res.status));
+    log(twTest.body?.status === "connected" ? "pass" : "warn", "Twilio test status", twTest.body?.status ?? "");
   } else if (integrations[0]) {
     const test = await timedFetch(`${BASE}/api/hq/integrations/${integrations[0].id}/test`, {
       method: "POST",

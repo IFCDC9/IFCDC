@@ -141,6 +141,24 @@ export async function initLegacyMonolithDb(founder: FounderSeedConfig): Promise<
   `);
 
   await db.exec(`
+    CREATE TABLE IF NOT EXISTS twilio_communication_events (
+      id TEXT PRIMARY KEY,
+      direction TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      from_number TEXT,
+      to_number TEXT,
+      body TEXT,
+      call_sid TEXT,
+      message_sid TEXT,
+      status TEXT,
+      aura_response TEXT,
+      metadata TEXT,
+      created_at TEXT NOT NULL
+    );
+  `);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_twilio_comm_events_created ON twilio_communication_events(created_at DESC);`);
+
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS outreach_tasks (
       id TEXT PRIMARY KEY,
       client_id TEXT,

@@ -564,44 +564,132 @@ async function buildPostgresCard(): Promise<IntegrationHubCard> {
 }
 
 async function buildTwilioCard(): Promise<IntegrationHubCard> {
-  const required = ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"];
-  const optional = ["TWILIO_SMS_FROM", "TWILIO_FROM_NUMBER"];
+  const {
+    probeTwilioApi,
+    buildTwilioDetails,
+    resolveTwilioHubStatus,
+    getTwilioEnvStatus,
+    countTwilioCommunicationEvents,
+    getLastTwilioEventAt,
+    getLastTwilioSuccessfulTestAt,
+    IFCDC_HQ_PHONE_E164,
+  } = await import("./twilioIntegrationEngine");
+
+  const envStatus = getTwilioEnvStatus();
   const now = new Date().toISOString();
-  const health = await probe("twilio", async () => {
-    const missing = required.filter((k) => !envSet(k));
-    if (missing.length) return { healthy: false, message: "Twilio credentials not configured" };
-    const from = process.env.TWILIO_SMS_FROM || process.env.TWILIO_FROM_NUMBER;
-    return {
-      healthy: true,
-      message: from ? `SMS ready from ${from}` : "Credentials present — set TWILIO_SMS_FROM for outbound SMS",
-    };
-  }, { healthy: false, message: "Health probe timed out" });
+
+  const twProbe = await probe("twilio", () => probeTwilioApi(), {
+    healthy: false,
+    accountStatus: null,
+    accountFriendlyName: null,
+    phone: {
+      found: false,
+      phoneNumber: IFCDC_HQ_PHONE_E164,
+      friendlyName: null,
+      voiceCapable: false,
+      smsCapable: false,
+      status: null,
+      voiceWebhook: null,
+      smsWebhook: null,
+    },
+    auraReady: envStatus.auraConfigured,
+    latencyMs: 0,
+    message: "Twilio probe timed out",
+    webhookUrls: { incomingVoice: "", voiceRespond: "", voiceStatus: "", incomingSms: "", smsStatus: "", legacyVoice: "", legacySms: "", reminderVoice: "", reminderStatus: "" },
+  });
+
+  const eventCount = await countTwilioCommunicationEvents().catch(() => 0);
+  const lastEventAt = await getLastTwilioEventAt().catch(() => null);
+  const lastTestAt = getLastTwilioSuccessfulTestAt();
+  const rawStatus = resolveTwilioHubStatus(twProbe, envStatus.ready);
+  const status = normalizeHubStatus(rawStatus, twProbe.healthy);
+  const details = buildTwilioDetails(twProbe, envStatus, eventCount, lastEventAt, lastTestAt);
+
+  const requiredKeys = ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "OPENAI_API_KEY"];
+  const optionalKeys = [
+    "TWILIO_PHONE_NUMBER",
+    "TWILIO_SMS_FROM",
+    "TWILIO_VOICE_FROM",
+    "TWILIO_FROM_NUMBER",
+    "TWILIO_MESSAGING_SERVICE_SID",
+    "PUBLIC_IFCDC_PHONE",
+  ];
 
   return {
     id: "twilio",
-    name: "Twilio (SMS)",
+    name: "Twilio (AURA Voice + SMS)",
     category: "Communications",
-    description: "SMS notifications — future Communications Center expansion",
-    status: health.healthy ? "configured" : statusFromEnv(required, optional),
+    description: "IFCDC HQ phone line +1 (331) 316-8167 — AURA voice assistant and SMS",
+    status,
     lastChecked: now,
     environmentReadiness: {
-      ready: required.every((k) => envSet(k)),
-      missing: [...required, ...optional].filter((k) => !envSet(k)),
-      configured: [...required, ...optional].filter((k) => envSet(k)),
+      ready: envStatus.ready,
+      missing: [
+        !envStatus.accountSidConfigured ? "TWILIO_ACCOUNT_SID" : null,
+        !envStatus.authTokenConfigured ? "TWILIO_AUTH_TOKEN" : null,
+        !envStatus.phoneNumberConfigured ? "TWILIO_PHONE_NUMBER" : null,
+        !envStatus.auraConfigured ? "OPENAI_API_KEY" : null,
+      ].filter(Boolean) as string[],
+      configured: [
+        ...(envStatus.accountSidConfigured ? ["TWILIO_ACCOUNT_SID"] : []),
+        ...(envStatus.authTokenConfigured ? ["TWILIO_AUTH_TOKEN"] : []),
+        ...(envStatus.phoneNumberConfigured ? ["TWILIO_PHONE_NUMBER"] : []),
+        ...(envStatus.messagingServiceConfigured ? ["TWILIO_MESSAGING_SERVICE_SID"] : []),
+        ...(envStatus.auraConfigured ? ["OPENAI_API_KEY"] : []),
+      ],
     },
     requiredCredentials: [
       credential("TWILIO_ACCOUNT_SID", "Twilio Account SID"),
       credential("TWILIO_AUTH_TOKEN", "Twilio Auth Token"),
-      credential("TWILIO_SMS_FROM", "SMS sender number"),
-    ],
-    health,
-    actions: [
-      { id: "test", label: "Test Connection", kind: "secondary", action: "test" },
       {
-        id: "sms",
-        label: "Coming soon / Not configured",
-        kind: "disabled",
-        reason: "SMS broadcast center ships in a future HQ release",
+        key: "TWILIO_PHONE_NUMBER",
+        label: `HQ line (${envStatus.phoneNumber ?? IFCDC_HQ_PHONE_E164})`,
+        configured: envStatus.phoneNumberConfigured,
+      },
+      {
+        key: "OPENAI_API_KEY",
+        label: "OpenAI (AURA voice AI)",
+        configured: envStatus.auraConfigured,
+      },
+      credential("TWILIO_MESSAGING_SERVICE_SID", "Messaging Service SID (optional)"),
+    ],
+    health: {
+      healthy: status === "connected",
+      latencyMs: twProbe.latencyMs,
+      message: twProbe.message,
+    },
+    details,
+    actions: [
+      { id: "test", label: "Test Connection", kind: "primary", action: "test" },
+      {
+        id: "aura",
+        label: "Open AURA",
+        kind: "secondary",
+        action: "link",
+        href: "/hq/aura",
+      },
+      {
+        id: "outreach",
+        label: "Outreach tasks",
+        kind: "secondary",
+        action: "link",
+        href: "/api/outreach-tasks?status=OPEN",
+      },
+      {
+        id: "configure",
+        label: envStatus.ready ? "Configured" : "Configure",
+        kind: "secondary",
+        action: "configure",
+        reason: envStatus.ready
+          ? "Twilio + AURA credentials detected on Render"
+          : "Set Twilio credentials and OPENAI_API_KEY on Render",
+      },
+      {
+        id: "render-env",
+        label: "Open Render Environment",
+        kind: "secondary",
+        action: "link",
+        href: renderEnvDashboardUrl(),
       },
     ],
   };
@@ -800,6 +888,10 @@ export async function testIntegrationHubProvider(provider: string) {
   if (provider === "paypal") {
     const { testPayPalIntegrationLive } = await import("./paypalIntegrationEngine");
     return testPayPalIntegrationLive();
+  }
+  if (provider === "twilio") {
+    const { testTwilioIntegrationLive } = await import("./twilioIntegrationEngine");
+    return testTwilioIntegrationLive();
   }
   const hub = await buildIntegrationsHubSafe();
   const card = hub.integrations.find((i) => i.id === provider);

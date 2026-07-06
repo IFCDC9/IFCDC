@@ -264,6 +264,40 @@ const IntegrationsHubPage: React.FC = () => {
                     </p>
                   </div>
                 )}
+                {configuring.id === "twilio" && (
+                  <div style={{ fontSize: "0.82rem", marginTop: "0.75rem", lineHeight: 1.5 }}>
+                    <p style={{ margin: "0 0 0.5rem" }}>
+                      <strong>Twilio + AURA voice setup (+1 331-316-8167)</strong>
+                    </p>
+                    <ol style={{ margin: 0, paddingLeft: "1.2rem" }}>
+                      <li>
+                        In Render → <strong>ifcdc-hq</strong> → Environment, set{" "}
+                        <code>TWILIO_ACCOUNT_SID</code>, <code>TWILIO_AUTH_TOKEN</code>,{" "}
+                        <code>TWILIO_PHONE_NUMBER=+13313168167</code>, and <code>OPENAI_API_KEY</code>.
+                      </li>
+                      <li>Save and redeploy so the service loads the new variables.</li>
+                      <li>
+                        In Twilio Console → Phone Numbers → +1 (331) 316-8167, set webhooks:
+                        <ul style={{ margin: "0.35rem 0", paddingLeft: "1rem" }}>
+                          <li>
+                            Voice: <code>https://ifcdc-hq-wst6.onrender.com/api/twilio/aura/voice</code>
+                          </li>
+                          <li>
+                            SMS: <code>https://ifcdc-hq-wst6.onrender.com/api/twilio/aura/sms</code>
+                          </li>
+                          <li>
+                            Status callback:{" "}
+                            <code>https://ifcdc-hq-wst6.onrender.com/api/twilio/aura/voice/status</code>
+                          </li>
+                        </ul>
+                      </li>
+                      <li>
+                        Click <strong>Test Connection</strong> to verify account, number status, and AURA readiness.
+                      </li>
+                      <li>Call +1 (331) 316-8167 to hear AURA answer live.</li>
+                    </ol>
+                  </div>
+                )}
                 {configuring.id === "github" && (
                   <div style={{ fontSize: "0.82rem", marginTop: "0.75rem", lineHeight: 1.5 }}>
                     <p style={{ margin: "0 0 0.5rem" }}>

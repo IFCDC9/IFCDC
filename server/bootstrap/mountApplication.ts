@@ -9,7 +9,9 @@ import hqRouter from "../routes/hq.routes";
 import enterpriseApiRouter from "../routes/enterpriseApi.routes";
 import { getAppRoot, getDistPublicDir, getPublicDir, getSpaIndexPath } from "../appPaths";
 import { registerMonolithRoutes, registerMonolithCronRoutes } from "../routes/monolith";
+import { registerTwilioAuraRoutes } from "../routes/twilioAura.routes";
 import { createTwilioSenders } from "../monolith/twilioHelpers";
+import { resolveTwilioPhoneNumber } from "../hq/twilioIntegrationEngine";
 
 export interface MountApplicationOptions {
   isDev: boolean;
@@ -20,6 +22,7 @@ export async function mountApplication(app: Express, opts: MountApplicationOptio
   const {
     TWILIO_ACCOUNT_SID,
     TWILIO_AUTH_TOKEN,
+    TWILIO_PHONE_NUMBER,
     TWILIO_SMS_FROM,
     TWILIO_VOICE_FROM,
     PUBLIC_IFCDC_PHONE,
@@ -39,12 +42,18 @@ export async function mountApplication(app: Express, opts: MountApplicationOptio
     console.warn("Warning: TWILIO_ACCOUNT_SID does not start with 'AC'. Twilio SMS disabled.");
   }
 
+  const resolvedPhone = resolveTwilioPhoneNumber();
+  const smsFrom = TWILIO_SMS_FROM || TWILIO_PHONE_NUMBER || resolvedPhone || undefined;
+  const voiceFrom = TWILIO_VOICE_FROM || TWILIO_PHONE_NUMBER || resolvedPhone || undefined;
+
   const twilioSenders = createTwilioSenders({
     twilioClient,
-    smsFrom: TWILIO_SMS_FROM,
-    voiceFrom: TWILIO_VOICE_FROM,
+    smsFrom,
+    voiceFrom,
     publicAppUrl: PUBLIC_APP_URL,
   });
+
+  registerTwilioAuraRoutes(app);
 
   app.use(cookieParser());
   app.use("/api", donationsRouter);
@@ -55,7 +64,7 @@ export async function mountApplication(app: Express, opts: MountApplicationOptio
   const monolithDeps = {
     twilio: twilioSenders,
     twilioClient,
-    twilioSmsFrom: TWILIO_SMS_FROM,
+    twilioSmsFrom: smsFrom,
     cronSecret: CRON_SECRET_TOKEN,
     apptReminderLeadHours: APPT_REMINDER_LEAD_HOURS,
     publicIfcdcPhone: PUBLIC_IFCDC_PHONE,
@@ -96,7 +105,7 @@ export async function mountApplication(app: Express, opts: MountApplicationOptio
   });
 
   app.get("*", (req, res, next) => {
-    if (req.path.startsWith("/api") || req.path.startsWith("/twilio")) {
+    if (req.path.startsWith("/api") || req.path.startsWith("/twilio") || req.path.startsWith("/twiml")) {
       return next();
     }
     if (req.path.startsWith("/assets/")) {

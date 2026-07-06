@@ -30,11 +30,13 @@ export function createTwilioSenders(deps: TwilioSenderDeps) {
     ensureTwilioConfigured();
     const toNorm = normalizePhone(to);
     if (!toNorm) throw new Error("Invalid phone number");
-    const baseUrl = deps.publicAppUrl || "https://your-app-url.example.com";
+    const baseUrl = (deps.publicAppUrl || "https://your-app-url.example.com").replace(/\/$/, "");
     return deps.twilioClient!.calls.create({
       to: toNorm,
       from: deps.voiceFrom!,
       url: `${baseUrl}/twilio/voice/reminder?appointmentId=${encodeURIComponent(appointmentId)}`,
+      statusCallback: `${baseUrl}/twilio/voice-status`,
+      statusCallbackMethod: "POST",
     });
   }
 

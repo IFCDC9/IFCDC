@@ -3,6 +3,7 @@ import { getBuildInfo } from "../../buildInfo";
 import { isApplicationReady } from "../../bootstrap/applicationState";
 import { getGrantCenterQaReport, grantCenterQaEnvReady } from "../../hq/grantCenterQaCache";
 import { getPayPalEnvStatus } from "../../hq/paypalIntegrationEngine";
+import { getTwilioEnvStatus } from "../../hq/twilioIntegrationEngine";
 import {
   credentialsAreSeparated,
   getGrantsOperatorEmail,
@@ -20,6 +21,7 @@ export function registerHealthRoutes(app: Express): void {
     const qaEnv = grantCenterQaEnvReady();
     const qaReport = getGrantCenterQaReport();
     const paypalEnv = getPayPalEnvStatus();
+    const twilioEnv = getTwilioEnvStatus();
     res.json({
       app: "ifcdc-headquarters",
       status: "healthy",
@@ -53,6 +55,14 @@ export function registerHealthRoutes(app: Express): void {
           environment: paypalEnv.environment,
           envRaw: paypalEnv.envRaw,
           ready: paypalEnv.ready,
+        },
+        twilio: {
+          accountSidConfigured: twilioEnv.accountSidConfigured,
+          authTokenConfigured: twilioEnv.authTokenConfigured,
+          phoneNumberConfigured: twilioEnv.phoneNumberConfigured,
+          phoneNumber: twilioEnv.phoneNumber,
+          auraConfigured: twilioEnv.auraConfigured,
+          ready: twilioEnv.ready,
         },
       },
     });

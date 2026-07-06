@@ -84,6 +84,23 @@ services:
         sync: false
       - key: PAYPAL_ENV
         value: live
+      # Twilio — AURA voice + SMS (+1 331-316-8167)
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        value: "+13313168167"
+      - key: TWILIO_SMS_FROM
+        value: "+13313168167"
+      - key: TWILIO_VOICE_FROM
+        value: "+13313168167"
+      - key: TWILIO_FROM_NUMBER
+        value: "+13313168167"
+      - key: PUBLIC_IFCDC_PHONE
+        value: "+13313168167"
+      - key: TWILIO_MESSAGING_SERVICE_SID
+        sync: false
 
     disk:
       name: ifcdc-hq-data
