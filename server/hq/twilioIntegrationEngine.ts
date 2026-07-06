@@ -100,7 +100,15 @@ export function getTwilioEnvStatus(): TwilioEnvStatus {
 }
 
 export function getPublicBaseUrl(): string {
-  return (process.env.PUBLIC_BASE_URL || process.env.PUBLIC_APP_URL || "").replace(/\/$/, "");
+  // RENDER_EXTERNAL_URL is the authoritative public URL for this Render service.
+  const renderExternal = (process.env.RENDER_EXTERNAL_URL || "").trim().replace(/\/$/, "");
+  if (renderExternal.startsWith("https://")) return renderExternal;
+  const publicBase = (process.env.PUBLIC_BASE_URL || "").trim().replace(/\/$/, "");
+  const publicApp = (process.env.PUBLIC_APP_URL || "").trim().replace(/\/$/, "");
+  // Prefer PUBLIC_APP_URL when PUBLIC_BASE_URL points at a stale/custom domain.
+  if (publicApp.startsWith("https://")) return publicApp;
+  if (publicBase.startsWith("https://")) return publicBase;
+  return "";
 }
 
 export function getTwilioWebhookUrls() {
@@ -138,13 +146,24 @@ function normalizeWebhookUrl(url: string | null | undefined): string | null {
   return url.trim().replace(/\/$/, "");
 }
 
-/** HQ accepts canonical Render AURA endpoints or legacy /twiml aliases on production host. */
+function webhookHostMatchesProduction(url: string | null | undefined): boolean {
+  const expectedBase = getPublicBaseUrl();
+  if (!url || !expectedBase) return false;
+  try {
+    return new URL(url).origin === new URL(expectedBase).origin;
+  } catch {
+    return false;
+  }
+}
+
+/** HQ accepts canonical Render AURA endpoints or legacy /twiml aliases on the production host. */
 export function isAcceptedVoiceWebhook(
   url: string | null | undefined,
   expected: string
 ): boolean {
   const actual = normalizeWebhookUrl(url);
   if (!actual || isTemporaryWebhookUrl(actual)) return false;
+  if (!webhookHostMatchesProduction(actual)) return false;
   const exp = normalizeWebhookUrl(expected);
   if (actual === exp) return true;
   return actual.endsWith("/twiml/voice") || actual.endsWith("/api/twilio/aura/voice");
@@ -153,6 +172,7 @@ export function isAcceptedVoiceWebhook(
 export function isAcceptedSmsWebhook(url: string | null | undefined, expected: string): boolean {
   const actual = normalizeWebhookUrl(url);
   if (!actual || isTemporaryWebhookUrl(actual)) return false;
+  if (!webhookHostMatchesProduction(actual)) return false;
   const exp = normalizeWebhookUrl(expected);
   if (actual === exp) return true;
   return actual.endsWith("/twiml/sms") || actual.endsWith("/api/twilio/aura/sms");

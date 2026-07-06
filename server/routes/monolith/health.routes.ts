@@ -3,7 +3,7 @@ import { getBuildInfo } from "../../buildInfo";
 import { isApplicationReady } from "../../bootstrap/applicationState";
 import { getGrantCenterQaReport, grantCenterQaEnvReady } from "../../hq/grantCenterQaCache";
 import { getPayPalEnvStatus } from "../../hq/paypalIntegrationEngine";
-import { getTwilioEnvStatus, getLastTwilioWebhookSync } from "../../hq/twilioIntegrationEngine";
+import { getTwilioEnvStatus, getLastTwilioWebhookSync, getTwilioWebhookUrls } from "../../hq/twilioIntegrationEngine";
 import {
   credentialsAreSeparated,
   getGrantsOperatorEmail,
@@ -23,6 +23,7 @@ export function registerHealthRoutes(app: Express): void {
     const paypalEnv = getPayPalEnvStatus();
     const twilioEnv = getTwilioEnvStatus();
     const twilioWebhookSync = getLastTwilioWebhookSync();
+    const twilioWebhooks = getTwilioWebhookUrls();
     res.json({
       app: "ifcdc-headquarters",
       status: "healthy",
@@ -68,9 +69,9 @@ export function registerHealthRoutes(app: Express): void {
             ? { synced: twilioWebhookSync.synced, success: twilioWebhookSync.success, message: twilioWebhookSync.message }
             : null,
           expectedWebhooks: {
-            voice: "https://ifcdc-hq-wst6.onrender.com/api/twilio/aura/voice",
-            sms: "https://ifcdc-hq-wst6.onrender.com/api/twilio/aura/sms",
-            status: "https://ifcdc-hq-wst6.onrender.com/api/twilio/aura/voice/status",
+            voice: twilioWebhooks.incomingVoice,
+            sms: twilioWebhooks.incomingSms,
+            status: twilioWebhooks.voiceStatus,
           },
         },
       },
