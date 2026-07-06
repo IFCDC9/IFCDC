@@ -42,7 +42,13 @@ router.get("/quickbooks/callback", async (req: Request, res: Response) => {
 router.use(hqAuthRequired, requireHQModule("software_division"));
 
 router.get("/", async (_req, res) => {
-  res.json(await getIntegrationsHub());
+  try {
+    res.json(await getIntegrationsHub());
+  } catch (err) {
+    console.error("[integrations-hub] GET / error:", err);
+    const { emptyIntegrationsHub } = await import("../hq/integrationsHubEngine");
+    res.json(emptyIntegrationsHub());
+  }
 });
 
 router.get("/quickbooks/status", async (_req, res) => {
@@ -87,7 +93,7 @@ router.post("/:provider/configure", async (req: Request, res: Response) => {
 });
 
 router.post("/:provider/test", async (req, res) => {
-  const provider = req.params.provider as IntegrationProvider;
+  const provider = req.params.provider;
   if (provider === "quickbooks") {
     const summary = await getQuickBooksSyncSummary();
     return res.json({
@@ -101,7 +107,12 @@ router.post("/:provider/test", async (req, res) => {
       testedAt: new Date().toISOString(),
     });
   }
-  res.json(await testIntegrationConnection(provider));
+  const { testIntegrationHubProvider } = await import("../hq/integrationsHubEngine");
+  const hubResult = await testIntegrationHubProvider(provider);
+  if (hubResult.message !== "Unknown integration") {
+    return res.json(hubResult);
+  }
+  res.json(await testIntegrationConnection(provider as IntegrationProvider));
 });
 
 export default router;

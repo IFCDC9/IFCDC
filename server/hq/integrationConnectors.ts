@@ -106,15 +106,8 @@ export async function ensureIntegrationTables(): Promise<void> {
 }
 
 export async function getIntegrationsHub() {
-  await ensureIntegrationTables();
-  const db = await getDb();
-  const connections = await db.all("SELECT * FROM hq_integration_connections ORDER BY name");
-  return {
-    catalog: INTEGRATION_CATALOG,
-    connections,
-    connectedCount: (connections as { status: string }[]).filter((c) => c.status === "connected").length,
-    timestamp: new Date().toISOString(),
-  };
+  const { buildIntegrationsHubSafe } = await import("./integrationsHubEngine");
+  return buildIntegrationsHubSafe();
 }
 
 export async function configureIntegration(
