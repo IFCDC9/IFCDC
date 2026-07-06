@@ -52,7 +52,7 @@ const SPA_ROUTES = [
 const MODULE_APIS = [
   ["Dashboard API", "/api/hq/workspace/dashboard", 20000],
   ["Mission Control", "/api/hq/phase10/mission-control", 45000],
-  ["Intelligent OS", "/api/hq/phase9/package", 45000],
+  ["Intelligent OS", "/api/hq/phase9/package", 5000],
   ["Enterprise Intelligence", "/api/hq/warehouse/overview", 20000],
   ["Workflow Automation", "/api/hq/workflows/dashboard", 20000],
   ["AURA Status", "/api/hq/aura/status", 20000],

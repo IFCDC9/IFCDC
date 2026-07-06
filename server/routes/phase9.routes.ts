@@ -2,7 +2,8 @@ import { Router } from "express";
 import type { Request, Response } from "express";
 import { hqAuthRequired, requireHQModule } from "../middleware/hqAuth";
 import {
-  buildPhase9OperatingSystemPackage,
+  buildPhase9OperatingSystemPackageSafe,
+  emptyPhase9OperatingSystemPackage,
   buildPhase9CommandCenter,
   buildPredictiveDashboard,
   buildCrossDivisionDataLayer,
@@ -23,10 +24,16 @@ import { createPackageCache } from "../hq/packageCache";
 const router = Router();
 router.use(hqAuthRequired);
 
-const phase9PackageCache = createPackageCache<Record<string, unknown>>(60_000);
+const phase9PackageCache = createPackageCache<Awaited<ReturnType<typeof buildPhase9OperatingSystemPackageSafe>>>(30_000);
 
 router.get("/package", requireHQModule("executive"), async (_req, res) => {
-  res.json(await phase9PackageCache.get("phase9", () => buildPhase9OperatingSystemPackage()));
+  try {
+    const payload = await phase9PackageCache.get("phase9", () => buildPhase9OperatingSystemPackageSafe());
+    res.json(payload);
+  } catch (err) {
+    console.error("[phase9] /package route error:", err);
+    res.json(emptyPhase9OperatingSystemPackage());
+  }
 });
 
 router.get("/command-center", requireHQModule("executive"), async (_req, res) => {
@@ -48,7 +55,13 @@ router.get("/login-briefing", requireHQModule("executive"), async (_req, res) =>
 });
 
 router.get("/predictive", requireHQModule("analytics"), async (_req, res) => {
-  res.json(await buildPredictiveDashboard());
+  try {
+    const payload = await buildPredictiveDashboard();
+    res.json(payload);
+  } catch (err) {
+    console.error("[phase9] /predictive route error:", err);
+    res.json({ models: [], generatedAt: new Date().toISOString(), degraded: true });
+  }
 });
 
 router.get("/grant-probability", requireHQModule("grants"), async (_req, res) => {

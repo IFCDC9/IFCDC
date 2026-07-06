@@ -7,6 +7,12 @@ import {
 } from "lucide-react";
 import HQLayout from "../../layouts/HQLayout";
 import { phase9Api } from "../../api/phase9Api";
+import {
+  EMPTY_PHASE9_PACKAGE,
+  EMPTY_PHASE9_PREDICTIVE,
+  normalizePhase9Package,
+  type Phase9Package,
+} from "../../data/phase9Defaults";
 import { KpiCard } from "../../components/hq/KpiCard";
 import { HqPanel } from "../../components/hq/HqPanel";
 import { HqLoading } from "../../components/hq/HqLoading";
@@ -15,31 +21,72 @@ import { StatusBadge } from "../../components/hq/StatusBadge";
 import { formatCurrency, formatLocaleNumber, formatPercent } from "../../utils/safeFormat";
 import { HqWidgetErrorBoundary } from "../../components/hq/HqErrorBoundary";
 
+type Phase9LoadResult = {
+  data: Phase9Package;
+  degraded: boolean;
+  warning: string | null;
+};
+
+const PHASE9_PLACEHOLDER: Phase9LoadResult = {
+  data: EMPTY_PHASE9_PACKAGE,
+  degraded: false,
+  warning: null,
+};
+
 const Phase9OperatingSystemPage: React.FC = () => {
   const qc = useQueryClient();
   const [searchQ, setSearchQ] = useState("");
   const [searchResults, setSearchResults] = useState<{ type: string; title: string; subtitle: string; path: string }[]>([]);
 
-  const os = useQuery({ queryKey: ["phase9-package"], queryFn: phase9Api.package, staleTime: 60_000 });
-  const predictive = useQuery({ queryKey: ["phase9-predictive"], queryFn: phase9Api.predictive, staleTime: 120_000 });
+  const os = useQuery({
+    queryKey: ["phase9-package"],
+    queryFn: async (): Promise<Phase9LoadResult> => {
+      try {
+        const raw = await phase9Api.package();
+        return {
+          data: normalizePhase9Package(raw),
+          degraded: Boolean((raw as { degraded?: boolean }).degraded),
+          warning: typeof (raw as { warning?: string }).warning === "string"
+            ? (raw as { warning: string }).warning
+            : null,
+        };
+      } catch (err) {
+        const warning = err instanceof Error ? err.message : "Phase 9 API did not respond in time.";
+        console.warn("[phase9] degraded load:", warning);
+        return {
+          data: normalizePhase9Package(EMPTY_PHASE9_PACKAGE),
+          degraded: true,
+          warning,
+        };
+      }
+    },
+    placeholderData: PHASE9_PLACEHOLDER,
+    staleTime: 60_000,
+    retry: 0,
+  });
+
+  const predictive = useQuery({
+    queryKey: ["phase9-predictive"],
+    queryFn: async () => {
+      try {
+        return await phase9Api.predictive();
+      } catch {
+        return EMPTY_PHASE9_PREDICTIVE;
+      }
+    },
+    placeholderData: EMPTY_PHASE9_PREDICTIVE,
+    staleTime: 120_000,
+    retry: 0,
+  });
 
   const deliverReport = useMutation({
     mutationFn: (type: "briefing" | "board-report") => phase9Api.deliverReport(type, { sendEmail: false }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["phase9-package"] }),
   });
 
-  const data = os.data as {
-    commandCenter?: {
-      organizationHealth?: { overall: number; grade: string };
-      briefing?: { greeting: string; highlights: string[]; priorities: string[] };
-      recommendations?: { action: string; priority: string; module: string }[];
-      riskAlerts?: { title: string; detail: string; severity: string }[];
-    };
-    divisions?: { counts?: { total: number; healthy: number; productionLocked: number }; dataLayer?: { divisions: { name: string; status: string; healthy: boolean; dataSource: string }[] } };
-    workflows?: { pending: number; overdue: number; escalations: { title: string }[] };
-    notifications?: { unreadCount: number; highPriority: number };
-    reporting?: { oneClickReports: { id: string; label: string; path?: string }[] };
-  } | undefined;
+  const data = os.data?.data;
+  const degraded = os.data?.degraded ?? false;
+  const loadWarning = os.data?.warning;
 
   const health = data?.commandCenter?.organizationHealth;
   const models = (predictive.data as { models?: { id: string; label: string; current: number; projected30d: number; trend: string; unit: string }[] })?.models ?? [];
@@ -47,8 +94,12 @@ const Phase9OperatingSystemPage: React.FC = () => {
   async function runSearch(e: React.FormEvent) {
     e.preventDefault();
     if (!searchQ.trim()) return;
-    const res = await phase9Api.search(searchQ);
-    setSearchResults(res.results ?? []);
+    try {
+      const res = await phase9Api.search(searchQ);
+      setSearchResults(res.results ?? []);
+    } catch {
+      setSearchResults([]);
+    }
   }
 
   return (
@@ -58,8 +109,21 @@ const Phase9OperatingSystemPage: React.FC = () => {
         title="Intelligent OS unavailable"
         message="The Phase 9 operating system package could not be loaded. Retry or use Mission Control / Executive Dashboard."
         loadingMessage="Loading operating system…"
+        hasRenderableData
       >
         <>
+          {degraded && (
+            <div className="hq-anomaly-alert hq-sev-medium hq-fade-in" style={{ marginBottom: "1rem" }}>
+              <AlertTriangle size={16} />
+              <div>
+                <strong>Degraded mode</strong>
+                <span>
+                  {loadWarning ?? "Live intelligence is still loading or temporarily unavailable. Showing safe defaults — retry or open Mission Control."}
+                </span>
+              </div>
+            </div>
+          )}
+
           <div className="hq-founder-hero hq-fade-in" style={{ marginBottom: "1.25rem" }}>
             <div>
               <p className="hq-founder-hero-eyebrow">Phase 9 · IFCDC Headquarters</p>
@@ -125,7 +189,7 @@ const Phase9OperatingSystemPage: React.FC = () => {
           </div>
 
           <HqPanel title="Predictive Analytics" subtitle="Cash flow, grants, staffing, and KPI forecasts" action={{ label: "Full Intelligence", to: "/hq/intelligence" }} style={{ marginTop: "1.25rem" }}>
-            {predictive.isLoading ? <HqLoading /> : (
+            {predictive.isLoading && !predictive.data?.models?.length ? <HqLoading /> : (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "0.75rem" }}>
                 {models.slice(0, 7).map((m) => (
                   <div key={m.id} className="hq-panel" style={{ padding: "0.75rem" }}>

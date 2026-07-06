@@ -1,4 +1,5 @@
-import { hqApiFetch, HQ_HEAVY_FETCH_TIMEOUT_MS } from "./hqApiFetch";
+import { hqApiFetch } from "./hqApiFetch";
+import { PHASE9_FETCH_TIMEOUT_MS } from "../data/phase9Defaults";
 
 async function apiFetch<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
   const { timeoutMs, ...init } = options ?? {};
@@ -6,7 +7,7 @@ async function apiFetch<T>(path: string, options?: RequestInit & { timeoutMs?: n
 }
 
 export const phase9Api = {
-  package: () => apiFetch<Record<string, unknown>>("/package", { timeoutMs: HQ_HEAVY_FETCH_TIMEOUT_MS }),
+  package: () => apiFetch<Record<string, unknown>>("/package", { timeoutMs: PHASE9_FETCH_TIMEOUT_MS }),
   commandCenter: () => apiFetch<Record<string, unknown>>("/command-center"),
   loginBriefing: () => apiFetch<{
     greeting: string;
@@ -18,7 +19,7 @@ export const phase9Api = {
     recommendations: { action: string; priority: string }[];
     generatedAt: string;
   }>("/login-briefing"),
-  predictive: () => apiFetch<Record<string, unknown>>("/predictive"),
+  predictive: () => apiFetch<Record<string, unknown>>("/predictive", { timeoutMs: PHASE9_FETCH_TIMEOUT_MS }),
   grantProbability: () => apiFetch<{ scores: { opportunityId: string; title: string; probability: number; factors: string[] }[] }>("/grant-probability"),
   divisions: () => apiFetch<Record<string, unknown>>("/divisions"),
   workflows: () => apiFetch<Record<string, unknown>>("/workflows"),

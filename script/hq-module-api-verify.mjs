@@ -14,7 +14,7 @@ const PASSWORD = process.env.IFCDC_SUPER_ADMIN_PASSWORD || process.env.FOUNDER_S
 const MODULE_APIS = [
   ["Mission Control", "GET", "/api/hq/phase10/mission-control", 45000],
   ["Mission Control Package", "GET", "/api/hq/phase10/package", 45000],
-  ["Intelligent OS", "GET", "/api/hq/phase9/package", 45000],
+  ["Intelligent OS", "GET", "/api/hq/phase9/package", 5000],
   ["Enterprise Intelligence", "GET", "/api/hq/warehouse/overview", 20000],
   ["Workflow Automation", "GET", "/api/hq/workflows/dashboard", 20000],
   ["AURA Status", "GET", "/api/hq/aura/status", 20000],
