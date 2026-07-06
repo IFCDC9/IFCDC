@@ -1,29 +1,13 @@
-async function api<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`/api/hq/documents${path}`, { credentials: "include", ...options });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || "Request failed");
-  }
-  return res.json();
+import { hqApiFetch } from "./hqApiFetch";
+import { DOCUMENTS_FETCH_TIMEOUT_MS } from "../data/documentsDefaults";
+import type { DocumentsOverview, HQDocumentRow } from "../data/documentsDefaults";
+
+async function api<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  const { timeoutMs = DOCUMENTS_FETCH_TIMEOUT_MS, ...init } = options ?? {};
+  return hqApiFetch<T>(`/api/hq/documents${path}`, { ...init, timeoutMs });
 }
 
-export interface HQDocument {
-  id: string;
-  title: string;
-  category: string;
-  file_url: string | null;
-  version: number;
-  access_level: string;
-  approval_status?: string;
-  signature_status?: string;
-  signed_by?: string | null;
-  signed_at?: string | null;
-  ocr_text?: string | null;
-  person_id: string | null;
-  grant_id: string | null;
-  created_at: string;
-  updated_at: string;
-}
+export interface HQDocument extends HQDocumentRow {}
 
 export interface DocumentVersion {
   id: string;
@@ -45,20 +29,21 @@ export interface DocumentUploadPayload {
   access_level?: string;
   grant_id?: string;
   person_id?: string;
+  department_id?: string;
   requires_approval?: boolean;
 }
 
 export const documentsApi = {
-  overview: () =>
-    api<{ total: number; byCategory: { category: string; count: number }[]; pendingApprovals?: number }>("/overview"),
-  list: (params?: { q?: string; category?: string; grant_id?: string; person_id?: string }) => {
+  overview: () => api<DocumentsOverview>("/overview"),
+  list: (params?: { q?: string; category?: string; grant_id?: string; person_id?: string; archived?: boolean }) => {
     const qs = new URLSearchParams();
     if (params?.q) qs.set("q", params.q);
     if (params?.category) qs.set("category", params.category);
     if (params?.grant_id) qs.set("grant_id", params.grant_id);
     if (params?.person_id) qs.set("person_id", params.person_id);
+    if (params?.archived) qs.set("archived", "1");
     const q = qs.toString();
-    return api<{ documents: HQDocument[] }>(q ? `?${q}` : "");
+    return api<{ documents: HQDocument[]; degraded?: boolean }>(q ? `?${q}` : "");
   },
   get: (id: string) => api<{ document: HQDocument; versions: DocumentVersion[] }>(`/${id}`),
   create: (data: {
@@ -68,6 +53,7 @@ export const documentsApi = {
     access_level?: string;
     grant_id?: string;
     person_id?: string;
+    department_id?: string;
     requires_approval?: boolean;
   }) =>
     api("/", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
@@ -83,6 +69,8 @@ export const documentsApi = {
     api(`/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
   review: (id: string, action: "approve" | "reject") =>
     api(`/${id}/approval`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) }),
+  archive: (id: string, archived = true) =>
+    api(`/${id}/archive`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archived }) }),
   ocrIndex: (id: string, text: string) =>
     api<{ document: HQDocument }>(`/${id}/ocr-index`, {
       method: "POST",

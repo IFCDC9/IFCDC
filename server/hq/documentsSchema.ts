@@ -35,4 +35,5 @@ export async function ensureDocumentTables(): Promise<void> {
   await addCol("signed_by", "TEXT");
   await addCol("signed_at", "TEXT");
   await addCol("signature_data", "TEXT");
+  await addCol("lifecycle_status", "TEXT DEFAULT 'active'");
 }

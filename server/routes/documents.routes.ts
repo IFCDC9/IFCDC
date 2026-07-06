@@ -2,7 +2,7 @@ import { Router } from "express";
 import type { Request, Response } from "express";
 import { getDb } from "../db";
 import { hqAuthRequired, requireHQModule, requireHQPermission } from "../middleware/hqAuth";
-import { docId } from "../hq/documentsSchema";
+import { docId, ensureDocumentTables } from "../hq/documentsSchema";
 import { saveHqFileBase64 } from "../hq/hqFileStorage";
 import { grantId } from "../hq/grantsSchema";
 import { toHQRole } from "../hq/enterpriseRoles";
@@ -10,6 +10,15 @@ import { toHQRole } from "../hq/enterpriseRoles";
 const router = Router();
 
 router.use(hqAuthRequired, requireHQModule("settings"));
+
+router.use(async (_req, _res, next) => {
+  try {
+    await ensureDocumentTables();
+  } catch (err) {
+    console.warn("[documents] ensureDocumentTables:", err);
+  }
+  next();
+});
 
 function canViewAccessLevel(role: string, accessLevel: string): boolean {
   const hqRole = toHQRole(role);
@@ -54,52 +63,81 @@ async function linkGrantDocument(
 }
 
 router.get("/overview", async (_req, res) => {
-  const db = await getDb();
-  const total = (await db.get<{ c: number }>("SELECT COUNT(*) as c FROM hq_documents"))?.c ?? 0;
-  const byCategory = await db.all(
-    `SELECT category, COUNT(*) as count FROM hq_documents GROUP BY category ORDER BY count DESC`
-  );
-  const pending = (await db.get<{ c: number }>(
-    "SELECT COUNT(*) as c FROM hq_documents WHERE approval_status = 'pending'"
-  ))?.c ?? 0;
-  res.json({ total, byCategory, pendingApprovals: pending });
+  try {
+    const db = await getDb();
+    const total = (await db.get<{ c: number }>(
+      "SELECT COUNT(*) as c FROM hq_documents WHERE COALESCE(lifecycle_status, 'active') != 'archived'"
+    ))?.c ?? 0;
+    const byCategory = await db.all(
+      `SELECT category, COUNT(*) as count FROM hq_documents
+       WHERE COALESCE(lifecycle_status, 'active') != 'archived'
+       GROUP BY category ORDER BY count DESC`
+    );
+    const pending = (await db.get<{ c: number }>(
+      "SELECT COUNT(*) as c FROM hq_documents WHERE approval_status = 'pending' AND COALESCE(lifecycle_status, 'active') != 'archived'"
+    ))?.c ?? 0;
+    const archived = (await db.get<{ c: number }>(
+      "SELECT COUNT(*) as c FROM hq_documents WHERE lifecycle_status = 'archived'"
+    ))?.c ?? 0;
+    res.json({ total, byCategory, pendingApprovals: pending, archived });
+  } catch (err) {
+    console.error("[documents] overview error:", err);
+    res.json({ total: 0, byCategory: [], pendingApprovals: 0, archived: 0, degraded: true });
+  }
 });
 
 router.get("/", async (req, res) => {
-  const db = await getDb();
-  const q = String(req.query.q ?? "").trim();
-  const category = String(req.query.category ?? "").trim();
-  const grant_id = String(req.query.grant_id ?? "").trim();
-  const person_id = String(req.query.person_id ?? "").trim();
-  let sql = "SELECT * FROM hq_documents WHERE 1=1";
-  const params: string[] = [];
-  if (category) {
-    sql += " AND category = ?";
-    params.push(category);
+  try {
+    const db = await getDb();
+    const q = String(req.query.q ?? "").trim();
+    const category = String(req.query.category ?? "").trim();
+    const grant_id = String(req.query.grant_id ?? "").trim();
+    const person_id = String(req.query.person_id ?? "").trim();
+    const showArchived = String(req.query.archived ?? "") === "1";
+    let sql = `
+      SELECT d.*, dep.name as department_name,
+        TRIM(COALESCE(p.first_name, '') || ' ' || COALESCE(p.last_name, '')) as owner_name
+      FROM hq_documents d
+      LEFT JOIN departments dep ON dep.id = d.department_id
+      LEFT JOIN people p ON p.id = d.person_id
+      WHERE 1=1`;
+    const params: string[] = [];
+    if (showArchived) {
+      sql += " AND d.lifecycle_status = 'archived'";
+    } else {
+      sql += " AND COALESCE(d.lifecycle_status, 'active') != 'archived'";
+    }
+    if (category) {
+      sql += " AND d.category = ?";
+      params.push(category);
+    }
+    if (grant_id) {
+      sql += " AND d.grant_id = ?";
+      params.push(grant_id);
+    }
+    if (person_id) {
+      sql += " AND d.person_id = ?";
+      params.push(person_id);
+    }
+    if (q) {
+      sql += " AND (d.title LIKE ? OR d.category LIKE ? OR d.ocr_text LIKE ?)";
+      params.push(`%${q}%`, `%${q}%`, `%${q}%`);
+    }
+    sql += " ORDER BY d.updated_at DESC LIMIT 100";
+    const rows = await db.all(sql, ...params);
+    const role = req.hqUser?.role ?? "";
+    const documents = rows.filter((d: { access_level?: string }) =>
+      canViewAccessLevel(role, d.access_level ?? "internal")
+    );
+    res.json({ documents });
+  } catch (err) {
+    console.error("[documents] list error:", err);
+    res.json({ documents: [], degraded: true });
   }
-  if (grant_id) {
-    sql += " AND grant_id = ?";
-    params.push(grant_id);
-  }
-  if (person_id) {
-    sql += " AND person_id = ?";
-    params.push(person_id);
-  }
-  if (q) {
-    sql += " AND (title LIKE ? OR category LIKE ? OR ocr_text LIKE ?)";
-    params.push(`%${q}%`, `%${q}%`, `%${q}%`);
-  }
-  sql += " ORDER BY updated_at DESC LIMIT 100";
-  const rows = await db.all(sql, ...params);
-  const role = req.hqUser?.role ?? "";
-  const documents = rows.filter((d: { access_level?: string }) =>
-    canViewAccessLevel(role, d.access_level ?? "internal")
-  );
-  res.json({ documents });
 });
 
 router.post("/upload", async (req: Request, res: Response) => {
-  const { fileName, base64, mimeType, title, category, access_level, grant_id, person_id, requires_approval } =
+  const { fileName, base64, mimeType, title, category, access_level, grant_id, person_id, department_id, requires_approval } =
     req.body ?? {};
   if (!fileName || !base64 || !title) {
     return res.status(400).json({ error: "fileName, base64, and title are required" });
@@ -119,7 +157,7 @@ router.post("/upload", async (req: Request, res: Response) => {
       saved.url,
       person_id ?? null,
       grant_id ?? null,
-      null,
+      department_id ?? null,
       access_level ?? "internal",
       approvalStatus,
       req.hqUser?.email ?? "",
@@ -313,6 +351,22 @@ router.patch("/:id/approval", requireHQPermission("hq.settings", "hq.executive")
     status,
     req.hqUser?.email ?? "",
     now,
+    now,
+    req.params.id
+  );
+  res.json({ document: await db.get("SELECT * FROM hq_documents WHERE id = ?", req.params.id) });
+});
+
+router.patch("/:id/archive", requireHQPermission("hq.settings", "hq.executive"), async (req: Request, res: Response) => {
+  const { archived } = req.body ?? {};
+  const db = await getDb();
+  const doc = await db.get("SELECT id FROM hq_documents WHERE id = ?", req.params.id);
+  if (!doc) return res.status(404).json({ error: "Document not found" });
+  const now = new Date().toISOString();
+  const lifecycle = archived === false ? "active" : "archived";
+  await db.run(
+    `UPDATE hq_documents SET lifecycle_status = ?, updated_at = ? WHERE id = ?`,
+    lifecycle,
     now,
     req.params.id
   );
