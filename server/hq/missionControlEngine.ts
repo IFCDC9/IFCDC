@@ -677,6 +677,91 @@ const DIVISION_MODULES = [
   { key: "integrations", label: "Integrations Hub", path: "/hq/integrations" },
 ];
 
+const MC_AGGREGATE_TIMEOUT_MS = 4_000;
+
+function mcTimeout<T>(promise: Promise<T>, fallback: T, label: string): Promise<T> {
+  return Promise.race([
+    promise.catch((err) => {
+      console.warn(`[mission-control] ${label} failed:`, err instanceof Error ? err.message : err);
+      return fallback;
+    }),
+    new Promise<T>((resolve) => setTimeout(() => {
+      console.warn(`[mission-control] ${label} timed out after ${MC_AGGREGATE_TIMEOUT_MS}ms`);
+      resolve(fallback);
+    }, MC_AGGREGATE_TIMEOUT_MS)),
+  ]);
+}
+
+/** Safe empty payload when aggregate build fails — always valid JSON for the client. */
+export function emptyMissionControlCommandCenter() {
+  return {
+    executiveDashboard: {
+      organizationHealth: { overall: 0, grade: "—" },
+      activePriorities: [] as { action: string; priority: string }[],
+      criticalAlerts: [] as { type: string; title: string; severity: string; path?: string; id: string }[],
+      scorecard: null,
+      dailyBriefing: null,
+    },
+    missionOperations: {
+      missions: [] as unknown[],
+      byStatus: { planning: [], active: [], at_risk: [], complete: [] },
+      upcoming: [] as unknown[],
+      completed: [] as unknown[],
+      timeline: [] as { missionId: string; missionTitle: string; events: unknown[] }[],
+    },
+    strategicObjectives: {
+      objectives: [] as unknown[],
+      byType: { annual: [], quarterly: [], department_milestone: [] },
+      avgProgress: 0,
+    },
+    taskCommandCenter: {
+      missionTasks: [] as unknown[],
+      executiveTasks: [] as unknown[],
+      counts: { missionPending: 0, missionApproved: 0, executivePending: 0 },
+    },
+    crossDivision: {
+      modules: DIVISION_MODULES.map((mod) => ({
+        ...mod,
+        healthy: true,
+        status: "connected",
+        alerts: 0,
+      })),
+      divisions: [] as unknown[],
+    },
+    founderPanel: {
+      pendingDecisions: [] as unknown[],
+      approvalQueue: [] as unknown[],
+      executiveNotes: [] as unknown[],
+      emergencyOverrides: [] as unknown[],
+    },
+    missionIntelligence: {
+      predictive: null,
+      financialRisk: null,
+      recommendations: [] as unknown[],
+      bottlenecks: [] as unknown[],
+      opportunities: [] as unknown[],
+    },
+    auditHistory: {
+      entries: [] as unknown[],
+      entityTypes: MISSION_ENTITY_TYPES,
+    },
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+export async function buildMissionControlCommandCenterSafe(role: string) {
+  try {
+    return await mcTimeout(
+      buildMissionControlCommandCenter(role),
+      emptyMissionControlCommandCenter() as Awaited<ReturnType<typeof buildMissionControlCommandCenter>>,
+      "aggregate"
+    );
+  } catch (err) {
+    console.error("[mission-control] aggregate error:", err);
+    return emptyMissionControlCommandCenter() as Awaited<ReturnType<typeof buildMissionControlCommandCenter>>;
+  }
+}
+
 export async function buildMissionControlCommandCenter(_role: string) {
   await ensureMissionControlTables();
 
@@ -697,21 +782,21 @@ export async function buildMissionControlCommandCenter(_role: string) {
     notes,
     auditEntries,
   ] = await Promise.all([
-    buildOrganizationHealthScore(),
-    listMissions(),
-    listObjectives(),
-    listMissionTasks(),
-    buildExecutiveTaskHub(40),
-    buildDivisionIntegrationOverview(),
-    buildApprovalQueue(20),
+    buildOrganizationHealthScore().catch(() => ({ overall: 0, grade: "—" })),
+    listMissions().catch(() => []),
+    listObjectives().catch(() => []),
+    listMissionTasks().catch(() => []),
+    buildExecutiveTaskHub(40).catch(() => ({ tasks: [], counts: { total: 0 } })),
+    buildDivisionIntegrationOverview().catch(() => ({ divisions: [] })),
+    buildApprovalQueue(20).catch(() => ({ tasks: [] })),
     getOrGenerateDailyBriefing().catch(() => null),
     buildExecutiveScorecard().catch(() => null),
     generateStrategicRecommendations().catch(() => ({ recommendations: [] })),
     buildPredictiveDashboard().catch(() => null),
     predictFinancialRisk().catch(() => null),
-    listFounderDecisions("pending"),
-    listExecutiveNotes(),
-    queryHqAudit({ limit: 50 }),
+    listFounderDecisions("pending").catch(() => []),
+    listExecutiveNotes().catch(() => []),
+    queryHqAudit({ limit: 50 }).catch(() => []),
   ]);
 
   const missionsByStatus = {
@@ -793,10 +878,10 @@ export async function buildMissionControlCommandCenter(_role: string) {
       upcoming: upcomingMissions,
       completed: missionsByStatus.complete,
       timeline: await Promise.all(
-        missions.slice(0, 10).map(async (m: { id: string; title: string }) => ({
+        missions.slice(0, 3).map(async (m: { id: string; title: string }) => ({
           missionId: m.id,
           missionTitle: m.title,
-          events: await listMissionTimeline(m.id),
+          events: await listMissionTimeline(m.id).catch(() => []),
         }))
       ),
     },

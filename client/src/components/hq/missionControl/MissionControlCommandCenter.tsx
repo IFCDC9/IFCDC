@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { phase10Api } from "../../../api/phase10Api";
 import type { MissionControlCommandCenter, HqMission, HqMissionTask } from "../../../api/missionControlTypes";
+import { EMPTY_MISSION_CONTROL, normalizeMissionControl } from "../../../data/missionControlDefaults";
 import { KpiCard } from "../KpiCard";
 import { HqPanel } from "../HqPanel";
 import { StatusBadge } from "../StatusBadge";
@@ -28,6 +29,18 @@ const TABS = [
 type TabId = (typeof TABS)[number]["id"];
 
 const MC_QUERY_KEY = ["mission-control-command-center"];
+
+type McLoadResult = {
+  control: MissionControlCommandCenter;
+  degraded: boolean;
+  warning: string | null;
+};
+
+const MC_PLACEHOLDER: McLoadResult = {
+  control: EMPTY_MISSION_CONTROL,
+  degraded: false,
+  warning: null,
+};
 
 function statusVariant(status: string): "success" | "warning" | "danger" | "muted" | "gold" {
   if (status === "active" || status === "approved" || status === "complete" || status === "completed") return "success";
@@ -63,8 +76,29 @@ export const MissionControlCommandCenter: React.FC = () => {
 
   const mc = useQuery({
     queryKey: MC_QUERY_KEY,
-    queryFn: phase10Api.missionControl,
+    queryFn: async (): Promise<McLoadResult> => {
+      try {
+        const raw = await phase10Api.missionControl();
+        return {
+          control: normalizeMissionControl(raw),
+          degraded: false,
+          warning: null,
+        };
+      } catch (err) {
+        const warning =
+          err instanceof Error ? err.message : "Mission Control API did not respond in time.";
+        console.warn("[mission-control] degraded load:", warning);
+        return {
+          control: normalizeMissionControl(EMPTY_MISSION_CONTROL),
+          degraded: true,
+          warning,
+        };
+      }
+    },
+    placeholderData: MC_PLACEHOLDER,
     staleTime: 30_000,
+    retry: 0,
+    refetchOnWindowFocus: false,
   });
 
   const invalidate = () => qc.invalidateQueries({ queryKey: MC_QUERY_KEY });
@@ -123,12 +157,39 @@ export const MissionControlCommandCenter: React.FC = () => {
     enabled: !!historyTaskId,
   });
 
-  const data = mc.data as MissionControlCommandCenter | undefined;
-  const health = data?.executiveDashboard.organizationHealth;
+  const load = mc.data ?? MC_PLACEHOLDER;
+  const data = load.control;
+  const health = data.executiveDashboard?.organizationHealth;
 
   return (
-    <HqQueryBoundary query={mc} title="Mission Control unavailable" message="Could not load the operational command center." loadingMessage="Loading Mission Control…">
-      {data && (
+    <HqQueryBoundary
+      query={mc}
+      hasRenderableData
+      title="Mission Control unavailable"
+      message="Could not load the operational command center."
+      loadingMessage="Loading Mission Control…"
+    >
+      {load.degraded && (
+        <div className="hq-panel hq-mb-md" style={{ borderColor: "var(--hq-warning)", padding: "0.85rem 1rem" }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: "0.5rem" }}>
+            <AlertTriangle size={18} style={{ color: "var(--hq-warning)", flexShrink: 0, marginTop: 2 }} />
+            <div>
+              <strong style={{ color: "var(--hq-gold)", fontSize: "0.9rem" }}>Live Mission Control data unavailable</strong>
+              <p className="hq-muted-text" style={{ margin: "0.25rem 0 0", fontSize: "0.82rem" }}>
+                Showing empty-state panels. {load.warning ?? "The headquarters API did not return live metrics in time."}
+              </p>
+              <button type="button" className="hq-btn hq-btn-secondary hq-btn-sm" style={{ marginTop: "0.5rem" }} onClick={() => void mc.refetch()}>
+                Retry live load
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {mc.isFetching && mc.isFetched && !load.degraded && (
+        <p className="hq-muted-text" style={{ fontSize: "0.75rem", marginBottom: "0.5rem" }}>Refreshing Mission Control…</p>
+      )}
+
     <div className="hq-fade-in">
       <div className="hq-founder-hero" style={{ marginBottom: "1rem" }}>
         <div>
@@ -212,9 +273,9 @@ export const MissionControlCommandCenter: React.FC = () => {
 
       <p className="hq-muted-text" style={{ fontSize: "0.72rem", marginTop: "1rem" }}>
         Last refreshed {new Date(data.generatedAt).toLocaleString()}
+        {load.degraded ? " · empty-state view" : ""}
       </p>
     </div>
-      )}
     </HqQueryBoundary>
   );
 };

@@ -18,6 +18,8 @@ import { createPackageCache } from "../hq/packageCache";
 import { queryHqAudit } from "../hq/hqAuditLog";
 import {
   buildMissionControlCommandCenter,
+  buildMissionControlCommandCenterSafe,
+  emptyMissionControlCommandCenter,
   listMissions,
   createMission,
   updateMission,
@@ -45,6 +47,7 @@ const router = Router();
 router.use(hqAuthRequired);
 
 const phase10PackageCache = createPackageCache<Record<string, unknown>>(60_000);
+const missionControlCache = createPackageCache<Awaited<ReturnType<typeof buildMissionControlCommandCenterSafe>>>(30_000);
 
 function actor(req: Request) {
   return { id: req.hqUser!.id, email: req.hqUser!.email };
@@ -69,7 +72,14 @@ router.get("/package", requireHQModule("executive"), async (req, res) => {
 });
 
 router.get("/mission-control", requireHQModule("executive"), async (req, res) => {
-  res.json(await buildMissionControlCommandCenter(req.hqUser!.role));
+  try {
+    const role = req.hqUser!.role;
+    const payload = await missionControlCache.get(role, () => buildMissionControlCommandCenterSafe(role));
+    res.json(payload);
+  } catch (err) {
+    console.error("[phase10] mission-control route error:", err);
+    res.json(emptyMissionControlCommandCenter());
+  }
 });
 
 router.get("/mission-control/legacy", requireHQModule("executive"), async (req, res) => {

@@ -1,4 +1,5 @@
 import { hqApiFetch, HQ_HEAVY_FETCH_TIMEOUT_MS } from "./hqApiFetch";
+import { MISSION_CONTROL_FETCH_TIMEOUT_MS } from "../data/missionControlDefaults";
 import type {
   HqAuditEntry,
   HqFounderDecision,
@@ -50,7 +51,9 @@ export interface ScenarioResult {
 export const phase10Api = {
   package: () => apiFetch<Record<string, unknown>>("/package", { timeoutMs: HQ_HEAVY_FETCH_TIMEOUT_MS }),
   missionControl: () =>
-    apiFetch<MissionControlCommandCenter>("/mission-control", { timeoutMs: HQ_HEAVY_FETCH_TIMEOUT_MS }),
+    apiFetch<MissionControlCommandCenter>("/mission-control", {
+      timeoutMs: MISSION_CONTROL_FETCH_TIMEOUT_MS,
+    }),
   roleHome: () => apiFetch<{ path: string; role: string }>("/role-home"),
   enterpriseAI: () => apiFetch<Record<string, unknown>>("/enterprise-ai"),
   ask: (question: string) =>
