@@ -1,11 +1,16 @@
 /**
- * Twilio AURA voice + SMS — incoming webhooks for +1 (331) 316-8167 and legacy /twiml aliases.
+ * Twilio AURA voice + SMS — executive receptionist for +1 (331) 316-8167.
  */
 import type { Express, Request, Response } from "express";
 import express from "express";
 import twilio from "twilio";
 import { cryptoRandomId } from "../monolith/constants";
-import { auraExecutiveChat, HQ_AURA_PROMPT } from "../lib/ifcdc";
+import {
+  getVoiceGreeting,
+  initializeReceptionistGreeting,
+  processReceptionistTurn,
+} from "../hq/auraReceptionistEngine";
+import { getReceptionistSession } from "../hq/auraReceptionistSession";
 import {
   IFCDC_HQ_PHONE_E164,
   logTwilioCommunicationEvent,
@@ -16,80 +21,99 @@ const VoiceResponse = twilio.twiml.VoiceResponse;
 const MessagingResponse = twilio.twiml.MessagingResponse;
 const twilioForm = express.urlencoded({ extended: false });
 
-const MAX_VOICE_TURNS = 6;
-const BARBERSHOP_FORWARD = "+17327435048";
+const MAX_VOICE_TURNS = 12;
 const RADIO_NUMBER = "+18587588791";
+const VOICE = "Polly.Joanna" as const;
 
-const AURA_PHONE_CONTEXT = `${HQ_AURA_PROMPT}
+function escapeXml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
 
-You are answering a live phone call or SMS to IFCDC Headquarters at +1 (331) 316-8167.
-Respond naturally and concisely — 1 to 3 short sentences per turn (optimized for text-to-speech).
-Help with appointments, barbershop bookings, grants, programs, donations, and general IFCDC questions.
-If the caller asks for a human, barber, or representative, acknowledge and offer transfer or callback.
-Do not use markdown, bullet points, or URLs in voice responses.`;
-
-function truncateForSpeech(text: string, max = 480): string {
+function truncateForSpeech(text: string, max = 520): string {
   const plain = text
-    .replace(/[*_#`]/g, "")
+    .replace(/[*_#`[\]]/g, "")
+    .replace(/\[ACTION:[^\]]+\]/gi, "")
     .replace(/\s+/g, " ")
     .trim();
   if (plain.length <= max) return plain;
   const cut = plain.slice(0, max);
   const lastPeriod = cut.lastIndexOf(".");
-  return lastPeriod > max * 0.5 ? cut.slice(0, lastPeriod + 1) : `${cut}…`;
+  return lastPeriod > max * 0.45 ? cut.slice(0, lastPeriod + 1) : `${cut}.`;
 }
 
 function truncateForSms(text: string, max = 1500): string {
-  const plain = text.replace(/\s+/g, " ").trim();
-  return plain.length <= max ? plain : `${plain.slice(0, max - 1)}…`;
-}
-
-function wantsHumanTransfer(speech: string): boolean {
-  const s = speech.toLowerCase();
-  return (
-    /\b(human|person|representative|agent|barber|barbershop|operator|real person)\b/.test(s) ||
-    /\b(transfer|connect me|speak to someone)\b/.test(s)
-  );
+  return text
+    .replace(/\[ACTION:[^\]]+\]/gi, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, max);
 }
 
 function respondXml(res: Response, twiml: string): void {
   res.type("text/xml").set("Cache-Control", "no-store").send(twiml);
 }
 
+function publicBaseUrl(): string {
+  return (process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_APP_URL || process.env.PUBLIC_BASE_URL || "")
+    .replace(/\/$/, "");
+}
+
 function buildGatherUrl(turn: number, callSid?: string): string {
-  const base = (process.env.PUBLIC_BASE_URL || process.env.PUBLIC_APP_URL || "").replace(/\/$/, "");
+  const base = publicBaseUrl();
   const qs = new URLSearchParams({ turn: String(turn) });
   if (callSid) qs.set("CallSid", callSid);
   return `${base}/api/twilio/aura/voice/respond?${qs.toString()}`;
 }
 
-async function auraPhoneReply(userMessage: string, from?: string): Promise<string> {
-  const context = `${AURA_PHONE_CONTEXT}\nCaller phone: ${from ?? "unknown"}`;
-  try {
-    const reply = await auraExecutiveChat(userMessage, context);
-    return reply;
-  } catch (err) {
-    console.error("AURA phone reply error:", err);
-    return "I'm having a brief technical issue. Please try again in a moment, or say transfer to reach our team.";
-  }
+function sayNatural(twiml: InstanceType<typeof VoiceResponse>, text: string): void {
+  const spoken = truncateForSpeech(text);
+  twiml.say(
+    {
+      voice: VOICE,
+      language: "en-US",
+    },
+    `<speak><prosody rate="95%" volume="medium"><break time="200ms"/>${escapeXml(spoken)}</prosody></speak>`
+  );
+}
+
+function appendGather(twiml: InstanceType<typeof VoiceResponse>, turn: number, callSid?: string): void {
+  twiml.gather({
+    input: ["speech"],
+    speechTimeout: "auto",
+    speechModel: "phone_call",
+    enhanced: true,
+    action: buildGatherUrl(turn, callSid),
+    method: "POST",
+    language: "en-US",
+    bargeIn: true,
+  });
+}
+
+function sessionKey(callSid?: string, from?: string | null): string {
+  return callSid || `sms-${from || "unknown"}`;
 }
 
 function handleRadioVoicemail(_req: Request, res: Response): void {
   const twiml = new VoiceResponse();
-  twiml.say({ voice: "Polly.Joanna" }, "Thank you for calling IFCDC Radio. Please leave your shoutout after the tone.");
+  twiml.say({ voice: VOICE }, "Thank you for calling IFCDC Radio. Please leave your shoutout after the tone.");
   twiml.record({ maxLength: 60, action: "/twiml/voicemail-complete", playBeep: true });
   respondXml(res, twiml.toString());
 }
 
 function handleVoicemailComplete(_req: Request, res: Response): void {
   const twiml = new VoiceResponse();
-  twiml.say({ voice: "Polly.Joanna" }, "Thank you for your message. Goodbye!");
+  twiml.say({ voice: VOICE }, "Thank you for your message. Goodbye!");
   twiml.hangup();
   respondXml(res, twiml.toString());
 }
 
 async function handleIncomingVoice(req: Request, res: Response): Promise<void> {
-  const calledNumber = normalizeE164(req.body.To);
+  const calledNumber = normalizeE164(req.body.To) || "";
   const from = normalizeE164(req.body.From);
   const callSid = req.body.CallSid as string | undefined;
 
@@ -97,11 +121,9 @@ async function handleIncomingVoice(req: Request, res: Response): Promise<void> {
     return handleRadioVoicemail(req, res);
   }
 
-  const twiml = new VoiceResponse();
-  const greeting =
-    calledNumber === IFCDC_HQ_PHONE_E164
-      ? "Hello, and thank you for calling Imperial Foundation Community Development Center. I'm AURA, your IFCDC assistant. How can I help you today?"
-      : "Thank you for calling Imperial Foundation Community Development Center. I'm AURA. How may I assist you?";
+  const sid = sessionKey(callSid, from);
+  const session = await getReceptionistSession(sid, "voice", from);
+  const greeting = getVoiceGreeting(session, calledNumber || IFCDC_HQ_PHONE_E164);
 
   void logTwilioCommunicationEvent({
     id: cryptoRandomId(),
@@ -114,16 +136,12 @@ async function handleIncomingVoice(req: Request, res: Response): Promise<void> {
     body: "incoming_call",
   });
 
-  twiml.say({ voice: "Polly.Joanna", language: "en-US" }, greeting);
-  twiml.gather({
-    input: ["speech"],
-    speechTimeout: "auto",
-    action: buildGatherUrl(1, callSid),
-    method: "POST",
-    language: "en-US",
-    hints: "appointment, barbershop, grant, hours, transfer, human, booking",
-  });
-  twiml.say({ voice: "Polly.Joanna" }, "I didn't hear anything. Goodbye.");
+  await initializeReceptionistGreeting(sid, "voice", from);
+
+  const twiml = new VoiceResponse();
+  sayNatural(twiml, greeting);
+  appendGather(twiml, 1, callSid);
+  twiml.say({ voice: VOICE }, "I didn't hear anything. Goodbye.");
   respondXml(res, twiml.toString());
 }
 
@@ -133,46 +151,26 @@ async function handleVoiceRespond(req: Request, res: Response): Promise<void> {
   const calledNumber = normalizeE164(req.body.To);
   const callSid = (req.body.CallSid || req.query.CallSid) as string | undefined;
   const turn = Math.min(parseInt(String(req.query.turn || "1"), 10) || 1, MAX_VOICE_TURNS);
+  const sid = sessionKey(callSid, from);
 
   const twiml = new VoiceResponse();
 
   if (!speech) {
-    twiml.say({ voice: "Polly.Joanna" }, "I'm sorry, I didn't catch that. Please tell me how I can help.");
-    if (turn < MAX_VOICE_TURNS) {
-      twiml.gather({
-        input: ["speech"],
-        speechTimeout: "auto",
-        action: buildGatherUrl(turn + 1, callSid),
-        method: "POST",
-        language: "en-US",
-      });
-    } else {
-      twiml.say({ voice: "Polly.Joanna" }, "Thank you for calling IFCDC. Goodbye.");
+    sayNatural(twiml, "I didn't catch that — go ahead, I'm listening.");
+    if (turn < MAX_VOICE_TURNS) appendGather(twiml, turn + 1, callSid);
+    else {
+      twiml.say({ voice: VOICE }, "Thank you for calling IFCDC. Goodbye.");
       twiml.hangup();
     }
     return respondXml(res, twiml.toString());
   }
 
-  if (wantsHumanTransfer(speech)) {
-    void logTwilioCommunicationEvent({
-      id: cryptoRandomId(),
-      direction: "inbound",
-      channel: "voice",
-      fromNumber: from,
-      toNumber: calledNumber,
-      callSid,
-      status: "transfer",
-      body: speech,
-      auraResponse: "Transferring to team",
-    });
-    twiml.say({ voice: "Polly.Joanna" }, "One moment while I connect you with our team.");
-    twiml.dial({ timeout: 30 }, BARBERSHOP_FORWARD);
-    twiml.say({ voice: "Polly.Joanna" }, "We couldn't reach someone right now. Please call back or visit ifcdc.org. Goodbye.");
-    return respondXml(res, twiml.toString());
-  }
-
-  const auraReply = await auraPhoneReply(speech, from ?? undefined);
-  const spoken = truncateForSpeech(auraReply);
+  const result = await processReceptionistTurn({
+    sessionId: sid,
+    userMessage: speech,
+    channel: "voice",
+    callerPhone: from,
+  });
 
   void logTwilioCommunicationEvent({
     id: cryptoRandomId(),
@@ -181,26 +179,26 @@ async function handleVoiceRespond(req: Request, res: Response): Promise<void> {
     fromNumber: from,
     toNumber: calledNumber,
     callSid,
-    status: "answered",
+    status: result.transferTo ? "transfer" : "answered",
     body: speech,
-    auraResponse: spoken,
-    metadata: { turn },
+    auraResponse: result.reply,
+    metadata: { turn, action: result.action, bookingConfirmed: result.bookingConfirmed },
   });
 
-  twiml.say({ voice: "Polly.Joanna", language: "en-US" }, spoken);
+  if (result.transferTo) {
+    sayNatural(twiml, "One moment — connecting you now.");
+    twiml.dial({ timeout: 30 }, result.transferTo);
+    twiml.say({ voice: VOICE }, "We couldn't reach someone right now. I'll make sure our team calls you back. Goodbye.");
+    return respondXml(res, twiml.toString());
+  }
+
+  sayNatural(twiml, result.reply);
 
   if (turn < MAX_VOICE_TURNS) {
-    twiml.gather({
-      input: ["speech"],
-      speechTimeout: "auto",
-      action: buildGatherUrl(turn + 1, callSid),
-      method: "POST",
-      language: "en-US",
-      hints: "appointment, barbershop, grant, hours, transfer, human, booking, goodbye",
-    });
-    twiml.say({ voice: "Polly.Joanna" }, "Thank you for calling IFCDC. Goodbye.");
+    appendGather(twiml, turn + 1, callSid);
+    twiml.say({ voice: VOICE }, "Thank you for calling IFCDC. Goodbye.");
   } else {
-    twiml.say({ voice: "Polly.Joanna" }, "Thank you for calling IFCDC. Goodbye.");
+    twiml.say({ voice: VOICE }, "Thank you for calling IFCDC. Goodbye.");
     twiml.hangup();
   }
 
@@ -208,23 +206,17 @@ async function handleVoiceRespond(req: Request, res: Response): Promise<void> {
 }
 
 async function handleVoiceStatus(req: Request, res: Response): Promise<void> {
-  const callStatus = req.body.CallStatus as string | undefined;
-  const from = normalizeE164(req.body.From);
-  const to = normalizeE164(req.body.To);
-  const callSid = req.body.CallSid as string | undefined;
-
   void logTwilioCommunicationEvent({
     id: cryptoRandomId(),
     direction: "inbound",
     channel: "voice",
-    fromNumber: from,
-    toNumber: to,
-    callSid,
-    status: callStatus ?? "unknown",
+    fromNumber: normalizeE164(req.body.From),
+    toNumber: normalizeE164(req.body.To),
+    callSid: req.body.CallSid,
+    status: req.body.CallStatus ?? "unknown",
     body: "status_callback",
     metadata: { duration: req.body.CallDuration },
   });
-
   respondXml(res, "<Response></Response>");
 }
 
@@ -234,6 +226,7 @@ async function handleIncomingSms(req: Request, res: Response): Promise<void> {
   const body = (req.body.Body || "").trim();
   const messageSid = req.body.MessageSid as string | undefined;
   const twiml = new MessagingResponse();
+  const sid = sessionKey(undefined, from);
 
   if (calledNumber === RADIO_NUMBER) {
     twiml.message("IFCDC Radio: Thanks for your shoutout or song request. We received your text.");
@@ -241,31 +234,18 @@ async function handleIncomingSms(req: Request, res: Response): Promise<void> {
   }
 
   if (!body) {
-    twiml.message("IFCDC: Send us your question and AURA will reply shortly.");
+    twiml.message("IFCDC: Send your question and AURA will reply. Text BOOK to schedule a barbershop appointment.");
     return respondXml(res, twiml.toString());
   }
 
-  const bookMatch = /^book$/i.test(body);
-  if (bookMatch) {
-    twiml.message(
-      "IFCDC Barbers: Book online at ifcdc-hq-wst6.onrender.com/book-barbershop.html or call (331) 316-8167."
-    );
-    void logTwilioCommunicationEvent({
-      id: cryptoRandomId(),
-      direction: "inbound",
-      channel: "sms",
-      fromNumber: from,
-      toNumber: calledNumber,
-      messageSid,
-      status: "replied",
-      body,
-      auraResponse: "BOOK auto-reply",
-    });
-    return respondXml(res, twiml.toString());
-  }
+  const result = await processReceptionistTurn({
+    sessionId: sid,
+    userMessage: body,
+    channel: "sms",
+    callerPhone: from,
+  });
 
-  const auraReply = truncateForSms(await auraPhoneReply(body, from ?? undefined));
-  twiml.message(auraReply);
+  twiml.message(truncateForSms(result.reply));
 
   void logTwilioCommunicationEvent({
     id: cryptoRandomId(),
@@ -276,7 +256,8 @@ async function handleIncomingSms(req: Request, res: Response): Promise<void> {
     messageSid,
     status: "replied",
     body,
-    auraResponse: auraReply,
+    auraResponse: result.reply,
+    metadata: { action: result.action, bookingConfirmed: result.bookingConfirmed },
   });
 
   respondXml(res, twiml.toString());
@@ -301,7 +282,7 @@ export function registerTwilioAuraRoutes(app: Express): void {
     void handleIncomingVoice(req, res).catch((err) => {
       console.error("Twilio AURA voice error:", err);
       const twiml = new VoiceResponse();
-      twiml.say({ voice: "Polly.Joanna" }, "We're experiencing technical difficulties. Please try again later.");
+      twiml.say({ voice: VOICE }, "We're experiencing technical difficulties. Please try again later.");
       respondXml(res, twiml.toString());
     });
   });
@@ -310,7 +291,7 @@ export function registerTwilioAuraRoutes(app: Express): void {
     void handleVoiceRespond(req, res).catch((err) => {
       console.error("Twilio AURA voice respond error:", err);
       const twiml = new VoiceResponse();
-      twiml.say({ voice: "Polly.Joanna" }, "Sorry, something went wrong. Goodbye.");
+      twiml.say({ voice: VOICE }, "Sorry, something went wrong. Goodbye.");
       respondXml(res, twiml.toString());
     });
   });
@@ -332,7 +313,6 @@ export function registerTwilioAuraRoutes(app: Express): void {
     void handleSmsStatus(req, res);
   });
 
-  // Legacy Twilio Console URLs (backward compatible)
   app.post("/twiml/voice", twilioForm, (req, res) => {
     void handleIncomingVoice(req, res);
   });

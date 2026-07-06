@@ -61,6 +61,9 @@ export async function initializeHqModules(founder: FounderSeedConfig): Promise<v
         if (result?.synced) console.log(`Twilio startup webhook sync: ${result.message}`);
       })
       .catch((e) => console.warn("Twilio webhook sync skipped:", e?.message));
+    import("../hq/auraReceptionistSession")
+      .then(({ ensureReceptionistSessionTable }) => ensureReceptionistSessionTable())
+      .catch((e) => console.warn("AURA receptionist session table skipped:", e?.message));
   }
   console.log("IFCDC HQ database and modules initialized");
 }

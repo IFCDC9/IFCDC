@@ -81,3 +81,29 @@ export async function auraExecutiveChat(prompt: string, context?: string): Promi
     : [{ role: "user" as const, content: prompt }];
   return aura.chat(messages);
 }
+
+/** Multi-turn receptionist chat — single combined system prompt (no duplicate system messages). */
+export async function auraReceptionistChat(
+  history: { role: "user" | "assistant"; content: string }[],
+  systemPrompt: string,
+  options?: { maxTokens?: number; temperature?: number }
+): Promise<string> {
+  const apiKey = process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY not configured");
+  }
+  const OpenAI = (await import("openai")).default;
+  const client = new OpenAI({
+    apiKey,
+    baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  });
+  const model = process.env.AURA_MODEL || "gpt-4o-mini";
+  const recent = history.slice(-12);
+  const response = await client.chat.completions.create({
+    model,
+    messages: [{ role: "system", content: systemPrompt }, ...recent],
+    temperature: options?.temperature ?? 0.72,
+    max_tokens: options?.maxTokens ?? 300,
+  });
+  return response.choices[0]?.message?.content?.trim() ?? "";
+}
