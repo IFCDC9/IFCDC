@@ -26,6 +26,9 @@ export interface WorkflowInstance {
   entity_id: string | null;
   due_at: string | null;
   created_at: string;
+  active_step_name?: string | null;
+  active_step_key?: string | null;
+  can_advance?: boolean;
 }
 
 export interface ScheduledJob {

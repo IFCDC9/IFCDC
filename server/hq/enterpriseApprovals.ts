@@ -1,8 +1,9 @@
 import { getDb } from "../db";
+import { getWorkflowSteps } from "./workflowOrchestration";
 
 export type ApprovalTask = {
   id: string;
-  type: "leave" | "expense" | "purchase_order" | "grant_application" | "document" | "grant_deadline";
+  type: "leave" | "expense" | "purchase_order" | "grant_application" | "document" | "grant_deadline" | "workflow";
   title: string;
   subtitle: string;
   amount?: number;
@@ -11,6 +12,8 @@ export type ApprovalTask = {
   entityId: string;
   priority: "high" | "normal" | "low";
   createdAt: string;
+  workflowStep?: string;
+  workflowKey?: string;
 };
 
 async function safeQuery<T>(sql: string, ...params: unknown[]): Promise<T[]> {
@@ -133,6 +136,42 @@ export async function buildApprovalQueue(limit = 20): Promise<{ tasks: ApprovalT
     });
   }
 
+  const workflowInstances = await safeQuery<{
+    id: string;
+    workflow_key: string;
+    title: string;
+    priority: string;
+    created_at: string;
+  }>(
+    `SELECT id, workflow_key, title, priority, created_at FROM hq_workflow_instances
+     WHERE status = 'pending' ORDER BY created_at DESC LIMIT 20`
+  );
+  let workflowCount = 0;
+  for (const inst of workflowInstances as {
+    id: string;
+    workflow_key: string;
+    title: string;
+    priority: string;
+    created_at: string;
+  }[]) {
+    const steps = await getWorkflowSteps(inst.id).catch(() => []);
+    const active = (steps as { status: string; step_name: string }[]).find((s) => s.status === "active");
+    if (!active) continue;
+    workflowCount++;
+    tasks.push({
+      id: `workflow-${inst.id}`,
+      type: "workflow",
+      title: inst.title,
+      subtitle: `${active.step_name} · ${inst.workflow_key.replace(/_/g, " ")}`,
+      path: "/hq/workflows",
+      entityId: inst.id,
+      priority: inst.priority === "high" ? "high" : "normal",
+      createdAt: inst.created_at,
+      workflowStep: active.step_name,
+      workflowKey: inst.workflow_key,
+    });
+  }
+
   tasks.sort((a, b) => {
     const pri = { high: 0, normal: 1, low: 2 };
     if (pri[a.priority] !== pri[b.priority]) return pri[a.priority] - pri[b.priority];
@@ -146,6 +185,7 @@ export async function buildApprovalQueue(limit = 20): Promise<{ tasks: ApprovalT
     grant_application: appRows.length,
     document: docRows.length,
     grant_deadline: deadlineRows.length,
+    workflow: workflowCount,
     total: tasks.length,
   };
 

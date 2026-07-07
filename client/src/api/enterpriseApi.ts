@@ -39,7 +39,7 @@ export interface EnterpriseNotification {
 
 export interface ApprovalTask {
   id: string;
-  type: "leave" | "expense" | "purchase_order" | "grant_application" | "document" | "grant_deadline";
+  type: "leave" | "expense" | "purchase_order" | "grant_application" | "document" | "grant_deadline" | "workflow";
   title: string;
   subtitle: string;
   amount?: number;
@@ -48,6 +48,8 @@ export interface ApprovalTask {
   entityId: string;
   priority: "high" | "normal" | "low";
   createdAt: string;
+  workflowStep?: string;
+  workflowKey?: string;
 }
 
 export const enterpriseApi = {

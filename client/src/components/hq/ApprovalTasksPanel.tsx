@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Clock, ArrowRight, Check, X } from "lucide-react";
@@ -15,6 +15,7 @@ const TYPE_LABELS: Record<ApprovalTask["type"], string> = {
   grant_application: "Grant App",
   document: "Document",
   grant_deadline: "Deadline",
+  workflow: "Workflow",
 };
 
 function fmtAmount(n?: number) {
@@ -24,6 +25,8 @@ function fmtAmount(n?: number) {
 
 export const ApprovalTasksPanel: React.FC<{ compact?: boolean; limit?: number }> = ({ compact, limit = 8 }) => {
   const qc = useQueryClient();
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
   const { data, isLoading } = useQuery({
     queryKey: ["hq-approval-tasks"],
     queryFn: () => enterpriseApi.approvals(),
@@ -31,10 +34,28 @@ export const ApprovalTasksPanel: React.FC<{ compact?: boolean; limit?: number }>
     refetchInterval: 60_000,
   });
 
+  const invalidateApprovalData = () => {
+    qc.invalidateQueries({ queryKey: ["hq-approval-tasks"] });
+    qc.invalidateQueries({ queryKey: ["workflow-dashboard"] });
+  };
+
   const processApproval = useMutation({
     mutationFn: ({ taskId, action }: { taskId: string; action: "approve" | "reject" }) =>
       enterpriseApi.processApproval(taskId, action),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["hq-approval-tasks"] }),
+    onSuccess: (result) => {
+      setFeedback({
+        type: "success",
+        text: result.message ?? "Approval processed successfully.",
+      });
+      invalidateApprovalData();
+      window.setTimeout(() => setFeedback(null), 5000);
+    },
+    onError: (err) => {
+      setFeedback({
+        type: "error",
+        text: err instanceof Error ? err.message : "Approval failed. Please try again.",
+      });
+    },
   });
 
   const tasks = (data?.tasks ?? []).slice(0, limit);
@@ -43,11 +64,12 @@ export const ApprovalTasksPanel: React.FC<{ compact?: boolean; limit?: number }>
   return (
     <HqPanel
       title="Tasks Requiring Approval"
-      subtitle={counts ? `${counts.total ?? tasks.length} items across finance, HR, grants, and documents` : "Pending executive actions"}
-      action={{ label: "View all modules", to: "/hq" }}
+      subtitle={counts ? `${counts.total ?? tasks.length} items across finance, HR, grants, workflows, and documents` : "Pending executive actions"}
+      action={{ label: "View all", to: "/hq/workflows" }}
       headerExtra={
         counts && !compact ? (
           <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+            {counts.workflow > 0 && <StatusBadge label={`${counts.workflow} workflows`} variant="gold" />}
             {counts.expense > 0 && <StatusBadge label={`${counts.expense} expenses`} variant="warning" />}
             {counts.leave > 0 && <StatusBadge label={`${counts.leave} leave`} variant="gold" />}
             {counts.purchase_order > 0 && <StatusBadge label={`${counts.purchase_order} POs`} variant="warning" />}
@@ -56,6 +78,22 @@ export const ApprovalTasksPanel: React.FC<{ compact?: boolean; limit?: number }>
         ) : undefined
       }
     >
+      {feedback && (
+        <div
+          role="status"
+          style={{
+            marginBottom: "0.75rem",
+            padding: "0.65rem 0.85rem",
+            borderRadius: "var(--hq-radius-sm)",
+            fontSize: "0.82rem",
+            background: feedback.type === "success" ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)",
+            border: `1px solid ${feedback.type === "success" ? "rgba(34,197,94,0.35)" : "rgba(239,68,68,0.35)"}`,
+            color: feedback.type === "success" ? "var(--hq-success)" : "var(--hq-danger)",
+          }}
+        >
+          {feedback.text}
+        </div>
+      )}
       {isLoading ? <HqLoading /> : tasks.length === 0 ? (
         <p style={{ color: "var(--hq-text-muted)", fontSize: "0.85rem", margin: 0 }}>
           No pending approvals — all workflows are current.
@@ -80,31 +118,39 @@ export const ApprovalTasksPanel: React.FC<{ compact?: boolean; limit?: number }>
                   {task.dueDate && ` · Due ${new Date(task.dueDate).toLocaleDateString()}`}
                 </div>
               </div>
-              {!compact && (
-                <div style={{ display: "flex", gap: "0.25rem", flexShrink: 0 }}>
-                  <button
-                    type="button"
-                    className="hq-btn hq-btn-sm hq-btn-primary"
-                    disabled={processApproval.isPending}
-                    onClick={(e) => { e.preventDefault(); processApproval.mutate({ taskId: task.id, action: "approve" }); }}
-                    title="Approve"
-                  >
-                    <Check size={12} />
-                  </button>
-                  <button
-                    type="button"
-                    className="hq-btn hq-btn-sm hq-btn-ghost"
-                    disabled={processApproval.isPending}
-                    onClick={(e) => { e.preventDefault(); processApproval.mutate({ taskId: task.id, action: "reject" }); }}
-                    title="Reject"
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-              )}
-              <Link to={task.path} className="hq-btn hq-btn-sm hq-btn-ghost" style={{ flexShrink: 0 }}>
-                Review <ArrowRight size={12} />
-              </Link>
+              <div className="hq-approval-actions" style={{ display: "flex", gap: "0.35rem", flexShrink: 0, alignItems: "center" }}>
+                <button
+                  type="button"
+                  className="hq-btn hq-btn-sm hq-btn-primary"
+                  disabled={processApproval.isPending}
+                  aria-label={`Approve ${task.title}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    processApproval.mutate({ taskId: task.id, action: "approve" });
+                  }}
+                >
+                  <Check size={14} />
+                  {!compact && <span>Approve</span>}
+                </button>
+                <button
+                  type="button"
+                  className="hq-btn hq-btn-sm hq-btn-ghost"
+                  disabled={processApproval.isPending}
+                  aria-label={`Reject ${task.title}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    processApproval.mutate({ taskId: task.id, action: "reject" });
+                  }}
+                >
+                  <X size={14} />
+                  {!compact && <span>Reject</span>}
+                </button>
+                <Link to={task.path} className="hq-btn hq-btn-sm hq-btn-ghost" style={{ flexShrink: 0 }}>
+                  Review <ArrowRight size={12} />
+                </Link>
+              </div>
             </li>
           ))}
         </ul>

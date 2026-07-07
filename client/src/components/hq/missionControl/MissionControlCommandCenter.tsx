@@ -6,6 +6,7 @@ import {
   Plus, Check, X, AlertTriangle, ChevronRight,
 } from "lucide-react";
 import { phase10Api } from "../../../api/phase10Api";
+import { enterpriseApi } from "../../../api/enterpriseApi";
 import type { MissionControlCommandCenter, HqMission, HqMissionTask } from "../../../api/missionControlTypes";
 import { EMPTY_MISSION_CONTROL, normalizeMissionControl } from "../../../data/missionControlDefaults";
 import { KpiCard } from "../KpiCard";
@@ -150,6 +151,15 @@ export const MissionControlCommandCenter: React.FC = () => {
     mutationFn: () => phase10Api.createFounderDecision(newDecision),
     onSuccess: () => { invalidate(); setNewDecision({ title: "", decisionType: "approval", priority: "high" }); },
   });
+  const processApproval = useMutation({
+    mutationFn: ({ taskId, action }: { taskId: string; action: "approve" | "reject" }) =>
+      enterpriseApi.processApproval(taskId, action),
+    onSuccess: () => {
+      invalidate();
+      qc.invalidateQueries({ queryKey: ["hq-approval-tasks"] });
+      qc.invalidateQueries({ queryKey: ["workflow-dashboard"] });
+    },
+  });
 
   const taskHistory = useQuery({
     queryKey: ["mission-task-history", historyTaskId],
@@ -266,6 +276,9 @@ export const MissionControlCommandCenter: React.FC = () => {
           setNewDecision={setNewDecision}
           onCreateDecision={() => createDecision.mutate()}
           onDecide={(id, decision) => decide.mutate({ id, decision })}
+          onApproveTask={(taskId) => processApproval.mutate({ taskId, action: "approve" })}
+          onRejectTask={(taskId) => processApproval.mutate({ taskId, action: "reject" })}
+          approvalPending={processApproval.isPending}
         />
       )}
       {tab === "intelligence" && <IntelligencePanel data={data} />}
@@ -605,7 +618,10 @@ const FounderPanel: React.FC<{
   setNewDecision: React.Dispatch<React.SetStateAction<{ title: string; decisionType: string; priority: string }>>;
   onCreateDecision: () => void;
   onDecide: (id: string, decision: "approved" | "rejected") => void;
-}> = ({ data, isFounder, newNote, setNewNote, onCreateNote, newDecision, setNewDecision, onCreateDecision, onDecide }) => (
+  onApproveTask: (taskId: string) => void;
+  onRejectTask: (taskId: string) => void;
+  approvalPending?: boolean;
+}> = ({ data, isFounder, newNote, setNewNote, onCreateNote, newDecision, setNewDecision, onCreateDecision, onDecide, onApproveTask, onRejectTask, approvalPending }) => (
   <>
     <HqPanel title="Pending Decisions" subtitle="Organization approvals requiring Founder action">
       <table className="hq-table">
@@ -635,14 +651,35 @@ const FounderPanel: React.FC<{
     <div className="hq-grid-2 hq-mt-lg">
       <HqPanel title="Approval Queue" subtitle="Enterprise approvals from across HQ">
         <ul className="hq-activity-list">
-          {(data.founderPanel.approvalQueue as { id: string; title: string; module: string }[]).slice(0, 8).map((a) => (
-            <li key={a.id} className="hq-activity-item">
-              <div className="hq-activity-content">
+          {(data.founderPanel.approvalQueue as { id: string; title: string; subtitle?: string; type?: string; workflowStep?: string }[]).slice(0, 8).map((a) => (
+            <li key={a.id} className="hq-activity-item" style={{ alignItems: "center" }}>
+              <div className="hq-activity-content" style={{ flex: 1, minWidth: 0 }}>
                 <div className="hq-activity-title">{a.title}</div>
-                <div className="hq-activity-detail">{a.module}</div>
+                <div className="hq-activity-detail">{a.workflowStep ?? a.subtitle ?? a.type ?? "Pending approval"}</div>
+              </div>
+              <div className="hq-approval-actions" style={{ display: "flex", gap: "0.35rem", flexShrink: 0 }}>
+                <button
+                  type="button"
+                  className="hq-btn hq-btn-sm hq-btn-primary"
+                  disabled={approvalPending}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); onApproveTask(a.id); }}
+                >
+                  <Check size={12} /> Approve
+                </button>
+                <button
+                  type="button"
+                  className="hq-btn hq-btn-sm hq-btn-ghost"
+                  disabled={approvalPending}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRejectTask(a.id); }}
+                >
+                  <X size={12} /> Reject
+                </button>
               </div>
             </li>
           ))}
+          {(data.founderPanel.approvalQueue as unknown[]).length === 0 && (
+            <li className="hq-muted-text">No pending approvals in queue.</li>
+          )}
         </ul>
       </HqPanel>
 

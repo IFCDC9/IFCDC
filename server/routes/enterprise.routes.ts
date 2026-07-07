@@ -9,7 +9,7 @@ import {
 import { buildApprovalQueue } from "../hq/enterpriseApprovals";
 import { getDb } from "../db";
 import { markLeadershipAlertRead } from "../hq/criticalAlerts";
-import { processApprovalTask } from "../hq/workflowEngine";
+import { processApprovalTask, parseApprovalTaskId } from "../hq/workflowEngine";
 import { hasPermission } from "../hq/enterpriseRoles";
 
 const router = Router();
@@ -43,15 +43,17 @@ router.patch("/approvals/:taskId", requireHQPermission("hq.executive", "hq.hr.ap
     return res.status(400).json({ error: "action must be approve, reject, or complete" });
   }
   if (req.hqUser?.role !== "owner" && !hasPermission(req.hqUser!.role, "hq.executive")) {
-    const taskType = String(req.params.taskId).split(":")[0];
+    const [taskType] = parseApprovalTaskId(String(req.params.taskId));
     const typePerm: Record<string, string[]> = {
       leave: ["hq.hr.approve"],
       expense: ["hq.finance.manage"],
-      purchase: ["hq.finance.manage"],
-      document: ["hq.settings"],
-      grant: ["hq.grants.manage"],
+      purchase_order: ["hq.finance.manage"],
+      document: ["hq.settings", "hq.executive"],
+      grant_application: ["hq.grants.manage"],
+      grant_deadline: ["hq.grants.manage"],
+      workflow: ["hq.executive"],
     };
-    const required = typePerm[taskType] ?? ["hq.executive"];
+    const required = typePerm[taskType ?? ""] ?? ["hq.executive"];
     if (!required.some((p) => hasPermission(req.hqUser!.role, p as never))) {
       return res.status(403).json({ error: "Insufficient permissions for this approval type" });
     }

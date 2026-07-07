@@ -139,13 +139,29 @@ export async function processApprovalTask(
       case "grant_application":
         if (action === "approve") {
           await db.run(`UPDATE grant_applications SET status = 'awarded' WHERE id = ?`, entityId);
+        } else if (action === "reject") {
+          await db.run(`UPDATE grant_applications SET status = 'rejected' WHERE id = ?`, entityId);
         }
         break;
       case "grant_deadline":
-        if (action === "complete") {
+        if (action === "approve" || action === "complete") {
           await db.run(`UPDATE grant_deadlines SET completed = 1 WHERE id = ?`, entityId);
         }
         break;
+      case "workflow": {
+        const { advanceWorkflowStep } = await import("./workflowOrchestration");
+        const wfResult = await advanceWorkflowStep(entityId, action === "complete" ? "complete" : action, { email: actor?.email });
+        if (!wfResult.success) return wfResult;
+        await logHqAudit({
+          action: `workflow_${action}`,
+          entityType: "workflow_instance",
+          entityId,
+          detail: wfResult.message,
+          actorId: actor?.id,
+          actorEmail: actor?.email,
+        });
+        return { success: true, message: wfResult.message };
+      }
       default:
         return { success: false, message: "Unknown task type" };
     }
@@ -164,30 +180,34 @@ export async function processApprovalTask(
       actorEmail: actor?.email,
     });
 
-    return { success: true };
+    return { success: true, message: action === "approve" ? "Approved successfully" : action === "reject" ? "Rejected successfully" : "Completed successfully" };
   } catch (err) {
     console.error("Workflow process error:", err);
     return { success: false, message: "Processing failed" };
   }
 }
 
-function parseTaskId(taskId: string): [string | null, string | null] {
+export function parseApprovalTaskId(taskId: string): [string | null, string | null] {
   const idx = taskId.indexOf("-");
   if (idx < 0) return [null, null];
   const prefix = taskId.slice(0, idx);
   const rest = taskId.slice(idx + 1);
-  const typeMap: Record<string, string> = {
-    leave: "leave",
-    expense: "expense",
-    po: "purchase_order",
-    grant: rest.startsWith("app-") ? "grant_application" : "grant_deadline",
-    doc: "document",
-  };
   if (prefix === "grant" && rest.startsWith("app-")) return ["grant_application", rest.slice(4)];
+  if (prefix === "grant" && rest.startsWith("deadline-")) return ["grant_deadline", rest.slice(9)];
   if (prefix === "grant") return ["grant_deadline", rest];
   if (prefix === "po") return ["purchase_order", rest];
   if (prefix === "doc") return ["document", rest];
+  if (prefix === "workflow") return ["workflow", rest];
+  if (prefix === "deadline") return ["grant_deadline", rest];
+  const typeMap: Record<string, string> = {
+    leave: "leave",
+    expense: "expense",
+  };
   return [typeMap[prefix] ?? prefix, rest];
+}
+
+function parseTaskId(taskId: string): [string | null, string | null] {
+  return parseApprovalTaskId(taskId);
 }
 
 export async function runScheduledJobs(actorEmail?: string): Promise<{ ran: string[]; errors: string[] }> {
@@ -332,18 +352,52 @@ async function executeScheduledJob(jobKey: string, actorEmail?: string): Promise
   }
 }
 
+export async function repairPendingWorkflowSteps(): Promise<number> {
+  await ensureWorkflowTables();
+  const db = await getDb();
+  const instances = (await db.all(
+    "SELECT id, workflow_key FROM hq_workflow_instances WHERE status = 'pending' ORDER BY created_at DESC LIMIT 100"
+  )) as { id: string; workflow_key: string }[];
+  const { initializeWorkflowSteps, ensureWorkflowStepTables } = await import("./workflowOrchestration");
+  await ensureWorkflowStepTables();
+  let repaired = 0;
+  for (const inst of instances) {
+    const existing = await db.get("SELECT id FROM hq_workflow_steps WHERE instance_id = ? LIMIT 1", inst.id);
+    if (!existing) {
+      await initializeWorkflowSteps(inst.id, inst.workflow_key);
+      repaired++;
+    }
+  }
+  return repaired;
+}
+
 export async function buildWorkflowDashboard() {
   await ensureWorkflowTables();
+  const { getWorkflowSteps, ensureWorkflowStepTables } = await import("./workflowOrchestration");
+  await ensureWorkflowStepTables();
+  await repairPendingWorkflowSteps().catch(() => undefined);
   const [definitions, instances, jobs, approvalQueue] = await Promise.all([
     listWorkflowDefinitions(),
     listWorkflowInstances({ limit: 20 }),
     listScheduledJobs(),
     buildApprovalQueue(15),
   ]);
-  const pending = (instances as { status: string }[]).filter((i) => i.status === "pending").length;
+  const enrichedInstances = await Promise.all(
+    (instances as { id: string; status: string; [key: string]: unknown }[]).map(async (inst) => {
+      const steps = await getWorkflowSteps(inst.id).catch(() => []);
+      const active = (steps as { status: string; step_name: string; step_key: string }[]).find((s) => s.status === "active");
+      return {
+        ...inst,
+        active_step_name: active?.step_name ?? null,
+        active_step_key: active?.step_key ?? null,
+        can_advance: inst.status === "pending" && !!active,
+      };
+    })
+  );
+  const pending = enrichedInstances.filter((i) => i.status === "pending").length;
   return {
     definitions,
-    instances,
+    instances: enrichedInstances,
     jobs,
     approvalTasks: approvalQueue.tasks,
     counts: { ...approvalQueue.counts, workflowPending: pending },

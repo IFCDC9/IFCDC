@@ -166,14 +166,18 @@ export async function advanceWorkflowStep(
       "UPDATE hq_workflow_steps SET status = 'active', updated_at = ? WHERE id = ?",
       now, (next as { id: string }).id
     );
-    return { success: true, message: "Advanced to next step" };
+    const nextStep = await db.get<{ step_name: string }>(
+      "SELECT step_name FROM hq_workflow_steps WHERE id = ?",
+      (next as { id: string }).id
+    );
+    return { success: true, message: `Advanced to ${nextStep?.step_name ?? "next step"}` };
   }
 
   await db.run(
     "UPDATE hq_workflow_instances SET status = 'completed', completed_at = ?, updated_at = ? WHERE id = ?",
     now, now, instanceId
   );
-  return { success: true, message: "Workflow completed", completed: true };
+  return { success: true, message: "Workflow completed and archived", completed: true };
 }
 
 export async function getWorkflowInstanceDetail(instanceId: string) {

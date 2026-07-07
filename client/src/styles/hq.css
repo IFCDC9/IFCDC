@@ -1215,6 +1215,14 @@ body.hq-nav-open {
   .hq-pipeline-column { min-width: min(78vw, 280px); flex-basis: min(78vw, 280px); }
 }
 
+.hq-approval-actions .hq-btn { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.hq-approval-item { flex-wrap: wrap; }
+@media (max-width: 768px) {
+  .hq-approval-item { gap: 0.5rem; }
+  .hq-approval-actions { width: 100%; justify-content: flex-end; }
+  .hq-approval-actions .hq-btn { min-height: 44px; min-width: 44px; }
+}
+
 .hq-shortcuts-modal {
   width: min(420px, 92vw);
   background: var(--hq-black-card);

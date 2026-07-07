@@ -12,6 +12,7 @@ import { StatusBadge } from "../../components/hq/StatusBadge";
 const WorkflowAutomationPage: React.FC = () => {
   const qc = useQueryClient();
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const dashboard = useQuery({ queryKey: ["workflow-dashboard"], queryFn: workflowApi.dashboard, staleTime: 45_000 });
   const stepsQuery = useQuery({
     queryKey: ["workflow-steps", expandedId],
@@ -19,27 +20,44 @@ const WorkflowAutomationPage: React.FC = () => {
     enabled: Boolean(expandedId),
   });
 
+  const showFeedback = (type: "success" | "error", text: string) => {
+    setFeedback({ type, text });
+    window.setTimeout(() => setFeedback(null), 5000);
+  };
+
+  const invalidateAll = () => {
+    qc.invalidateQueries({ queryKey: ["workflow-dashboard"] });
+    qc.invalidateQueries({ queryKey: ["hq-approval-tasks"] });
+    if (expandedId) qc.invalidateQueries({ queryKey: ["workflow-steps", expandedId] });
+  };
+
   const runScheduled = useMutation({
     mutationFn: workflowApi.runScheduled,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["workflow-dashboard"] }),
+    onSuccess: (result) => {
+      showFeedback("success", `Scheduled jobs ran: ${result.ran.join(", ") || "none"}`);
+      invalidateAll();
+    },
+    onError: (err) => showFeedback("error", err instanceof Error ? err.message : "Scheduled job run failed"),
   });
 
   const processApproval = useMutation({
     mutationFn: ({ taskId, action }: { taskId: string; action: "approve" | "reject" }) =>
       enterpriseApi.processApproval(taskId, action),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["workflow-dashboard"] });
-      qc.invalidateQueries({ queryKey: ["hq-approval-tasks"] });
+    onSuccess: (result) => {
+      showFeedback("success", result.message ?? "Approval processed successfully.");
+      invalidateAll();
     },
+    onError: (err) => showFeedback("error", err instanceof Error ? err.message : "Approval failed"),
   });
 
   const advanceStep = useMutation({
     mutationFn: ({ id, action }: { id: string; action: "approve" | "reject" }) =>
       workflowApi.advance(id, action),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["workflow-dashboard"] });
-      qc.invalidateQueries({ queryKey: ["workflow-steps", expandedId] });
+    onSuccess: (result) => {
+      showFeedback("success", result.message ?? "Workflow advanced successfully.");
+      invalidateAll();
     },
+    onError: (err) => showFeedback("error", err instanceof Error ? err.message : "Workflow advance failed"),
   });
 
   const data = dashboard.data;
@@ -50,6 +68,23 @@ const WorkflowAutomationPage: React.FC = () => {
       title="Workflow Automation"
       subtitle="Approval workflows, task assignments, compliance reminders, and scheduled reports"
     >
+      {feedback && (
+        <div
+          role="status"
+          style={{
+            marginBottom: "1rem",
+            padding: "0.75rem 1rem",
+            borderRadius: "var(--hq-radius-sm)",
+            fontSize: "0.85rem",
+            background: feedback.type === "success" ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)",
+            border: `1px solid ${feedback.type === "success" ? "rgba(34,197,94,0.35)" : "rgba(239,68,68,0.35)"}`,
+            color: feedback.type === "success" ? "var(--hq-success)" : "var(--hq-danger)",
+          }}
+        >
+          {feedback.text}
+        </div>
+      )}
+
       <div className="hq-sd-toolbar" style={{ marginBottom: "1.25rem" }}>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
           <StatusBadge label={`${counts.workflowPending ?? 0} workflow instances pending`} variant="warning" />
@@ -111,23 +146,32 @@ const WorkflowAutomationPage: React.FC = () => {
       </HqQueryBoundary>
 
       <div style={{ marginTop: "1.25rem" }}>
-        <HqPanel title="Approval Queue" subtitle="Process pending executive approvals inline">
+        <HqPanel title="Approval Queue" subtitle="Process pending executive approvals inline — including Daily Executive Reports">
         <HqQueryBoundary query={dashboard} loadingMessage="Loading approval queue…">
+          <div className="hq-table-scroll">
           <table className="hq-table">
-            <thead><tr><th>Task</th><th>Type</th><th>Priority</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Task</th><th>Type</th><th>Step</th><th>Priority</th><th>Actions</th></tr></thead>
             <tbody>
-              {(data?.approvalTasks as { id: string; title: string; type: string; priority: string }[] ?? []).map((task) => (
+              {(data?.approvalTasks as { id: string; title: string; type: string; priority: string; subtitle?: string; workflowStep?: string }[] ?? []).map((task) => (
                 <tr key={task.id}>
-                  <td>{task.title}</td>
+                  <td>
+                    <div style={{ fontWeight: 500 }}>{task.title}</div>
+                    {task.subtitle && <div className="hq-muted-text" style={{ fontSize: "0.75rem" }}>{task.subtitle}</div>}
+                  </td>
                   <td><StatusBadge label={task.type} variant="muted" /></td>
+                  <td>{task.workflowStep ?? "—"}</td>
                   <td><StatusBadge label={task.priority} variant={task.priority === "high" ? "warning" : "muted"} /></td>
                   <td>
-                    <div style={{ display: "flex", gap: "0.35rem" }}>
+                    <div className="hq-approval-actions" style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
                       <button
                         type="button"
                         className="hq-btn hq-btn-sm hq-btn-primary"
                         disabled={processApproval.isPending}
-                        onClick={() => processApproval.mutate({ taskId: task.id, action: "approve" })}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          processApproval.mutate({ taskId: task.id, action: "approve" });
+                        }}
                       >
                         <CheckCircle size={12} /> Approve
                       </button>
@@ -135,7 +179,11 @@ const WorkflowAutomationPage: React.FC = () => {
                         type="button"
                         className="hq-btn hq-btn-sm hq-btn-ghost"
                         disabled={processApproval.isPending}
-                        onClick={() => processApproval.mutate({ taskId: task.id, action: "reject" })}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          processApproval.mutate({ taskId: task.id, action: "reject" });
+                        }}
                       >
                         Reject
                       </button>
@@ -144,23 +192,24 @@ const WorkflowAutomationPage: React.FC = () => {
                 </tr>
               ))}
               {!data?.approvalTasks?.length && (
-                <tr><td colSpan={4} className="hq-empty-cell">No pending approvals</td></tr>
+                <tr><td colSpan={5} className="hq-empty-cell">No pending approvals</td></tr>
               )}
             </tbody>
           </table>
+          </div>
         </HqQueryBoundary>
         </HqPanel>
       </div>
 
-      <HqPanel title="Active Workflow Instances" subtitle="Multi-step approvals — expand to review and advance">
+      <HqPanel title="Active Workflow Instances" subtitle="Multi-step approvals — expand to review step history">
         <HqQueryBoundary query={dashboard} loadingMessage="Loading workflow instances…">
+        <div className="hq-table-scroll">
         <table className="hq-table">
-          <thead><tr><th></th><th>Title</th><th>Workflow</th><th>Status</th><th>Due</th><th>Actions</th></tr></thead>
+          <thead><tr><th></th><th>Title</th><th>Workflow</th><th>Current Step</th><th>Status</th><th>Due</th><th>Actions</th></tr></thead>
           <tbody>
             {(data?.instances ?? []).map((inst: WorkflowInstance) => {
               const expanded = expandedId === inst.id;
               const steps = expanded ? (stepsQuery.data?.steps ?? []) : [];
-              const activeStep = steps.find((s) => s.status === "active");
               return (
                 <React.Fragment key={inst.id}>
                   <tr>
@@ -171,6 +220,7 @@ const WorkflowAutomationPage: React.FC = () => {
                     </td>
                     <td>{inst.title}</td>
                     <td>{inst.workflow_key}</td>
+                    <td>{inst.active_step_name ?? "—"}</td>
                     <td>
                       <StatusBadge
                         label={inst.status}
@@ -179,12 +229,30 @@ const WorkflowAutomationPage: React.FC = () => {
                     </td>
                     <td>{inst.due_at ? new Date(inst.due_at).toLocaleDateString() : "—"}</td>
                     <td>
-                      {inst.status === "pending" && activeStep && (
-                        <div style={{ display: "flex", gap: "0.35rem" }}>
-                          <button type="button" className="hq-btn hq-btn-sm hq-btn-primary" disabled={advanceStep.isPending} onClick={() => advanceStep.mutate({ id: inst.id, action: "approve" })}>
+                      {inst.status === "pending" && inst.can_advance && (
+                        <div className="hq-approval-actions" style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                          <button
+                            type="button"
+                            className="hq-btn hq-btn-sm hq-btn-primary"
+                            disabled={advanceStep.isPending}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              advanceStep.mutate({ id: inst.id, action: "approve" });
+                            }}
+                          >
                             Approve step
                           </button>
-                          <button type="button" className="hq-btn hq-btn-sm hq-btn-ghost" disabled={advanceStep.isPending} onClick={() => advanceStep.mutate({ id: inst.id, action: "reject" })}>
+                          <button
+                            type="button"
+                            className="hq-btn hq-btn-sm hq-btn-ghost"
+                            disabled={advanceStep.isPending}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              advanceStep.mutate({ id: inst.id, action: "reject" });
+                            }}
+                          >
                             Reject
                           </button>
                         </div>
@@ -193,7 +261,7 @@ const WorkflowAutomationPage: React.FC = () => {
                   </tr>
                   {expanded && (
                     <tr>
-                      <td colSpan={6} style={{ background: "var(--hq-black-elevated)", padding: "0.75rem 1rem" }}>
+                      <td colSpan={7} style={{ background: "var(--hq-black-elevated)", padding: "0.75rem 1rem" }}>
                         {stepsQuery.isLoading ? <HqLoading message="Loading steps…" /> : (
                           <ol style={{ margin: 0, paddingLeft: "1.25rem", fontSize: "0.82rem" }}>
                             {steps.map((s) => (
@@ -203,7 +271,7 @@ const WorkflowAutomationPage: React.FC = () => {
                                 {s.completed_by && <span className="hq-muted-text"> · {s.completed_by}</span>}
                               </li>
                             ))}
-                            {!steps.length && <li className="hq-muted-text">No multi-step definition for this workflow</li>}
+                            {!steps.length && <li className="hq-muted-text">No steps found — refresh or contact support</li>}
                           </ol>
                         )}
                       </td>
@@ -214,6 +282,7 @@ const WorkflowAutomationPage: React.FC = () => {
             })}
           </tbody>
         </table>
+        </div>
         </HqQueryBoundary>
       </HqPanel>
     </HQLayout>
