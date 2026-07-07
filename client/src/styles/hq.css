@@ -1193,6 +1193,7 @@ body.hq-nav-open {
     -webkit-overflow-scrolling: touch;
   }
   .hq-panel:has(.hq-table) .hq-table { min-width: 520px; }
+}
 
 @media (max-width: 390px) {
   .hq-kpi-grid { grid-template-columns: 1fr; }
