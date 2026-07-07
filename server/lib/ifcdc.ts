@@ -1,6 +1,5 @@
 /**
  * IFCDC Headquarters — centralized service integration.
- * All HQ auth, AURA, payments, and notifications route through here.
  */
 import { createAuthService } from "@ifcdc/auth";
 import { createAuraAI } from "@ifcdc/aura-ai";
@@ -8,6 +7,8 @@ import { createStripePayments } from "@ifcdc/payments";
 import { createNotificationService } from "@ifcdc/notifications";
 import {
   resolveOpenAiCredentials,
+  withOpenAiCredentialFallback,
+  openAiClientOptions,
   formatOpenAiAuthError,
   type ResolvedOpenAiCredentials,
 } from "./openaiConfig";
@@ -28,26 +29,27 @@ function buildAuraClient(creds: ResolvedOpenAiCredentials): AuraClient {
   return createAuraAI({
     apiKey: creds.apiKey,
     baseURL: creds.baseURL,
+    organization: openAiClientOptions(creds).organization,
+    project: openAiClientOptions(creds).project,
     model: process.env.AURA_MODEL || "gpt-4o-mini",
     systemPrompt: HQ_AURA_PROMPT,
   });
 }
 
-function getAuraClient(): AuraClient | null {
-  const creds = resolveOpenAiCredentials();
-  if (!creds) {
+function getAuraClient(creds?: ResolvedOpenAiCredentials): AuraClient | null {
+  const resolved = creds ?? resolveOpenAiCredentials();
+  if (!resolved) {
     _aura = null;
     _auraCreds = null;
     return null;
   }
 
-  // Rebuild client when credentials change (e.g. after Render env update + restart).
-  if (_aura && _auraCreds && _auraCreds.apiKey === creds.apiKey && _auraCreds.baseURL === creds.baseURL) {
+  if (_aura && _auraCreds && _auraCreds.apiKey === resolved.apiKey && _auraCreds.baseURL === resolved.baseURL) {
     return _aura;
   }
 
-  _auraCreds = creds;
-  _aura = buildAuraClient(creds);
+  _auraCreds = resolved;
+  _aura = buildAuraClient(resolved);
   return _aura;
 }
 
@@ -91,14 +93,6 @@ export async function checkIfcdcServices(): Promise<Record<string, boolean>> {
 }
 
 export async function auraExecutiveChat(prompt: string, context?: string): Promise<string> {
-  const creds = resolveOpenAiCredentials();
-  const aura = getAuraClient();
-  if (!aura || !creds) {
-    throw new Error(
-      "AURA is not configured. Set OPENAI_API_KEY on the server (Render → Environment Variables)."
-    );
-  }
-
   const messages = context
     ? [
         { role: "system" as const, content: context },
@@ -107,40 +101,47 @@ export async function auraExecutiveChat(prompt: string, context?: string): Promi
     : [{ role: "user" as const, content: prompt }];
 
   try {
-    return await aura.chat(messages);
+    const { result, creds } = await withOpenAiCredentialFallback(async (candidateCreds, client) => {
+      // Use direct OpenAI client for reliable 401 fallback (bypasses cached singleton).
+      const model = process.env.AURA_MODEL || "gpt-4o-mini";
+      const response = await client.chat.completions.create({
+        model,
+        messages: [{ role: "system", content: HQ_AURA_PROMPT }, ...messages],
+        temperature: 0.7,
+        max_tokens: 2048,
+      });
+      getAuraClient(candidateCreds);
+      return response.choices[0]?.message?.content?.trim() ?? "";
+    });
+    return result;
   } catch (err) {
+    const creds = resolveOpenAiCredentials();
     const message = formatOpenAiAuthError(err, creds);
-    console.error(`[aura] chat failed source=${creds.source} prefix=${creds.keyPrefix}:`, message);
+    console.error(`[aura] chat failed:`, message);
     throw new Error(message);
   }
 }
 
-/** Multi-turn receptionist chat — single combined system prompt (no duplicate system messages). */
 export async function auraReceptionistChat(
   history: { role: "user" | "assistant"; content: string }[],
   systemPrompt: string,
   options?: { maxTokens?: number; temperature?: number }
 ): Promise<string> {
-  const creds = resolveOpenAiCredentials();
-  if (!creds) {
-    throw new Error("OPENAI_API_KEY not configured");
-  }
-  const OpenAI = (await import("openai")).default;
-  const client = new OpenAI({
-    apiKey: creds.apiKey,
-    ...(creds.baseURL ? { baseURL: creds.baseURL } : {}),
-  });
   const model = process.env.AURA_MODEL || "gpt-4o-mini";
   const recent = history.slice(-12);
+
   try {
-    const response = await client.chat.completions.create({
-      model,
-      messages: [{ role: "system", content: systemPrompt }, ...recent],
-      temperature: options?.temperature ?? 0.72,
-      max_tokens: options?.maxTokens ?? 300,
+    const { result } = await withOpenAiCredentialFallback(async (_creds, client) => {
+      const response = await client.chat.completions.create({
+        model,
+        messages: [{ role: "system", content: systemPrompt }, ...recent],
+        temperature: options?.temperature ?? 0.72,
+        max_tokens: options?.maxTokens ?? 300,
+      });
+      return response.choices[0]?.message?.content?.trim() ?? "";
     });
-    return response.choices[0]?.message?.content?.trim() ?? "";
+    return result;
   } catch (err) {
-    throw new Error(formatOpenAiAuthError(err, creds));
+    throw new Error(formatOpenAiAuthError(err, resolveOpenAiCredentials()));
   }
 }

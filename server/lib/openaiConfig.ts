@@ -1,10 +1,5 @@
 /**
- * Single source of truth for OpenAI credentials across AURA surfaces:
- * Executive Chat, Grant Writer Studio, Proposal Generator, Voice AI, legacy monolith routes.
- *
- * Production issue addressed: OPENAI_API_KEY and AI_INTEGRATIONS_OPENAI_API_KEY had
- * opposite precedence in different modules, and AI_INTEGRATIONS_OPENAI_BASE_URL could
- * route a valid OpenAI key to a stale Replit proxy → 401 Incorrect API Key.
+ * Single source of truth for OpenAI credentials across AURA surfaces.
  */
 
 export type OpenAiCredentialSource =
@@ -15,9 +10,9 @@ export type OpenAiCredentialSource =
 export type ResolvedOpenAiCredentials = {
   apiKey: string;
   source: OpenAiCredentialSource;
-  /** OpenAI SDK baseURL — omitted for default api.openai.com */
   baseURL?: string;
   keyPrefix: string;
+  keyLength: number;
   alternateKeyConfigured: boolean;
 };
 
@@ -31,22 +26,41 @@ const PLACEHOLDER_PATTERNS = [
   /^test[_-]?key/i,
 ];
 
+/** sk-proj keys are typically 160+ characters — shorter usually means truncation on Render/dotenv. */
+const MIN_SK_PROJ_LENGTH = 120;
+const MIN_SK_LENGTH = 40;
+
 function normalizeEnvValue(raw: string | undefined): string {
   if (!raw) return "";
   let v = raw.trim();
+  // Strip BOM and all whitespace/newlines (common Render copy-paste issue).
+  v = v.replace(/^\uFEFF/, "").replace(/[\r\n\t]/g, "");
   if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
     v = v.slice(1, -1).trim();
   }
   if (v.toLowerCase().startsWith("bearer ")) {
     v = v.slice(7).trim();
   }
+  // Remove stray surrounding quotes after inner trim.
+  v = v.replace(/^["']|["']$/g, "");
   return v;
 }
 
 function looksLikeOpenAiKey(key: string): boolean {
-  if (!key || key.length < 20) return false;
+  if (!key || key.length < MIN_SK_LENGTH) return false;
   if (PLACEHOLDER_PATTERNS.some((re) => re.test(key))) return false;
-  return /^(sk-|sk_proj-)/i.test(key);
+  return /^sk-/i.test(key);
+}
+
+function keyIntegrityWarning(key: string, source: OpenAiCredentialSource): string | null {
+  if (!key) return null;
+  if (/^sk-proj-/i.test(key) && key.length < MIN_SK_PROJ_LENGTH) {
+    return `${source} looks truncated (${key.length} chars; sk-proj keys are usually 160+). Re-paste the full key on Render.`;
+  }
+  if (/^sk-/i.test(key) && key.length < MIN_SK_LENGTH) {
+    return `${source} looks too short (${key.length} chars).`;
+  }
+  return null;
 }
 
 export function keyPrefix(key: string): string {
@@ -62,12 +76,10 @@ function resolveBaseUrl(source: OpenAiCredentialSource): string | undefined {
   const integrationsBase = normalizeEnvValue(process.env.AI_INTEGRATIONS_OPENAI_BASE_URL);
   if (!integrationsBase) return undefined;
 
-  // Only use Replit/custom base URL with the integrations key — never with production OPENAI_API_KEY.
   if (source === "AI_INTEGRATIONS_OPENAI_API_KEY") {
     return integrationsBase;
   }
 
-  // Stale Replit base URL set alongside a valid OPENAI_API_KEY causes 401 on Voice/legacy routes.
   if (source === "OPENAI_API_KEY" && integrationsBase.includes("replit")) {
     console.warn(
       "[openai-config] Ignoring AI_INTEGRATIONS_OPENAI_BASE_URL (Replit) — using api.openai.com with OPENAI_API_KEY"
@@ -78,112 +90,183 @@ function resolveBaseUrl(source: OpenAiCredentialSource): string | undefined {
   return undefined;
 }
 
-/** Resolve which API key and base URL all AURA services should use. */
-export function resolveOpenAiCredentials(): ResolvedOpenAiCredentials | null {
-  const primary = normalizeEnvValue(process.env.OPENAI_API_KEY);
-  const alternate = normalizeEnvValue(process.env.AI_INTEGRATIONS_OPENAI_API_KEY);
-
-  const primaryValid = looksLikeOpenAiKey(primary);
-  const alternateValid = looksLikeOpenAiKey(alternate);
-
-  if (primaryValid && alternateValid && primary !== alternate) {
-    console.warn(
-      `[openai-config] Both OPENAI_API_KEY (${keyPrefix(primary)}) and AI_INTEGRATIONS_OPENAI_API_KEY (${keyPrefix(alternate)}) are set and differ. Using OPENAI_API_KEY.`
-    );
-  }
-
-  let apiKey = "";
-  let source: OpenAiCredentialSource = "none";
-
-  if (primaryValid) {
-    apiKey = primary;
-    source = "OPENAI_API_KEY";
-  } else if (alternateValid) {
-    apiKey = alternate;
-    source = "AI_INTEGRATIONS_OPENAI_API_KEY";
-  } else if (primary && !primaryValid) {
-    console.warn(`[openai-config] OPENAI_API_KEY is set but invalid/placeholder (${keyPrefix(primary)})`);
-    if (alternateValid) {
-      apiKey = alternate;
-      source = "AI_INTEGRATIONS_OPENAI_API_KEY";
-    }
-  } else if (alternate && !alternateValid) {
-    console.warn(`[openai-config] AI_INTEGRATIONS_OPENAI_API_KEY is set but invalid/placeholder (${keyPrefix(alternate)})`);
-  }
-
-  if (!apiKey) return null;
-
-  const baseURL = resolveBaseUrl(source);
+function buildCreds(apiKey: string, source: OpenAiCredentialSource, alternateConfigured: boolean): ResolvedOpenAiCredentials {
+  const warn = keyIntegrityWarning(apiKey, source);
+  if (warn) console.warn(`[openai-config] ${warn}`);
   return {
     apiKey,
     source,
-    baseURL,
+    baseURL: resolveBaseUrl(source),
     keyPrefix: keyPrefix(apiKey),
-    alternateKeyConfigured: alternateValid && alternate !== apiKey,
+    keyLength: apiKey.length,
+    alternateKeyConfigured: alternateConfigured,
+  };
+}
+
+/** All valid keys to try, in priority order. */
+export function listOpenAiCredentialCandidates(): ResolvedOpenAiCredentials[] {
+  const primary = normalizeEnvValue(process.env.OPENAI_API_KEY);
+  const alternate = normalizeEnvValue(process.env.AI_INTEGRATIONS_OPENAI_API_KEY);
+  const candidates: ResolvedOpenAiCredentials[] = [];
+  const bothValid = looksLikeOpenAiKey(primary) && looksLikeOpenAiKey(alternate);
+
+  if (looksLikeOpenAiKey(primary)) {
+    candidates.push(buildCreds(primary, "OPENAI_API_KEY", bothValid && primary !== alternate));
+  }
+  if (looksLikeOpenAiKey(alternate) && alternate !== primary) {
+    candidates.push(buildCreds(alternate, "AI_INTEGRATIONS_OPENAI_API_KEY", false));
+  }
+
+  return candidates;
+}
+
+/** Primary credentials (first candidate). */
+export function resolveOpenAiCredentials(): ResolvedOpenAiCredentials | null {
+  const candidates = listOpenAiCredentialCandidates();
+  if (!candidates.length) {
+    const primary = normalizeEnvValue(process.env.OPENAI_API_KEY);
+    const alternate = normalizeEnvValue(process.env.AI_INTEGRATIONS_OPENAI_API_KEY);
+    if (primary && !looksLikeOpenAiKey(primary)) {
+      console.warn(`[openai-config] OPENAI_API_KEY invalid/placeholder (${keyPrefix(primary)}, len ${primary.length})`);
+    }
+    if (alternate && !looksLikeOpenAiKey(alternate)) {
+      console.warn(`[openai-config] AI_INTEGRATIONS_OPENAI_API_KEY invalid (${keyPrefix(alternate)})`);
+    }
+    return null;
+  }
+
+  if (candidates.length > 1) {
+    console.log(
+      `[openai-config] ${candidates.length} OpenAI keys configured; primary ${candidates[0].source} (${candidates[0].keyPrefix}, ${candidates[0].keyLength} chars)`
+    );
+  }
+
+  return candidates[0];
+}
+
+export function isOpenAiAuthError(err: unknown): boolean {
+  const raw = err instanceof Error ? err.message : String(err);
+  return /401|incorrect api key|invalid api key|authentication|invalid_api_key/i.test(raw);
+}
+
+export function openAiClientOptions(creds: ResolvedOpenAiCredentials): {
+  apiKey: string;
+  baseURL?: string;
+  organization?: string;
+  project?: string;
+} {
+  const org = normalizeEnvValue(process.env.OPENAI_ORG_ID) || normalizeEnvValue(process.env.OPENAI_ORGANIZATION);
+  const project = normalizeEnvValue(process.env.OPENAI_PROJECT_ID);
+  return {
+    apiKey: creds.apiKey,
+    ...(creds.baseURL ? { baseURL: creds.baseURL } : {}),
+    ...(org ? { organization: org } : {}),
+    ...(project ? { project } : {}),
   };
 }
 
 export function formatOpenAiAuthError(err: unknown, creds: ResolvedOpenAiCredentials | null): string {
   const raw = err instanceof Error ? err.message : String(err);
-  const is401 = /401|incorrect api key|invalid api key|authentication/i.test(raw);
-  if (!is401) return raw;
+  if (!isOpenAiAuthError(err)) return raw;
 
   const src = creds?.source ?? "none";
   const prefix = creds?.keyPrefix ?? "(unknown)";
-  const hints: string[] = [
-    `OpenAI rejected the API key from ${src} (prefix ${prefix}).`,
-  ];
-  if (src === "OPENAI_API_KEY" && creds?.alternateKeyConfigured) {
-    hints.push("AI_INTEGRATIONS_OPENAI_API_KEY is also set — update or remove the invalid OPENAI_API_KEY on Render.");
+  const len = creds?.keyLength ?? 0;
+  const hints: string[] = [`OpenAI rejected ${src} (prefix ${prefix}, ${len} chars).`];
+
+  const truncation = creds ? keyIntegrityWarning(creds.apiKey, creds.source) : null;
+  if (truncation) hints.push(truncation);
+
+  if (creds?.alternateKeyConfigured) {
+    hints.push("A fallback key was also tried if configured.");
   }
-  if (normalizeEnvValue(process.env.AI_INTEGRATIONS_OPENAI_BASE_URL)) {
-    hints.push("Check AI_INTEGRATIONS_OPENAI_BASE_URL — stale Replit URLs cause 401 with production keys.");
-  }
-  hints.push("Set a valid OPENAI_API_KEY on Render (Integrations → Environment).");
+
+  hints.push(
+    "On Render: open Environment → delete OPENAI_API_KEY → create a new secret key at platform.openai.com → paste the full sk-proj-… value → Manual Deploy."
+  );
   return hints.join(" ");
 }
 
-/** Lightweight live verification — used by Integrations Hub test. */
+/** Try each configured key until one succeeds; on 401 rotate to next candidate. */
+export async function withOpenAiCredentialFallback<T>(
+  operation: (creds: ResolvedOpenAiCredentials, client: import("openai").default) => Promise<T>
+): Promise<{ result: T; creds: ResolvedOpenAiCredentials }> {
+  const candidates = listOpenAiCredentialCandidates();
+  if (!candidates.length) {
+    throw new Error("No valid OpenAI API key. Set OPENAI_API_KEY on Render.");
+  }
+
+  const OpenAI = (await import("openai")).default;
+  const errors: string[] = [];
+
+  for (const creds of candidates) {
+    const client = new OpenAI(openAiClientOptions(creds));
+    try {
+      const result = await operation(creds, client);
+      if (creds !== candidates[0]) {
+        console.warn(
+          `[openai-config] Primary key failed; succeeded with ${creds.source} (${creds.keyPrefix}). Update OPENAI_API_KEY on Render.`
+        );
+      }
+      return { result, creds };
+    } catch (err) {
+      const msg = formatOpenAiAuthError(err, creds);
+      errors.push(msg);
+      if (!isOpenAiAuthError(err)) throw new Error(msg);
+      console.warn(`[openai-config] ${creds.source} auth failed (${creds.keyPrefix}):`, msg);
+    }
+  }
+
+  throw new Error(errors.join(" | "));
+}
+
+/** Live verification — tries every configured key. */
 export async function verifyOpenAiConnection(): Promise<{
   ok: boolean;
   source: OpenAiCredentialSource;
   keyPrefix: string;
+  keyLength: number;
   baseURL: string;
   message: string;
+  triedSources: string[];
 }> {
-  const creds = resolveOpenAiCredentials();
-  if (!creds) {
+  const candidates = listOpenAiCredentialCandidates();
+  if (!candidates.length) {
     return {
       ok: false,
       source: "none",
       keyPrefix: "(empty)",
+      keyLength: 0,
       baseURL: "default",
       message: "No valid OpenAI API key. Set OPENAI_API_KEY on Render.",
+      triedSources: [],
     };
   }
 
-  const OpenAI = (await import("openai")).default;
-  const client = new OpenAI({
-    apiKey: creds.apiKey,
-    ...(creds.baseURL ? { baseURL: creds.baseURL } : {}),
-  });
-
   try {
-    await client.models.list();
+    const { creds: used } = await withOpenAiCredentialFallback(async (creds, client) => {
+      await client.models.list();
+      return creds;
+    });
     return {
       ok: true,
-      source: creds.source,
-      keyPrefix: creds.keyPrefix,
-      baseURL: creds.baseURL ?? "https://api.openai.com/v1",
-      message: `Connected via ${creds.source} (${creds.keyPrefix})`,
+      source: used.source,
+      keyPrefix: used.keyPrefix,
+      keyLength: used.keyLength,
+      baseURL: used.baseURL ?? "https://api.openai.com/v1",
+      message: `Connected via ${used.source} (${used.keyPrefix}, ${used.keyLength} chars)`,
+      triedSources: candidates.map((c) => c.source),
     };
   } catch (err) {
+    const primary = candidates[0];
     return {
       ok: false,
-      source: creds.source,
-      keyPrefix: creds.keyPrefix,
-      baseURL: creds.baseURL ?? "https://api.openai.com/v1",
-      message: formatOpenAiAuthError(err, creds),
+      source: primary.source,
+      keyPrefix: primary.keyPrefix,
+      keyLength: primary.keyLength,
+      baseURL: primary.baseURL ?? "https://api.openai.com/v1",
+      message: formatOpenAiAuthError(err, primary),
+      triedSources: candidates.map((c) => c.source),
     };
   }
 }
@@ -192,21 +275,40 @@ export function openAiConfigStatus(): {
   configured: boolean;
   source: OpenAiCredentialSource;
   keyPrefix: string;
+  keyLength: number;
+  keyIntegrityOk: boolean;
   baseURL: string;
   primarySet: boolean;
   alternateSet: boolean;
   integrationsBaseSet: boolean;
+  candidateCount: number;
 } {
   const creds = resolveOpenAiCredentials();
   const primary = normalizeEnvValue(process.env.OPENAI_API_KEY);
   const alternate = normalizeEnvValue(process.env.AI_INTEGRATIONS_OPENAI_API_KEY);
+  const candidates = listOpenAiCredentialCandidates();
   return {
     configured: Boolean(creds),
     source: creds?.source ?? "none",
     keyPrefix: creds?.keyPrefix ?? "(empty)",
+    keyLength: creds?.keyLength ?? 0,
+    keyIntegrityOk: creds ? !keyIntegrityWarning(creds.apiKey, creds.source) : false,
     baseURL: creds?.baseURL ?? "https://api.openai.com/v1 (default)",
     primarySet: Boolean(primary),
     alternateSet: Boolean(alternate),
     integrationsBaseSet: Boolean(normalizeEnvValue(process.env.AI_INTEGRATIONS_OPENAI_BASE_URL)),
+    candidateCount: candidates.length,
   };
+}
+
+/** Boot-time diagnostic — logs key length without exposing secrets. */
+export function logOpenAiConfigAtBoot(): void {
+  const status = openAiConfigStatus();
+  if (!status.configured) {
+    console.warn("[openai-config] No valid OpenAI API key — AURA grant writing and chat disabled");
+    return;
+  }
+  const level = status.keyIntegrityOk ? "log" : "warn";
+  const msg = `[openai-config] AURA OpenAI: ${status.source} prefix=${status.keyPrefix} length=${status.keyLength} candidates=${status.candidateCount} integrity=${status.keyIntegrityOk ? "ok" : "CHECK_TRUNCATION"}`;
+  console[level](msg);
 }

@@ -4,8 +4,9 @@ export interface AuraConfig {
   apiKey: string;
   model?: string;
   systemPrompt?: string;
-  /** Optional OpenAI-compatible API base (omit for api.openai.com) */
   baseURL?: string;
+  organization?: string;
+  project?: string;
 }
 
 export interface ChatMessage {
@@ -21,6 +22,8 @@ export function createAuraAI(config: AuraConfig) {
   const client = new OpenAI({
     apiKey: config.apiKey,
     ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+    ...(config.organization ? { organization: config.organization } : {}),
+    ...(config.project ? { project: config.project } : {}),
   });
   const model = config.model ?? "gpt-4o-mini";
   const systemPrompt = config.systemPrompt ?? DEFAULT_AURA_SYSTEM_PROMPT;

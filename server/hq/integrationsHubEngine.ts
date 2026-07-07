@@ -357,7 +357,7 @@ async function buildOpenAiCard(): Promise<IntegrationHubCard> {
     id: "openai_aura",
     name: "OpenAI / AURA",
     category: "AI Intelligence",
-    description: `Executive Chat, Grant Writer, Proposal Generator, Voice AI — via ${status.source} (${status.keyPrefix})`,
+    description: `Grant Writer, Executive Chat, Voice — ${status.source} (${status.keyPrefix}, ${status.keyLength} chars${status.keyIntegrityOk ? "" : ", ⚠ possible truncation"})`,
     status: health.healthy ? "configured" : status.configured ? "degraded" : "not_configured",
     lastChecked: now,
     environmentReadiness: {
