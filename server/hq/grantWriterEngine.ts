@@ -247,7 +247,7 @@ function assertAuraConfigured(): ResolvedOpenAiCredentials {
   const creds = resolveOpenAiCredentials();
   if (!creds) {
     throw new Error(
-      "AURA is not configured. Set OPENAI_API_KEY on Render (Environment Variables). " +
+      "AURA is not configured. Set AURA_OPENAI_API_KEY on Render (Environment Variables). " +
         "Remove placeholder or stale AI_INTEGRATIONS_OPENAI_API_KEY if it overrides production."
     );
   }
@@ -290,7 +290,7 @@ export async function grantWritingAssistProduction(opts: {
   }
 
   if (!content?.trim()) {
-    throw new Error(`AURA returned empty content for ${label}. Verify OPENAI_API_KEY on Render (${creds.source}, prefix ${creds.keyPrefix}).`);
+    throw new Error(`AURA returned empty content for ${label}. Verify AURA_OPENAI_API_KEY on Render (${creds.source}, prefix ${creds.keyPrefix}).`);
   }
 
   const durationMs = Date.now() - started;

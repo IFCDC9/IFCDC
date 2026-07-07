@@ -3,6 +3,7 @@
  */
 
 export type OpenAiCredentialSource =
+  | "AURA_OPENAI_API_KEY"
   | "OPENAI_API_KEY"
   | "AI_INTEGRATIONS_OPENAI_API_KEY"
   | "none";
@@ -103,18 +104,26 @@ function buildCreds(apiKey: string, source: OpenAiCredentialSource, alternateCon
   };
 }
 
-/** All valid keys to try, in priority order. */
+/**
+ * All valid keys to try, in priority order.
+ * AURA_OPENAI_API_KEY is the canonical production key; OPENAI_API_KEY and
+ * AI_INTEGRATIONS_OPENAI_API_KEY remain as automatic fallbacks for continuity.
+ */
 export function listOpenAiCredentialCandidates(): ResolvedOpenAiCredentials[] {
-  const primary = normalizeEnvValue(process.env.OPENAI_API_KEY);
-  const alternate = normalizeEnvValue(process.env.AI_INTEGRATIONS_OPENAI_API_KEY);
-  const candidates: ResolvedOpenAiCredentials[] = [];
-  const bothValid = looksLikeOpenAiKey(primary) && looksLikeOpenAiKey(alternate);
+  const sources: Array<{ value: string; source: OpenAiCredentialSource }> = [
+    { value: normalizeEnvValue(process.env.AURA_OPENAI_API_KEY), source: "AURA_OPENAI_API_KEY" },
+    { value: normalizeEnvValue(process.env.OPENAI_API_KEY), source: "OPENAI_API_KEY" },
+    { value: normalizeEnvValue(process.env.AI_INTEGRATIONS_OPENAI_API_KEY), source: "AI_INTEGRATIONS_OPENAI_API_KEY" },
+  ];
 
-  if (looksLikeOpenAiKey(primary)) {
-    candidates.push(buildCreds(primary, "OPENAI_API_KEY", bothValid && primary !== alternate));
-  }
-  if (looksLikeOpenAiKey(alternate) && alternate !== primary) {
-    candidates.push(buildCreds(alternate, "AI_INTEGRATIONS_OPENAI_API_KEY", false));
+  const candidates: ResolvedOpenAiCredentials[] = [];
+  const seen = new Set<string>();
+  const validCount = sources.filter((s) => looksLikeOpenAiKey(s.value)).length;
+
+  for (const { value, source } of sources) {
+    if (!looksLikeOpenAiKey(value) || seen.has(value)) continue;
+    seen.add(value);
+    candidates.push(buildCreds(value, source, validCount > 1));
   }
 
   return candidates;
@@ -124,8 +133,12 @@ export function listOpenAiCredentialCandidates(): ResolvedOpenAiCredentials[] {
 export function resolveOpenAiCredentials(): ResolvedOpenAiCredentials | null {
   const candidates = listOpenAiCredentialCandidates();
   if (!candidates.length) {
+    const aura = normalizeEnvValue(process.env.AURA_OPENAI_API_KEY);
     const primary = normalizeEnvValue(process.env.OPENAI_API_KEY);
     const alternate = normalizeEnvValue(process.env.AI_INTEGRATIONS_OPENAI_API_KEY);
+    if (aura && !looksLikeOpenAiKey(aura)) {
+      console.warn(`[openai-config] AURA_OPENAI_API_KEY invalid/placeholder (${keyPrefix(aura)}, len ${aura.length})`);
+    }
     if (primary && !looksLikeOpenAiKey(primary)) {
       console.warn(`[openai-config] OPENAI_API_KEY invalid/placeholder (${keyPrefix(primary)}, len ${primary.length})`);
     }
@@ -182,7 +195,7 @@ export function formatOpenAiAuthError(err: unknown, creds: ResolvedOpenAiCredent
   }
 
   hints.push(
-    "On Render: open Environment → delete OPENAI_API_KEY → create a new secret key at platform.openai.com → paste the full sk-proj-… value → Manual Deploy."
+    "On Render: open Environment → set AURA_OPENAI_API_KEY to a fresh secret key from platform.openai.com → paste the full sk-proj-… value with no line breaks → Manual Deploy."
   );
   return hints.join(" ");
 }
@@ -193,7 +206,7 @@ export async function withOpenAiCredentialFallback<T>(
 ): Promise<{ result: T; creds: ResolvedOpenAiCredentials }> {
   const candidates = listOpenAiCredentialCandidates();
   if (!candidates.length) {
-    throw new Error("No valid OpenAI API key. Set OPENAI_API_KEY on Render.");
+    throw new Error("No valid OpenAI API key. Set AURA_OPENAI_API_KEY on Render.");
   }
 
   const OpenAI = (await import("openai")).default;
@@ -205,7 +218,7 @@ export async function withOpenAiCredentialFallback<T>(
       const result = await operation(creds, client);
       if (creds !== candidates[0]) {
         console.warn(
-          `[openai-config] Primary key failed; succeeded with ${creds.source} (${creds.keyPrefix}). Update OPENAI_API_KEY on Render.`
+          `[openai-config] Primary key failed; succeeded with ${creds.source} (${creds.keyPrefix}). Update AURA_OPENAI_API_KEY on Render.`
         );
       }
       return { result, creds };
@@ -238,7 +251,7 @@ export async function verifyOpenAiConnection(): Promise<{
       keyPrefix: "(empty)",
       keyLength: 0,
       baseURL: "default",
-      message: "No valid OpenAI API key. Set OPENAI_API_KEY on Render.",
+      message: "No valid OpenAI API key. Set AURA_OPENAI_API_KEY on Render.",
       triedSources: [],
     };
   }
@@ -278,12 +291,14 @@ export function openAiConfigStatus(): {
   keyLength: number;
   keyIntegrityOk: boolean;
   baseURL: string;
+  auraKeySet: boolean;
   primarySet: boolean;
   alternateSet: boolean;
   integrationsBaseSet: boolean;
   candidateCount: number;
 } {
   const creds = resolveOpenAiCredentials();
+  const aura = normalizeEnvValue(process.env.AURA_OPENAI_API_KEY);
   const primary = normalizeEnvValue(process.env.OPENAI_API_KEY);
   const alternate = normalizeEnvValue(process.env.AI_INTEGRATIONS_OPENAI_API_KEY);
   const candidates = listOpenAiCredentialCandidates();
@@ -294,6 +309,7 @@ export function openAiConfigStatus(): {
     keyLength: creds?.keyLength ?? 0,
     keyIntegrityOk: creds ? !keyIntegrityWarning(creds.apiKey, creds.source) : false,
     baseURL: creds?.baseURL ?? "https://api.openai.com/v1 (default)",
+    auraKeySet: Boolean(aura),
     primarySet: Boolean(primary),
     alternateSet: Boolean(alternate),
     integrationsBaseSet: Boolean(normalizeEnvValue(process.env.AI_INTEGRATIONS_OPENAI_BASE_URL)),

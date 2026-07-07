@@ -18,7 +18,7 @@ export function createAiRouter(): Router {
 
       const openai = getOpenAI();
       if (!openai) {
-        return res.status(503).json({ error: "AI service not configured. Set OPENAI_API_KEY in .env" });
+        return res.status(503).json({ error: "AI service not configured. Set AURA_OPENAI_API_KEY on Render." });
       }
 
       const systemPrompt = `You are an AI assistant for IFCDC (Imperial Foundation Community Development Center), a community health organization. You help staff with:
@@ -75,7 +75,7 @@ Be helpful, professional, and culturally sensitive. Keep responses concise and a
 
         const openai = getOpenAI();
         if (!openai) {
-          return res.status(503).json({ error: "AI service not configured. Set OPENAI_API_KEY in .env" });
+          return res.status(503).json({ error: "AI service not configured. Set AURA_OPENAI_API_KEY on Render." });
         }
 
         const prompt = `Based on this client information, provide a brief care summary and recommendations:
@@ -132,7 +132,7 @@ Provide a 2-3 sentence summary and 2-3 actionable recommendations for the care t
 
       const openai = getOpenAI();
       if (!openai) {
-        return res.status(503).json({ error: "AI service not configured. Set OPENAI_API_KEY in .env" });
+        return res.status(503).json({ error: "AI service not configured. Set AURA_OPENAI_API_KEY on Render." });
       }
 
       const response = await openai.chat.completions.create({
@@ -178,7 +178,7 @@ Provide a 2-3 sentence summary and 2-3 actionable recommendations for the care t
 
       const openai = getOpenAI();
       if (!openai) {
-        return res.status(503).json({ error: "AI service not configured. Set OPENAI_API_KEY in .env" });
+        return res.status(503).json({ error: "AI service not configured. Set AURA_OPENAI_API_KEY on Render." });
       }
 
       const response = await openai.chat.completions.create({

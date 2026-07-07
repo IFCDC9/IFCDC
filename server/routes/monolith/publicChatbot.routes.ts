@@ -27,7 +27,7 @@ export function createPublicChatbotRouter(): Router {
 
       const openai = getOpenAI();
       if (!openai) {
-        return res.status(503).json({ error: "AI service not configured. Set OPENAI_API_KEY in .env" });
+        return res.status(503).json({ error: "AI service not configured. Set AURA_OPENAI_API_KEY on Render." });
       }
 
       const systemPrompt = `You are a helpful assistant for Imperial Foundation CDC (IFCDC), a 501(c)(3) nonprofit organization in Asbury Park, NJ dedicated to community development, mentorship, and economic empowerment.

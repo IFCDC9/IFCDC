@@ -4,8 +4,9 @@
  */
 
 const OPTIONAL_PRODUCTION_VARS: { key: string; purpose: string }[] = [
-  { key: "OPENAI_API_KEY", purpose: "AURA AI Command Center" },
-  { key: "AI_INTEGRATIONS_OPENAI_API_KEY", purpose: "AURA AI (alternate key)" },
+  { key: "AURA_OPENAI_API_KEY", purpose: "AURA AI — canonical production key (all AURA surfaces)" },
+  { key: "OPENAI_API_KEY", purpose: "AURA AI (fallback key)" },
+  { key: "AI_INTEGRATIONS_OPENAI_API_KEY", purpose: "AURA AI (legacy alternate key)" },
   { key: "RESEND_API_KEY", purpose: "Communications Center email" },
   { key: "RESEND_FROM_EMAIL", purpose: "Outbound email sender" },
   { key: "TWILIO_ACCOUNT_SID", purpose: "Twilio AURA voice + SMS" },

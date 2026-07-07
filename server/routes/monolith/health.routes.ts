@@ -60,6 +60,7 @@ export function registerHealthRoutes(app: Express): void {
           keyLength: openai.keyLength,
           keyIntegrityOk: openai.keyIntegrityOk,
           baseURL: openai.baseURL,
+          auraKeySet: openai.auraKeySet,
           primarySet: openai.primarySet,
           alternateSet: openai.alternateSet,
           integrationsBaseSet: openai.integrationsBaseSet,

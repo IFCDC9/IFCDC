@@ -413,7 +413,7 @@ export async function probeTwilioApi(): Promise<TwilioProbeResult> {
     } else {
       parts.push(`${targetPhone} not found in Twilio account`);
     }
-    if (!envStatus.auraConfigured) parts.push("OPENAI_API_KEY missing for AURA voice");
+    if (!envStatus.auraConfigured) parts.push("AURA_OPENAI_API_KEY missing for AURA voice");
     if (phone.found && !voiceWebhookOk) {
       const v = phone.voiceWebhook ?? "(not set)";
       parts.push(
@@ -525,7 +525,7 @@ export function buildTwilioDetails(
     },
     {
       label: "AURA voice AI",
-      value: envStatus.auraConfigured ? "Ready (OpenAI)" : "OPENAI_API_KEY not set",
+      value: envStatus.auraConfigured ? "Ready (OpenAI)" : "AURA_OPENAI_API_KEY not set",
       status: envStatus.auraConfigured ? "success" : "danger",
     },
     {

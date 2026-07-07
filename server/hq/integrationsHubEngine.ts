@@ -338,13 +338,13 @@ async function buildResendCard(): Promise<IntegrationHubCard> {
 }
 
 async function buildOpenAiCard(): Promise<IntegrationHubCard> {
-  const keys = ["OPENAI_API_KEY", "AI_INTEGRATIONS_OPENAI_API_KEY"];
+  const keys = ["AURA_OPENAI_API_KEY", "OPENAI_API_KEY", "AI_INTEGRATIONS_OPENAI_API_KEY"];
   const status = openAiConfigStatus();
   const configured = keys.filter((k) => envSet(k));
   const now = new Date().toISOString();
   const health = await probe("openai_aura", async () => {
     if (!status.configured) {
-      return { healthy: false, message: "No valid OpenAI API key — set OPENAI_API_KEY on Render" };
+      return { healthy: false, message: "No valid OpenAI API key — set AURA_OPENAI_API_KEY on Render" };
     }
     const live = await verifyOpenAiConnection();
     return {
@@ -362,7 +362,7 @@ async function buildOpenAiCard(): Promise<IntegrationHubCard> {
     lastChecked: now,
     environmentReadiness: {
       ready: status.configured,
-      missing: status.configured ? [] : ["OPENAI_API_KEY"],
+      missing: status.configured ? [] : ["AURA_OPENAI_API_KEY"],
       configured: [
         ...configured,
         ...(status.integrationsBaseSet ? ["AI_INTEGRATIONS_OPENAI_BASE_URL"] : []),
@@ -385,7 +385,7 @@ async function buildOpenAiCard(): Promise<IntegrationHubCard> {
         label: status.configured ? `Active: ${status.source}` : "Not configured",
         kind: status.configured ? "secondary" : "disabled",
         action: "configure",
-        reason: "Set OPENAI_API_KEY on Render — remove stale AI_INTEGRATIONS_OPENAI_BASE_URL if 401 persists",
+        reason: "Set AURA_OPENAI_API_KEY on Render — remove stale AI_INTEGRATIONS_OPENAI_BASE_URL if 401 persists",
       },
     ],
   };
@@ -623,7 +623,7 @@ async function buildTwilioCard(): Promise<IntegrationHubCard> {
   const status = normalizeHubStatus(rawStatus, twProbe.healthy);
   const details = buildTwilioDetails(twProbe, envStatus, eventCount, lastEventAt, lastTestAt);
 
-  const requiredKeys = ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "OPENAI_API_KEY"];
+  const requiredKeys = ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "AURA_OPENAI_API_KEY"];
   const optionalKeys = [
     "TWILIO_PHONE_NUMBER",
     "TWILIO_SMS_FROM",
@@ -646,14 +646,14 @@ async function buildTwilioCard(): Promise<IntegrationHubCard> {
         !envStatus.accountSidConfigured ? "TWILIO_ACCOUNT_SID" : null,
         !envStatus.authTokenConfigured ? "TWILIO_AUTH_TOKEN" : null,
         !envStatus.phoneNumberConfigured ? "TWILIO_PHONE_NUMBER" : null,
-        !envStatus.auraConfigured ? "OPENAI_API_KEY" : null,
+        !envStatus.auraConfigured ? "AURA_OPENAI_API_KEY" : null,
       ].filter(Boolean) as string[],
       configured: [
         ...(envStatus.accountSidConfigured ? ["TWILIO_ACCOUNT_SID"] : []),
         ...(envStatus.authTokenConfigured ? ["TWILIO_AUTH_TOKEN"] : []),
         ...(envStatus.phoneNumberConfigured ? ["TWILIO_PHONE_NUMBER"] : []),
         ...(envStatus.messagingServiceConfigured ? ["TWILIO_MESSAGING_SERVICE_SID"] : []),
-        ...(envStatus.auraConfigured ? ["OPENAI_API_KEY"] : []),
+        ...(envStatus.auraConfigured ? ["AURA_OPENAI_API_KEY"] : []),
       ],
     },
     requiredCredentials: [
@@ -665,7 +665,7 @@ async function buildTwilioCard(): Promise<IntegrationHubCard> {
         configured: envStatus.phoneNumberConfigured,
       },
       {
-        key: "OPENAI_API_KEY",
+        key: "AURA_OPENAI_API_KEY",
         label: "OpenAI (AURA voice AI)",
         configured: envStatus.auraConfigured,
       },
@@ -700,7 +700,7 @@ async function buildTwilioCard(): Promise<IntegrationHubCard> {
         action: "configure",
         reason: envStatus.ready
           ? "Twilio + AURA credentials detected on Render"
-          : "Set Twilio credentials and OPENAI_API_KEY on Render",
+          : "Set Twilio credentials and AURA_OPENAI_API_KEY on Render",
       },
       {
         id: "render-env",

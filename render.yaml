@@ -33,6 +33,11 @@ services:
         generateValue: true
       - key: GRANTS_OPERATOR_NAME
         value: "IFCDC Grants Operator"
+      # AURA_OPENAI_API_KEY is the canonical production OpenAI key for every AURA
+      # surface (Executive Chat, Grant Writer Studio, Full Proposal, AURA Voice,
+      # Enterprise Intelligence). OPENAI_API_KEY is kept only as an automatic fallback.
+      - key: AURA_OPENAI_API_KEY
+        sync: false
       - key: OPENAI_API_KEY
         sync: false
       - key: PUBLIC_APP_URL
