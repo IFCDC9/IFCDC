@@ -31,6 +31,7 @@
     "deploy:parity": "node script/host-parity-verify.mjs",
     "production:verify": "node script/production-verify.mjs",
     "hq:nav-audit": "node script/hq-nav-audit.mjs",
+    "hq:aura-audit": "node script/hq-aura-platform-audit.mjs",
     "hq:mobile-readiness": "node script/hq-mobile-readiness.mjs",
     "hq:chunk-audit": "node script/hq-chunk-audit.mjs",
     "hq:production-audit": "node script/hq-full-production-audit.mjs",

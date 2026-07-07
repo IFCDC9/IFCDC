@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
@@ -12,17 +12,11 @@ import { warehouseApi } from "../../api/warehouseApi";
 import { StatusBadge } from "../../components/hq/StatusBadge";
 import { KpiCard } from "../../components/hq/KpiCard";
 import { formatLocaleNumber } from "../../utils/safeFormat";
+import { isAuraNavigationQuery, AURA_NAV_SUGGESTIONS } from "../../utils/auraNavigation";
+import { HqApiError } from "../../api/hqApiFetch";
 
 type AuraMode = "ask" | "brief" | "intelligence" | "monitor" | "navigate";
 type AskMode = "general" | "operations" | "enterprise";
-
-const CHAT_SUGGESTIONS = [
-  "What should I prioritize this week as IFCDC founder?",
-  "How is our grant portfolio performing?",
-  "Summarize our financial health",
-  "Which Software Division apps need attention?",
-  "Go to Financial Center",
-];
 
 const SUMMARIZE_OPTIONS = [
   { id: "full", label: "Full Organization Summary" },
@@ -44,6 +38,12 @@ function formatBoardReport(data: Record<string, unknown> | null): string {
   return parts.length ? parts.join("\n\n") : JSON.stringify(data, null, 2);
 }
 
+function errorMessage(err: unknown): string {
+  if (err instanceof HqApiError) return err.message;
+  if (err instanceof Error) return err.message;
+  return "Request failed. Please try again.";
+}
+
 const AuraCommandCenterPage: React.FC = () => {
   const navigate = useNavigate();
   const [mode, setMode] = useState<AuraMode>("ask");
@@ -57,109 +57,165 @@ const AuraCommandCenterPage: React.FC = () => {
   const [forecast, setForecast] = useState<string | null>(null);
   const [navQuery, setNavQuery] = useState("");
   const [navResult, setNavResult] = useState<Record<string, unknown> | null>(null);
+  const [briefError, setBriefError] = useState<string | null>(null);
+  const [intelError, setIntelError] = useState<string | null>(null);
 
   const { data: status } = useQuery({ queryKey: ["hq-aura-status"], queryFn: hqApi.auraStatus });
+  const moduleMonitor = useQuery({
+    queryKey: ["copilot-module-monitor"],
+    queryFn: intelligenceApi.moduleMonitor,
+    staleTime: 120_000,
+  });
   const executiveHealth = useQuery({ queryKey: ["aura-executive-health"], queryFn: hqApi.auraExecutiveHealth, enabled: mode === "monitor" || mode === "intelligence" });
   const warehouseForecasts = useQuery({ queryKey: ["warehouse-forecasts"], queryFn: warehouseApi.forecasts, enabled: mode === "intelligence" });
   const morningBriefing = useQuery({ queryKey: ["copilot-morning"], queryFn: intelligenceApi.morningBriefing, enabled: mode === "brief" });
-  const moduleMonitor = useQuery({ queryKey: ["copilot-module-monitor"], queryFn: intelligenceApi.moduleMonitor, enabled: mode === "monitor" });
   const correctiveActions = useQuery({ queryKey: ["copilot-corrective"], queryFn: intelligenceApi.correctiveActions, enabled: mode === "monitor" || mode === "intelligence" });
+
+  const appendChat = useCallback((user: string, aura: string) => {
+    setHistory((h) => [...h, { role: "user", text: user }, { role: "aura", text: aura }]);
+  }, []);
+
+  const appendChatError = useCallback((user: string, err: unknown) => {
+    appendChat(user, `⚠ ${errorMessage(err)}`);
+  }, [appendChat]);
 
   const copilotAskMutation = useMutation({
     mutationFn: (q: string) => intelligenceApi.ask(q),
     onSuccess: (data, msg) => {
-      setHistory((h) => [...h, { role: "user", text: msg }, { role: "aura", text: String(data.answer ?? data.response ?? "") }]);
+      appendChat(msg, String(data.answer ?? data.response ?? "No response received."));
       setMessage("");
     },
+    onError: (err, msg) => appendChatError(msg, err),
   });
 
-  const automateMutation = useMutation({ mutationFn: (action: string) => intelligenceApi.automate(action) });
-
-  const chatMutation = useMutation({
-    mutationFn: (msg: string) => hqApi.auraChat(msg),
-    onSuccess: (data, msg) => {
-      setHistory((h) => [...h, { role: "user", text: msg }, { role: "aura", text: data.response }]);
-      setMessage("");
-    },
+  const automateMutation = useMutation({
+    mutationFn: (action: string) => intelligenceApi.automate(action),
+    onError: (err) => setIntelError(errorMessage(err)),
   });
 
   const opsAskMutation = useMutation({
     mutationFn: (q: string) => hqApi.auraOperationsAsk(q),
     onSuccess: (data, msg) => {
-      setHistory((h) => [...h, { role: "user", text: msg }, { role: "aura", text: data.answer }]);
+      appendChat(msg, data.answer);
       setMessage("");
     },
+    onError: (err, msg) => appendChatError(msg, err),
   });
 
   const enterpriseAskMutation = useMutation({
     mutationFn: (q: string) => hqApi.auraEnterpriseAsk(q),
     onSuccess: (data, msg) => {
-      setHistory((h) => [...h, { role: "user", text: msg }, { role: "aura", text: data.answer }]);
+      appendChat(msg, data.answer);
       setMessage("");
     },
+    onError: (err, msg) => appendChatError(msg, err),
   });
 
   const summarizeMutation = useMutation({
     mutationFn: (reportType: "full" | "financial" | "grants" | "operations") => hqApi.auraSummarize(reportType),
-    onSuccess: (data) => setSummary(data.summary),
+    onSuccess: (data) => { setBriefError(null); setSummary(data.summary); },
+    onError: (err) => setBriefError(errorMessage(err)),
   });
 
   const briefingMutation = useMutation({
     mutationFn: (focus: "daily" | "board") => hqApi.auraBriefing(focus),
-    onSuccess: (data) => setBriefing(data.briefing),
+    onSuccess: (data) => { setBriefError(null); setBriefing(data.briefing); },
+    onError: (err) => setBriefError(errorMessage(err)),
   });
 
   const execSummaryMutation = useMutation({
     mutationFn: hqApi.auraExecutiveSummary,
-    onSuccess: (data) => setExecSummary(data.summary),
+    onSuccess: (data) => { setBriefError(null); setExecSummary(data.summary); },
+    onError: (err) => setBriefError(errorMessage(err)),
   });
 
   const recommendMutation = useMutation({
     mutationFn: hqApi.auraRecommend,
-    onSuccess: (data) => setRecommendations(data.recommendations),
+    onSuccess: (data) => { setIntelError(null); setRecommendations(data.recommendations); },
+    onError: (err) => setIntelError(errorMessage(err)),
   });
 
   const forecastMutation = useMutation({
     mutationFn: hqApi.auraForecast,
-    onSuccess: (data) => setForecast(data.forecast),
+    onSuccess: (data) => { setIntelError(null); setForecast(data.forecast); },
+    onError: (err) => setIntelError(errorMessage(err)),
   });
 
-  const anomaliesMutation = useMutation({ mutationFn: hqApi.auraAnomalies });
-  const riskMutation = useMutation({ mutationFn: hqApi.auraFinancialRisk });
-  const complianceTrackerMutation = useMutation({ mutationFn: hqApi.auraComplianceTracker });
+  const anomaliesMutation = useMutation({
+    mutationFn: hqApi.auraAnomalies,
+    onError: (err) => setIntelError(errorMessage(err)),
+  });
+  const riskMutation = useMutation({ mutationFn: hqApi.auraFinancialRisk, onError: (err) => setIntelError(errorMessage(err)) });
+  const complianceTrackerMutation = useMutation({ mutationFn: hqApi.auraComplianceTracker, onError: (err) => setIntelError(errorMessage(err)) });
   const complianceMutation = useMutation({
     mutationFn: hqApi.auraCompliance,
-    onSuccess: (data) => setRecommendations(data.review),
+    onSuccess: (data) => { setIntelError(null); setRecommendations(data.review); },
+    onError: (err) => setIntelError(errorMessage(err)),
   });
 
-  const deptMutation = useMutation({ mutationFn: hqApi.auraDepartments });
-  const actionPlanMutation = useMutation({ mutationFn: hqApi.auraExecutiveActionPlan });
-  const boardReportMutation = useMutation({ mutationFn: hqApi.auraEnterpriseBoardReport });
+  const deptMutation = useMutation({ mutationFn: hqApi.auraDepartments, onError: (err) => setIntelError(errorMessage(err)) });
+  const actionPlanMutation = useMutation({
+    mutationFn: hqApi.auraExecutiveActionPlan,
+    onError: (err) => setBriefError(errorMessage(err)),
+  });
+  const boardReportMutation = useMutation({
+    mutationFn: hqApi.auraEnterpriseBoardReport,
+    onError: (err) => setBriefError(errorMessage(err)),
+  });
 
   const navMutation = useMutation({
     mutationFn: (q: string) => hqApi.auraNavigate(q),
-    onSuccess: (data) => setNavResult(data as Record<string, unknown>),
   });
 
-  const pending = chatMutation.isPending || opsAskMutation.isPending || enterpriseAskMutation.isPending;
+  const pending =
+    copilotAskMutation.isPending ||
+    opsAskMutation.isPending ||
+    enterpriseAskMutation.isPending ||
+    navMutation.isPending;
 
-  const send = () => {
-    const trimmed = message.trim();
-    if (!trimmed || pending) return;
-    if (trimmed.toLowerCase().startsWith("go to ") || trimmed.toLowerCase().startsWith("open ")) {
+  const handleNavigation = useCallback(
+    (trimmed: string, opts?: { autoNavigate?: boolean; showInChat?: boolean }) => {
+      const autoNavigate = opts?.autoNavigate !== false;
+      const showInChat = opts?.showInChat !== false;
+      setMessage("");
       navMutation.mutate(trimmed, {
         onSuccess: (data) => {
-          if (data.path) navigate(data.path);
+          setNavResult(data as Record<string, unknown>);
+          if (showInChat) {
+            appendChat(trimmed, String(data.message ?? `Opening ${data.label ?? "module"}…`));
+          }
+          if (autoNavigate && data.intent === "navigate" && data.path) {
+            window.setTimeout(() => navigate(data.path!), 350);
+          } else if (autoNavigate && data.intent === "search" && data.path) {
+            window.setTimeout(() => navigate(data.path!), 350);
+          }
+        },
+        onError: (err) => {
+          if (showInChat) appendChatError(trimmed, err);
         },
       });
-      return;
-    }
-    if (askMode === "operations") opsAskMutation.mutate(trimmed);
-    else if (askMode === "enterprise") enterpriseAskMutation.mutate(trimmed);
-    else if (askMode === "general") copilotAskMutation.mutate(trimmed);
-    else chatMutation.mutate(trimmed);
-  };
+    },
+    [appendChat, appendChatError, navigate, navMutation]
+  );
 
+  const runMessage = useCallback(
+    (rawText?: string) => {
+      const trimmed = (rawText ?? message).trim();
+      if (!trimmed || pending) return;
+
+      if (isAuraNavigationQuery(trimmed)) {
+        handleNavigation(trimmed, { autoNavigate: true, showInChat: true });
+        return;
+      }
+
+      if (askMode === "operations") opsAskMutation.mutate(trimmed);
+      else if (askMode === "enterprise") enterpriseAskMutation.mutate(trimmed);
+      else copilotAskMutation.mutate(trimmed);
+    },
+    [message, pending, handleNavigation, askMode, opsAskMutation, enterpriseAskMutation, copilotAskMutation]
+  );
+
+  const moduleCount = (moduleMonitor.data?.modules as unknown[] | undefined)?.length;
   const health = executiveHealth.data;
   const risks = (health?.risks ?? []) as { level: string; area: string; detail: string }[];
 
@@ -168,7 +224,10 @@ const AuraCommandCenterPage: React.FC = () => {
       {status && (
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
           <StatusBadge label={status.auraCore ? "AURA Core Connected" : "Enterprise Mode"} variant={status.auraCore ? "success" : "gold"} pulse={status.auraCore} />
-          <StatusBadge label="27 Modules Monitored" variant="muted" />
+          <StatusBadge
+            label={moduleCount != null ? `${moduleCount} Modules Monitored` : "Scanning modules…"}
+            variant="muted"
+          />
           <Link to="/hq/intelligence" className="hq-btn hq-btn-ghost hq-btn-sm">Full Intelligence Center <ExternalLink size={12} /></Link>
         </div>
       )}
@@ -201,7 +260,7 @@ const AuraCommandCenterPage: React.FC = () => {
               {history.length === 0 && (
                 <div className="hq-empty">
                   <Sparkles size={32} style={{ margin: "0 auto 1rem", display: "block", color: "#f5c842", opacity: 0.5 }} />
-                  Ask AURA anything — or say &quot;Go to Grant Center&quot; for natural-language navigation across Headquarters.
+                  Ask AURA anything — or tap a suggestion below. Say &quot;Go to Grant Center&quot; or &quot;Open Financial Center&quot; to navigate instantly.
                 </div>
               )}
               {history.map((entry, i) => (
@@ -212,12 +271,29 @@ const AuraCommandCenterPage: React.FC = () => {
               {pending && <div className="hq-aura-msg aura"><div className="hq-aura-bubble hq-aura-typing">AURA is analyzing organization data…</div></div>}
             </div>
             <div className="hq-aura-input-row">
-              <input className="hq-aura-input" value={message} onChange={(e) => setMessage(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder="Ask or navigate — e.g. Open Financial Center…" />
-              <button type="button" className="hq-btn hq-btn-primary" onClick={send} disabled={pending || !message.trim()}>Send</button>
+              <input
+                className="hq-aura-input"
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); runMessage(); } }}
+                placeholder="Ask or navigate — e.g. Open Financial Center…"
+                disabled={pending}
+              />
+              <button type="button" className="hq-btn hq-btn-primary" onClick={() => runMessage()} disabled={pending || !message.trim()}>
+                {pending ? "Sending…" : "Send"}
+              </button>
             </div>
             <div className="hq-aura-suggestions">
-              {CHAT_SUGGESTIONS.map((s) => (
-                <button key={s} type="button" className="hq-aura-suggestion" onClick={() => setMessage(s)}>{s}</button>
+              {AURA_NAV_SUGGESTIONS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className="hq-aura-suggestion"
+                  disabled={pending}
+                  onClick={() => runMessage(s)}
+                >
+                  {s}
+                </button>
               ))}
             </div>
           </div>
@@ -229,6 +305,7 @@ const AuraCommandCenterPage: React.FC = () => {
           <div className="hq-panel">
             <div className="hq-panel-body">
               <h4 style={{ color: "var(--hq-gold)", marginBottom: "0.75rem" }}>Executive Summaries</h4>
+              {briefError && <p style={{ color: "var(--hq-danger)", fontSize: "0.82rem", marginBottom: "0.75rem" }}>{briefError}</p>}
               <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginBottom: "1rem" }}>
                 {SUMMARIZE_OPTIONS.map((opt) => (
                   <button key={opt.id} type="button" className="hq-btn hq-btn-secondary hq-btn-sm" disabled={summarizeMutation.isPending} onClick={() => summarizeMutation.mutate(opt.id)}>{opt.label}</button>
@@ -275,6 +352,7 @@ const AuraCommandCenterPage: React.FC = () => {
 
       {mode === "intelligence" && (
         <div className="hq-fade-in">
+          {intelError && <p style={{ color: "var(--hq-danger)", fontSize: "0.85rem", marginBottom: "0.75rem" }}>{intelError}</p>}
           <div className="hq-kpi-grid" style={{ marginBottom: "1rem" }}>
             <KpiCard label="Org Health" value={`${health?.organizationHealth ?? "—"}%`} icon={Activity} variant="gold" />
             <KpiCard label="Risk Score" value={health?.riskScore ?? "—"} icon={AlertTriangle} variant={(health?.riskScore as number) > 60 ? "danger" : "success"} />
@@ -352,7 +430,7 @@ const AuraCommandCenterPage: React.FC = () => {
       {mode === "monitor" && (
         <div className="hq-fade-in">
           <div className="hq-kpi-grid" style={{ marginBottom: "1rem" }}>
-            <KpiCard label="Modules Monitored" value={(moduleMonitor.data?.modules as unknown[])?.length ?? 7} icon={Building2} />
+            <KpiCard label="Modules Monitored" value={moduleCount ?? "—"} icon={Building2} />
             <KpiCard label="Anomalies" value={moduleMonitor.data?.anomalyCount ?? 0} icon={AlertTriangle} variant={(moduleMonitor.data?.anomalyCount as number) > 0 ? "warning" : "success"} />
             <KpiCard label="High Severity" value={moduleMonitor.data?.highSeverity ?? 0} icon={Shield} variant={(moduleMonitor.data?.highSeverity as number) > 0 ? "danger" : "success"} />
           </div>
@@ -414,14 +492,43 @@ const AuraCommandCenterPage: React.FC = () => {
         <div className="hq-panel hq-fade-in">
           <div className="hq-panel-body">
             <p className="hq-muted-text" style={{ marginBottom: "1rem" }}>
-              Natural-language navigation across Headquarters. Try &quot;Go to Grant Center&quot;, &quot;Open Security Center&quot;, or search for people, grants, and documents.
+              Natural-language navigation across Headquarters. Try &quot;Go to Grant Center&quot;, &quot;Open Communications&quot;, or search for people, grants, and documents.
             </p>
             <div className="hq-aura-input-row">
-              <input className="hq-aura-input" value={navQuery} onChange={(e) => setNavQuery(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && navQuery.trim().length >= 2 && navMutation.mutate(navQuery.trim())}
-                placeholder="Navigate or search Headquarters…" />
-              <button type="button" className="hq-btn hq-btn-primary" disabled={navQuery.trim().length < 2 || navMutation.isPending}
-                onClick={() => navMutation.mutate(navQuery.trim())}>Go</button>
+              <input
+                className="hq-aura-input"
+                value={navQuery}
+                onChange={(e) => setNavQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && navQuery.trim().length >= 2 && !navMutation.isPending) {
+                    e.preventDefault();
+                    handleNavigation(navQuery.trim(), { autoNavigate: true, showInChat: false });
+                  }
+                }}
+                placeholder="Navigate or search Headquarters…"
+                disabled={navMutation.isPending}
+              />
+              <button
+                type="button"
+                className="hq-btn hq-btn-primary"
+                disabled={navQuery.trim().length < 2 || navMutation.isPending}
+                onClick={() => handleNavigation(navQuery.trim(), { autoNavigate: true, showInChat: false })}
+              >
+                {navMutation.isPending ? "Going…" : "Go"}
+              </button>
+            </div>
+            <div className="hq-aura-suggestions" style={{ marginTop: "0.75rem" }}>
+              {["Go to Financial Center", "Go to Grant Center", "Open Communications", "Open Software Division", "Open Integrations"].map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className="hq-aura-suggestion"
+                  disabled={navMutation.isPending}
+                  onClick={() => { setNavQuery(s); handleNavigation(s, { autoNavigate: true, showInChat: false }); }}
+                >
+                  {s}
+                </button>
+              ))}
             </div>
             {navResult && <p style={{ marginTop: "0.75rem", fontSize: "0.85rem" }}>{String(navResult.message)}</p>}
             {navResult?.intent === "navigate" && navResult.path && (
@@ -431,7 +538,7 @@ const AuraCommandCenterPage: React.FC = () => {
             )}
             <ul className="hq-activity-list" style={{ marginTop: "1rem" }}>
               {((navResult?.results ?? []) as { id: string; title: string; subtitle: string; path: string }[]).map((r) => (
-                <li key={r.id} className="hq-activity-item" style={{ cursor: "pointer" }} onClick={() => navigate(r.path)}>
+                <li key={r.id} className="hq-activity-item" style={{ cursor: "pointer" }} onClick={() => navigate(r.path)} role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && navigate(r.path)}>
                   <div className="hq-activity-content"><div className="hq-activity-title">{r.title}</div><div className="hq-activity-detail">{r.subtitle}</div></div>
                 </li>
               ))}
