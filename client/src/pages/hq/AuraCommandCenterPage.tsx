@@ -40,7 +40,12 @@ function formatBoardReport(data: Record<string, unknown> | null): string {
 }
 
 function errorMessage(err: unknown): string {
-  if (err instanceof HqApiError) return err.message;
+  if (err instanceof HqApiError) {
+    if (err.status === 403 && /mfa/i.test(err.message)) {
+      return "This protected action requires MFA enrollment in Security Center (/hq/security). AURA chat, grant search, navigation, and drafting work without MFA.";
+    }
+    return err.message;
+  }
   if (err instanceof Error) return err.message;
   return "Request failed. Please try again.";
 }

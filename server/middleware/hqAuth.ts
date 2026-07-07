@@ -4,12 +4,14 @@ import { canAccessModule, hasPermission, type Permission } from "../hq/enterpris
 import { JWT_SECRET } from "../config/auth";
 import { getDb } from "../db";
 import { roleRequiresMfa } from "../hq/hqSecuritySessions";
+import { hqMutationRequiresMfaEnrollment } from "../hq/mfaRoutePolicy";
 
 export interface HQUser {
   id: string;
   email: string;
   role: string;
   name?: string;
+  mfaVerified?: boolean;
 }
 
 declare global {
@@ -18,10 +20,6 @@ declare global {
       hqUser?: HQUser;
     }
   }
-}
-
-function isMfaExemptHqPath(path: string): boolean {
-  return path.startsWith("/auth") || path.startsWith("/security");
 }
 
 async function enforcePrivilegedMfa(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -35,12 +33,7 @@ async function enforcePrivilegedMfa(req: Request, res: Response, next: NextFunct
     return;
   }
 
-  if (["GET", "HEAD", "OPTIONS"].includes(req.method)) {
-    next();
-    return;
-  }
-
-  if (isMfaExemptHqPath(req.path)) {
+  if (!hqMutationRequiresMfaEnrollment(req)) {
     next();
     return;
   }
@@ -56,7 +49,9 @@ async function enforcePrivilegedMfa(req: Request, res: Response, next: NextFunct
       res.status(403).json({
         error: "MFA required",
         requiresMfaSetup: true,
-        message: "Privileged accounts must enable two-factor authentication in Security Center.",
+        code: "mfa_enrollment_required",
+        message:
+          "This action requires two-factor authentication. Enable MFA in Security Center, then retry. AURA chat, grant search, and navigation work without MFA.",
       });
       return;
     }
@@ -81,12 +76,19 @@ export function hqAuthRequired(req: Request, res: Response, next: NextFunction) 
   }
 
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as { id: string; email: string; role: string; name?: string };
+    const payload = jwt.verify(token, JWT_SECRET) as {
+      id: string;
+      email: string;
+      role: string;
+      name?: string;
+      mfaVerified?: boolean;
+    };
     req.hqUser = {
       id: payload.id,
       email: payload.email,
       role: payload.role,
       name: payload.name,
+      mfaVerified: payload.mfaVerified === true,
     };
     (req as Request).user = req.hqUser;
     void enforcePrivilegedMfa(req, res, next);

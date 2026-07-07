@@ -21,10 +21,23 @@ const AURA_API_ROUTES = [
   "GET /api/hq/aura/status",
   "POST /api/hq/aura/navigate",
   "POST /api/hq/intelligence/copilot/ask",
+  "POST /api/hq/grants/intelligence/aura/ask",
+  "GET /api/hq/grants/intelligence/match",
   "POST /api/hq/aura/operations/ask",
   "POST /api/hq/aura/enterprise/ask",
   "GET /api/hq/intelligence/copilot/module-monitor",
   "GET /api/hq/intelligence/copilot/morning-briefing",
+];
+
+const MFA_EXEMPT_POSTS = [
+  ["/api/hq/intelligence/copilot/ask", { question: "Find grants for the whole IFCDC project" }],
+  ["/api/hq/grants/intelligence/aura/ask", { question: "Find grants for HR and staffing" }],
+  ["/api/hq/aura/navigate", { query: "Go to Grant Center" }],
+  ["/api/hq/aura/summarize", { reportType: "grants" }],
+];
+
+const MFA_REQUIRED_POSTS = [
+  ["/api/hq/grants/applications/app-1/workflow", { action: "submit" }],
 ];
 
 const results = { pass: 0, fail: 0, warn: 0 };
@@ -70,8 +83,47 @@ for (const route of AURA_API_ROUTES) {
   log("pass", `API route documented: ${route}`);
 }
 
+console.log("\n── MFA route policy (executive chat exempt) ──");
+const mfaTest = spawnSync(process.execPath, ["./node_modules/tsx/dist/cli.mjs", "-e", `
+import { hqMutationRequiresMfaEnrollment } from "./server/hq/mfaRoutePolicy.ts";
+function mockReq(path, method, body = {}) {
+  return { method, originalUrl: path, url: path, path, body };
+}
+const exempt = ${JSON.stringify(MFA_EXEMPT_POSTS)};
+const required = ${JSON.stringify(MFA_REQUIRED_POSTS)};
+let fail = 0;
+for (const [path, body] of exempt) {
+  if (hqMutationRequiresMfaEnrollment(mockReq(path, "POST", body))) {
+    console.log("FAIL|exempt|" + path);
+    fail++;
+  } else console.log("PASS|exempt|" + path);
+}
+for (const [path, body] of required) {
+  if (!hqMutationRequiresMfaEnrollment(mockReq(path, "POST", body))) {
+    console.log("FAIL|required|" + path);
+    fail++;
+  } else console.log("PASS|required|" + path);
+}
+process.exit(fail > 0 ? 1 : 0);
+`], { cwd: process.cwd(), encoding: "utf8" });
+for (const line of (mfaTest.stdout || "").split("\n").filter(Boolean)) {
+  if (line.startsWith("PASS|")) {
+    const [, kind, path] = line.split("|");
+    log("pass", `MFA ${kind}: ${path}`);
+    fixed.push(`MFA policy ${kind}: ${path}`);
+  } else if (line.startsWith("FAIL|")) {
+    const [, kind, path] = line.split("|");
+    log("fail", `MFA ${kind}: ${path}`);
+    remaining.push(`MFA policy wrong for ${path}`);
+  }
+}
+if (mfaTest.status !== 0 && !mfaTest.stdout?.includes("PASS|")) {
+  log("fail", "MFA policy test runner", mfaTest.stderr?.trim() || "unknown error");
+}
+
 console.log("\n── AURA UI fixes (this release) ──");
 const uiFixes = [
+  "MFA gate scoped to sensitive mutations only (not executive chat)",
   "Suggestion chips auto-execute (runMessage on click)",
   "Send button includes copilot + nav pending state",
   "Navigation commands auto-navigate after API success",

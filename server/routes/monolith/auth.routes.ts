@@ -69,6 +69,8 @@ async function handleLogin(req: Request, res: Response): Promise<Response | void
 
     const grantsQaBypass = process.env.IFCDC_GRANTS_QA === "1";
 
+    let mfaVerifiedThisSession = false;
+
     if (roleRequiresMfa(effectiveRole) && !grantsQaBypass) {
       if (user.twofa_enabled) {
         if (!totpCode) {
@@ -87,13 +89,21 @@ async function handleLogin(req: Request, res: Response): Promise<Response | void
           });
           return res.status(401).json({ error: "Invalid 2FA code" });
         }
+        mfaVerifiedThisSession = true;
       }
       // twofa not yet enabled: allow login so Super Admin can enroll in Security Center
     }
 
-    const token = jwt.sign({ id: user.id, email: user.email, role: effectiveRole }, JWT_SECRET, {
-      expiresIn: "7d",
-    });
+    const token = jwt.sign(
+      {
+        id: user.id,
+        email: user.email,
+        role: effectiveRole,
+        mfaVerified: mfaVerifiedThisSession,
+      },
+      JWT_SECRET,
+      { expiresIn: "7d" },
+    );
 
     res.cookie("ifcdc_token", token, {
       httpOnly: true,
