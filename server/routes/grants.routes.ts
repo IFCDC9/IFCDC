@@ -364,11 +364,31 @@ router.post("/opportunities/:id/start-application", async (req: Request, res: Re
 });
 
 router.post("/applications/:id/generate-full-draft", async (req: Request, res: Response) => {
-  const sections = Array.isArray(req.body?.sections) ? req.body.sections.map(String) : undefined;
-  res.json(await generateFullProposalDraft(req.params.id, {
-    actorEmail: req.hqUser?.email,
-    sections,
-  }));
+  try {
+    const sections = Array.isArray(req.body?.sections) ? req.body.sections.map(String) : undefined;
+    const result = await generateFullProposalDraft(req.params.id, {
+      actorEmail: req.hqUser?.email,
+      sections,
+    });
+    res.status(202).json({ ...result, humanReviewRequired: true, founderApprovalRequired: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Full proposal generation failed";
+    console.error(`[grant-writer] generate-full-draft app=${req.params.id}:`, message);
+    res.status(400).json({ error: message });
+  }
+});
+
+router.get("/draft-jobs/:jobId", async (req, res) => {
+  const { getFullProposalDraftJob } = await import("../hq/grantWriterEngine");
+  const job = await getFullProposalDraftJob(req.params.jobId);
+  if (!job) return res.status(404).json({ error: "Draft job not found" });
+  res.json({ job });
+});
+
+router.get("/applications/:id/draft-job", async (req, res) => {
+  const { getActiveDraftJobForApplication } = await import("../hq/grantWriterEngine");
+  const job = await getActiveDraftJobForApplication(req.params.id);
+  res.json({ job });
 });
 
 router.get("/center/executive-summary", async (_req, res) => {
@@ -422,8 +442,38 @@ router.patch("/writer-studio/:applicationId/sections/:sectionKey", async (req: R
 });
 
 router.post("/writer-studio/:applicationId/sections/:sectionKey/ai-assist", async (req: Request, res: Response) => {
-  const result = await assistWriterSection(req.params.applicationId, req.params.sectionKey, req.body?.prompt);
-  res.json(result);
+  try {
+    const result = await assistWriterSection(
+      req.params.applicationId,
+      req.params.sectionKey,
+      req.body?.prompt,
+      req.hqUser?.email
+    );
+    res.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "AURA draft failed";
+    console.error(`[grant-writer] ai-assist app=${req.params.applicationId} section=${req.params.sectionKey}:`, message);
+    res.status(400).json({ error: message });
+  }
+});
+
+router.get("/writer-studio/:applicationId/sections/:sectionKey/versions", async (req, res) => {
+  const { listWriterSectionVersions } = await import("../hq/grantWriterEngine");
+  const versions = await listWriterSectionVersions(req.params.applicationId, req.params.sectionKey);
+  res.json({ versions });
+});
+
+router.post("/writer-studio/:applicationId/sections/:sectionKey/restore/:versionId", async (req: Request, res: Response) => {
+  const { getWriterSectionVersion } = await import("../hq/grantWriterEngine");
+  const version = await getWriterSectionVersion(req.params.versionId);
+  if (!version) return res.status(404).json({ error: "Version not found" });
+  const section = await updateWriterSection(
+    req.params.applicationId,
+    req.params.sectionKey,
+    String((version as { content: string }).content),
+    { email: req.hqUser?.email }
+  );
+  res.json({ section });
 });
 
 router.get("/opportunities", async (_req, res) => {
@@ -1010,15 +1060,25 @@ router.post("/ai/match", async (req, res) => {
   res.json(result);
 });
 
-router.post("/ai/write", async (req, res) => {
+router.post("/ai/write", async (req: Request, res: Response) => {
   const { prompt, applicationId, opportunityId, section } = req.body ?? {};
   if (!prompt) return res.status(400).json({ error: "prompt is required" });
+  if (!applicationId || !section) {
+    return res.status(400).json({ error: "applicationId and section are required for production grant writing" });
+  }
   try {
-    const narrative = await grantWritingAssist({ prompt, applicationId, opportunityId, section });
-    res.json({ narrative, generatedAt: new Date().toISOString() });
+    const narrative = await grantWritingAssist({
+      prompt,
+      applicationId,
+      opportunityId,
+      section,
+      actorEmail: req.hqUser?.email,
+    });
+    res.json({ narrative, generatedAt: new Date().toISOString(), humanReviewRequired: true });
   } catch (e) {
-    console.error("Grant writing assist error:", e);
-    res.status(500).json({ error: "Grant writing assistant unavailable" });
+    const message = e instanceof Error ? e.message : "Grant writing assistant unavailable";
+    console.error("[grant-writer] ai/write error:", message);
+    res.status(400).json({ error: message });
   }
 });
 

@@ -21,6 +21,7 @@ import { syncGrantFeeds } from "../hq/grantFeedConnectors";
 import { purgeGrantDevSeedData } from "../hq/grantProductionCleanup";
 import { purgeHqSampleData } from "../hq/hqProductionCleanup";
 import { purgeWorkflowDemoData } from "../hq/workflowProductionCleanup";
+import { ensureGrantWriterTables } from "../hq/grantWriterEngine";
 import { ensureMissionControlTables } from "../hq/missionControlSchema";
 import { initGoogleOAuth } from "../monolith/googleOAuth";
 import { initLegacyMonolithDb, type FounderSeedConfig } from "../monolith/legacyDbBootstrap";
@@ -29,6 +30,7 @@ import { initLegacyMonolithDb, type FounderSeedConfig } from "../monolith/legacy
 export async function initializeHqModules(founder: FounderSeedConfig): Promise<void> {
   await initLegacyMonolithDb(founder);
   await ensureGrantModulesReady();
+  await ensureGrantWriterTables();
   await purgeGrantDevSeedData().catch((e) => console.warn("Grant dev_seed purge skipped:", e?.message));
   await purgeHqSampleData().catch((e) => console.warn("HQ sample data purge skipped:", e?.message));
   await purgeWorkflowDemoData().catch((e) => console.warn("Workflow demo purge skipped:", e?.message));

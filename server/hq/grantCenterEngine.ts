@@ -6,7 +6,7 @@ import { grantId, logGrantActivity } from "./grantsSchema";
 import { buildGrantExecutiveDashboard, buildGrantAnalytics, generateGrantNotifications } from "./grantReporting";
 import { buildFundingIntelligencePlatform, buildExecutiveIntelligenceV5, buildComplianceDashboard } from "./grantFundingEngineV5";
 import { buildFunderCrmDashboard } from "./grantFunderCrm";
-import { buildApplicationWorkspace, aiAssistApplicationSection } from "./grantFundingEngineV5";
+import { buildApplicationWorkspace } from "./grantFundingEngineV5";
 import { discoverAndRankGrants } from "./grantFundingEngineV3";
 import { buildFundingOperationsCalendar } from "./grantFundingEngineV4";
 import { getGrantFeedIntegrationStatus, countExternalFeedOpportunities } from "./grantFeedConnectors";
@@ -241,6 +241,17 @@ export async function updateWriterSection(
   const now = new Date().toISOString();
   const wordCount = content.trim().split(/\s+/).filter(Boolean).length;
   const label = WRITER_SECTIONS.find((s) => s.key === sectionKey)?.label ?? sectionKey;
+
+  const existing = await db.get<{ content: string }>(
+    "SELECT content FROM grant_writer_sections WHERE application_id = ? AND section_key = ?",
+    applicationId,
+    sectionKey
+  );
+  if (existing?.content?.trim() && existing.content !== content) {
+    const { saveWriterSectionVersion } = await import("./grantWriterEngine");
+    await saveWriterSectionVersion(applicationId, sectionKey, existing.content, "manual", actor?.email);
+  }
+
   await db.run(
     `INSERT INTO grant_writer_sections (id, application_id, section_key, section_label, content, word_count, updated_by, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -253,23 +264,31 @@ export async function updateWriterSection(
 }
 
 export async function buildWriterStudio(applicationId: string, opts?: { templateId?: string; actorEmail?: string }) {
-  const [workspace, sections] = await Promise.all([
+  const { ensureGrantWriterTables, getActiveDraftJobForApplication, computeProposalCompleteness } = await import("./grantWriterEngine");
+  await ensureGrantWriterTables();
+  const [workspace, sections, activeJob] = await Promise.all([
     buildApplicationWorkspace(applicationId, { actorEmail: opts?.actorEmail }),
     seedWriterSectionsForApplication(applicationId, opts?.templateId),
+    getActiveDraftJobForApplication(applicationId),
   ]);
   if (!workspace) return null;
   const templates = await listGrantTemplates();
-  return { ...workspace, writerSections: sections, templates: templates.templates };
+  const sectionRows = (sections.sections ?? []) as { section_key: string; content: string }[];
+  const completeness = computeProposalCompleteness(sectionRows);
+  return {
+    ...workspace,
+    writerSections: sections,
+    templates: templates.templates,
+    activeDraftJob: activeJob,
+    proposalCompleteness: completeness,
+    humanReviewRequired: true,
+    founderApprovalRequired: true,
+  };
 }
 
-export async function assistWriterSection(applicationId: string, sectionKey: string, prompt?: string) {
-  const section = WRITER_SECTIONS.find((s) => s.key === sectionKey);
-  const result = await aiAssistApplicationSection({
-    applicationId,
-    section: sectionKey,
-    prompt: prompt ?? `Draft the ${section?.label ?? sectionKey} section for this grant application.`,
-  });
-  return result;
+export async function assistWriterSection(applicationId: string, sectionKey: string, prompt?: string, actorEmail?: string) {
+  const { assistWriterSectionProduction } = await import("./grantWriterEngine");
+  return assistWriterSectionProduction(applicationId, sectionKey, prompt, actorEmail);
 }
 
 export async function buildOpportunityFinder(filters?: { category?: string; geography?: string; q?: string }) {

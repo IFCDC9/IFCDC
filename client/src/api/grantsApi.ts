@@ -1,3 +1,5 @@
+const GRANT_AI_TIMEOUT_MS = 120_000;
+
 async function apiFetch<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
   const { timeoutMs = 30_000, ...fetchOptions } = options ?? {};
   const controller = new AbortController();
@@ -21,6 +23,18 @@ async function apiFetch<T>(path: string, options?: RequestInit & { timeoutMs?: n
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function pollDraftJob(jobId: string, onProgress?: (job: Record<string, unknown>) => void): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + 10 * 60_000;
+  while (Date.now() < deadline) {
+    const { job } = await apiFetch<{ job: Record<string, unknown> }>(`/draft-jobs/${jobId}`, { timeoutMs: 15_000 });
+    onProgress?.(job);
+    const status = String(job.status ?? "");
+    if (status !== "running") return job;
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  throw new Error("Proposal generation is still running. Refresh the page to check progress.");
 }
 
 export interface GrantOverview {
@@ -760,9 +774,25 @@ export const grantsApi = {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content }),
     }),
   writerAiAssist: (applicationId: string, sectionKey: string, prompt?: string) =>
-    apiFetch<{ content?: string; narrative?: string }>(`/writer-studio/${applicationId}/sections/${sectionKey}/ai-assist`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt }),
-    }),
+    apiFetch<{ content?: string; narrative?: string; durationMs?: number; humanReviewRequired?: boolean }>(
+      `/writer-studio/${applicationId}/sections/${sectionKey}/ai-assist`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+        timeoutMs: GRANT_AI_TIMEOUT_MS,
+      }
+    ),
+  writerSectionVersions: (applicationId: string, sectionKey: string) =>
+    apiFetch<{ versions: { id: string; source: string; word_count: number; created_by: string; created_at: string }[] }>(
+      `/writer-studio/${applicationId}/sections/${sectionKey}/versions`
+    ),
+  restoreWriterSectionVersion: (applicationId: string, sectionKey: string, versionId: string) =>
+    apiFetch(`/writer-studio/${applicationId}/sections/${sectionKey}/restore/${versionId}`, { method: "POST" }),
+  draftJob: (jobId: string) =>
+    apiFetch<{ job: Record<string, unknown> }>(`/draft-jobs/${jobId}`),
+  activeDraftJob: (applicationId: string) =>
+    apiFetch<{ job: Record<string, unknown> | null }>(`/applications/${applicationId}/draft-job`),
 
   // Grant Intelligence Engine
   intelligenceDashboard: () =>
@@ -812,15 +842,33 @@ export const grantsApi = {
         body: JSON.stringify({ generateDrafts }),
       }
     ),
-  generateFullProposalDraft: (applicationId: string, sections?: string[]) =>
-    apiFetch<{ applicationId: string; completed: number; total: number; humanReviewRequired: boolean }>(
+  generateFullProposalDraft: async (
+    applicationId: string,
+    sections?: string[],
+    onProgress?: (job: Record<string, unknown>) => void
+  ) => {
+    const started = await apiFetch<{ jobId: string; status: string; total: number; humanReviewRequired: boolean }>(
       `/applications/${applicationId}/generate-full-draft`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sections }),
+        timeoutMs: 30_000,
       }
-    ),
+    );
+    const job = await pollDraftJob(started.jobId, onProgress);
+    return {
+      applicationId,
+      jobId: started.jobId,
+      status: String(job.status),
+      completed: Number(job.completed ?? 0),
+      total: Number(job.total ?? started.total),
+      sections: (job.sections as { section: string; status: string; error?: string }[]) ?? [],
+      humanReviewRequired: true,
+      founderApprovalRequired: true,
+      error: job.error ? String(job.error) : undefined,
+    };
+  },
   askGrantAura: (question: string) =>
     apiFetch<{
       answer: string;

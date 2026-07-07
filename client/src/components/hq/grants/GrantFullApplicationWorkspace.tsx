@@ -12,13 +12,15 @@ import { GrantApplicationWorkflowPanel } from "./GrantApplicationWorkflowPanel";
 
 const AI_SECTIONS = [
   { key: "executive_summary", label: "Executive Summary" },
-  { key: "need_statement", label: "Need Statement" },
-  { key: "project_description", label: "Program Narrative" },
+  { key: "need_statement", label: "Statement of Need" },
+  { key: "project_description", label: "Project Description" },
   { key: "goals_objectives", label: "Goals & Objectives" },
-  { key: "methods", label: "Work Plan" },
+  { key: "methods", label: "Methods & Activities" },
   { key: "evaluation", label: "Evaluation Plan" },
   { key: "budget_narrative", label: "Budget Narrative" },
-  { key: "sustainability", label: "Sustainability Plan" },
+  { key: "sustainability", label: "Sustainability" },
+  { key: "organizational_capacity", label: "Organizational Capacity" },
+  { key: "attachments_checklist", label: "Attachments Checklist" },
 ];
 
 export const GrantFullApplicationWorkspace: React.FC<{
@@ -28,20 +30,32 @@ export const GrantFullApplicationWorkspace: React.FC<{
   const qc = useQueryClient();
   const { canManage } = useGrantManage();
   const [activeSection, setActiveSection] = useState("executive_summary");
+  const [draftProgress, setDraftProgress] = useState<{ completed: number; total: number } | null>(null);
+  const [genError, setGenError] = useState<string | null>(null);
 
   const workspace = useQuery({
     queryKey: ["grant-full-workspace", applicationId],
     queryFn: () => grantsApi.fullApplicationWorkspace(String(applicationId)),
     enabled: !!applicationId,
     staleTime: 15_000,
+    refetchInterval: draftProgress ? 3000 : false,
   });
 
   const generateFull = useMutation({
-    mutationFn: () => grantsApi.generateFullProposalDraft(String(applicationId)),
-    onSuccess: () => {
+    mutationFn: () =>
+      grantsApi.generateFullProposalDraft(String(applicationId), undefined, (job) => {
+        setDraftProgress({ completed: Number(job.completed ?? 0), total: Number(job.total ?? 10) });
+      }),
+    onSuccess: (result) => {
+      setDraftProgress(null);
+      setGenError(result.error ?? null);
       qc.invalidateQueries({ queryKey: ["grant-full-workspace", applicationId] });
       qc.invalidateQueries({ queryKey: ["grant-writer-studio", applicationId] });
       onUpdated?.();
+    },
+    onError: (err: Error) => {
+      setDraftProgress(null);
+      setGenError(err.message);
     },
   });
 
@@ -124,12 +138,13 @@ export const GrantFullApplicationWorkspace: React.FC<{
             <button type="button" className="hq-btn hq-btn-sm hq-btn-secondary" disabled={founderAction.isPending} onClick={() => founderAction.mutate("request_changes")}>
               Request Changes
             </button>
-            <button type="button" className="hq-btn hq-btn-sm hq-btn-secondary" disabled={generateFull.isPending} onClick={() => generateFull.mutate()}>
-              <Sparkles size={14} /> {generateFull.isPending ? "Generating…" : "Generate All Draft Sections"}
+            <button type="button" className="hq-btn hq-btn-sm hq-btn-secondary" disabled={generateFull.isPending || !!draftProgress} onClick={() => generateFull.mutate()}>
+              <Sparkles size={14} /> {generateFull.isPending || draftProgress ? `Generating ${draftProgress?.completed ?? 0}/${draftProgress?.total ?? 10}…` : "Generate Full Proposal"}
             </button>
           </div>
         )}
-        <p className="hq-muted-text" style={{ fontSize: "0.75rem" }}>Federal submission requires founder approval. AURA drafts are starting points only.</p>
+        {genError && <p className="hq-muted-text" style={{ color: "var(--hq-danger)", fontSize: "0.75rem" }}>{genError}</p>}
+        <p className="hq-muted-text" style={{ fontSize: "0.75rem" }}>Federal submission requires founder approval. AURA never submits automatically.</p>
       </HqPanel>
 
       <HqPanel title="Required Documents & Task Checklist">

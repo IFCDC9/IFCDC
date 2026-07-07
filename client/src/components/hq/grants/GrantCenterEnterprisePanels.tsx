@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { BookOpen, Sparkles, FileText, AlertTriangle, RefreshCw, Zap, MessageSquare } from "lucide-react";
 import { grantsApi } from "../../../api/grantsApi";
@@ -93,11 +93,21 @@ export const GrantWriterStudioPanel: React.FC<{
   const [activeSection, setActiveSection] = useState("executive_summary");
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [draftProgress, setDraftProgress] = useState<{ completed: number; total: number; status?: string } | null>(null);
+  const [showVersions, setShowVersions] = useState(false);
+  const autoSaveSkip = useRef(true);
 
   const studio = useQuery({
     queryKey: ["grant-writer-studio", selectedApplicationId],
     queryFn: () => grantsApi.writerStudio(String(selectedApplicationId)),
     enabled: !!selectedApplicationId,
+    refetchInterval: draftProgress ? 3000 : false,
+  });
+
+  const versions = useQuery({
+    queryKey: ["grant-writer-versions", selectedApplicationId, activeSection],
+    queryFn: () => grantsApi.writerSectionVersions(String(selectedApplicationId), activeSection),
+    enabled: !!selectedApplicationId && showVersions,
   });
 
   const saveSection = useMutation({
@@ -113,17 +123,46 @@ export const GrantWriterStudioPanel: React.FC<{
   const aiAssist = useMutation({
     mutationFn: (sectionKey: string) => grantsApi.writerAiAssist(String(selectedApplicationId), sectionKey),
     onSuccess: (data, sectionKey) => {
-      const content = String((data as { content?: string; narrative?: string }).content ?? (data as { narrative?: string }).narrative ?? "");
-      if (content) setDraft((d) => ({ ...d, [sectionKey]: content }));
+      const content = String(data.content ?? "");
+      if (content) {
+        setDraft((d) => ({ ...d, [sectionKey]: content }));
+        saveSection.mutate({ sectionKey, content });
+      }
+      setSaveError(null);
+      qc.invalidateQueries({ queryKey: ["grant-writer-studio", selectedApplicationId] });
+      qc.invalidateQueries({ queryKey: ["grant-writer-versions", selectedApplicationId, sectionKey] });
     },
     onError: (err: Error) => setSaveError(err.message),
   });
 
   const generateFullDraft = useMutation({
-    mutationFn: () => grantsApi.generateFullProposalDraft(String(selectedApplicationId)),
-    onSuccess: () => {
-      setSaveError(null);
+    mutationFn: () =>
+      grantsApi.generateFullProposalDraft(String(selectedApplicationId), undefined, (job) => {
+        setDraftProgress({
+          completed: Number(job.completed ?? 0),
+          total: Number(job.total ?? 10),
+          status: String(job.status ?? "running"),
+        });
+      }),
+    onSuccess: (result) => {
+      setSaveError(result.error ?? null);
+      setDraftProgress(null);
+      setDraft({});
       qc.invalidateQueries({ queryKey: ["grant-writer-studio", selectedApplicationId] });
+    },
+    onError: (err: Error) => {
+      setDraftProgress(null);
+      setSaveError(err.message);
+    },
+  });
+
+  const restoreVersion = useMutation({
+    mutationFn: (versionId: string) =>
+      grantsApi.restoreWriterSectionVersion(String(selectedApplicationId), activeSection, versionId),
+    onSuccess: () => {
+      setDraft({});
+      qc.invalidateQueries({ queryKey: ["grant-writer-studio", selectedApplicationId] });
+      qc.invalidateQueries({ queryKey: ["grant-writer-versions", selectedApplicationId, activeSection] });
     },
     onError: (err: Error) => setSaveError(err.message),
   });
@@ -131,10 +170,43 @@ export const GrantWriterStudioPanel: React.FC<{
   const sections = (studio.data?.writerSections?.sections ?? []) as { section_key: string; section_label: string; content: string }[];
   const current = sections.find((s) => s.section_key === activeSection);
   const content = draft[activeSection] ?? current?.content ?? "";
+  const debouncedContent = useDebouncedValue(content, 1500);
+  const completeness = (studio.data as { proposalCompleteness?: { completionPct: number; confidence: string; missingSections: string[] } })?.proposalCompleteness;
+  const activeJob = (studio.data as { activeDraftJob?: { status: string; progressPct: number; completed: number; total: number } })?.activeDraftJob;
+  const founderStatus = String((studio.data?.application as { founder_approval_status?: string })?.founder_approval_status ?? "pending");
+
+  useEffect(() => {
+    if (!selectedApplicationId) return;
+    autoSaveSkip.current = true;
+    setDraft({});
+    setSaveError(null);
+    setDraftProgress(null);
+  }, [selectedApplicationId, activeSection]);
+
+  useEffect(() => {
+    if (!canManage || !selectedApplicationId || autoSaveSkip.current) {
+      autoSaveSkip.current = false;
+      return;
+    }
+    if (!debouncedContent.trim() || debouncedContent === (current?.content ?? "")) return;
+    saveSection.mutate({ sectionKey: activeSection, content: debouncedContent });
+  }, [debouncedContent]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (activeJob?.status === "running") {
+      setDraftProgress({
+        completed: Number(activeJob.completed ?? 0),
+        total: Number(activeJob.total ?? 10),
+        status: "running",
+      });
+    }
+  }, [activeJob]);
+
+  const isGenerating = generateFullDraft.isPending || draftProgress?.status === "running" || activeJob?.status === "running";
 
   return (
     <div className="hq-fade-in">
-      <HqPanel title="Grant Writer Studio" subtitle="Draft, save, and AI-assist each narrative section">
+      <HqPanel title="Grant Writer Studio" subtitle="AURA-powered narratives from live IFCDC data and Grants.gov opportunities">
         <div className="hq-form-grid" style={{ marginBottom: "1rem", maxWidth: 480 }}>
           <select className="hq-input" value={selectedApplicationId ?? ""} onChange={(e) => onSelectApplication(e.target.value)}>
             <option value="">Select application…</option>
@@ -142,13 +214,37 @@ export const GrantWriterStudioPanel: React.FC<{
           </select>
         </div>
         {!selectedApplicationId ? (
-          <p className="hq-muted-text">Choose an application to open the writer workspace.</p>
-        ) : studio.isLoading ? <HqLoading /> : studio.isError ? (
+          <p className="hq-muted-text">Choose an application linked to a live grant opportunity.</p>
+        ) : studio.isLoading ? <HqLoading message="Loading writer studio…" /> : studio.isError ? (
           <QueryError message="Writer studio failed to load. Verify the application still exists." />
         ) : (
           <>
-            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem", alignItems: "center" }}>
               <StatusBadge label={`${studio.data?.writerSections?.completionPct ?? 0}% complete`} variant="gold" />
+              {completeness && (
+                <StatusBadge
+                  label={`Confidence: ${completeness.confidence}`}
+                  variant={completeness.confidence === "high" ? "success" : completeness.confidence === "medium" ? "warning" : "muted"}
+                />
+              )}
+              <StatusBadge
+                label={`Founder: ${founderStatus.replace(/_/g, " ")}`}
+                variant={founderStatus === "approved" ? "success" : "warning"}
+              />
+              {isGenerating && (
+                <StatusBadge
+                  label={`AURA generating ${draftProgress?.completed ?? activeJob?.completed ?? 0}/${draftProgress?.total ?? activeJob?.total ?? 10}…`}
+                  variant="warning"
+                />
+              )}
+              {saveSection.isPending && <StatusBadge label="Auto-saving…" variant="muted" />}
+            </div>
+            {completeness?.missingSections?.length ? (
+              <p className="hq-muted-text" style={{ fontSize: "0.75rem", marginBottom: "0.75rem" }}>
+                Missing sections: {completeness.missingSections.join(", ")}
+              </p>
+            ) : null}
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
               {sections.map((s) => (
                 <button key={s.section_key} type="button" className={`hq-btn hq-btn-sm ${activeSection === s.section_key ? "hq-btn-primary" : "hq-btn-secondary"}`} onClick={() => setActiveSection(s.section_key)}>
                   {s.section_label}
@@ -161,28 +257,58 @@ export const GrantWriterStudioPanel: React.FC<{
               style={{ width: "100%", fontFamily: "inherit", lineHeight: 1.6 }}
               value={content}
               onChange={(e) => canManage && setDraft({ ...draft, [activeSection]: e.target.value })}
-              readOnly={!canManage}
+              readOnly={!canManage || isGenerating}
               placeholder={`Write ${current?.section_label ?? activeSection}…`}
             />
-            {saveError && <p className="hq-muted-text" style={{ color: "var(--hq-danger)", marginTop: "0.5rem", fontSize: "0.8rem" }}>{saveError}</p>}
+            {saveError && (
+              <p className="hq-muted-text" style={{ color: "var(--hq-danger)", marginTop: "0.5rem", fontSize: "0.8rem" }}>
+                {saveError}
+              </p>
+            )}
             {canManage && (
             <div className="hq-founder-command-strip" style={{ marginTop: "0.75rem" }}>
-              <button type="button" className="hq-btn hq-btn-primary" disabled={saveSection.isPending} onClick={() => saveSection.mutate({ sectionKey: activeSection, content })}>
-                <FileText size={14} /> {saveSection.isPending ? "Saving…" : "Save Section"}
+              <button type="button" className="hq-btn hq-btn-primary" disabled={saveSection.isPending || isGenerating} onClick={() => saveSection.mutate({ sectionKey: activeSection, content })}>
+                <FileText size={14} /> Save Section
               </button>
-              <button type="button" className="hq-btn hq-btn-secondary" disabled={aiAssist.isPending} onClick={() => aiAssist.mutate(activeSection)}>
-                <Sparkles size={14} /> {aiAssist.isPending ? "Drafting…" : "AURA Draft"}
+              <button type="button" className="hq-btn hq-btn-secondary" disabled={aiAssist.isPending || isGenerating} onClick={() => aiAssist.mutate(activeSection)}>
+                <Sparkles size={14} /> {aiAssist.isPending ? "AURA drafting…" : "AURA Draft"}
               </button>
-              <button type="button" className="hq-btn hq-btn-secondary" disabled={generateFullDraft.isPending} onClick={() => generateFullDraft.mutate()}>
-                <Sparkles size={14} /> {generateFullDraft.isPending ? "Generating…" : "Generate Full Proposal"}
+              <button type="button" className="hq-btn hq-btn-secondary" disabled={isGenerating} onClick={() => generateFullDraft.mutate()}>
+                <Sparkles size={14} /> {isGenerating ? "Generating full proposal…" : "Generate Full Proposal"}
+              </button>
+              <button type="button" className="hq-btn hq-btn-ghost" onClick={() => setShowVersions((v) => !v)}>
+                {showVersions ? "Hide" : "Version"} History
               </button>
             </div>
             )}
-            <p className="hq-muted-text" style={{ marginTop: "0.5rem", fontSize: "0.75rem" }}>
-              All AI drafts require human review before federal submission.
+            {showVersions && (
+              <div style={{ marginTop: "0.75rem", fontSize: "0.8rem" }}>
+                {versions.isLoading ? <HqLoading message="Loading versions…" /> : (
+                  <ul className="hq-activity-list">
+                    {(versions.data?.versions ?? []).map((v) => (
+                      <li key={v.id} className="hq-activity-item">
+                        <div className="hq-activity-content">
+                          <div className="hq-activity-title">{v.source} · {v.word_count} words</div>
+                          <div className="hq-activity-detail">{new Date(v.created_at).toLocaleString()} {v.created_by ? `· ${v.created_by}` : ""}</div>
+                        </div>
+                        {canManage && (
+                          <button type="button" className="hq-btn hq-btn-sm hq-btn-ghost" disabled={restoreVersion.isPending} onClick={() => restoreVersion.mutate(v.id)}>
+                            Restore
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                    {!versions.data?.versions?.length && <li className="hq-muted-text">No prior versions for this section.</li>}
+                  </ul>
+                )}
+              </div>
+            )}
+            <p className="hq-muted-text" style={{ marginTop: "0.75rem", fontSize: "0.75rem" }}>
+              AURA uses live IFCDC organizational data, SAM.gov status, Grants.gov opportunity details, and prior approved narratives.
+              Sections auto-save. <strong>Founder approval is required before any federal submission.</strong>
             </p>
             {studio.data?.application && (
-              <p className="hq-muted-text" style={{ marginTop: "0.75rem", fontSize: "0.8rem" }}>
+              <p className="hq-muted-text" style={{ marginTop: "0.5rem", fontSize: "0.8rem" }}>
                 Opportunity: {String((studio.data.application as { opportunity_title?: string }).opportunity_title ?? "—")}
               </p>
             )}

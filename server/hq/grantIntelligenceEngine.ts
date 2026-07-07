@@ -1111,7 +1111,7 @@ export async function processGrantAuraCommand(
       commandType: "draft",
       matches: [top],
       actions: ["application_drafted", "writer_sections_generated", "awaiting_founder_approval"],
-      answer: `Drafted full grant package for **${top.title}** (${top.funder}).\n\nMatch score: ${top.matchScore}% → ${top.bestProgram.label}\nEligibility: ${top.eligibility.grade}\n\nAll narrative sections are saved in Writer Studio. **Founder Review required** before submission.`,
+      answer: `Started full grant draft for **${top.title}** (${top.funder}).\n\nMatch score: ${top.matchScore}% → ${top.bestProgram.label}\nEligibility: ${top.eligibility.grade}\n\nAURA is generating all narrative sections in Writer Studio. **Founder review required** before any submission.`,
     };
   }
 
@@ -1337,49 +1337,13 @@ export async function startGrantApplicationWorkflow(
   };
 }
 
-const FULL_DRAFT_SECTIONS = [
-  "executive_summary",
-  "need_statement",
-  "project_description",
-  "goals_objectives",
-  "methods",
-  "evaluation",
-  "sustainability",
-  "organizational_capacity",
-  "budget_narrative",
-] as const;
-
-/** Generate all proposal sections via AURA (saved to writer studio). */
+/** Generate all proposal sections via AURA — async job (returns immediately, poll for progress). */
 export async function generateFullProposalDraft(
   applicationId: string,
   opts?: { actorEmail?: string; sections?: string[] }
 ) {
-  const sectionKeys = opts?.sections ?? [...FULL_DRAFT_SECTIONS];
-  const results: { section: string; ok: boolean; wordCount?: number }[] = [];
-
-  for (const key of sectionKeys) {
-    try {
-      const draft = await assistWriterSection(applicationId, key);
-      const content = String((draft as { content?: string; narrative?: string }).content ?? (draft as { narrative?: string }).narrative ?? "");
-      if (content.trim()) {
-        await updateWriterSection(applicationId, key, content, { email: opts?.actorEmail });
-        results.push({ section: key, ok: true, wordCount: content.split(/\s+/).length });
-      } else {
-        results.push({ section: key, ok: false });
-      }
-    } catch {
-      results.push({ section: key, ok: false });
-    }
-  }
-
-  return {
-    applicationId,
-    sections: results,
-    completed: results.filter((r) => r.ok).length,
-    total: sectionKeys.length,
-    humanReviewRequired: true,
-    generatedAt: new Date().toISOString(),
-  };
+  const { startFullProposalDraftJob } = await import("./grantWriterEngine");
+  return startFullProposalDraftJob(applicationId, opts);
 }
 
 /** Natural-language grant advisor for AURA (AI-enhanced fallback). */

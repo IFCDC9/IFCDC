@@ -7,7 +7,6 @@ import { grantId, logGrantActivity } from "./grantsSchema";
 import { logHqAudit } from "./hqAuditLog";
 import { auraExecutiveChat } from "../lib/ifcdc";
 import { buildAuraExecutiveContext } from "./auraExecutiveContext";
-import { grantWritingAssist } from "./grantIntelligence";
 import {
   IFCDC_FUNDING_DIVISIONS,
   searchGrantOpportunities,
@@ -303,20 +302,8 @@ export async function aiAssistApplicationSection(opts: {
   prompt?: string;
   actorEmail?: string;
 }) {
-  const workspace = await buildApplicationWorkspace(opts.applicationId);
-  if (!workspace) return { error: "Application not found" };
-
-  const defaultPrompt = opts.prompt ?? `Draft the ${opts.section} section for grant application "${workspace.application.title}".`;
-  const narrative = await grantWritingAssist({
-    prompt: defaultPrompt,
-    applicationId: opts.applicationId,
-    opportunityId: String(workspace.application.opportunity_id ?? ""),
-    section: opts.section,
-  });
-
-  await logGrantActivity("application", opts.applicationId, "ai_assist", `AI assist: ${opts.section}`, opts.actorEmail);
-
-  return { section: opts.section, content: narrative, generatedAt: new Date().toISOString() };
+  const { assistWriterSectionProduction } = await import("./grantWriterEngine");
+  return assistWriterSectionProduction(opts.applicationId, opts.section, opts.prompt, opts.actorEmail);
 }
 
 export async function buildPerformanceMetrics() {

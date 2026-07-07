@@ -1,7 +1,7 @@
 import { getDb } from "../db";
-import { auraExecutiveChat } from "../lib/ifcdc";
-import { buildAuraExecutiveContext } from "./auraExecutiveContext";
 import { getGrantFinancialSummary } from "./grantFinanceIntegration";
+import { buildAuraExecutiveContext } from "./auraExecutiveContext";
+import { auraExecutiveChat } from "../lib/ifcdc";
 
 export async function findGrantOpportunities(criteria: {
   keywords?: string;
@@ -85,24 +85,19 @@ export async function grantWritingAssist(opts: {
   applicationId?: string;
   opportunityId?: string;
   section?: string;
+  actorEmail?: string;
 }): Promise<string> {
-  const db = await getDb();
-  let context = await buildAuraExecutiveContext();
-
-  if (opts.applicationId) {
-    const app = await db.get("SELECT * FROM grant_applications WHERE id = ?", opts.applicationId);
-    if (app) context += `\n\nApplication:\n${JSON.stringify(app, null, 2)}`;
+  if (!opts.applicationId || !opts.section) {
+    throw new Error("applicationId and section are required for production grant writing.");
   }
-  if (opts.opportunityId) {
-    const opp = await db.get("SELECT * FROM grant_opportunities WHERE id = ?", opts.opportunityId);
-    if (opp) context += `\n\nOpportunity:\n${JSON.stringify(opp, null, 2)}`;
-  }
-
-  const section = opts.section ? `Focus on the ${opts.section} section. ` : "";
-  return auraExecutiveChat(
-    `${section}${opts.prompt}\n\nWrite in professional grant narrative style suitable for a community development nonprofit.`,
-    context
-  );
+  const { grantWritingAssistProduction } = await import("./grantWriterEngine");
+  const { content } = await grantWritingAssistProduction({
+    prompt: opts.prompt,
+    applicationId: opts.applicationId,
+    sectionKey: opts.section,
+    actorEmail: opts.actorEmail,
+  });
+  return content;
 }
 
 export async function generateGrantOutcomeReport(awardId: string): Promise<string> {
