@@ -5,6 +5,7 @@ import { getDb } from "../db";
 import { pollAllApps } from "./appRegistry";
 import { getGrantFeedIntegrationStatus } from "./grantFeedConnectors";
 import { ensureIntegrationTables, INTEGRATION_CATALOG } from "./integrationConnectors";
+import { openAiConfigStatus, verifyOpenAiConnection } from "../lib/openaiConfig";
 
 export type IntegrationHubStatus =
   | "connected"
@@ -338,36 +339,53 @@ async function buildResendCard(): Promise<IntegrationHubCard> {
 
 async function buildOpenAiCard(): Promise<IntegrationHubCard> {
   const keys = ["OPENAI_API_KEY", "AI_INTEGRATIONS_OPENAI_API_KEY"];
+  const status = openAiConfigStatus();
   const configured = keys.filter((k) => envSet(k));
   const now = new Date().toISOString();
   const health = await probe("openai_aura", async () => {
-    if (!configured.length) return { healthy: false, message: "No OpenAI API key configured" };
-    return { healthy: true, message: "AURA AI service credentials present (@ifcdc/aura-ai)" };
+    if (!status.configured) {
+      return { healthy: false, message: "No valid OpenAI API key — set OPENAI_API_KEY on Render" };
+    }
+    const live = await verifyOpenAiConnection();
+    return {
+      healthy: live.ok,
+      message: live.message,
+    };
   }, { healthy: false, message: "Health probe timed out" });
 
   return {
     id: "openai_aura",
     name: "OpenAI / AURA",
     category: "AI Intelligence",
-    description: "Executive AURA copilot and intelligence via centralized @ifcdc/aura-ai",
-    status: health.healthy ? "configured" : "not_configured",
+    description: `Executive Chat, Grant Writer, Proposal Generator, Voice AI — via ${status.source} (${status.keyPrefix})`,
+    status: health.healthy ? "configured" : status.configured ? "degraded" : "not_configured",
     lastChecked: now,
     environmentReadiness: {
-      ready: configured.length > 0,
-      missing: configured.length ? [] : keys,
-      configured,
+      ready: status.configured,
+      missing: status.configured ? [] : ["OPENAI_API_KEY"],
+      configured: [
+        ...configured,
+        ...(status.integrationsBaseSet ? ["AI_INTEGRATIONS_OPENAI_BASE_URL"] : []),
+      ],
     },
-    requiredCredentials: keys.map((k) => credential(k, k.replace(/_/g, " "))),
+    requiredCredentials: [
+      ...keys.map((k) => credential(k, k.replace(/_/g, " "))),
+      {
+        key: "AI_INTEGRATIONS_OPENAI_BASE_URL",
+        label: "Integrations base URL (legacy — remove if using production OPENAI_API_KEY)",
+        configured: status.integrationsBaseSet,
+      },
+    ],
     health,
     actions: [
       { id: "aura", label: "Open AURA", kind: "primary", action: "link", href: "/hq/aura" },
       { id: "test", label: "Test Connection", kind: "secondary", action: "test" },
       {
         id: "configure",
-        label: configured.length ? "Configured on Render" : "Not configured",
-        kind: configured.length ? "secondary" : "disabled",
+        label: status.configured ? `Active: ${status.source}` : "Not configured",
+        kind: status.configured ? "secondary" : "disabled",
         action: "configure",
-        reason: "Set OPENAI_API_KEY on Render",
+        reason: "Set OPENAI_API_KEY on Render — remove stale AI_INTEGRATIONS_OPENAI_BASE_URL if 401 persists",
       },
     ],
   };
@@ -892,6 +910,16 @@ export async function testIntegrationHubProvider(provider: string) {
   if (provider === "twilio") {
     const { testTwilioIntegrationLive } = await import("./twilioIntegrationEngine");
     return testTwilioIntegrationLive();
+  }
+  if (provider === "openai_aura") {
+    const live = await verifyOpenAiConnection();
+    return {
+      success: live.ok,
+      message: live.message,
+      provider,
+      testedAt: new Date().toISOString(),
+      details: [{ label: "Key source", value: live.source }, { label: "Key prefix", value: live.keyPrefix }],
+    };
   }
   const hub = await buildIntegrationsHubSafe();
   const card = hub.integrations.find((i) => i.id === provider);

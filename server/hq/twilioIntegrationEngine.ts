@@ -2,6 +2,7 @@
  * Twilio integration — account probe, phone number status, Integrations Hub monitoring.
  */
 import { getDb } from "../db";
+import { resolveOpenAiCredentials } from "../lib/openaiConfig";
 
 const PROBE_TIMEOUT_MS = 12_000;
 
@@ -83,9 +84,7 @@ export function getTwilioEnvStatus(): TwilioEnvStatus {
     null;
   const phoneNumber = resolveTwilioPhoneNumber();
   const messagingServiceConfigured = Boolean((process.env.TWILIO_MESSAGING_SERVICE_SID || "").trim());
-  const auraConfigured = Boolean(
-    (process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY || "").trim()
-  );
+  const auraConfigured = Boolean(resolveOpenAiCredentials());
   const phoneNumberConfigured = Boolean(phoneNumber);
   return {
     accountSidConfigured,

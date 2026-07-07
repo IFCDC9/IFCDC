@@ -1,11 +1,12 @@
 import OpenAI from "openai";
+import { resolveOpenAiCredentials } from "./openaiConfig";
 
-/** Shared OpenAI client — supports Replit AI integrations or direct API key. */
+/** Shared OpenAI client — same credential resolver as AURA Executive Chat and Grant Writer. */
 export function getOpenAI(): OpenAI | null {
-  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
+  const creds = resolveOpenAiCredentials();
+  if (!creds) return null;
   return new OpenAI({
-    baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-    apiKey,
+    apiKey: creds.apiKey,
+    ...(creds.baseURL ? { baseURL: creds.baseURL } : {}),
   });
 }

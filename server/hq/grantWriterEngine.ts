@@ -5,6 +5,7 @@
 import { getDb } from "../db";
 import { grantId, logGrantActivity } from "./grantsSchema";
 import { auraExecutiveChat } from "../lib/ifcdc";
+import { resolveOpenAiCredentials, formatOpenAiAuthError, type ResolvedOpenAiCredentials } from "../lib/openaiConfig";
 import { buildAuraExecutiveContext } from "./auraExecutiveContext";
 import { IFCDC_FUNDING_DIVISIONS } from "./grantFundingEngine";
 import { logHqAudit } from "./hqAuditLog";
@@ -242,11 +243,15 @@ export async function buildGrantWriterContext(opts: {
   return { context, opportunity: opp ?? null, application: app };
 }
 
-function assertAuraConfigured(): void {
-  const apiKey = process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error("AURA is not configured. Set OPENAI_API_KEY on the server to enable grant writing.");
+function assertAuraConfigured(): ResolvedOpenAiCredentials {
+  const creds = resolveOpenAiCredentials();
+  if (!creds) {
+    throw new Error(
+      "AURA is not configured. Set OPENAI_API_KEY on Render (Environment Variables). " +
+        "Remove placeholder or stale AI_INTEGRATIONS_OPENAI_API_KEY if it overrides production."
+    );
   }
+  return creds;
 }
 
 /** Production grant writing assist — throws on failure, logs timing. */
@@ -257,7 +262,7 @@ export async function grantWritingAssistProduction(opts: {
   actorEmail?: string;
   preservePrior?: string;
 }): Promise<{ content: string; durationMs: number }> {
-  assertAuraConfigured();
+  const creds = assertAuraConfigured();
   const started = Date.now();
   const label = WRITER_SECTION_LABELS[opts.sectionKey] ?? opts.sectionKey;
   const sectionGuide = SECTION_INSTRUCTIONS[opts.sectionKey] ?? `Draft the ${label} section.`;
@@ -279,13 +284,13 @@ export async function grantWritingAssistProduction(opts: {
   try {
     content = await auraExecutiveChat(userPrompt, context);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "AURA generation failed";
-    console.error(`[grant-writer] AURA error section=${opts.sectionKey} app=${opts.applicationId}:`, message);
+    const message = formatOpenAiAuthError(err, creds);
+    console.error(`[grant-writer] AURA error section=${opts.sectionKey} app=${opts.applicationId} source=${creds.source}:`, message);
     throw new Error(`AURA draft failed for ${label}: ${message}`);
   }
 
-  if (!content?.trim() || content.includes("AURA AI is not configured")) {
-    throw new Error(`AURA returned empty content for ${label}. Check OPENAI_API_KEY and try again.`);
+  if (!content?.trim()) {
+    throw new Error(`AURA returned empty content for ${label}. Verify OPENAI_API_KEY on Render (${creds.source}, prefix ${creds.keyPrefix}).`);
   }
 
   const durationMs = Date.now() - started;
