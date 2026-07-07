@@ -822,10 +822,72 @@ export const grantsApi = {
       }
     ),
   askGrantAura: (question: string) =>
-    apiFetch<{ answer: string; offline?: boolean; dashboard: Record<string, unknown> }>(
+    apiFetch<{
+      answer: string;
+      offline?: boolean;
+      commandType?: string;
+      matches?: Record<string, unknown>[];
+      humanReviewRequired?: boolean;
+      dashboard: Record<string, unknown> | null;
+      actions?: string[];
+    }>(
       "/intelligence/aura/ask",
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question }) }
     ),
+  orgWideGrantMatches: (params?: {
+    programSlug?: string;
+    sort?: "fit" | "funding" | "deadline";
+    limit?: number;
+    minScore?: number;
+    syncFeeds?: boolean;
+    q?: string;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.programSlug) qs.set("programSlug", params.programSlug);
+    if (params?.sort) qs.set("sort", params.sort);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.minScore) qs.set("minScore", String(params.minScore));
+    if (params?.syncFeeds) qs.set("syncFeeds", "true");
+    if (params?.q) qs.set("q", params.q);
+    const q = qs.toString();
+    return apiFetch<{
+      matches: {
+        opportunityId: string;
+        title: string;
+        funder: string;
+        bestProgram: { slug: string; label: string; score: number };
+        eligibility: { score: number; grade: string };
+        fundingAmount: { min: number | null; max: number | null };
+        deadline: string | null;
+        daysUntilDeadline: number | null;
+        matchScore: number;
+        priority: string;
+        estimatedEffort: string;
+        recommendedNextStep: string;
+      }[];
+      programs: { slug: string; label: string }[];
+      sort: string;
+      programFilter: string | null;
+      totalScored: number;
+      generatedAt: string;
+    }>(`/intelligence/match${q ? `?${q}` : ""}`, { timeoutMs: 60_000 });
+  },
+  programGrantQueues: (params?: { programSlug?: string; limitPerStage?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.programSlug) qs.set("programSlug", params.programSlug);
+    if (params?.limitPerStage) qs.set("limitPerStage", String(params.limitPerStage));
+    const q = qs.toString();
+    return apiFetch<{
+      programs: {
+        programSlug: string;
+        programLabel: string;
+        queues: Record<string, Record<string, unknown>[]>;
+        totals: Record<string, number>;
+      }[];
+      stages: { key: string; label: string }[];
+      generatedAt: string;
+    }>(`/intelligence/program-queues${q ? `?${q}` : ""}`, { timeoutMs: 45_000 });
+  },
   programGrantMatches: (programSlug: string) =>
     apiFetch<{ programSlug: string; programLabel: string; matches: Record<string, unknown>[] }>(
       `/intelligence/programs/${programSlug}/matches`

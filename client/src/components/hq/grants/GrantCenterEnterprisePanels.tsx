@@ -200,11 +200,35 @@ export const GrantIntelligencePanel: React.FC<{
   const { canManage } = useGrantManage();
   const [auraQuestion, setAuraQuestion] = useState("");
   const [auraAnswer, setAuraAnswer] = useState<string | null>(null);
+  const [matchSort, setMatchSort] = useState<"fit" | "funding" | "deadline">("fit");
+  const [programFilter, setProgramFilter] = useState("");
+  const [selectedQueueProgram, setSelectedQueueProgram] = useState("");
 
   const dashboard = useQuery({
     queryKey: ["grant-intelligence-dashboard"],
     queryFn: () => grantsApi.intelligenceDashboard(),
     refetchInterval: 60_000,
+  });
+
+  const orgMatches = useQuery({
+    queryKey: ["grant-org-matches", matchSort, programFilter],
+    queryFn: () =>
+      grantsApi.orgWideGrantMatches({
+        sort: matchSort,
+        limit: 20,
+        programSlug: programFilter || undefined,
+      }),
+    staleTime: 30_000,
+  });
+
+  const programQueues = useQuery({
+    queryKey: ["grant-program-queues", selectedQueueProgram],
+    queryFn: () =>
+      grantsApi.programGrantQueues({
+        programSlug: selectedQueueProgram || undefined,
+        limitPerStage: 5,
+      }),
+    staleTime: 30_000,
   });
 
   const syncIntel = useMutation({
@@ -213,6 +237,8 @@ export const GrantIntelligencePanel: React.FC<{
       qc.invalidateQueries({ queryKey: ["grant-intelligence-dashboard"] });
       qc.invalidateQueries({ queryKey: ["grant-opportunity-finder"] });
       qc.invalidateQueries({ queryKey: ["grant-intelligence-feed"] });
+      qc.invalidateQueries({ queryKey: ["grant-org-matches"] });
+      qc.invalidateQueries({ queryKey: ["grant-program-queues"] });
     },
   });
 
@@ -227,17 +253,27 @@ export const GrantIntelligencePanel: React.FC<{
       if (data.applicationId) onStartApplication?.(data.applicationId);
       qc.invalidateQueries({ queryKey: ["grant-intelligence-dashboard"] });
       qc.invalidateQueries({ queryKey: ["grant-applications"] });
+      qc.invalidateQueries({ queryKey: ["grant-program-queues"] });
     },
   });
 
   const summary = dashboard.data?.summary;
   const feed = dashboard.data?.liveFeed ?? [];
+  const programs = dashboard.data?.programs ?? orgMatches.data?.programs ?? [];
+  const matches = orgMatches.data?.matches ?? [];
+  const queueProgram = selectedQueueProgram
+    ? programQueues.data?.programs.find((p) => p.programSlug === selectedQueueProgram)
+    : programQueues.data?.programs[0];
 
   const quickQuestions = [
-    "What grants are available today?",
-    "Find grants for our Transitional Housing program.",
-    "Show grants due this month.",
-    "How much funding is currently in our pipeline?",
+    "Find grants for the whole IFCDC project",
+    "Find grants for HR and staffing",
+    "Find grants for transitional housing",
+    "Find grants for software and technology",
+    "Show grants due soon",
+    "Rank all grants by best fit",
+    "Start applications for the top five matches",
+    "Draft this grant for founder approval",
   ];
 
   return (
@@ -301,6 +337,146 @@ export const GrantIntelligencePanel: React.FC<{
           </>
         ) : (
           <QueryError message="Grant intelligence dashboard unavailable." />
+        )}
+      </HqPanel>
+
+      <HqPanel
+        title="Organization-Wide Grant Matching"
+        subtitle="Live ranked matches across every IFCDC program, department, HR need, and operational area"
+        headerExtra={
+          <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+            {(["fit", "funding", "deadline"] as const).map((s) => (
+              <button
+                key={s}
+                type="button"
+                className={`hq-btn hq-btn-sm ${matchSort === s ? "hq-btn-primary" : "hq-btn-secondary"}`}
+                onClick={() => setMatchSort(s)}
+              >
+                {s === "fit" ? "Best Fit" : s === "funding" ? "Highest Funding" : "Due Soon"}
+              </button>
+            ))}
+          </div>
+        }
+      >
+        <div className="hq-founder-command-strip" style={{ marginBottom: "0.75rem", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className={`hq-btn hq-btn-sm ${!programFilter ? "hq-btn-primary" : "hq-btn-secondary"}`}
+            onClick={() => setProgramFilter("")}
+          >
+            All IFCDC
+          </button>
+          {programs.slice(0, 12).map((p) => (
+            <button
+              key={p.slug}
+              type="button"
+              className={`hq-btn hq-btn-sm ${programFilter === p.slug ? "hq-btn-primary" : "hq-btn-secondary"}`}
+              onClick={() => setProgramFilter(p.slug)}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        {orgMatches.isLoading ? <HqLoading /> : orgMatches.isError ? (
+          <QueryError message="Organization-wide grant matching unavailable." />
+        ) : (
+          <div className="hq-table-scroll">
+            <table className="hq-table">
+              <thead>
+                <tr>
+                  <th>Opportunity</th>
+                  <th>Best Program</th>
+                  <th>Match</th>
+                  <th>Eligibility</th>
+                  <th>Funding</th>
+                  <th>Deadline</th>
+                  <th>Priority</th>
+                  <th>Next Step</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {matches.map((m) => (
+                  <tr key={m.opportunityId}>
+                    <td>
+                      <div>{m.title}</div>
+                      <div className="hq-muted-text" style={{ fontSize: "0.75rem" }}>{m.funder}</div>
+                    </td>
+                    <td>{m.bestProgram.label}</td>
+                    <td><StatusBadge label={`${m.matchScore}%`} variant={m.matchScore >= 70 ? "success" : "warning"} /></td>
+                    <td>{m.eligibility.grade}</td>
+                    <td>{formatCurrency(m.fundingAmount.max ?? m.fundingAmount.min ?? 0)}</td>
+                    <td>{fmtGrantDeadline(m.deadline)}</td>
+                    <td><StatusBadge label={m.priority.toUpperCase()} variant={m.priority === "high" ? "gold" : m.priority === "medium" ? "warning" : "muted"} /></td>
+                    <td style={{ fontSize: "0.8rem", maxWidth: 180 }}>{m.recommendedNextStep}</td>
+                    <td>
+                      {canManage && (
+                        <button
+                          type="button"
+                          className="hq-btn hq-btn-sm hq-btn-primary"
+                          disabled={startApp.isPending}
+                          onClick={() => startApp.mutate(m.opportunityId)}
+                        >
+                          Start
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {matches.length === 0 && (
+                  <tr><td colSpan={9} className="hq-muted-text">No matches yet. Sync Grants.gov to discover live opportunities.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="hq-muted-text" style={{ marginTop: "0.75rem", fontSize: "0.75rem" }}>
+          Scored {orgMatches.data?.totalScored ?? 0} opportunities · Founder approval required before any submission
+        </p>
+      </HqPanel>
+
+      <HqPanel title="Program Funding Queues" subtitle="Per-program pipeline: new matches → drafting → review → approval → submitted → awarded">
+        <div className="hq-founder-command-strip" style={{ marginBottom: "0.75rem", flexWrap: "wrap" }}>
+          <select
+            className="hq-input hq-btn-sm"
+            value={selectedQueueProgram}
+            onChange={(e) => setSelectedQueueProgram(e.target.value)}
+            style={{ minWidth: 220 }}
+          >
+            <option value="">First active program</option>
+            {programs.map((p) => (
+              <option key={p.slug} value={p.slug}>{p.label}</option>
+            ))}
+          </select>
+        </div>
+        {programQueues.isLoading ? <HqLoading /> : queueProgram ? (
+          <div className="hq-grid-2" style={{ gap: "0.75rem" }}>
+            {(["new_matches", "drafting", "review", "ready_for_approval", "submitted", "awarded", "declined"] as const).map((stage) => {
+              const label =
+                stage === "new_matches" ? "New Matches"
+                : stage === "ready_for_approval" ? "Ready for Approval"
+                : stage.charAt(0).toUpperCase() + stage.slice(1);
+              const items = queueProgram.queues[stage] ?? [];
+              return (
+                <div key={stage} className="hq-panel" style={{ padding: "0.75rem" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+                    <strong style={{ fontSize: "0.85rem" }}>{label}</strong>
+                    <StatusBadge label={String(queueProgram.totals[stage] ?? items.length)} variant="muted" />
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: "1rem", fontSize: "0.8rem" }}>
+                    {items.slice(0, 4).map((item, i) => (
+                      <li key={String(item.opportunityId ?? item.applicationId ?? i)} style={{ marginBottom: "0.25rem" }}>
+                        {String(item.title ?? "")}
+                      </li>
+                    ))}
+                    {items.length === 0 && <li className="hq-muted-text">None</li>}
+                  </ul>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <QueryError message="Program queues unavailable." />
         )}
       </HqPanel>
 

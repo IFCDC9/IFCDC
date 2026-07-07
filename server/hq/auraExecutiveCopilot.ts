@@ -8,6 +8,7 @@ import { createWorkflowInstance } from "./workflowEngine";
 import { buildEnterpriseNotifications } from "./enterpriseHub";
 import { answerEnterpriseQuestion } from "./auraEnterpriseIntelligence";
 import { askOperationsCopilot } from "./auraOperationsCopilot";
+import { isGrantAuraQuery, processGrantAuraCommand } from "./grantIntelligenceEngine";
 import { auraExecutiveChat } from "../lib/ifcdc";
 import { sendHqNotification } from "../lib/notifications";
 
@@ -121,6 +122,17 @@ export async function detectAndRecommendCorrectiveActions() {
 }
 
 export async function answerExecutiveCopilotQuestion(question: string) {
+  if (isGrantAuraQuery(question)) {
+    const result = await processGrantAuraCommand(question);
+    return {
+      answer: result.answer,
+      module: "grants",
+      commandType: result.commandType,
+      matches: result.matches,
+      humanReviewRequired: result.humanReviewRequired,
+      offline: result.offline,
+    };
+  }
   const module = detectModule(question);
   if (module === "operations" || module === "programs") {
     return askOperationsCopilot(question, module);

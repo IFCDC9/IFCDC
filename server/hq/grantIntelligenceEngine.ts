@@ -406,6 +406,58 @@ export const IFCDC_MISSION_KEYWORDS = [
   "arts",
   "radio",
   "technology",
+  "software",
+  "staffing",
+  "hiring",
+  "training",
+  "administration",
+  "operations",
+  "capacity building",
+  "evaluation",
+  "compliance",
+  "equipment",
+  "case management",
+  "publishing",
+  "communications",
+  "analytics",
+  "infrastructure",
+  "artificial intelligence",
+  "document management",
+  "grant administration",
+  "organizational capacity",
+];
+
+/** NL query → division slug aliases for AURA grant commands. */
+const PROGRAM_QUERY_ALIASES: { pattern: RegExp; slug: string }[] = [
+  { pattern: /\bhr\b|staffing|hiring|human resource|case management/, slug: "hr_staffing" },
+  { pattern: /transitional housing|housing program|shelter/, slug: "housing" },
+  { pattern: /anti.?gang|violence prevention|gang prevention/, slug: "anti_gang" },
+  { pattern: /youth development|youth program/, slug: "youth_development" },
+  { pattern: /mentorship|tapis|mentor program/, slug: "tapis" },
+  { pattern: /scholarship/, slug: "scholarships" },
+  { pattern: /economic development/, slug: "economic_development" },
+  { pattern: /workforce development|job training/, slug: "workforce_development" },
+  { pattern: /small business|entrepreneurship|microenterprise/, slug: "small_business" },
+  { pattern: /community development/, slug: "community_development" },
+  { pattern: /community outreach|outreach program/, slug: "community_outreach" },
+  { pattern: /software division|barbers app|barber/, slug: "barbers" },
+  { pattern: /software|technology infrastructure|it infrastructure|digital/, slug: "technology_infrastructure" },
+  { pattern: /headquarters|hq\b|ifcdc hq/, slug: "headquarters" },
+  { pattern: /\baura\b|ai assistant|artificial intelligence/, slug: "aura_ai" },
+  { pattern: /communications center|communications/, slug: "communications" },
+  { pattern: /ifcdc radio|radio program/, slug: "radio" },
+  { pattern: /productions|film|video production/, slug: "productions" },
+  { pattern: /ifcdc music|music program/, slug: "music" },
+  { pattern: /publishing/, slug: "publishing" },
+  { pattern: /document management|records management/, slug: "document_management" },
+  { pattern: /data analytics|analytics|business intelligence/, slug: "data_analytics" },
+  { pattern: /financial management|accounting|fiscal/, slug: "financial_management" },
+  { pattern: /nonprofit capacity|capacity building/, slug: "nonprofit_capacity" },
+  { pattern: /grants management|grant administration/, slug: "grants_management" },
+  { pattern: /program evaluation|impact measurement/, slug: "program_evaluation" },
+  { pattern: /operations|facilities|equipment/, slug: "operations" },
+  { pattern: /administration|compliance|governance/, slug: "administration" },
+  { pattern: /inclusive community|mental health/, slug: "inclusive" },
 ];
 
 /** Extended program catalog for matching (divisions + HQ registry). */
@@ -413,8 +465,35 @@ export const IFCDC_PROGRAM_CATALOG = IFCDC_FUNDING_DIVISIONS.map((d) => ({
   slug: d.slug,
   label: d.label,
   programs: [...d.programs],
-  keywords: [...d.programs, d.slug.replace(/_/g, " "), d.label.toLowerCase()],
+  keywords: [
+    ...d.programs,
+    d.slug.replace(/_/g, " "),
+    d.label.toLowerCase(),
+    ...d.label.toLowerCase().split(/[/,&]+/).map((s) => s.trim()).filter(Boolean),
+  ],
 }));
+
+export function resolveProgramSlugFromQuery(question: string): string | undefined {
+  const q = question.trim().toLowerCase();
+  for (const { pattern, slug } of PROGRAM_QUERY_ALIASES) {
+    if (pattern.test(q)) return slug;
+  }
+  return undefined;
+}
+
+export function isGrantAuraQuery(question: string): boolean {
+  const q = question.trim().toLowerCase();
+  return (
+    /\bgrant\b|\bfunding\b|\bfunder\b|grants\.gov|\brfp\b|\bnofo\b|award opportunity|find grant|search grant|discover grant/.test(q)
+    || PROGRAM_QUERY_ALIASES.some(({ pattern }) => pattern.test(q))
+    || /whole ifcdc|entire organization|all program|every program|org.?wide|organization.?wide/.test(q)
+  );
+}
+
+export function isOrgWideGrantQuery(question: string): boolean {
+  const q = question.trim().toLowerCase();
+  return /whole ifcdc|entire organization|entire ifcdc|all program|every program|whole project|entire project|organization.?wide|org.?wide|entire hq|full organization/.test(q);
+}
 
 function parseJsonArray(raw: unknown): string[] {
   if (!raw) return [];
@@ -640,6 +719,452 @@ export async function matchOpportunitiesForProgram(programSlug: string, limit = 
   };
 }
 
+export type OrgWideGrantMatch = {
+  opportunityId: string;
+  title: string;
+  funder: string;
+  bestProgram: { slug: string; label: string; score: number };
+  eligibility: { score: number; grade: string };
+  fundingAmount: { min: number | null; max: number | null };
+  deadline: string | null;
+  daysUntilDeadline: number | null;
+  requiredDocuments: string[];
+  matchScore: number;
+  priority: "high" | "medium" | "low";
+  estimatedEffort: "low" | "medium" | "high";
+  recommendedNextStep: string;
+  url: string | null;
+};
+
+function recommendNextStep(intel: OpportunityIntelligenceScore): string {
+  if (intel.composite >= 75 && intel.priority === "high") {
+    return "Start application draft and schedule founder review";
+  }
+  if (intel.composite >= 60) {
+    return "Review eligibility requirements and begin narrative outline";
+  }
+  if (intel.daysUntilDeadline != null && intel.daysUntilDeadline <= 14) {
+    return "Urgent: confirm eligibility and assign writer within 48 hours";
+  }
+  return "Add to watchlist — monitor deadline and gather required documents";
+}
+
+function formatFundingAmount(min: number | null, max: number | null): string {
+  if (max != null && min != null && min !== max) return `$${min.toLocaleString()} – $${max.toLocaleString()}`;
+  if (max != null) return `Up to $${max.toLocaleString()}`;
+  if (min != null) return `From $${min.toLocaleString()}`;
+  return "Amount TBD";
+}
+
+/** Organization-wide ranked grant matches across every IFCDC division and operational need. */
+export async function buildOrgWideGrantMatches(opts?: {
+  programSlug?: string;
+  sort?: "fit" | "funding" | "deadline";
+  limit?: number;
+  minScore?: number;
+  syncFeeds?: boolean;
+  actorEmail?: string;
+  q?: string;
+}) {
+  if (opts?.syncFeeds) {
+    try {
+      await runGrantIntelligenceSync({ actorEmail: opts?.actorEmail });
+    } catch {
+      /* sync optional */
+    }
+  }
+
+  const db = await getDb();
+  const limit = opts?.limit ?? 50;
+  const minScore = opts?.minScore ?? 40;
+
+  let sql = `SELECT o.* FROM grant_opportunities o
+    WHERE o.status IN ('open','active','researching')${productionGrantOpportunitySqlFilter("o")}`;
+  const params: unknown[] = [];
+
+  if (opts?.programSlug) {
+    const catalog = IFCDC_PROGRAM_CATALOG.find((p) => p.slug === opts.programSlug);
+    const keywords = (catalog?.keywords ?? [opts.programSlug]).slice(0, 6);
+    const clauses = keywords.map(
+      () => "(o.division_slugs LIKE ? OR o.program_areas LIKE ? OR o.title LIKE ? OR o.description LIKE ? OR o.match_tags LIKE ?)"
+    );
+    sql += ` AND (${clauses.join(" OR ")})`;
+    for (const kw of keywords) {
+      const like = `%${kw}%`;
+      params.push(like, like, like, like, like);
+    }
+  }
+
+  if (opts?.q?.trim()) {
+    sql += " AND (o.title LIKE ? OR o.funder LIKE ? OR o.description LIKE ?)";
+    const like = `%${opts.q.trim()}%`;
+    params.push(like, like, like);
+  }
+
+  sql += " ORDER BY o.updated_at DESC LIMIT ?";
+  params.push(limit * 4);
+
+  const rows = (await db.all(sql, ...params)) as Record<string, unknown>[];
+  const scored: OrgWideGrantMatch[] = [];
+
+  for (const row of rows) {
+    const id = String(row.id);
+    await enrichOpportunityPrograms(id);
+    const intel = await scoreOpportunityIntelligence(id, {
+      divisionSlug: opts?.programSlug,
+      actorEmail: opts?.actorEmail,
+    });
+    if (!intel || intel.composite < minScore) continue;
+
+    const best = intel.matchedPrograms[0];
+    const inferred = inferProgramMatches(row);
+    const bestSlug = best?.slug ?? inferred.divisionSlugs[0] ?? opts?.programSlug ?? "headquarters";
+    const bestLabel = IFCDC_PROGRAM_CATALOG.find((p) => p.slug === bestSlug)?.label ?? bestSlug.replace(/_/g, " ");
+
+    scored.push({
+      opportunityId: id,
+      title: String(row.title ?? ""),
+      funder: String(row.funder ?? ""),
+      bestProgram: { slug: bestSlug, label: bestLabel, score: best?.score ?? intel.composite },
+      eligibility: { score: intel.eligibility, grade: intel.eligibilityGrade },
+      fundingAmount: intel.fundingAmount,
+      deadline: intel.deadline,
+      daysUntilDeadline: intel.daysUntilDeadline,
+      requiredDocuments: intel.requiredAttachments,
+      matchScore: intel.composite,
+      priority: intel.priority,
+      estimatedEffort: intel.estimatedEffort,
+      recommendedNextStep: recommendNextStep(intel),
+      url: row.url ? String(row.url) : null,
+    });
+  }
+
+  const sort = opts?.sort ?? "fit";
+  if (sort === "funding") {
+    scored.sort((a, b) => (b.fundingAmount.max ?? 0) - (a.fundingAmount.max ?? 0));
+  } else if (sort === "deadline") {
+    scored.sort((a, b) => {
+      if (a.daysUntilDeadline == null) return 1;
+      if (b.daysUntilDeadline == null) return -1;
+      return a.daysUntilDeadline - b.daysUntilDeadline;
+    });
+  } else {
+    scored.sort((a, b) => b.matchScore - a.matchScore);
+  }
+
+  return {
+    matches: scored.slice(0, limit),
+    totalScored: scored.length,
+    programs: IFCDC_PROGRAM_CATALOG.map((p) => ({ slug: p.slug, label: p.label })),
+    sort,
+    programFilter: opts?.programSlug ?? null,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+export const PROGRAM_GRANT_QUEUE_STAGES = [
+  { key: "new_matches", label: "New Matches" },
+  { key: "drafting", label: "Drafting" },
+  { key: "review", label: "Review" },
+  { key: "ready_for_approval", label: "Ready for Approval" },
+  { key: "submitted", label: "Submitted" },
+  { key: "awarded", label: "Awarded" },
+  { key: "declined", label: "Declined" },
+] as const;
+
+export type ProgramGrantQueueStage = (typeof PROGRAM_GRANT_QUEUE_STAGES)[number]["key"];
+
+function classifyApplicationQueueStage(app: Record<string, unknown>): ProgramGrantQueueStage {
+  const status = String(app.status ?? "draft");
+  const founder = String(app.founder_approval_status ?? "pending");
+  const ready = Number(app.ready_to_submit ?? 0) === 1;
+  if (status === "awarded") return "awarded";
+  if (status === "denied" || status === "withdrawn") return "declined";
+  if (status === "submitted" || status === "under_review") return "submitted";
+  if (founder === "approved" && ready) return "ready_for_approval";
+  if (founder === "approved" || founder === "pending") return "review";
+  return "drafting";
+}
+
+/** Per-program funding pipeline queues (new matches through awarded/declined). */
+export async function buildProgramGrantQueues(opts?: { programSlug?: string; limitPerStage?: number }) {
+  const limit = opts?.limitPerStage ?? 8;
+  const db = await getDb();
+  const programs = opts?.programSlug
+    ? IFCDC_PROGRAM_CATALOG.filter((p) => p.slug === opts.programSlug)
+    : IFCDC_PROGRAM_CATALOG;
+
+  const programQueues = await Promise.all(
+    programs.map(async (prog) => {
+      const like = `%${prog.slug}%`;
+      const newMatchRows = (await db.all(
+        `SELECT o.* FROM grant_opportunities o
+         WHERE o.status IN ('open','active','researching')${productionGrantOpportunitySqlFilter("o")}
+           AND (o.division_slugs LIKE ? OR o.program_areas LIKE ? OR o.title LIKE ?)
+           AND NOT EXISTS (
+             SELECT 1 FROM grant_applications a
+             WHERE a.opportunity_id = o.id AND a.status NOT IN ('denied','withdrawn')
+           )
+         ORDER BY o.updated_at DESC LIMIT ?`,
+        like,
+        like,
+        like,
+        limit * 3
+      )) as Record<string, unknown>[];
+
+      const newMatches: Record<string, unknown>[] = [];
+      for (const row of newMatchRows) {
+        if (newMatches.length >= limit) break;
+        await enrichOpportunityPrograms(String(row.id));
+        const inferred = inferProgramMatches(row);
+        const slugs = parseJsonArray(row.division_slugs).length ? parseJsonArray(row.division_slugs) : inferred.divisionSlugs;
+        if (!slugs.includes(prog.slug) && !inferred.divisionSlugs.includes(prog.slug)) continue;
+        const intel = await scoreOpportunityIntelligence(String(row.id), { divisionSlug: prog.slug });
+        if (!intel || intel.composite < 45) continue;
+        newMatches.push({
+          opportunityId: row.id,
+          title: row.title,
+          funder: row.funder,
+          deadline: row.deadline,
+          matchScore: intel.composite,
+          priority: intel.priority,
+        });
+      }
+
+      const appRows = (await db.all(
+        `SELECT a.*, o.title as opportunity_title, o.funder, o.deadline as opportunity_deadline
+         FROM grant_applications a
+         LEFT JOIN grant_opportunities o ON o.id = a.opportunity_id
+         WHERE a.matched_program_slug = ?
+            OR (a.matched_program_slug IS NULL AND o.division_slugs LIKE ?)
+         ORDER BY a.updated_at DESC LIMIT 80`,
+        prog.slug,
+        like
+      )) as Record<string, unknown>[];
+
+      const queues: Record<ProgramGrantQueueStage, Record<string, unknown>[]> = {
+        new_matches: newMatches,
+        drafting: [],
+        review: [],
+        ready_for_approval: [],
+        submitted: [],
+        awarded: [],
+        declined: [],
+      };
+
+      for (const app of appRows) {
+        const stage = classifyApplicationQueueStage(app);
+        if (stage === "new_matches") continue;
+        const bucket = queues[stage];
+        if (bucket.length >= limit) continue;
+        bucket.push({
+          applicationId: app.id,
+          title: app.title ?? app.opportunity_title,
+          funder: app.funder,
+          deadline: app.opportunity_deadline,
+          amountRequested: app.amount_requested,
+          founderApprovalStatus: app.founder_approval_status,
+          status: app.status,
+        });
+      }
+
+      const totals = Object.fromEntries(
+        PROGRAM_GRANT_QUEUE_STAGES.map((s) => [s.key, queues[s.key].length])
+      ) as Record<ProgramGrantQueueStage, number>;
+
+      return {
+        programSlug: prog.slug,
+        programLabel: prog.label,
+        queues,
+        totals,
+      };
+    })
+  );
+
+  return {
+    programs: programQueues,
+    stages: PROGRAM_GRANT_QUEUE_STAGES,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+function formatMatchesAnswer(
+  data: Awaited<ReturnType<typeof buildOrgWideGrantMatches>>,
+  opts?: { programLabel?: string; sortLabel?: string }
+): string {
+  const scope = data.programFilter
+    ? `for ${opts?.programLabel ?? data.programFilter}`
+    : "across the entire IFCDC organization";
+  const sortNote = opts?.sortLabel ? ` (sorted by ${opts.sortLabel})` : "";
+  const lines = [`Found ${data.matches.length} live grant matches ${scope}${sortNote}:\n`];
+  for (const m of data.matches.slice(0, 12)) {
+    const amt = formatFundingAmount(m.fundingAmount.min, m.fundingAmount.max);
+    const dl = m.deadline ? new Date(m.deadline).toLocaleDateString() : "rolling/TBD";
+    lines.push(
+      `• **${m.title}** (${m.funder})\n  Match: ${m.matchScore}% → ${m.bestProgram.label} | ${m.eligibility.grade} | Priority: ${m.priority.toUpperCase()}\n  Funding: ${amt} | Due: ${dl} | Effort: ${m.estimatedEffort}\n  Next: ${m.recommendedNextStep}`
+    );
+  }
+  lines.push("\n⚠ Founder Review is required before any grant is submitted to a funder.");
+  return lines.join("\n");
+}
+
+export type GrantAuraCommandResult = {
+  commandType: "answer" | "matches" | "sync" | "started_applications" | "draft";
+  answer: string;
+  matches: OrgWideGrantMatch[];
+  actions: string[];
+  humanReviewRequired: boolean;
+  dashboard: Record<string, unknown> | null;
+  startedApplications?: { title: string; applicationId?: string; ok: boolean }[];
+  offline?: boolean;
+  askedBy: string | null;
+  generatedAt: string;
+};
+
+/** Structured AURA grant commands — discovery, ranking, drafting, founder gate. */
+export async function processGrantAuraCommand(
+  question: string,
+  opts?: { actorEmail?: string }
+): Promise<GrantAuraCommandResult> {
+  const q = question.trim().toLowerCase();
+  const base: GrantAuraCommandResult = {
+    commandType: "answer",
+    answer: "",
+    matches: [],
+    actions: [],
+    humanReviewRequired: true,
+    dashboard: null,
+    askedBy: opts?.actorEmail ?? null,
+    generatedAt: new Date().toISOString(),
+  };
+
+  if (/sync|refresh.*grant|update.*grants\.gov/.test(q)) {
+    const sync = await runGrantIntelligenceSync({ actorEmail: opts?.actorEmail });
+    const dash = await buildGrantIntelligenceDashboard();
+    return {
+      ...base,
+      commandType: "sync",
+      dashboard: dash.summary as unknown as Record<string, unknown>,
+      answer: `Synced live grant feeds (Grants.gov + SAM.gov). Enriched ${sync.enriched} opportunities and filled ${sync.deadlinesFilled} missing deadlines. ${dash.summary.newOpportunities} mission-relevant opportunities in the last week.`,
+      actions: ["feeds_synced", "opportunities_enriched"],
+    };
+  }
+
+  const wholeOrg = isOrgWideGrantQuery(question);
+  const programSlug = wholeOrg ? undefined : resolveProgramSlugFromQuery(question);
+  let sort: "fit" | "funding" | "deadline" = "fit";
+  if (/highest funding|largest award|most money|biggest grant/.test(q)) sort = "funding";
+  if (/due soon|deadline|this month|this week|urgent/.test(q)) sort = "deadline";
+  if (/rank.*fit|best fit|highest match/.test(q)) sort = "fit";
+
+  const findIntent =
+    /find grant|search grant|discover grant|funding for|grants for|show grant|what grant|available grant|match grant/.test(q)
+    || wholeOrg
+    || !!programSlug;
+
+  if (/start application|top five|top 5|begin application/.test(q)) {
+    const matches = await buildOrgWideGrantMatches({
+      programSlug,
+      sort: "fit",
+      limit: 5,
+      syncFeeds: /live|today|real.?time/.test(q),
+      actorEmail: opts?.actorEmail,
+    });
+    const started: { title: string; applicationId?: string; ok: boolean }[] = [];
+    for (const m of matches.matches) {
+      const r = await startGrantApplicationWorkflow(m.opportunityId, {
+        actorEmail: opts?.actorEmail,
+        generateDrafts: false,
+      });
+      started.push({ title: m.title, applicationId: r.applicationId, ok: r.ok });
+    }
+    return {
+      ...base,
+      commandType: "started_applications",
+      matches: matches.matches,
+      startedApplications: started,
+      actions: started.map((s) => `Draft started: ${s.title}`),
+      answer: `Started ${started.filter((s) => s.ok).length} application drafts for top matches. Each draft is in Founder Review — nothing will be submitted until you approve.\n\n${started.map((s, i) => `${i + 1}. ${s.title}${s.applicationId ? ` (App ${s.applicationId.slice(0, 8)}…)` : ""}`).join("\n")}`,
+    };
+  }
+
+  if (/draft.*grant|draft for founder|founder approval|prepare.*application/.test(q)) {
+    const matches = await buildOrgWideGrantMatches({
+      programSlug,
+      sort: "fit",
+      limit: 1,
+      actorEmail: opts?.actorEmail,
+    });
+    const top = matches.matches[0];
+    if (!top) {
+      return { ...base, answer: "No matching grants found to draft. Try syncing Grants.gov or broadening your search." };
+    }
+    const workflow = await startGrantApplicationWorkflow(top.opportunityId, {
+      actorEmail: opts?.actorEmail,
+      generateDrafts: true,
+    });
+    if (workflow.applicationId) {
+      await generateFullProposalDraft(workflow.applicationId, { actorEmail: opts?.actorEmail });
+    }
+    return {
+      ...base,
+      commandType: "draft",
+      matches: [top],
+      actions: ["application_drafted", "writer_sections_generated", "awaiting_founder_approval"],
+      answer: `Drafted full grant package for **${top.title}** (${top.funder}).\n\nMatch score: ${top.matchScore}% → ${top.bestProgram.label}\nEligibility: ${top.eligibility.grade}\n\nAll narrative sections are saved in Writer Studio. **Founder Review required** before submission.`,
+    };
+  }
+
+  if (findIntent) {
+    const matches = await buildOrgWideGrantMatches({
+      programSlug,
+      sort,
+      limit: 15,
+      syncFeeds: /live|today|real.?time|available today/.test(q),
+      actorEmail: opts?.actorEmail,
+    });
+    const programLabel = programSlug
+      ? IFCDC_PROGRAM_CATALOG.find((p) => p.slug === programSlug)?.label
+      : undefined;
+    const sortLabel = sort === "funding" ? "funding amount" : sort === "deadline" ? "deadline urgency" : "best fit";
+    return {
+      ...base,
+      commandType: "matches",
+      matches: matches.matches,
+      actions: matches.matches.slice(0, 5).map((m) => m.recommendedNextStep),
+      answer: formatMatchesAnswer(matches, { programLabel, sortLabel }),
+    };
+  }
+
+  if (/pipeline|funding secured|how much/.test(q)) {
+    const dashboard = await buildGrantIntelligenceDashboard();
+    return {
+      ...base,
+      dashboard: dashboard.summary as unknown as Record<string, unknown>,
+      answer: `Pipeline value: $${dashboard.summary.totalPipelineValue.toLocaleString()}. Secured: $${dashboard.summary.totalFundingSecured.toLocaleString()}. ${dashboard.summary.grantsBeingWritten} grants in drafting/review. ${dashboard.summary.submitted} submitted. ${dashboard.summary.newOpportunities} new opportunities this week.`,
+    };
+  }
+
+  if (/program queue|funding pipeline|queue for/.test(q)) {
+    const queues = await buildProgramGrantQueues({ programSlug, limitPerStage: 5 });
+    const target = programSlug
+      ? queues.programs[0]
+      : queues.programs.find((p) => (p.totals.new_matches ?? 0) > 0) ?? queues.programs[0];
+    if (!target) return { ...base, answer: "No program queues available." };
+    const lines = [`**${target.programLabel}** funding pipeline:`];
+    for (const stage of PROGRAM_GRANT_QUEUE_STAGES) {
+      const items = target.queues[stage.key];
+      lines.push(`\n${stage.label}: ${items.length}`);
+      for (const item of items.slice(0, 3)) {
+        lines.push(`  • ${String(item.title ?? item.opportunityId ?? "")}`);
+      }
+    }
+    return { ...base, answer: lines.join("\n") };
+  }
+
+  return askGrantAura(question, opts);
+}
+
 /** Live feed — newly synced + mission-relevant opportunities. */
 export async function getLiveOpportunityFeed(opts?: { sinceHours?: number; limit?: number }) {
   const sinceHours = opts?.sinceHours ?? 72;
@@ -857,8 +1382,8 @@ export async function generateFullProposalDraft(
   };
 }
 
-/** Natural-language grant advisor for AURA. */
-export async function askGrantAura(question: string, opts?: { actorEmail?: string }) {
+/** Natural-language grant advisor for AURA (AI-enhanced fallback). */
+export async function askGrantAura(question: string, opts?: { actorEmail?: string }): Promise<GrantAuraCommandResult> {
   const q = question.trim().toLowerCase();
   const [dashboard, context] = await Promise.all([
     buildGrantIntelligenceDashboard(),
@@ -884,9 +1409,12 @@ export async function askGrantAura(question: string, opts?: { actorEmail?: strin
     structured = JSON.stringify(rows, null, 2);
   } else if (/pipeline|funding secured|how much/.test(q)) {
     structured = JSON.stringify(dashboard.summary, null, 2);
+  } else {
+    const orgMatches = await buildOrgWideGrantMatches({ limit: 10, actorEmail: opts?.actorEmail });
+    structured = JSON.stringify(orgMatches.matches, null, 2);
   }
 
-  const prompt = `${question}\n\nUse the structured grant intelligence data below. Be specific and actionable. Remind the user that all federal submissions require human review.\n\nData:\n${structured || JSON.stringify(dashboard.summary, null, 2)}`;
+  const prompt = `${question}\n\nUse the structured grant intelligence data below. Be specific and actionable. Remind the user that all federal submissions require founder approval — AURA never submits automatically.\n\nData:\n${structured || JSON.stringify(dashboard.summary, null, 2)}`;
 
   let answer: string;
   let offline = false;
@@ -894,10 +1422,20 @@ export async function askGrantAura(question: string, opts?: { actorEmail?: strin
     answer = await auraExecutiveChat(prompt, `${context}\n\nGrant Intelligence Dashboard:\n${JSON.stringify(dashboard.summary, null, 2)}`);
   } catch {
     offline = true;
-    answer = `Pipeline value: $${dashboard.summary.totalPipelineValue.toLocaleString()}. Secured: $${dashboard.summary.totalFundingSecured.toLocaleString()}. ${dashboard.summary.newOpportunities} new opportunities in the last week.`;
+    answer = `Pipeline value: $${dashboard.summary.totalPipelineValue.toLocaleString()}. Secured: $${dashboard.summary.totalFundingSecured.toLocaleString()}. ${dashboard.summary.newOpportunities} new opportunities in the last week. Ask me to "find grants for the whole IFCDC project" for ranked matches.`;
   }
 
-  return { answer, offline, dashboard: dashboard.summary, askedBy: opts?.actorEmail ?? null, generatedAt: new Date().toISOString() };
+  return {
+    commandType: "answer",
+    answer,
+    offline,
+    matches: [],
+    actions: [],
+    humanReviewRequired: true,
+    dashboard: dashboard.summary as unknown as Record<string, unknown>,
+    askedBy: opts?.actorEmail ?? null,
+    generatedAt: new Date().toISOString(),
+  };
 }
 
 /** Sync feeds + enrich + optional broadcast. */

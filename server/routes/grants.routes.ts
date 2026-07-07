@@ -136,7 +136,10 @@ import {
   startGrantApplicationWorkflow,
   generateFullProposalDraft,
   askGrantAura,
+  processGrantAuraCommand,
   matchOpportunitiesForProgram,
+  buildOrgWideGrantMatches,
+  buildProgramGrantQueues,
   IFCDC_PROGRAM_CATALOG,
   buildEnrichedOpportunityList,
   buildFullApplicationWorkspace,
@@ -264,6 +267,32 @@ router.get("/intelligence/programs/:slug/matches", async (req, res) => {
   res.json(await matchOpportunitiesForProgram(req.params.slug, limit ?? 25));
 });
 
+router.get("/intelligence/match", async (req, res) => {
+  const programSlug = req.query.programSlug ? String(req.query.programSlug) : undefined;
+  const sort = req.query.sort ? String(req.query.sort) as "fit" | "funding" | "deadline" : undefined;
+  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  const minScore = req.query.minScore ? Number(req.query.minScore) : undefined;
+  const syncFeeds = req.query.syncFeeds === "true" || req.query.syncFeeds === "1";
+  const q = req.query.q ? String(req.query.q) : undefined;
+  res.json(
+    await buildOrgWideGrantMatches({
+      programSlug,
+      sort,
+      limit,
+      minScore,
+      syncFeeds,
+      q,
+      actorEmail: req.hqUser?.email,
+    })
+  );
+});
+
+router.get("/intelligence/program-queues", async (req, res) => {
+  const programSlug = req.query.programSlug ? String(req.query.programSlug) : undefined;
+  const limitPerStage = req.query.limitPerStage ? Number(req.query.limitPerStage) : undefined;
+  res.json(await buildProgramGrantQueues({ programSlug, limitPerStage }));
+});
+
 router.get("/intelligence/opportunities", async (req, res) => {
   const filter = req.query.filter ? String(req.query.filter) : "all";
   const programSlug = req.query.programSlug ? String(req.query.programSlug) : undefined;
@@ -313,7 +342,7 @@ router.post("/intelligence/sync", async (req: Request, res: Response) => {
 router.post("/intelligence/aura/ask", async (req: Request, res: Response) => {
   const question = String(req.body?.question ?? "").trim();
   if (!question) return res.status(400).json({ error: "question required" });
-  res.json(await askGrantAura(question, { actorEmail: req.hqUser?.email }));
+  res.json(await processGrantAuraCommand(question, { actorEmail: req.hqUser?.email }));
 });
 
 router.post("/opportunities/:id/score-intelligence", async (req: Request, res: Response) => {

@@ -8,11 +8,12 @@ import {
 import HQLayout from "../../layouts/HQLayout";
 import { hqApi } from "../../api/hqApi";
 import { intelligenceApi } from "../../api/intelligenceApi";
+import { grantsApi } from "../../api/grantsApi";
 import { warehouseApi } from "../../api/warehouseApi";
 import { StatusBadge } from "../../components/hq/StatusBadge";
 import { KpiCard } from "../../components/hq/KpiCard";
 import { formatLocaleNumber } from "../../utils/safeFormat";
-import { isAuraNavigationQuery, AURA_NAV_SUGGESTIONS } from "../../utils/auraNavigation";
+import { isAuraNavigationQuery, isGrantAuraQuery, AURA_NAV_SUGGESTIONS } from "../../utils/auraNavigation";
 import { HqApiError } from "../../api/hqApiFetch";
 
 type AuraMode = "ask" | "brief" | "intelligence" | "monitor" | "navigate";
@@ -111,6 +112,15 @@ const AuraCommandCenterPage: React.FC = () => {
     onError: (err, msg) => appendChatError(msg, err),
   });
 
+  const grantAuraMutation = useMutation({
+    mutationFn: (q: string) => grantsApi.askGrantAura(q),
+    onSuccess: (data, msg) => {
+      appendChat(msg, String(data.answer ?? "No grant matches returned."));
+      setMessage("");
+    },
+    onError: (err, msg) => appendChatError(msg, err),
+  });
+
   const summarizeMutation = useMutation({
     mutationFn: (reportType: "full" | "financial" | "grants" | "operations") => hqApi.auraSummarize(reportType),
     onSuccess: (data) => { setBriefError(null); setSummary(data.summary); },
@@ -171,6 +181,7 @@ const AuraCommandCenterPage: React.FC = () => {
     copilotAskMutation.isPending ||
     opsAskMutation.isPending ||
     enterpriseAskMutation.isPending ||
+    grantAuraMutation.isPending ||
     navMutation.isPending;
 
   const handleNavigation = useCallback(
@@ -208,11 +219,16 @@ const AuraCommandCenterPage: React.FC = () => {
         return;
       }
 
+      if (isGrantAuraQuery(trimmed)) {
+        grantAuraMutation.mutate(trimmed);
+        return;
+      }
+
       if (askMode === "operations") opsAskMutation.mutate(trimmed);
       else if (askMode === "enterprise") enterpriseAskMutation.mutate(trimmed);
       else copilotAskMutation.mutate(trimmed);
     },
-    [message, pending, handleNavigation, askMode, opsAskMutation, enterpriseAskMutation, copilotAskMutation]
+    [message, pending, handleNavigation, askMode, opsAskMutation, enterpriseAskMutation, copilotAskMutation, grantAuraMutation]
   );
 
   const moduleCount = (moduleMonitor.data?.modules as unknown[] | undefined)?.length;
