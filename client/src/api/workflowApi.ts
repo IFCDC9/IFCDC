@@ -11,8 +11,13 @@ export interface WorkflowDefinition {
   name: string;
   description: string;
   category: string;
+  trigger_type?: string;
   steps_json: string;
   enabled: number;
+  instanceCount?: number;
+  pendingCount?: number;
+  lastInstanceAt?: string | null;
+  operationalStatus?: string;
 }
 
 export interface WorkflowInstance {
@@ -36,8 +41,13 @@ export interface ScheduledJob {
   job_key: string;
   name: string;
   schedule: string;
+  schedule_expr?: string;
   last_run_at: string | null;
+  next_run_at?: string | null;
   enabled: number;
+  runStatus?: string;
+  lastError?: string | null;
+  sourceModule?: string;
 }
 
 export const workflowApi = {
@@ -67,6 +77,18 @@ export const workflowApi = {
     }),
   runScheduled: () =>
     apiFetch<{ ran: string[]; errors: string[] }>("/run-scheduled", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }),
+  runJob: (jobKey: string) =>
+    apiFetch<{ ok: boolean; jobKey?: string; ranAt?: string; error?: string }>(`/jobs/${jobKey}/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    }),
+  setJobEnabled: (jobKey: string, enabled: boolean) =>
+    apiFetch<{ job: ScheduledJob }>(`/jobs/${jobKey}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    }),
   instanceDetail: (id: string) =>
     apiFetch<{ instance: WorkflowInstance; steps?: unknown[] }>(`/instances/${id}`).catch(() => null),
   steps: (id: string) =>

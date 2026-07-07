@@ -1,12 +1,11 @@
 /**
  * Seeds enterprise-ready operational data for HQ health scoring and UAT.
- * Idempotent — safe to run on every boot.
+ * Idempotent — safe to run on every boot. Disabled in production (live data only).
  */
 import crypto from "crypto";
 import { getDb } from "../db";
+import { allowHqDemoSeed } from "./grantProductionPolicy";
 import { ensureDivisionAnalyticsTables, ingestDivisionAnalytics } from "./divisionAnalyticsWebhook";
-import { ensureWorkflowStepTables } from "./workflowOrchestration";
-import { createWorkflowInstance } from "./workflowEngine";
 import { buildOrganizationHealthScore } from "./analyticsReporting";
 import { invalidateWarehouseOverviewCache } from "./analyticsWarehouse";
 import type { DivisionId } from "./divisionIntegrationLayer";
@@ -159,25 +158,8 @@ async function seedOperatingCash(): Promise<void> {
   );
 }
 
-async function seedDemoWorkflow(): Promise<void> {
-  await ensureWorkflowStepTables();
-  const db = await getDb();
-  const count = (await db.get<{ c: number }>("SELECT COUNT(*) as c FROM hq_workflow_instances"))?.c ?? 0;
-  if (count > 0) return;
-
-  await createWorkflowInstance({
-    workflowKey: "expense_approval",
-    title: "Enterprise readiness — expense approval demo",
-    entityType: "finance_expense",
-    entityId: "seed-demo",
-    priority: "normal",
-    payload: { amount: 2500, category: "operations", description: "HQ enterprise readiness validation" },
-  });
-}
-
 export async function ensureEnterpriseReadinessSeed(): Promise<void> {
-  if (process.env.NODE_ENV === "production" && process.env.ALLOW_DEMO_SEED !== "true") {
-    console.log("[Enterprise Readiness Seed] Skipped in production (demo data disabled; set ALLOW_DEMO_SEED=true to override)");
+  if (!allowHqDemoSeed()) {
     return;
   }
   try {
@@ -186,7 +168,6 @@ export async function ensureEnterpriseReadinessSeed(): Promise<void> {
     await seedDonationActivity();
     await seedOperatingCash();
     await revertLegacyBudgetBandSeed();
-    await seedDemoWorkflow();
 
     invalidateWarehouseOverviewCache();
 

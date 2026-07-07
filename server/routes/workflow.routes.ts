@@ -9,7 +9,8 @@ import {
   processApprovalTask,
   runScheduledJobs,
   runDueScheduledJobs,
-  syncApprovalTasksToWorkflows,
+  runSingleScheduledJob,
+  setScheduledJobEnabled,
   createWorkflowInstance,
 } from "../hq/workflowEngine";
 import {
@@ -24,7 +25,6 @@ router.use(hqAuthRequired, requireHQModule("executive"));
 
 router.get("/dashboard", async (_req, res) => {
   await ensureWorkflowStepTables().catch(() => undefined);
-  await syncApprovalTasksToWorkflows().catch(() => undefined);
   res.json(await buildWorkflowDashboard());
 });
 
@@ -91,6 +91,22 @@ router.post("/run-scheduled", async (req: Request, res: Response) => {
 
 router.post("/run-due", async (req: Request, res: Response) => {
   res.json(await runDueScheduledJobs(req.hqUser?.email));
+});
+
+router.post("/jobs/:jobKey/run", async (req: Request, res: Response) => {
+  const result = await runSingleScheduledJob(req.params.jobKey, req.hqUser?.email);
+  if (!result.ok) return res.status(400).json(result);
+  res.json(result);
+});
+
+router.patch("/jobs/:jobKey", async (req: Request, res: Response) => {
+  const enabled = req.body?.enabled;
+  if (typeof enabled !== "boolean") {
+    return res.status(400).json({ error: "enabled boolean required" });
+  }
+  const job = await setScheduledJobEnabled(req.params.jobKey, enabled, req.hqUser?.email);
+  if (!job) return res.status(404).json({ error: "Job not found" });
+  res.json({ job });
 });
 
 export default router;

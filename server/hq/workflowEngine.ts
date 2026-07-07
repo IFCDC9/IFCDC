@@ -5,17 +5,43 @@ import { generateGrantNotifications } from "./grantReporting";
 import { captureFullWarehouseSnapshot } from "./analyticsWarehouse";
 import { logHqAudit } from "./hqAuditLog";
 import { syncGrantExpenditureFromFinance } from "./grantFinanceIntegration";
+import { productionWorkflowInstanceSqlFilter } from "./workflowProductionCleanup";
 
 export async function listWorkflowDefinitions() {
   await ensureWorkflowTables();
   const db = await getDb();
-  return db.all("SELECT * FROM hq_workflow_definitions WHERE enabled = 1 ORDER BY name");
+  const defs = (await db.all(
+    "SELECT * FROM hq_workflow_definitions ORDER BY name"
+  )) as Record<string, unknown>[];
+
+  return Promise.all(
+    defs.map(async (def) => {
+      const key = String(def.workflow_key);
+      const stats = await db.get<{ pending: number; total: number; last_at: string | null }>(
+        `SELECT
+          SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+          COUNT(*) as total,
+          MAX(created_at) as last_at
+         FROM hq_workflow_instances WHERE workflow_key = ?${productionWorkflowInstanceSqlFilter()}`,
+        key
+      );
+      const pending = Number(stats?.pending ?? 0);
+      return {
+        ...def,
+        category: def.trigger_type ?? "event",
+        instanceCount: Number(stats?.total ?? 0),
+        pendingCount: pending,
+        lastInstanceAt: stats?.last_at ?? null,
+        operationalStatus: pending > 0 ? "in_use" : Number(stats?.total ?? 0) > 0 ? "configured" : "idle",
+      };
+    })
+  );
 }
 
 export async function listWorkflowInstances(opts?: { status?: string; workflowKey?: string; limit?: number }) {
   await ensureWorkflowTables();
   const db = await getDb();
-  let sql = "SELECT * FROM hq_workflow_instances WHERE 1=1";
+  let sql = `SELECT * FROM hq_workflow_instances WHERE 1=1${productionWorkflowInstanceSqlFilter()}`;
   const params: unknown[] = [];
   if (opts?.status) { sql += " AND status = ?"; params.push(opts.status); }
   if (opts?.workflowKey) { sql += " AND workflow_key = ?"; params.push(opts.workflowKey); }
@@ -27,7 +53,84 @@ export async function listWorkflowInstances(opts?: { status?: string; workflowKe
 export async function listScheduledJobs() {
   await ensureWorkflowTables();
   const db = await getDb();
-  return db.all("SELECT * FROM hq_scheduled_jobs ORDER BY name");
+  const rows = (await db.all("SELECT * FROM hq_scheduled_jobs ORDER BY name")) as Record<string, unknown>[];
+  return rows.map((job) => ({
+    ...job,
+    schedule: job.schedule_expr ?? job.schedule ?? "daily",
+    runStatus: job.last_run_status ?? (job.last_run_at ? "success" : "never_run"),
+    lastError: job.last_error ?? null,
+    sourceModule: job.source_module ?? sourceModuleForJob(String(job.job_key)),
+  }));
+}
+
+function sourceModuleForJob(jobKey: string): string {
+  const map: Record<string, string> = {
+    grant_deadlines: "grants",
+    compliance_reminders: "grants",
+    warehouse_snapshot: "analytics",
+    db_backup: "security",
+    executive_report_daily: "executive",
+    onboarding_check: "people",
+  };
+  return map[jobKey] ?? "hq";
+}
+
+export async function setScheduledJobEnabled(jobKey: string, enabled: boolean, actorEmail?: string) {
+  await ensureWorkflowTables();
+  const db = await getDb();
+  await db.run("UPDATE hq_scheduled_jobs SET enabled = ? WHERE job_key = ?", enabled ? 1 : 0, jobKey);
+  await logHqAudit({
+    action: enabled ? "scheduled_job_enabled" : "scheduled_job_disabled",
+    entityType: "scheduled_job",
+    entityId: jobKey,
+    actorEmail,
+  });
+  return db.get("SELECT * FROM hq_scheduled_jobs WHERE job_key = ?", jobKey);
+}
+
+export async function runSingleScheduledJob(jobKey: string, actorEmail?: string) {
+  await ensureWorkflowTables();
+  const db = await getDb();
+  const job = await db.get<{ job_key: string; name: string; enabled: number }>(
+    "SELECT job_key, name, enabled FROM hq_scheduled_jobs WHERE job_key = ?",
+    jobKey
+  );
+  if (!job) return { ok: false, error: "Job not found" };
+
+  const now = new Date().toISOString();
+  try {
+    await executeScheduledJob(job.job_key, actorEmail);
+    await db.run(
+      "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'success', last_error = NULL WHERE job_key = ?",
+      now,
+      computeNextRunAt(job.job_key),
+      jobKey
+    );
+    await logHqAudit({
+      action: "scheduled_job_run",
+      entityType: "scheduled_job",
+      entityId: jobKey,
+      detail: job.name,
+      actorEmail: actorEmail ?? "system",
+    });
+    return { ok: true, jobKey, ranAt: now };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await db.run(
+      "UPDATE hq_scheduled_jobs SET last_run_at = ?, last_run_status = 'failed', last_error = ? WHERE job_key = ?",
+      now,
+      message,
+      jobKey
+    );
+    await logHqAudit({
+      action: "scheduled_job_failed",
+      entityType: "scheduled_job",
+      entityId: jobKey,
+      detail: message,
+      actorEmail: actorEmail ?? "system",
+    });
+    return { ok: false, jobKey, error: message };
+  }
 }
 
 export async function createWorkflowInstance(opts: {
@@ -87,9 +190,11 @@ function taskTypeToWorkflowKey(type: ApprovalTask["type"]): string {
     leave: "leave_approval",
     expense: "expense_approval",
     purchase_order: "expense_approval",
-    grant_application: "board_approval",
+    grant_founder_approval: "board_approval",
     document: "document_approval",
-    grant_deadline: "grant_deadline_reminder",
+    onboarding: "employee_onboarding",
+    board_resolution: "board_approval",
+    board_packet: "board_approval",
   };
   return map[type] ?? "expense_approval";
 }
@@ -135,6 +240,50 @@ export async function processApprovalTask(
           `UPDATE hq_documents SET approval_status = ?, approved_by = ?, approved_at = ?, updated_at = ? WHERE id = ?`,
           action === "approve" ? "approved" : "rejected", actor?.email ?? "", now, now, entityId
         );
+        break;
+      case "grant_founder_approval": {
+        const { setFounderApproval } = await import("./grantIntelligenceEngine");
+        const result = await setFounderApproval(
+          entityId,
+          action === "approve" ? "approve" : "request_changes",
+          { actorEmail: actor?.email }
+        );
+        if (!result.ok) return { success: false, message: result.error ?? "Grant approval failed" };
+        break;
+      }
+      case "board_resolution":
+        await db.run(
+          `UPDATE board_resolutions SET status = ?, adopted_at = ? WHERE id = ?`,
+          action === "approve" ? "adopted" : "rejected",
+          action === "approve" ? now : null,
+          entityId
+        );
+        break;
+      case "board_packet":
+        await db.run(
+          `UPDATE board_packets SET status = ?, published_at = ? WHERE id = ?`,
+          action === "approve" ? "published" : "draft",
+          action === "approve" ? now : null,
+          entityId
+        );
+        break;
+      case "onboarding":
+        if (action === "approve") {
+          await db.run(
+            `UPDATE people_onboarding_items SET completed = 1, completed_at = ?, completed_by = ?
+             WHERE person_id = ? AND completed = 0`,
+            now,
+            actor?.email ?? "",
+            entityId
+          );
+          const remaining = await db.get<{ c: number }>(
+            "SELECT COUNT(*) as c FROM people_onboarding_items WHERE person_id = ? AND completed = 0",
+            entityId
+          );
+          if ((remaining?.c ?? 0) === 0) {
+            await db.run("UPDATE people SET status = 'active', updated_at = ? WHERE id = ?", now, entityId);
+          }
+        }
         break;
       case "grant_application":
         if (action === "approve") {
@@ -188,6 +337,9 @@ export async function processApprovalTask(
 }
 
 export function parseApprovalTaskId(taskId: string): [string | null, string | null] {
+  if (taskId.startsWith("grant-founder-")) return ["grant_founder_approval", taskId.slice(14)];
+  if (taskId.startsWith("board-packet-")) return ["board_packet", taskId.slice(13)];
+  if (taskId.startsWith("onboarding-")) return ["onboarding", taskId.slice(11)];
   const idx = taskId.indexOf("-");
   if (idx < 0) return [null, null];
   const prefix = taskId.slice(0, idx);
@@ -199,6 +351,7 @@ export function parseApprovalTaskId(taskId: string): [string | null, string | nu
   if (prefix === "doc") return ["document", rest];
   if (prefix === "workflow") return ["workflow", rest];
   if (prefix === "deadline") return ["grant_deadline", rest];
+  if (prefix === "board") return ["board_resolution", rest];
   const typeMap: Record<string, string> = {
     leave: "leave",
     expense: "expense",
@@ -224,7 +377,7 @@ export async function runScheduledJobs(actorEmail?: string): Promise<{ ran: stri
     try {
       await executeScheduledJob(job.job_key, actorEmail);
       await db.run(
-        "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ? WHERE job_key = ?",
+        "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'success', last_error = NULL WHERE job_key = ?",
         now, computeNextRunAt(job.job_key), job.job_key
       );
       ran.push(job.job_key);
@@ -236,7 +389,14 @@ export async function runScheduledJobs(actorEmail?: string): Promise<{ ran: stri
         actorEmail: actorEmail ?? "system",
       });
     } catch (err) {
-      errors.push(`${job.job_key}: ${(err as Error).message}`);
+      const message = (err as Error).message;
+      errors.push(`${job.job_key}: ${message}`);
+      await db.run(
+        "UPDATE hq_scheduled_jobs SET last_run_at = ?, last_run_status = 'failed', last_error = ? WHERE job_key = ?",
+        now,
+        message,
+        job.job_key
+      );
     }
   }
   return { ran, errors };
@@ -290,7 +450,7 @@ export async function runDueScheduledJobs(actorEmail?: string): Promise<{ ran: s
       await executeScheduledJob(job.job_key, actorEmail);
       const ts = new Date().toISOString();
       await db.run(
-        "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ? WHERE job_key = ?",
+        "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'success', last_error = NULL WHERE job_key = ?",
         ts, computeNextRunAt(job.job_key), job.job_key
       );
       ran.push(job.job_key);
@@ -302,7 +462,14 @@ export async function runDueScheduledJobs(actorEmail?: string): Promise<{ ran: s
         actorEmail: actorEmail ?? "system",
       });
     } catch (err) {
-      errors.push(`${job.job_key}: ${(err as Error).message}`);
+      const message = (err as Error).message;
+      errors.push(`${job.job_key}: ${message}`);
+      await db.run(
+        "UPDATE hq_scheduled_jobs SET last_run_at = ?, last_run_status = 'failed', last_error = ? WHERE job_key = ?",
+        new Date().toISOString(),
+        message,
+        job.job_key
+      );
     }
   }
 

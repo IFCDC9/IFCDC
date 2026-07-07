@@ -56,11 +56,22 @@ export async function ensureWorkflowTables(): Promise<void> {
       schedule_expr TEXT NOT NULL,
       last_run_at TEXT,
       next_run_at TEXT,
+      last_run_status TEXT,
+      last_error TEXT,
+      source_module TEXT,
       config_json TEXT,
       enabled INTEGER DEFAULT 1,
       created_at TEXT NOT NULL
     );
   `);
+
+  for (const col of ["last_run_status TEXT", "last_error TEXT", "source_module TEXT"]) {
+    try {
+      await db.exec(`ALTER TABLE hq_scheduled_jobs ADD COLUMN ${col}`);
+    } catch {
+      /* exists */
+    }
+  }
 
   const now = new Date().toISOString();
   for (const def of WORKFLOW_DEFINITIONS) {
@@ -75,19 +86,25 @@ export async function ensureWorkflowTables(): Promise<void> {
   }
 
   const jobs = [
-    { key: "grant_deadlines", name: "Grant Deadline Notifications", schedule: "daily" },
-    { key: "compliance_reminders", name: "Compliance Reminders", schedule: "daily" },
-    { key: "warehouse_snapshot", name: "Data Warehouse Snapshot", schedule: "hourly" },
-    { key: "db_backup", name: "Database Backup Snapshot", schedule: "daily" },
-    { key: "executive_report_daily", name: "Daily Executive Report", schedule: "daily" },
-    { key: "onboarding_check", name: "Onboarding Progress Check", schedule: "daily" },
+    { key: "grant_deadlines", name: "Grant Deadline Notifications", schedule: "daily", module: "grants" },
+    { key: "compliance_reminders", name: "Compliance Reminders", schedule: "daily", module: "grants" },
+    { key: "warehouse_snapshot", name: "Data Warehouse Snapshot", schedule: "hourly", module: "analytics" },
+    { key: "db_backup", name: "Database Backup Snapshot", schedule: "daily", module: "security" },
+    { key: "executive_report_daily", name: "Daily Executive Report", schedule: "daily", module: "executive" },
+    { key: "onboarding_check", name: "Onboarding Progress Check", schedule: "daily", module: "people" },
   ];
   for (const job of jobs) {
     const exists = await db.get("SELECT id FROM hq_scheduled_jobs WHERE job_key = ?", job.key);
     if (!exists) {
       await db.run(
-        `INSERT INTO hq_scheduled_jobs (id, job_key, name, schedule_expr, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)`,
-        workflowId(), job.key, job.name, job.schedule, now
+        `INSERT INTO hq_scheduled_jobs (id, job_key, name, schedule_expr, source_module, enabled, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)`,
+        workflowId(), job.key, job.name, job.schedule, job.module, now
+      );
+    } else {
+      await db.run(
+        "UPDATE hq_scheduled_jobs SET source_module = COALESCE(source_module, ?) WHERE job_key = ?",
+        job.module,
+        job.key
       );
     }
   }

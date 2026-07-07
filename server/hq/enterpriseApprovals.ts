@@ -1,9 +1,19 @@
 import { getDb } from "../db";
 import { getWorkflowSteps } from "./workflowOrchestration";
+import { productionGrantOpportunitySqlFilter } from "./grantProductionPolicy";
 
 export type ApprovalTask = {
   id: string;
-  type: "leave" | "expense" | "purchase_order" | "grant_application" | "document" | "grant_deadline" | "workflow";
+  type:
+    | "leave"
+    | "expense"
+    | "purchase_order"
+    | "grant_founder_approval"
+    | "document"
+    | "workflow"
+    | "onboarding"
+    | "board_resolution"
+    | "board_packet";
   title: string;
   subtitle: string;
   amount?: number;
@@ -25,6 +35,7 @@ async function safeQuery<T>(sql: string, ...params: unknown[]): Promise<T[]> {
   }
 }
 
+/** Live founder / executive approval queue — no demo deadlines or seed placeholders. */
 export async function buildApprovalQueue(limit = 20): Promise<{ tasks: ApprovalTask[]; counts: Record<string, number> }> {
   const tasks: ApprovalTask[] = [];
 
@@ -84,19 +95,27 @@ export async function buildApprovalQueue(limit = 20): Promise<{ tasks: ApprovalT
     });
   }
 
-  const appRows = await safeQuery<{ id: string; title: string; status: string; created_at: string }>(
-    `SELECT id, title, status, created_at FROM grant_applications
-     WHERE status IN ('draft', 'submitted', 'under_review') ORDER BY created_at DESC LIMIT 10`
+  const founderGrantRows = await safeQuery<{
+    id: string; title: string; amount_requested: number | null; created_at: string; funder: string | null;
+  }>(
+    `SELECT a.id, a.title, a.amount_requested, a.created_at, o.funder
+     FROM grant_applications a
+     LEFT JOIN grant_opportunities o ON o.id = a.opportunity_id
+     WHERE a.status = 'draft'
+       AND COALESCE(a.founder_approval_status, 'pending') = 'pending'
+       AND (o.id IS NULL OR 1=1${productionGrantOpportunitySqlFilter("o")})
+     ORDER BY a.updated_at DESC LIMIT 15`
   );
-  for (const a of appRows) {
+  for (const a of founderGrantRows) {
     tasks.push({
-      id: `grant-app-${a.id}`,
-      type: "grant_application",
-      title: `Grant application: ${a.title}`,
-      subtitle: a.status.replace(/_/g, " "),
-      path: "/hq/grants",
+      id: `grant-founder-${a.id}`,
+      type: "grant_founder_approval",
+      title: `Grant draft — founder review: ${a.title}`,
+      subtitle: a.funder ? `Funder: ${a.funder}` : "Awaiting founder approval before submission",
+      amount: a.amount_requested != null ? Number(a.amount_requested) : undefined,
+      path: `/hq/grants?tab=applications`,
       entityId: a.id,
-      priority: a.status === "submitted" ? "high" : "normal",
+      priority: "high",
       createdAt: a.created_at,
     });
   }
@@ -118,21 +137,58 @@ export async function buildApprovalQueue(limit = 20): Promise<{ tasks: ApprovalT
     });
   }
 
-  const deadlineRows = await safeQuery<{ id: string; title: string; due_date: string; deadline_type: string }>(
-    `SELECT id, title, due_date, deadline_type FROM grant_deadlines
-     WHERE completed = 0 AND due_date <= date('now', '+14 days') ORDER BY due_date ASC LIMIT 10`
+  const onboardingRows = await safeQuery<{ id: string; first_name: string; last_name: string; created_at: string; pending_items: number }>(
+    `SELECT p.id, p.first_name, p.last_name, p.created_at,
+      (SELECT COUNT(*) FROM people_onboarding_items oi WHERE oi.person_id = p.id AND oi.completed = 0) as pending_items
+     FROM people p
+     WHERE p.status = 'onboarding'
+       AND EXISTS (SELECT 1 FROM people_onboarding_items oi WHERE oi.person_id = p.id AND oi.completed = 0)
+     ORDER BY p.created_at DESC LIMIT 10`
   );
-  for (const d of deadlineRows) {
+  for (const p of onboardingRows) {
     tasks.push({
-      id: `deadline-${d.id}`,
-      type: "grant_deadline",
-      title: d.title,
-      subtitle: d.deadline_type,
-      dueDate: d.due_date,
-      path: "/hq/grants",
-      entityId: d.id,
+      id: `onboarding-${p.id}`,
+      type: "onboarding",
+      title: `Onboarding: ${p.first_name} ${p.last_name}`,
+      subtitle: `${p.pending_items} checklist item(s) remaining`,
+      path: `/hq/people?tab=onboarding`,
+      entityId: p.id,
+      priority: "normal",
+      createdAt: p.created_at,
+    });
+  }
+
+  const boardPacketRows = await safeQuery<{ id: string; title: string; status: string; created_at: string }>(
+    `SELECT id, title, status, created_at FROM board_packets
+     WHERE status IN ('draft', 'pending_review', 'review') ORDER BY created_at DESC LIMIT 10`
+  );
+  for (const pkt of boardPacketRows) {
+    tasks.push({
+      id: `board-packet-${pkt.id}`,
+      type: "board_packet",
+      title: `Board packet: ${pkt.title}`,
+      subtitle: pkt.status.replace(/_/g, " "),
+      path: "/hq/board-portal",
+      entityId: pkt.id,
       priority: "high",
-      createdAt: d.due_date,
+      createdAt: pkt.created_at,
+    });
+  }
+
+  const boardResolutionRows = await safeQuery<{ id: string; title: string; status: string; created_at: string }>(
+    `SELECT id, title, status, created_at FROM board_resolutions
+     WHERE status IN ('proposed', 'voting') ORDER BY created_at DESC LIMIT 10`
+  );
+  for (const r of boardResolutionRows) {
+    tasks.push({
+      id: `board-${r.id}`,
+      type: "board_resolution",
+      title: `Board resolution: ${r.title}`,
+      subtitle: r.status,
+      path: "/hq/board-portal",
+      entityId: r.id,
+      priority: "high",
+      createdAt: r.created_at,
     });
   }
 
@@ -144,16 +200,14 @@ export async function buildApprovalQueue(limit = 20): Promise<{ tasks: ApprovalT
     created_at: string;
   }>(
     `SELECT id, workflow_key, title, priority, created_at FROM hq_workflow_instances
-     WHERE status = 'pending' ORDER BY created_at DESC LIMIT 20`
+     WHERE status = 'pending'
+       AND entity_id != 'seed-demo'
+       AND title NOT LIKE '%demo%'
+       AND title NOT LIKE '%Enterprise readiness%'
+     ORDER BY created_at DESC LIMIT 20`
   );
   let workflowCount = 0;
-  for (const inst of workflowInstances as {
-    id: string;
-    workflow_key: string;
-    title: string;
-    priority: string;
-    created_at: string;
-  }[]) {
+  for (const inst of workflowInstances) {
     const steps = await getWorkflowSteps(inst.id).catch(() => []);
     const active = (steps as { status: string; step_name: string }[]).find((s) => s.status === "active");
     if (!active) continue;
@@ -182,9 +236,11 @@ export async function buildApprovalQueue(limit = 20): Promise<{ tasks: ApprovalT
     leave: leaveRows.length,
     expense: expenseRows.length,
     purchase_order: poRows.length,
-    grant_application: appRows.length,
+    grant_founder_approval: founderGrantRows.length,
     document: docRows.length,
-    grant_deadline: deadlineRows.length,
+    onboarding: onboardingRows.length,
+    board_packet: boardPacketRows.length,
+    board_resolution: boardResolutionRows.length,
     workflow: workflowCount,
     total: tasks.length,
   };
