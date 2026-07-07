@@ -9,6 +9,7 @@ import {
   getGrantsOperatorEmail,
   getSuperAdminEmail,
 } from "../../config/credentials";
+import { openAiConfigStatus } from "../../lib/openaiConfig";
 
 export function registerHealthRoutes(app: Express): void {
   app.get("/api/health", (_req, res) => {
@@ -24,6 +25,7 @@ export function registerHealthRoutes(app: Express): void {
     const twilioEnv = getTwilioEnvStatus();
     const twilioWebhookSync = getLastTwilioWebhookSync();
     const twilioWebhooks = getTwilioWebhookUrls();
+    const openai = openAiConfigStatus();
     res.json({
       app: "ifcdc-headquarters",
       status: "healthy",
@@ -51,6 +53,18 @@ export function registerHealthRoutes(app: Express): void {
         separated: credentialsAreSeparated(),
       },
       integrations: {
+        openai: {
+          configured: openai.configured,
+          source: openai.source,
+          keyPrefix: openai.keyPrefix,
+          keyLength: openai.keyLength,
+          keyIntegrityOk: openai.keyIntegrityOk,
+          baseURL: openai.baseURL,
+          primarySet: openai.primarySet,
+          alternateSet: openai.alternateSet,
+          integrationsBaseSet: openai.integrationsBaseSet,
+          candidateCount: openai.candidateCount,
+        },
         paypal: {
           clientIdConfigured: paypalEnv.clientIdConfigured,
           clientSecretConfigured: paypalEnv.clientSecretConfigured,
