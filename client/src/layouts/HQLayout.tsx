@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Menu, X, Bell, Search } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -69,6 +69,15 @@ const HQLayout: React.FC<HQLayoutProps> = ({
 
   const closeSidebar = () => setSidebarOpen(false);
 
+  useEffect(() => {
+    if (sidebarOpen) {
+      document.body.classList.add("hq-nav-open");
+    } else {
+      document.body.classList.remove("hq-nav-open");
+    }
+    return () => document.body.classList.remove("hq-nav-open");
+  }, [sidebarOpen]);
+
   return (
     <div className="hq-shell">
       <CommandPalette open={command.open} onClose={command.close} />
@@ -134,8 +143,8 @@ const HQLayout: React.FC<HQLayoutProps> = ({
             >
               {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
             </button>
-            <div>
-              <div className="hq-page-title">{title}</div>
+            <div className="hq-topbar-title-wrap" style={{ minWidth: 0 }}>
+              <div className="hq-page-title hq-page-title-truncate">{title}</div>
               <div className="hq-page-subtitle">{subtitle}</div>
             </div>
           </div>
@@ -169,7 +178,7 @@ const HQLayout: React.FC<HQLayoutProps> = ({
         </div>
       </div>
 
-      <HqMobileNav />
+      <HqMobileNav onSearch={command.toggle} />
     </div>
   );
 };

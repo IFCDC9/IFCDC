@@ -1,6 +1,7 @@
 import { getDb } from "../db";
 import crypto from "crypto";
 import { ensurePeopleTables } from "./peopleSchema";
+import { allowHqDemoSeed } from "./grantProductionPolicy";
 
 export function programId() {
   return crypto.randomUUID();
@@ -150,7 +151,7 @@ export async function ensureProgramModuleTables(): Promise<void> {
     await db.run(
       `INSERT INTO hq_program_registry (id, slug, name, description, status, budget_allocated, budget_spent, created_at, updated_at)
        VALUES (?, ?, ?, ?, 'active', ?, 0, ?, ?)`,
-      programId(), slug, def.name, def.description, def.budgetAllocated, now, now
+      programId(), slug, def.name, def.description, allowHqDemoSeed() ? def.budgetAllocated : 0, now, now
     );
     await seedProgramMetrics(db, slug, now);
   }

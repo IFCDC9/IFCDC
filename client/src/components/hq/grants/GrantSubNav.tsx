@@ -5,7 +5,7 @@ export const GrantSubNav: React.FC<{
   active: string;
   onChange: (id: string) => void;
 }> = ({ items, active, onChange }) => (
-  <nav className="hq-founder-command-strip" style={{ marginBottom: "1rem", flexWrap: "wrap" }} aria-label="Section navigation">
+  <nav className="hq-sub-nav" aria-label="Section navigation">
     {items.map((item) => (
       <button
         key={item.id}

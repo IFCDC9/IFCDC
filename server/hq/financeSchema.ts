@@ -1,5 +1,6 @@
 import { getDb } from "../db";
 import crypto from "crypto";
+import { allowHqDemoSeed } from "./grantProductionPolicy";
 
 export function financeId() {
   return crypto.randomUUID();
@@ -294,10 +295,12 @@ export async function ensureFinanceTables(): Promise<void> {
 
   await migrateFinanceColumns();
   await seedChartOfAccounts();
-  await seedBudgets();
-  await seedVendors();
-  await seedSampleInvoices();
-  await seedBankAccounts();
+  if (allowHqDemoSeed()) {
+    await seedBudgets();
+    await seedVendors();
+    await seedSampleInvoices();
+    await seedBankAccounts();
+  }
 }
 
 async function migrateFinanceColumns(): Promise<void> {
@@ -394,13 +397,14 @@ async function seedChartOfAccounts(): Promise<void> {
   if (count && count.c > 0) return;
 
   const now = new Date().toISOString();
+  const useSampleBalances = allowHqDemoSeed();
   const accounts: { code: string; name: string; type: AccountType; balance?: number }[] = [
-    { code: "1000", name: "Cash & Bank", type: "asset", balance: 12500000 },
-    { code: "1100", name: "Accounts Receivable", type: "asset", balance: 450000 },
+    { code: "1000", name: "Cash & Bank", type: "asset", balance: useSampleBalances ? 12500000 : 0 },
+    { code: "1100", name: "Accounts Receivable", type: "asset", balance: useSampleBalances ? 450000 : 0 },
     { code: "1200", name: "Prepaid Expenses", type: "asset" },
-    { code: "2000", name: "Accounts Payable", type: "liability", balance: 320000 },
+    { code: "2000", name: "Accounts Payable", type: "liability", balance: useSampleBalances ? 320000 : 0 },
     { code: "2100", name: "Accrued Payroll", type: "liability" },
-    { code: "3000", name: "Net Assets — Unrestricted", type: "equity", balance: 11800000 },
+    { code: "3000", name: "Net Assets — Unrestricted", type: "equity", balance: useSampleBalances ? 11800000 : 0 },
     { code: "3100", name: "Net Assets — Restricted (Grants)", type: "equity" },
     { code: "4000", name: "Donation Revenue", type: "revenue" },
     { code: "4100", name: "Grant Revenue", type: "revenue" },

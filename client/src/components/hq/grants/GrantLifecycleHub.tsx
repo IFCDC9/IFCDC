@@ -49,7 +49,7 @@ export const GrantOpportunityTable: React.FC<{
   });
 
   return (
-    <div style={{ overflowX: "auto" }}>
+    <div className="hq-table-scroll">
       <table className="hq-table">
         <thead>
           <tr>
@@ -192,7 +192,7 @@ export const GrantApplicationsHub: React.FC<{
         onChange={(id) => setView(id as typeof view)}
       />
       {apps.isLoading ? <HqLoading /> : (
-        <div style={{ overflowX: "auto", marginTop: "1rem" }}>
+        <div className="hq-table-scroll" style={{ marginTop: "1rem" }}>
           <table className="hq-table">
             <thead>
               <tr><th>Application</th><th>Funder</th><th>Status</th><th>Workflow</th><th>Requested</th><th>Deadline</th><th></th></tr>

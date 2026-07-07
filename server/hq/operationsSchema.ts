@@ -1,5 +1,6 @@
 import { getDb } from "../db";
 import crypto from "crypto";
+import { allowHqDemoSeed } from "./grantProductionPolicy";
 
 export function opsId() {
   return crypto.randomUUID();
@@ -119,6 +120,10 @@ export async function ensureOperationsTables(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_ops_tasks_status ON ops_tasks(status);
     CREATE INDEX IF NOT EXISTS idx_ops_tasks_assignee ON ops_tasks(assigned_person_id);
   `);
+
+  if (!allowHqDemoSeed()) {
+    return;
+  }
 
   const housingCount = (await db.get<{ c: number }>("SELECT COUNT(*) as c FROM housing_units"))?.c ?? 0;
   if (housingCount === 0) {

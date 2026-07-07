@@ -1,11 +1,12 @@
 import { getDb } from "../db";
 import { ensureWarehouseTables, warehouseId } from "./analyticsWarehouseSchema";
-import { buildSafeAnalyticsOverview } from "./analyticsReporting";
+import { buildSafeAnalyticsOverview, EMPTY_ANALYTICS_OVERVIEW } from "./analyticsReporting";
 import { buildGrantExecutiveDashboard } from "./grantReporting";
 import { buildExecutiveDashboard } from "./financeReporting";
 import { buildApprovalQueue } from "./enterpriseApprovals";
 import { buildEnterpriseNotifications } from "./enterpriseHub";
 import { pollAllApps } from "./appRegistry";
+import { isProductionHq } from "./grantProductionPolicy";
 
 export type WarehouseDomain =
   | "organization"
@@ -17,6 +18,20 @@ export type WarehouseDomain =
   | "software"
   | "workflows";
 
+const EMPTY_WAREHOUSE_OVERVIEW = {
+  organizationHealth: 0,
+  grade: "—",
+  totalRevenue: 0,
+  cashFlow: 0,
+  activeGrants: 0,
+  programsRunning: 0,
+  totalPeople: 0,
+  donationsTotal: 0,
+  pendingApprovals: 0,
+  timestamp: new Date().toISOString(),
+};
+
+/** Dev-only fallback when warehouse queries fail locally. */
 const SAFE_WAREHOUSE_OVERVIEW = {
   organizationHealth: 82,
   totalRevenue: 485000,
@@ -175,7 +190,21 @@ async function getWarehouseOverviewLive() {
       pendingTasks: approvals.tasks,
       timestamp: new Date().toISOString(),
     };
-  } catch {
+  } catch (err) {
+    console.error("Warehouse overview error:", err);
+    if (isProductionHq()) {
+      return {
+        ...EMPTY_WAREHOUSE_OVERVIEW,
+        finance: { totalRevenue: 0, cashFlow: 0, netPosition: 0, monthlyExpenses: 0, financialHealthScore: 0, grantRevenue: 0 },
+        grants: { activeAwards: 0, pipelineValue: 0, complianceDue: 0, winRate: 0, fundingPipeline: [] },
+        programs: { programsRunning: 0, participants: 0 },
+        people: { totalPeople: 0, employees: 0, volunteers: 0, activePayroll: 0, hoursThisMonth: 0, pendingApprovals: 0 },
+        donations: { total: 0, monthly: 0, count: 0 },
+        software: { total: 0, healthy: 0, production: 0, inDevelopment: 0 },
+        pendingTasks: [],
+        timestamp: new Date().toISOString(),
+      };
+    }
     return {
       ...SAFE_WAREHOUSE_OVERVIEW,
       finance: { cashFlow: SAFE_WAREHOUSE_OVERVIEW.cashFlow },

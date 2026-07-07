@@ -168,9 +168,9 @@ export const GrantEnterprisePipelineHub: React.FC<{
               </p>
             </HqPanel>
           ) : (
-            <div style={{ display: "flex", gap: "0.65rem", overflowX: "auto", paddingBottom: "0.5rem" }}>
+            <div className="hq-pipeline-board">
               {(board.data?.columns ?? []).map((col) => (
-                <div key={col.stageKey} style={{ minWidth: 220, flex: "0 0 220px", background: "var(--hq-bg-subtle)", borderRadius: 8, padding: "0.75rem", border: "1px solid var(--hq-border)" }}>
+                <div key={col.stageKey} className="hq-pipeline-column">
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.35rem" }}>
                     <strong style={{ fontSize: "0.8rem" }}>{col.label}</strong>
                     <span className="hq-muted-text" style={{ fontSize: "0.72rem" }}>{col.count}</span>
@@ -285,7 +285,7 @@ export const GrantEnterprisePipelineHub: React.FC<{
             <input className="hq-input" placeholder="Search…" value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} />
           </div>
           <GrantQueryBoundary query={founder} title="Founder command center unavailable" loadingMessage="Loading applications for review…">
-            <div style={{ overflowX: "auto" }}>
+            <div className="hq-table-scroll">
               <table className="hq-table">
                 <thead>
                   <tr><th>Application</th><th>Program</th><th>Agency</th><th>Amount</th><th>Status</th><th>Deadline</th><th>Priority</th><th>Actions</th></tr>

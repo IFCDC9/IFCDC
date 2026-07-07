@@ -11,6 +11,7 @@ import {
   buildOperationsHealthScore,
   buildBudgetUtilizationScore,
 } from "./enterpriseHealthScoring";
+import { isProductionHq } from "./grantProductionPolicy";
 
 export interface OrganizationHealthScore {
   overall: number;
@@ -30,6 +31,19 @@ export interface AnalyticsOverview {
   timestamp: string;
 }
 
+export const EMPTY_ANALYTICS_OVERVIEW: AnalyticsOverview = {
+  organizationHealth: { overall: 0, grade: "—", factors: [] },
+  finance: { totalRevenue: 0, monthlyExpenses: 0, cashFlow: 0, netPosition: 0, financialHealthScore: 0 },
+  grants: { totalAwarded: 0, activeAwards: 0, pipelineValue: 0, winRate: 0, complianceDue: 0 },
+  people: { totalPeople: 0, employees: 0, volunteers: 0, activePayroll: 0, hoursThisMonth: 0 },
+  programs: { programsRunning: 0, participants: 0 },
+  clients: { totalClients: 0, activeAssignments: 0, openGoals: 0, upcomingAppointments: 0, highRiskClients: 0 },
+  donations: { total: 0, monthly: 0, count: 0 },
+  software: { total: 0, healthy: 0, production: 0, inDevelopment: 0 },
+  timestamp: new Date().toISOString(),
+};
+
+/** Dev-only illustrative dashboard when live queries fail locally. */
 export const SAFE_ANALYTICS_OVERVIEW: AnalyticsOverview = {
   organizationHealth: {
     overall: 82,
@@ -182,27 +196,15 @@ export async function buildAnalyticsOverview(): Promise<AnalyticsOverview> {
   };
 }
 
-/** Returns a complete overview shape even when underlying queries fail. */
+/** Returns live analytics; production never merges or falls back to demo KPIs. */
 export async function buildSafeAnalyticsOverview(): Promise<AnalyticsOverview> {
   try {
-    const overview = await buildAnalyticsOverview();
-    return {
-      ...SAFE_ANALYTICS_OVERVIEW,
-      ...overview,
-      organizationHealth: { ...SAFE_ANALYTICS_OVERVIEW.organizationHealth, ...overview.organizationHealth },
-      finance: { ...SAFE_ANALYTICS_OVERVIEW.finance, ...overview.finance },
-      grants: { ...SAFE_ANALYTICS_OVERVIEW.grants, ...overview.grants },
-      people: { ...SAFE_ANALYTICS_OVERVIEW.people, ...overview.people },
-      programs: {
-        programsRunning: overview.programs?.programsRunning ?? SAFE_ANALYTICS_OVERVIEW.programs.programsRunning,
-        participants: overview.programs?.participants ?? SAFE_ANALYTICS_OVERVIEW.programs.participants,
-      },
-      donations: { ...SAFE_ANALYTICS_OVERVIEW.donations, ...overview.donations },
-      software: { ...SAFE_ANALYTICS_OVERVIEW.software, ...overview.software },
-      timestamp: overview.timestamp ?? SAFE_ANALYTICS_OVERVIEW.timestamp,
-    };
+    return await buildAnalyticsOverview();
   } catch (error) {
     console.error("Analytics overview error:", error);
+    if (isProductionHq()) {
+      return { ...EMPTY_ANALYTICS_OVERVIEW, timestamp: new Date().toISOString() };
+    }
     return { ...SAFE_ANALYTICS_OVERVIEW, timestamp: new Date().toISOString() };
   }
 }

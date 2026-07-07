@@ -120,7 +120,7 @@ export async function syncAllPipelineStages(): Promise<number> {
   const db = await getDb();
   const now = new Date().toISOString();
   let updated = 0;
-  const prodFilter = productionGrantOpportunitySqlFilter("o");
+  const prodFilter = productionGrantOpportunitySqlFilter();
 
   const closed = await db.run(
     `UPDATE grant_opportunities SET status = 'closed', pipeline_stage = 'closed', updated_at = ?

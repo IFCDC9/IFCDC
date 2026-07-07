@@ -417,6 +417,9 @@ async function syncProvider(
 export async function syncGrantFeeds(opts?: { providers?: GrantFeedProvider[] }): Promise<FeedSyncResult[]> {
   await ensureGrantFeedSyncTables();
   const defaultProviders: GrantFeedProvider[] = ["grants_gov", "foundation_directory"];
+  if (process.env.SAM_GOV_API_KEY && (process.env.SAM_GOV_UEI || process.env.IFCDC_SAM_UEI)) {
+    defaultProviders.push("sam_gov");
+  }
   if (allowStaticCsrFeedSync()) {
     defaultProviders.push("corporate_csr");
   }

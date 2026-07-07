@@ -268,7 +268,7 @@ export const GrantIntelligencePanel: React.FC<{
             <p className="hq-muted-text" style={{ fontSize: "0.75rem", marginBottom: "0.75rem" }}>
               Last Grants.gov sync: {dashboard.data?.lastSync ? new Date(dashboard.data.lastSync).toLocaleString() : "—"}
             </p>
-            <div style={{ overflowX: "auto" }}>
+            <div className="hq-table-scroll">
               <table className="hq-table">
                 <thead>
                   <tr><th>Opportunity</th><th>Funder</th><th>Score</th><th>Deadline</th><th>Action</th></tr>
@@ -394,7 +394,7 @@ export const GrantOpportunityFinderPanel: React.FC<{
       {finder.isLoading ? <HqLoading /> : finder.isError ? (
         <QueryError message="Opportunity finder unavailable. Check your connection and retry." />
       ) : (
-        <div style={{ overflowX: "auto" }}>
+        <div className="hq-table-scroll">
           <table className="hq-table">
             <thead><tr><th>Title</th><th>Funder</th><th>Source</th><th>Deadline</th><th>Max Award</th><th>Match</th><th>Actions</th></tr></thead>
             <tbody>

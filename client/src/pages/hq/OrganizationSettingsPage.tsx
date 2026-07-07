@@ -99,7 +99,7 @@ const OrganizationSettingsPage: React.FC = () => {
         {isLoading && <HqLoading message="Loading permission matrix…" />}
         {error && <div style={{ color: "#ef4444" }}>{(error as Error).message}</div>}
         {data?.roles && (
-          <div style={{ overflowX: "auto" }}>
+          <div className="hq-table-scroll">
             <table className="hq-table">
               <thead>
                 <tr>

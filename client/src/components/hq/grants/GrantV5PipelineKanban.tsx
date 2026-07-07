@@ -44,19 +44,9 @@ export const GrantV5PipelineKanban: React.FC = () => {
       title="Pipeline Kanban"
       subtitle="System of record — opportunities, applications, and awards across lifecycle stages"
     >
-      <div style={{ display: "flex", gap: "0.75rem", overflowX: "auto", paddingBottom: "0.5rem" }}>
+      <div className="hq-pipeline-board">
         {columns.map((col) => (
-          <div
-            key={col.stageKey}
-            style={{
-              minWidth: 240,
-              flex: "0 0 240px",
-              background: "var(--hq-bg-subtle)",
-              borderRadius: 8,
-              padding: "0.75rem",
-              border: "1px solid var(--hq-border)",
-            }}
-          >
+          <div key={col.stageKey} className="hq-pipeline-column">
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem" }}>
               <strong style={{ fontSize: "0.85rem" }}>{col.label}</strong>
               <span className="hq-muted-text" style={{ fontSize: "0.75rem" }}>{col.count}</span>
