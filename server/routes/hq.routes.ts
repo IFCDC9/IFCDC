@@ -512,11 +512,27 @@ router.post("/aura/command", hqAuthRequired, requireHQModule("aura"), async (req
     const module = typeof req.body?.module === "string" ? req.body.module : undefined;
     const contextRef =
       req.body?.contextRef && typeof req.body.contextRef === "object" ? req.body.contextRef : undefined;
-    const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+    const deviceId =
+      typeof req.body?.deviceId === "string"
+        ? req.body.deviceId
+        : typeof req.headers["x-aura-device-id"] === "string"
+          ? req.headers["x-aura-device-id"]
+          : null;
+    const {
+      resolveIdentityFromHqUser,
+      resolveTrustedFounderDevice,
+      logAuraIdentityAction,
+    } = await import("../hq/auraFounderTrustEngine");
+    const device = await resolveTrustedFounderDevice({
+      deviceId,
+      email: req.hqUser?.email ?? null,
+    });
     const identity = resolveIdentityFromHqUser({
       user: req.hqUser,
       channel: "hq_web",
       sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+      trustedDeviceId: device.deviceId,
+      deviceTrusted: device.trusted,
     });
     const { runAuraCommand } = await import("../hq/auraCommandLayer");
     const result = await runAuraCommand({
@@ -527,6 +543,15 @@ router.post("/aura/command", hqAuthRequired, requireHQModule("aura"), async (req
       actorUser: req.hqUser,
       identity,
     });
+    if (identity.founderMode) {
+      void logAuraIdentityAction({
+        identity,
+        action: "aura_founder_command",
+        detail: command.slice(0, 240),
+        metadata: { module, seamless: device.trusted },
+        ipAddress: req.ip,
+      });
+    }
     res.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "AURA command failed";
@@ -543,11 +568,25 @@ router.post("/aura/action/:actionId", hqAuthRequired, requireHQModule("aura"), a
     const module = typeof req.body?.module === "string" ? req.body.module : undefined;
     const contextRef =
       req.body?.contextRef && typeof req.body.contextRef === "object" ? req.body.contextRef : undefined;
-    const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+    const deviceId =
+      typeof req.body?.deviceId === "string"
+        ? req.body.deviceId
+        : typeof req.headers["x-aura-device-id"] === "string"
+          ? req.headers["x-aura-device-id"]
+          : null;
+    const { resolveIdentityFromHqUser, resolveTrustedFounderDevice, logAuraIdentityAction } = await import(
+      "../hq/auraFounderTrustEngine"
+    );
+    const device = await resolveTrustedFounderDevice({
+      deviceId,
+      email: req.hqUser?.email ?? null,
+    });
     const identity = resolveIdentityFromHqUser({
       user: req.hqUser,
       channel: "hq_web",
       sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+      trustedDeviceId: device.deviceId,
+      deviceTrusted: device.trusted,
     });
     const { runAuraAction } = await import("../hq/auraCommandLayer");
     const result = await runAuraAction(actionId, args, {
@@ -556,6 +595,15 @@ router.post("/aura/action/:actionId", hqAuthRequired, requireHQModule("aura"), a
       contextRef,
       identity,
     });
+    if (identity.founderMode) {
+      void logAuraIdentityAction({
+        identity,
+        action: "aura_founder_action",
+        detail: actionId,
+        metadata: { module, seamless: device.trusted },
+        ipAddress: req.ip,
+      });
+    }
     res.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "AURA action failed";
@@ -566,16 +614,88 @@ router.post("/aura/action/:actionId", hqAuthRequired, requireHQModule("aura"), a
 
 /** Founder Identity & Trust — current AURA identity for this HQ session. */
 router.get("/aura/identity", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
-  const { resolveIdentityFromHqUser, publicIdentitySummary, ensureAuraTrustTables } = await import(
-    "../hq/auraFounderTrustEngine"
-  );
+  const {
+    resolveIdentityFromHqUser,
+    publicIdentitySummary,
+    ensureAuraTrustTables,
+    resolveTrustedFounderDevice,
+  } = await import("../hq/auraFounderTrustEngine");
   await ensureAuraTrustTables();
+  const deviceId =
+    typeof req.query.deviceId === "string"
+      ? req.query.deviceId
+      : typeof req.headers["x-aura-device-id"] === "string"
+        ? req.headers["x-aura-device-id"]
+        : null;
+  const device = await resolveTrustedFounderDevice({
+    deviceId,
+    email: req.hqUser?.email ?? null,
+  });
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+    trustedDeviceId: device.deviceId,
+    deviceTrusted: device.trusted,
+  });
+  res.json({
+    identity: publicIdentitySummary(identity),
+    device: {
+      trusted: device.trusted,
+      biometricBound: device.biometricBound,
+      expiresAt: device.expiresAt,
+    },
+  });
+});
+
+/** Register this browser as a Founder trusted device (Face ID / Touch ID gate on client). */
+router.post("/aura/identity/trust-device", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const {
+    resolveIdentityFromHqUser,
+    registerTrustedFounderDevice,
+    publicIdentitySummary,
+  } = await import("../hq/auraFounderTrustEngine");
   const identity = resolveIdentityFromHqUser({
     user: req.hqUser,
     channel: "hq_web",
     sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
   });
-  res.json({ identity: publicIdentitySummary(identity) });
+  if (!identity.isFounder) {
+    return res.status(403).json({ error: "Only the Founder can register a trusted device." });
+  }
+  const deviceId = String(req.body?.deviceId ?? "").trim();
+  const result = await registerTrustedFounderDevice({
+    email: identity.email || "",
+    userId: identity.userId,
+    displayName: identity.displayName,
+    deviceId,
+    label: typeof req.body?.label === "string" ? req.body.label : "Founder HQ browser",
+    biometricBound: Boolean(req.body?.biometricBound),
+    publicKeyJwk: typeof req.body?.publicKeyJwk === "string" ? req.body.publicKeyJwk : null,
+  });
+  if (!result.ok) return res.status(400).json(result);
+  const elevated = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+    trustedDeviceId: result.deviceId,
+    deviceTrusted: true,
+  });
+  res.json({ ...result, identity: publicIdentitySummary(elevated) });
+});
+
+router.delete("/aura/identity/trust-device", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { revokeTrustedFounderDevice, resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const identity = resolveIdentityFromHqUser({ user: req.hqUser, channel: "hq_web" });
+  if (!identity.isFounder) return res.status(403).json({ error: "Forbidden" });
+  const deviceId =
+    typeof req.body?.deviceId === "string"
+      ? req.body.deviceId
+      : typeof req.query.deviceId === "string"
+        ? req.query.deviceId
+        : "";
+  if (!deviceId) return res.status(400).json({ error: "deviceId required" });
+  res.json(await revokeTrustedFounderDevice(deviceId, identity.email || ""));
 });
 
 // Catalog of AURA actions for rendering buttons.

@@ -160,11 +160,36 @@ export function AuraExecutiveChatWorkspace({
         ]);
         if (identityRes?.identity) {
           setFounderMode(Boolean(identityRes.identity.founderMode));
+          const seamless = Boolean(identityRes.identity.seamless || identityRes.device?.trusted);
           setIdentityLabel(
             identityRes.identity.founderMode
-              ? `Founder Mode · ${identityRes.identity.displayName || "Fahreal Allah"}`
+              ? `Founder Mode · ${identityRes.identity.displayName || "Fahreal Allah"}${seamless ? " · Trusted device" : ""}`
               : identityRes.identity.enterpriseRoleLabel
           );
+
+          // Register this browser as a trusted Founder device once.
+          // Face ID / Touch ID is preferred when the platform supports it;
+          // password-authenticated HQ Founder sessions still get seamless trust.
+          if (identityRes.identity.isFounder && !identityRes.device?.trusted) {
+            try {
+              const { gateFounderBiometric, getOrCreateFounderDeviceId } = await import(
+                "../../../lib/founderTrustedDevice"
+              );
+              const deviceId = getOrCreateFounderDeviceId();
+              const bio = await gateFounderBiometric(deviceId);
+              const trust = await hqApi.auraTrustDevice({
+                biometricBound: bio.biometricBound,
+                label: "Founder HQ browser",
+              });
+              if (trust.ok) {
+                setIdentityLabel(
+                  `Founder Mode · ${identityRes.identity.displayName || "Fahreal Allah"} · Trusted device`
+                );
+              }
+            } catch {
+              /* trust binding is best-effort */
+            }
+          }
         }
         if (!turns?.length) return;
         setMessages(

@@ -6,9 +6,9 @@ import express from "express";
 import twilio from "twilio";
 import { cryptoRandomId } from "../monolith/constants";
 import {
-  getVoiceGreeting,
   initializeReceptionistGreeting,
   processReceptionistTurn,
+  resolveVoiceGreeting,
 } from "../hq/auraReceptionistEngine";
 import { getReceptionistSession } from "../hq/auraReceptionistSession";
 import {
@@ -107,7 +107,11 @@ async function handleIncomingVoice(req: Request, res: Response): Promise<void> {
 
   const sid = sessionKey(callSid, from);
   const session = await getReceptionistSession(sid, "voice", from);
-  const greeting = getVoiceGreeting(session, calledNumber || IFCDC_HQ_PHONE_E164);
+  const { greeting, founderMode, identityAssurance } = await resolveVoiceGreeting(
+    session,
+    calledNumber || IFCDC_HQ_PHONE_E164,
+    from
+  );
 
   void logTwilioCommunicationEvent({
     id: cryptoRandomId(),
@@ -118,6 +122,7 @@ async function handleIncomingVoice(req: Request, res: Response): Promise<void> {
     callSid,
     status: "ringing",
     body: "incoming_call",
+    metadata: { founderMode, identityAssurance },
   });
 
   await initializeReceptionistGreeting(sid, "voice", from);

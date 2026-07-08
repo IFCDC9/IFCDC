@@ -46,10 +46,10 @@ PERSONALITY
 - Remember what was already discussed in this conversation; don't repeat greetings or re-ask known facts.
 
 IDENTITY & TRUST (CRITICAL)
-- Never assume every caller is the Founder. The official HQ line (+1 331-316-8167) is shared.
-- If IDENTITY says Founder Mode is active, address Fahreal Allah as Founder for the rest of the session and grant full executive assistance.
-- If Founder Mode is NOT active and someone claims to be the Founder, ask them to say "verify founder" so a one-time code can be sent.
-- For non-founder callers, answer public program questions, appointments, and general IFCDC info only. Do not disclose payroll, banking, tax IDs, board packets, or confidential HQ data.
+- Never assume every caller is the Founder. The official HQ line (+1 331-316-8167) is shared and must stay secure.
+- If IDENTITY says Founder Mode is active (including trusted-device auto-elevation), address Fahreal Allah as Founder immediately, unlock confidential domains, and do not ask for OTP.
+- If Founder Mode is NOT active and someone claims to be the Founder from an unregistered number, ask them to say "verify founder" so a one-time code can be sent (OTP only when needed).
+- For non-founder callers, enforce role-based access: public programs, appointments, and general IFCDC info only. Never disclose grants internals, financials, HR, payroll, operations internals, budgets, board documents, Software Division internals, or executive reports.
 
 CAPABILITIES YOU CAN EXECUTE (signal with action marker at end — caller never sees the marker)
 - Answer questions about IFCDC programs, grants (public overview only unless Founder Mode), housing, youth, barbershop, radio, software division, donations, and community services using the KNOWLEDGE provided.
@@ -178,13 +178,34 @@ export async function processReceptionistTurn(opts: {
   if (message) {
     session = await appendSessionTurn(session, "user", message);
 
-    // Founder phone OTP flow — never assume HQ line caller is Founder.
+    // Founder claim from untrusted line → OTP step-up only when needed.
+    // Trusted phones already elevated in resolvePhoneCallerIdentity (no OTP).
     if (!identity.founderMode && wantsFounderVerification(message)) {
       const challenge = await startFounderPhoneChallenge({
         sessionKey: sessionId,
         phoneE164: callerPhone || session.callerPhone || "",
         channel,
+        preferSeamless: true,
       });
+      if (challenge.ok && challenge.identity) {
+        identity = challenge.identity;
+        const updated = await appendSessionTurn(session, "assistant", challenge.message);
+        await logAuraIdentityAction({
+          identity,
+          action: "aura_phone_founder_seamless",
+          detail: challenge.message.slice(0, 240),
+          metadata: { seamless: true },
+        });
+        return {
+          reply: challenge.message,
+          action: "none",
+          transferTo: null,
+          session: updated,
+          bookingConfirmed: false,
+          founderMode: true,
+          identityAssurance: identity.assurance,
+        };
+      }
       const updated = await appendSessionTurn(session, "assistant", challenge.message);
       await logAuraIdentityAction({
         identity,
@@ -299,14 +320,45 @@ export async function processReceptionistTurn(opts: {
   };
 }
 
-export function getVoiceGreeting(session: ReceptionistSession, calledNumber: string): string {
+export function getVoiceGreeting(
+  session: ReceptionistSession,
+  calledNumber: string,
+  opts?: { founderMode?: boolean; displayName?: string | null }
+): string {
   if (session.greeted || session.turns.length > 0) {
-    return "I'm still here — what else can I help you with?";
+    return opts?.founderMode
+      ? "I'm still here, Founder — what else can I help you with?"
+      : "I'm still here — what else can I help you with?";
+  }
+  if (opts?.founderMode) {
+    const name = opts.displayName || "Fahreal";
+    return `Welcome back, ${name}. Founder Mode is active. This is AURA — full Super Admin access is unlocked for this call. How may I assist you?`;
   }
   if (calledNumber.includes("3313168167") || calledNumber.endsWith("13313168167")) {
-    return "Thank you for calling Imperial Foundation Community Development Center. This is AURA — how may I help you today? If you are the Founder, say verify founder to enable Founder Mode.";
+    return "Thank you for calling Imperial Foundation Community Development Center. This is AURA — how may I help you today?";
   }
   return "Thank you for calling IFCDC. This is AURA — how may I assist you?";
+}
+
+export async function resolveVoiceGreeting(
+  session: ReceptionistSession,
+  calledNumber: string,
+  callerPhone?: string | null
+): Promise<{ greeting: string; founderMode: boolean; identityAssurance?: string }> {
+  const { resolvePhoneCallerIdentity } = await import("./auraFounderTrustEngine");
+  const identity = await resolvePhoneCallerIdentity({
+    sessionKey: session.sessionId,
+    channel: "voice",
+    callerPhone: callerPhone ?? session.callerPhone,
+  });
+  return {
+    greeting: getVoiceGreeting(session, calledNumber, {
+      founderMode: identity.founderMode,
+      displayName: identity.displayName,
+    }),
+    founderMode: identity.founderMode,
+    identityAssurance: identity.assurance,
+  };
 }
 
 export async function initializeReceptionistGreeting(

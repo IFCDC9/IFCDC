@@ -128,6 +128,8 @@ export interface AuraCommandResponse {
     channel: string;
     modules: string[];
     verifiedAt: string | null;
+    trustedDevice?: boolean;
+    seamless?: boolean;
   };
 }
 
@@ -149,8 +151,18 @@ export interface AuraMemoryTurn {
 
 import { hqApiFetch } from "./hqApiFetch";
 import { EXECUTIVE_OVERVIEW_FETCH_TIMEOUT_MS } from "../data/founderDashboardDefaults";
+import { getOrCreateFounderDeviceId } from "../lib/founderTrustedDevice";
 
 const AURA_COMMAND_TIMEOUT_MS = 45_000;
+
+function auraDeviceHeaders(): Record<string, string> {
+  try {
+    const id = getOrCreateFounderDeviceId();
+    return { "X-Aura-Device-Id": id };
+  } catch {
+    return {};
+  }
+}
 
 async function hqFetch<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
   const { timeoutMs, ...init } = options ?? {};
@@ -233,27 +245,38 @@ export const hqApi = {
   appDiagnostics: (appId: string) => hqFetch<AppDiagnostics>(`/software-division/${appId}/diagnostics`),
   allDiagnostics: () => hqFetch<{ diagnostics: AppDiagnostics[] }>("/software-division/diagnostics"),
   auraStatus: () => hqFetch<{ auraCore: boolean; capabilities: string[] }>("/aura/status"),
-  auraCommand: (command: string, opts?: { module?: string; contextRef?: Record<string, unknown> }) =>
-    hqFetch<AuraCommandResponse>("/aura/command", {
+  auraCommand: (command: string, opts?: { module?: string; contextRef?: Record<string, unknown> }) => {
+    const deviceId = getOrCreateFounderDeviceId();
+    return hqFetch<AuraCommandResponse>("/aura/command", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ command, module: opts?.module, contextRef: opts?.contextRef }),
+      headers: { "Content-Type": "application/json", ...auraDeviceHeaders() },
+      body: JSON.stringify({ command, module: opts?.module, contextRef: opts?.contextRef, deviceId }),
       timeoutMs: AURA_COMMAND_TIMEOUT_MS,
-    }),
+    });
+  },
   auraAction: (
     actionId: string,
     opts?: { args?: Record<string, unknown>; module?: string; contextRef?: Record<string, unknown> }
-  ) =>
-    hqFetch<AuraCommandResponse>(`/aura/action/${actionId}`, {
+  ) => {
+    const deviceId = getOrCreateFounderDeviceId();
+    return hqFetch<AuraCommandResponse>(`/aura/action/${actionId}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ args: opts?.args ?? {}, module: opts?.module, contextRef: opts?.contextRef }),
+      headers: { "Content-Type": "application/json", ...auraDeviceHeaders() },
+      body: JSON.stringify({
+        args: opts?.args ?? {},
+        module: opts?.module,
+        contextRef: opts?.contextRef,
+        deviceId,
+      }),
       timeoutMs: AURA_COMMAND_TIMEOUT_MS,
-    }),
+    });
+  },
   auraActions: () => hqFetch<{ actions: AuraActionCatalogItem[] }>("/aura/actions"),
   auraMemory: () => hqFetch<{ turns: AuraMemoryTurn[] }>("/aura/memory"),
-  auraIdentity: () =>
-    hqFetch<{
+  auraIdentity: () => {
+    const deviceId = getOrCreateFounderDeviceId();
+    const qs = encodeURIComponent(deviceId);
+    return hqFetch<{
       identity: {
         founderMode: boolean;
         isFounder: boolean;
@@ -265,8 +288,34 @@ export const hqApi = {
         channel: string;
         modules: string[];
         verifiedAt: string | null;
+        trustedDevice?: boolean;
+        seamless?: boolean;
       };
-    }>("/aura/identity"),
+      device?: { trusted: boolean; biometricBound: boolean; expiresAt: string | null };
+    }>(`/aura/identity?deviceId=${qs}`, { headers: auraDeviceHeaders() });
+  },
+  auraTrustDevice: (opts?: { label?: string; biometricBound?: boolean }) => {
+    const deviceId = getOrCreateFounderDeviceId();
+    return hqFetch<{
+      ok: boolean;
+      deviceId: string;
+      expiresAt: string;
+      message: string;
+      identity?: AuraCommandResponse["identity"];
+    }>("/aura/identity/trust-device", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...auraDeviceHeaders() },
+      body: JSON.stringify({
+        deviceId,
+        label: opts?.label || "Founder HQ browser",
+        biometricBound: Boolean(opts?.biometricBound),
+      }),
+    });
+  },
   auraMemoryReset: () =>
-    hqFetch<{ cleared: number }>("/aura/memory/reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }),
+    hqFetch<{ cleared: number }>("/aura/memory/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    }),
 };
