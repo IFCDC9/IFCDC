@@ -116,6 +116,7 @@ export interface AuraCommandResponse {
   navigation?: { path: string; label: string };
   approvalsCreated: Array<{ path: string; label: string }>;
   poweredBy: string;
+  enterpriseJobId?: string;
 }
 
 export interface AuraActionCatalogItem {
@@ -137,7 +138,7 @@ export interface AuraMemoryTurn {
 import { hqApiFetch } from "./hqApiFetch";
 import { EXECUTIVE_OVERVIEW_FETCH_TIMEOUT_MS } from "../data/founderDashboardDefaults";
 
-const AURA_COMMAND_TIMEOUT_MS = 120_000;
+const AURA_COMMAND_TIMEOUT_MS = 45_000;
 
 async function hqFetch<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
   const { timeoutMs, ...init } = options ?? {};

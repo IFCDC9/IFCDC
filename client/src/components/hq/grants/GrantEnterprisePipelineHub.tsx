@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Filter, Sparkles, CheckCircle, XCircle, ArrowRight, AlertTriangle } from "lucide-react";
 import { grantsApi } from "../../../api/grantsApi";
@@ -55,6 +55,8 @@ export const GrantEnterprisePipelineHub: React.FC<{
     ...PIPELINE_QUERY_OPTS,
   });
 
+  const [activeEnterpriseJobId, setActiveEnterpriseJobId] = useState<string | null>(null);
+
   const intelligence = useQuery({
     queryKey: ["pipeline-intelligence", selectedOpp],
     queryFn: () => grantsApi.pipelineIntelligence(String(selectedOpp)),
@@ -71,15 +73,35 @@ export const GrantEnterprisePipelineHub: React.FC<{
     staleTime: 30_000,
   });
 
+  const enterpriseJob = useQuery({
+    queryKey: ["enterprise-funding-job", activeEnterpriseJobId],
+    queryFn: () => grantsApi.enterpriseFundingJob(String(activeEnterpriseJobId)),
+    enabled: !!activeEnterpriseJobId && section === "report",
+    refetchInterval: (q) => {
+      const status = q.state.data?.job?.status;
+      return status === "completed" || status === "failed" ? false : 3000;
+    },
+    retry: 0,
+  });
+
   const enterpriseScan = useMutation({
     mutationFn: () => grantsApi.enterpriseFundingScan({ syncFeeds: true, prepareDrafts: true, populatePipeline: true }),
-    onSuccess: () => {
+    onSuccess: (data) => {
+      setActiveEnterpriseJobId(data.jobId);
       qc.invalidateQueries({ queryKey: ["executive-funding-report"] });
       qc.invalidateQueries({ queryKey: ["pipeline-enterprise-metrics"] });
       qc.invalidateQueries({ queryKey: ["pipeline-enterprise-board"] });
       qc.invalidateQueries({ queryKey: ["pipeline-founder"] });
     },
   });
+
+  useEffect(() => {
+    if (enterpriseJob.data?.job?.status === "completed") {
+      qc.invalidateQueries({ queryKey: ["executive-funding-report"] });
+      qc.invalidateQueries({ queryKey: ["pipeline-enterprise-metrics"] });
+      qc.invalidateQueries({ queryKey: ["pipeline-enterprise-board"] });
+    }
+  }, [enterpriseJob.data?.job?.status, qc]);
 
   const syncPipeline = useMutation({
     mutationFn: () => grantsApi.pipelineSync(),
@@ -246,10 +268,20 @@ export const GrantEnterprisePipelineHub: React.FC<{
               {(enterpriseScan.error as Error)?.message ?? "Enterprise scan failed."}
             </div>
           )}
-          {enterpriseScan.isSuccess && (
+          {(enterpriseScan.isSuccess || enterpriseJob.data) && (
             <div className="hq-muted-text" style={{ marginBottom: "0.75rem", fontSize: "0.82rem" }}>
-              Scan complete: {(enterpriseScan.data?.report as { totals?: { matchingGrants?: number; draftsPrepared?: number } })?.totals?.matchingGrants ?? 0} matches ·{" "}
-              {(enterpriseScan.data?.report as { totals?: { draftsPrepared?: number } })?.totals?.draftsPrepared ?? 0} drafts queued for founder review.
+              {enterpriseJob.data?.job?.status === "completed"
+                ? `Scan complete: ${(enterpriseJob.data.job.report as { totals?: { matchingGrants?: number; draftsPrepared?: number } } | null)?.totals?.matchingGrants ?? 0} matches · ${(enterpriseJob.data.job.report as { totals?: { draftsPrepared?: number } } | null)?.totals?.draftsPrepared ?? 0} drafts queued for founder review.`
+                : enterpriseJob.data?.job
+                  ? `${enterpriseJob.data.job.message} (${enterpriseJob.data.job.progress}%)`
+                  : enterpriseScan.isSuccess
+                    ? `Enterprise job started (${enterpriseScan.data.jobId.slice(0, 8)}…) — live progress below.`
+                    : null}
+              {enterpriseJob.data?.job && enterpriseJob.data.job.status !== "completed" && enterpriseJob.data.job.status !== "failed" && (
+                <div style={{ marginTop: 8, height: 6, borderRadius: 999, background: "var(--hq-border)", overflow: "hidden" }}>
+                  <div style={{ width: `${Math.max(4, enterpriseJob.data.job.progress)}%`, height: "100%", background: "var(--hq-gold, #c9a227)" }} />
+                </div>
+              )}
             </div>
           )}
           <GrantQueryBoundary
@@ -259,7 +291,7 @@ export const GrantEnterprisePipelineHub: React.FC<{
             loadingMessage="Loading executive funding report…"
           >
             {(() => {
-              const report = (enterpriseScan.data?.report ?? executiveReport.data?.report) as {
+              const report = (enterpriseJob.data?.job?.report ?? executiveReport.data?.report) as {
                 totals?: { programsEvaluated?: number; matchingGrants?: number; qualifiedGrants?: number; draftsPrepared?: number };
                 programEvaluations?: { programLabel: string; matchingOpportunities: number; qualifiedOpportunities: number; topMatchScore: number | null }[];
                 opportunities?: Array<{
@@ -280,6 +312,9 @@ export const GrantEnterprisePipelineHub: React.FC<{
                 generatedAt?: string;
               } | undefined;
               if (!report?.opportunities?.length) {
+                if (enterpriseJob.data?.job && ["queued", "running"].includes(enterpriseJob.data.job.status)) {
+                  return <p className="hq-muted-text">AURA is building the Executive Funding Report in the background…</p>;
+                }
                 return <p className="hq-muted-text">No matching grants in the latest report. Sync pipeline feeds and run Enterprise Scan.</p>;
               }
               return (

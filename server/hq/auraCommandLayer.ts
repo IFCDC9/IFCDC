@@ -48,6 +48,8 @@ export interface AuraCommandResponse {
   navigation?: { path: string; label: string };
   approvalsCreated: Array<{ path: string; label: string }>;
   poweredBy: string;
+  /** Present when a long-running enterprise grant job was started. */
+  enterpriseJobId?: string;
 }
 
 const AURA_COMMAND_SYSTEM = `You are AURA, the native operating intelligence for IFCDC Headquarters.
@@ -105,6 +107,10 @@ export async function runAuraAction(
     navigation: executed.navigation,
     approvalsCreated,
     poweredBy: "AURA Command Layer",
+    enterpriseJobId:
+      actionId === "enterprise_funding_scan" && result.data && typeof result.data === "object" && "jobId" in (result.data as object)
+        ? String((result.data as { jobId: string }).jobId)
+        : undefined,
   };
 }
 
@@ -119,6 +125,61 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
 
   if (!command) {
     return { reply: "What would you like me to do?", actions: [], approvalsCreated: [], poweredBy: "AURA" };
+  }
+
+  // Enterprise grants mode — acknowledge immediately and run as background job (no request timeout).
+  try {
+    const { isEnterpriseFundingQuery, startEnterpriseFundingScanJob, formatEnterpriseJobAck } = await import(
+      "./grantEnterpriseDirectorEngine"
+    );
+    const q = command.toLowerCase();
+    const enterpriseHits =
+      isEnterpriseFundingQuery(command)
+      || (/whole ifcdc|entire organization|all program|every program|org.?wide/.test(q)
+        && /grant|funding|report|scan|evaluate|pipeline|draft/.test(q))
+      || /draft.*grant|prepare.*application|populate.*pipeline/.test(q);
+
+    if (enterpriseHits) {
+      const prepareDrafts =
+        /draft|proposal|prepare|populate|enterprise|director|complete/.test(q);
+      const started = await startEnterpriseFundingScanJob({
+        actorEmail: ctx.actorEmail,
+        syncFeeds: true,
+        populatePipeline: true,
+        prepareDrafts,
+      });
+      const reply = formatEnterpriseJobAck(started.jobId, prepareDrafts);
+      const executed: AuraExecutedAction = {
+        id: "enterprise_funding_scan",
+        label: "Enterprise Funding Scan",
+        status: "prepared",
+        summary: reply,
+        data: { jobId: started.jobId, status: started.status, prepareDrafts },
+        navigation: {
+          path: `/hq/grants?tab=pipeline&enterpriseJob=${started.jobId}`,
+          label: "Track Enterprise Scan",
+        },
+        approval: { path: "/hq/workflows", label: "Review in Workflow Automation" },
+      };
+      await recordAuraTurn({ actorEmail: ctx.actorEmail, module: ctx.module, role: "user", content: command });
+      await recordAuraTurn({
+        actorEmail: ctx.actorEmail,
+        module: ctx.module,
+        role: "assistant",
+        content: reply,
+        action: executed,
+      });
+      return {
+        reply,
+        actions: [executed],
+        navigation: executed.navigation,
+        approvalsCreated: executed.approval ? [executed.approval] : [],
+        poweredBy: "AURA Enterprise Grants Director",
+        enterpriseJobId: started.jobId,
+      };
+    }
+  } catch (err) {
+    console.warn("[aura] enterprise fast-path failed:", err instanceof Error ? err.message : err);
   }
 
   // 1. Deterministic navigation fast-path (only explicit "open/go to X").

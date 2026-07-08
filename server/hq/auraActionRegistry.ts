@@ -22,8 +22,8 @@ import {
   resolveProgramSlugFromQuery,
 } from "./grantIntelligenceEngine";
 import {
-  runEnterpriseFundingScan,
-  formatExecutiveFundingReportAnswer,
+  startEnterpriseFundingScanJob,
+  formatEnterpriseJobAck,
 } from "./grantEnterpriseDirectorEngine";
 import { assistWriterSectionProduction } from "./grantWriterEngine";
 import { executeCopilotAutomation } from "./auraExecutiveCopilot";
@@ -203,7 +203,7 @@ const enterpriseFundingScan: AuraAction = {
     const syncFeeds = args.syncFeeds !== false;
     const prepareDrafts = args.prepareDrafts !== false;
     const minScore = typeof args.minScore === "number" ? args.minScore : undefined;
-    const scan = await runEnterpriseFundingScan({
+    const started = await startEnterpriseFundingScanJob({
       actorEmail: ctx.actorEmail,
       syncFeeds,
       populatePipeline: true,
@@ -212,9 +212,14 @@ const enterpriseFundingScan: AuraAction = {
     });
     return {
       status: "prepared",
-      summary: `Enterprise scan complete: ${scan.report.totals.matchingGrants} matching grants across ${scan.report.totals.programsEvaluated} programs. ${scan.report.totals.draftsPrepared} drafts queued for founder review.`,
-      data: { report: scan.report, draftResults: scan.draftResults, narrative: formatExecutiveFundingReportAnswer(scan.report, { includeDrafts: prepareDrafts }) },
-      navigation: { path: "/hq/grants?tab=pipeline", label: "Open Enterprise Funding Pipeline" },
+      summary: formatEnterpriseJobAck(started.jobId, prepareDrafts),
+      data: {
+        jobId: started.jobId,
+        status: started.status,
+        prepareDrafts,
+        narrative: formatEnterpriseJobAck(started.jobId, prepareDrafts),
+      },
+      navigation: { path: `/hq/grants?tab=pipeline&enterpriseJob=${started.jobId}`, label: "Track Enterprise Scan" },
       approval: APPROVAL_LINK,
     };
   },

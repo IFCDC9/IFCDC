@@ -346,9 +346,9 @@ router.post("/intelligence/aura/ask", async (req: Request, res: Response) => {
 });
 
 router.post("/intelligence/enterprise/scan", async (req: Request, res: Response) => {
-  const { runEnterpriseFundingScan } = await import("../hq/grantEnterpriseDirectorEngine");
+  const { startEnterpriseFundingScanJob } = await import("../hq/grantEnterpriseDirectorEngine");
   try {
-    const result = await runEnterpriseFundingScan({
+    const started = await startEnterpriseFundingScanJob({
       actorEmail: req.hqUser?.email,
       syncFeeds: req.body?.syncFeeds !== false,
       populatePipeline: req.body?.populatePipeline !== false,
@@ -356,15 +356,31 @@ router.post("/intelligence/enterprise/scan", async (req: Request, res: Response)
       minScore: typeof req.body?.minScore === "number" ? req.body.minScore : undefined,
     });
     res.status(202).json({
-      ...result,
+      ...started,
       humanReviewRequired: true,
       founderApprovalRequired: true,
+      pollUrl: `/api/hq/grants/intelligence/enterprise/jobs/${started.jobId}`,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Enterprise funding scan failed";
     console.error("[grants] enterprise/scan:", message);
     res.status(500).json({ error: message });
   }
+});
+
+router.get("/intelligence/enterprise/jobs/:jobId", async (req, res) => {
+  const { getEnterpriseFundingJob, formatExecutiveFundingReportAnswer } = await import(
+    "../hq/grantEnterpriseDirectorEngine"
+  );
+  const job = await getEnterpriseFundingJob(req.params.jobId);
+  if (!job) return res.status(404).json({ error: "Enterprise job not found" });
+  res.json({
+    job,
+    narrative:
+      job.status === "completed" && job.report
+        ? formatExecutiveFundingReportAnswer(job.report, { includeDrafts: job.draftResults.length > 0 })
+        : job.message,
+  });
 });
 
 router.get("/intelligence/enterprise/report", async (_req, res) => {

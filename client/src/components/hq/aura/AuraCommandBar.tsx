@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Sparkles, Mic, Send, X, ArrowRight, ShieldCheck, Loader2, Eraser } from "lucide-react";
 import { hqApi, type AuraCommandResponse, type AuraExecutedAction } from "../../../api/hqApi";
+import { grantsApi } from "../../../api/grantsApi";
 import { AURA_OPEN_EVENT, type AuraOpenDetail } from "./auraBus";
 
 interface AuraMessage {
@@ -11,13 +12,15 @@ interface AuraMessage {
   navigation?: { path: string; label: string };
   approvals?: Array<{ path: string; label: string }>;
   error?: boolean;
+  progress?: number;
+  jobId?: string;
 }
 
 const SUGGESTIONS = [
+  "Run enterprise mode — funding report for all IFCDC programs",
   "Find funding across all IFCDC programs",
   "Summarize the board report",
   "What needs my approval?",
-  "Give me my morning briefing",
 ];
 
 type SpeechRecognitionCtor = new () => {
@@ -35,6 +38,15 @@ function getSpeechRecognition(): SpeechRecognitionCtor | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
+function extractEnterpriseJobId(res: AuraCommandResponse): string | undefined {
+  if (res.enterpriseJobId) return res.enterpriseJobId;
+  for (const action of res.actions ?? []) {
+    const data = action.data as { jobId?: string } | undefined;
+    if (data?.jobId) return String(data.jobId);
+  }
+  return undefined;
+}
+
 export function AuraCommandBar(): React.ReactElement {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -42,6 +54,7 @@ export function AuraCommandBar(): React.ReactElement {
   const [messages, setMessages] = useState<AuraMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [listening, setListening] = useState(false);
+  const [jobTracking, setJobTracking] = useState<{ jobId: string; messageIndex: number } | null>(null);
   const moduleRef = useRef<string | undefined>(undefined);
   const contextRef = useRef<Record<string, unknown> | undefined>(undefined);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -53,18 +66,63 @@ export function AuraCommandBar(): React.ReactElement {
   }, []);
 
   const applyResponse = useCallback((res: AuraCommandResponse) => {
-    setMessages((prev) => [
-      ...prev,
-      {
-        role: "aura",
-        text: res.reply,
-        actions: res.actions,
-        navigation: res.navigation,
-        approvals: res.approvalsCreated,
-      },
-    ]);
+    const jobId = extractEnterpriseJobId(res);
+    setMessages((prev) => {
+      const next = [
+        ...prev,
+        {
+          role: "aura" as const,
+          text: res.reply,
+          actions: res.actions,
+          navigation: res.navigation,
+          approvals: res.approvalsCreated,
+          progress: jobId ? 2 : undefined,
+          jobId,
+        },
+      ];
+      if (jobId) setJobTracking({ jobId, messageIndex: next.length - 1 });
+      return next;
+    });
     scrollToEnd();
   }, [scrollToEnd]);
+
+  useEffect(() => {
+    if (!jobTracking) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const { job, narrative } = await grantsApi.enterpriseFundingJob(jobTracking.jobId);
+        if (cancelled) return;
+        setMessages((prev) => {
+          const copy = [...prev];
+          const idx = jobTracking.messageIndex;
+          if (!copy[idx] || copy[idx].jobId !== jobTracking.jobId) return prev;
+          copy[idx] = {
+            ...copy[idx],
+            progress: job.progress,
+            text:
+              job.status === "completed" || job.status === "failed"
+                ? narrative
+                : `${job.message}\n\nProgress: ${job.progress}% · Phase: ${job.phase.replace(/_/g, " ")}`,
+            error: job.status === "failed",
+          };
+          return copy;
+        });
+        scrollToEnd();
+        if (job.status === "completed" || job.status === "failed") {
+          setJobTracking(null);
+        }
+      } catch {
+        /* keep polling until timeout window ends */
+      }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [jobTracking, scrollToEnd]);
 
   const runCommand = useCallback(
     async (text: string) => {
@@ -234,7 +292,18 @@ export function AuraCommandBar(): React.ReactElement {
             {messages.map((m, i) => (
               <div key={i} className={`hq-aura-msg ${m.role === "user" ? "user" : "aura"}`}>
                 <div className={`hq-aura-bubble ${m.error ? "hq-aura-bubble-error" : ""}`}>
-                  {m.text}
+                  <div style={{ whiteSpace: "pre-wrap" }}>{m.text}</div>
+                  {typeof m.progress === "number" && m.progress < 100 && !m.error && (
+                    <div style={{ marginTop: "0.65rem" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.72rem", marginBottom: 4 }}>
+                        <span>Enterprise scan</span>
+                        <span>{m.progress}%</span>
+                      </div>
+                      <div style={{ height: 6, borderRadius: 999, background: "rgba(255,255,255,0.12)", overflow: "hidden" }}>
+                        <div style={{ width: `${Math.max(4, m.progress)}%`, height: "100%", background: "var(--hq-gold, #c9a227)", transition: "width 0.4s ease" }} />
+                      </div>
+                    </div>
+                  )}
                   {m.approvals && m.approvals.length > 0 && (
                     <div className="hq-aura-approval-note">
                       <ShieldCheck size={14} />

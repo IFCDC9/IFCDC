@@ -1072,34 +1072,22 @@ export async function processGrantAuraCommand(
 
   if (enterpriseMode) {
     const {
-      runEnterpriseFundingScan,
-      formatExecutiveFundingReportAnswer,
-      toOrgWideGrantMatch,
+      startEnterpriseFundingScanJob,
+      formatEnterpriseJobAck,
     } = await import("./grantEnterpriseDirectorEngine");
-    const scan = await runEnterpriseFundingScan({
+    const started = await startEnterpriseFundingScanJob({
       actorEmail: opts?.actorEmail,
-      syncFeeds: /live|today|real.?time|sync/.test(q),
+      syncFeeds: true,
       populatePipeline: true,
-      prepareDrafts: wantsDrafts,
+      prepareDrafts: wantsDrafts || /enterprise|director|complete|populate/.test(q),
     });
-    const { report, draftResults } = scan;
     return {
       ...base,
-      commandType: wantsDrafts ? "draft" : "enterprise_report",
-      matches: report.opportunities.map(toOrgWideGrantMatch),
-      executiveReport: report as unknown as Record<string, unknown>,
-      startedApplications: draftResults.map((d) => ({
-        title: d.title,
-        applicationId: d.applicationId,
-        ok: d.ok,
-      })),
-      actions: [
-        `programs_evaluated:${report.totals.programsEvaluated}`,
-        `matching_grants:${report.totals.matchingGrants}`,
-        `pipeline_updated:${report.totals.pipelineUpdated}`,
-        ...(wantsDrafts ? [`drafts_prepared:${report.totals.draftsPrepared}`] : []),
-      ],
-      answer: formatExecutiveFundingReportAnswer(report, { includeDrafts: wantsDrafts }),
+      commandType: "enterprise_report",
+      matches: [],
+      executiveReport: { jobId: started.jobId, status: started.status },
+      actions: [`enterprise_job:${started.jobId}`, "awaiting_background_completion"],
+      answer: formatEnterpriseJobAck(started.jobId, wantsDrafts || /enterprise|director|complete|populate/.test(q)),
     };
   }
 

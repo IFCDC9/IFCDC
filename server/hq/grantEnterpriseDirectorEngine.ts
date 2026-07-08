@@ -16,12 +16,43 @@ import {
   type OpportunityIntelligenceScore,
   type OrgWideGrantMatch,
 } from "./grantIntelligenceEngine";
-import { logGrantActivity } from "./grantsSchema";
+import { grantId, logGrantActivity } from "./grantsSchema";
 
 const QUALIFIED_MATCH_THRESHOLD = 60;
 const DEFAULT_MIN_SCORE = 40;
-const MAX_OPPORTUNITIES_SCANNED = 400;
-const DRAFT_BATCH_CONCURRENCY = 3;
+/** Cap live scan so scoring stays within background-job latency budgets. */
+const MAX_OPPORTUNITIES_SCANNED = 120;
+const DRAFT_BATCH_CONCURRENCY = 2;
+/** Cap how many full proposal drafts are queued in one enterprise run. */
+const MAX_DRAFTS_PER_SCAN = 8;
+const ENRICH_LIMIT = 80;
+
+export type EnterpriseJobPhase =
+  | "queued"
+  | "syncing_feeds"
+  | "scoring"
+  | "building_report"
+  | "populating_pipeline"
+  | "preparing_drafts"
+  | "completed"
+  | "failed";
+
+export type EnterpriseFundingJob = {
+  jobId: string;
+  status: "queued" | "running" | "completed" | "failed";
+  phase: EnterpriseJobPhase;
+  progress: number;
+  message: string;
+  steps: { phase: EnterpriseJobPhase; label: string; status: "pending" | "active" | "done" | "error" }[];
+  report: ExecutiveFundingReport | null;
+  draftResults: EnterpriseDraftResult[];
+  pipelineUpdated: number;
+  error: string | null;
+  actorEmail: string | null;
+  startedAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+};
 
 export type ExecutiveFundingReportEntry = {
   opportunityId: string;
@@ -81,9 +112,134 @@ export type EnterpriseDraftResult = {
 };
 
 let cachedReport: ExecutiveFundingReport | null = null;
+const enterpriseJobs = new Map<string, EnterpriseFundingJob>();
+let enterpriseTablesReady = false;
 
 export function getLatestExecutiveFundingReport(): ExecutiveFundingReport | null {
   return cachedReport;
+}
+
+async function ensureEnterpriseJobTables(): Promise<void> {
+  if (enterpriseTablesReady) return;
+  const db = await getDb();
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS grant_enterprise_scan_jobs (
+      id TEXT PRIMARY KEY,
+      status TEXT NOT NULL DEFAULT 'queued',
+      phase TEXT NOT NULL DEFAULT 'queued',
+      progress INTEGER NOT NULL DEFAULT 0,
+      message TEXT,
+      steps_json TEXT,
+      report_json TEXT,
+      draft_results_json TEXT,
+      pipeline_updated INTEGER DEFAULT 0,
+      error TEXT,
+      actor_email TEXT,
+      options_json TEXT,
+      started_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_enterprise_jobs_status ON grant_enterprise_scan_jobs(status);
+  `);
+  enterpriseTablesReady = true;
+}
+
+function defaultSteps(): EnterpriseFundingJob["steps"] {
+  return [
+    { phase: "syncing_feeds", label: "Sync Grants.gov + SAM.gov", status: "pending" },
+    { phase: "scoring", label: "Score opportunities across all programs", status: "pending" },
+    { phase: "building_report", label: "Build Executive Funding Report", status: "pending" },
+    { phase: "populating_pipeline", label: "Populate Enterprise Funding Pipeline", status: "pending" },
+    { phase: "preparing_drafts", label: "Queue Grant Writer Studio drafts", status: "pending" },
+  ];
+}
+
+function serializeJob(job: EnterpriseFundingJob) {
+  return {
+    jobId: job.jobId,
+    status: job.status,
+    phase: job.phase,
+    progress: job.progress,
+    message: job.message,
+    steps: job.steps,
+    report: job.report,
+    draftResults: job.draftResults,
+    pipelineUpdated: job.pipelineUpdated,
+    error: job.error,
+    actorEmail: job.actorEmail,
+    startedAt: job.startedAt,
+    updatedAt: job.updatedAt,
+    completedAt: job.completedAt,
+  };
+}
+
+async function persistJob(job: EnterpriseFundingJob, options?: Record<string, unknown>): Promise<void> {
+  await ensureEnterpriseJobTables();
+  const db = await getDb();
+  await db.run(
+    `INSERT INTO grant_enterprise_scan_jobs (
+      id, status, phase, progress, message, steps_json, report_json, draft_results_json,
+      pipeline_updated, error, actor_email, options_json, started_at, updated_at, completed_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      status = excluded.status,
+      phase = excluded.phase,
+      progress = excluded.progress,
+      message = excluded.message,
+      steps_json = excluded.steps_json,
+      report_json = excluded.report_json,
+      draft_results_json = excluded.draft_results_json,
+      pipeline_updated = excluded.pipeline_updated,
+      error = excluded.error,
+      updated_at = excluded.updated_at,
+      completed_at = excluded.completed_at`,
+    job.jobId,
+    job.status,
+    job.phase,
+    job.progress,
+    job.message,
+    JSON.stringify(job.steps),
+    job.report ? JSON.stringify(job.report) : null,
+    JSON.stringify(job.draftResults),
+    job.pipelineUpdated,
+    job.error,
+    job.actorEmail,
+    options ? JSON.stringify(options) : null,
+    job.startedAt,
+    job.updatedAt,
+    job.completedAt
+  );
+}
+
+async function updateJobProgress(
+  job: EnterpriseFundingJob,
+  patch: Partial<Pick<EnterpriseFundingJob, "status" | "phase" | "progress" | "message" | "error" | "report" | "draftResults" | "pipelineUpdated" | "completedAt">>
+): Promise<void> {
+  Object.assign(job, patch);
+  job.updatedAt = new Date().toISOString();
+  if (patch.phase) {
+    for (const step of job.steps) {
+      if (step.phase === patch.phase) step.status = "active";
+      else if (
+        ["syncing_feeds", "scoring", "building_report", "populating_pipeline", "preparing_drafts"].indexOf(step.phase)
+        < ["syncing_feeds", "scoring", "building_report", "populating_pipeline", "preparing_drafts"].indexOf(patch.phase)
+      ) {
+        if (step.status !== "error") step.status = "done";
+      }
+    }
+  }
+  if (patch.status === "completed") {
+    for (const step of job.steps) {
+      if (step.status !== "error") step.status = "done";
+    }
+  }
+  if (patch.status === "failed" && patch.phase) {
+    const active = job.steps.find((s) => s.phase === patch.phase);
+    if (active) active.status = "error";
+  }
+  enterpriseJobs.set(job.jobId, job);
+  await persistJob(job);
 }
 
 export function isEnterpriseFundingQuery(question: string): boolean {
@@ -200,19 +356,38 @@ export function toOrgWideGrantMatch(entry: ExecutiveFundingReportEntry): OrgWide
 
 async function scoreOpportunitiesInBatches(
   rows: Record<string, unknown>[],
-  opts: { actorEmail?: string; minScore: number; concurrency: number }
+  opts: {
+    actorEmail?: string;
+    minScore: number;
+    concurrency: number;
+    onProgress?: (done: number, total: number) => void | Promise<void>;
+  }
 ): Promise<Map<string, { intel: OpportunityIntelligenceScore; row: Record<string, unknown> }>> {
   const scored = new Map<string, { intel: OpportunityIntelligenceScore; row: Record<string, unknown> }>();
   const queue = [...rows];
+  const total = rows.length;
+  let done = 0;
 
   async function worker() {
     while (queue.length) {
       const row = queue.shift();
       if (!row) break;
       const id = String(row.id);
-      const intel = await scoreOpportunityIntelligence(id, { actorEmail: opts.actorEmail });
-      if (!intel || intel.composite < opts.minScore) continue;
-      scored.set(id, { intel, row });
+      try {
+        const intel = await scoreOpportunityIntelligence(id, { actorEmail: opts.actorEmail });
+        if (intel && intel.composite >= opts.minScore) {
+          scored.set(id, { intel, row });
+        }
+      } catch (err) {
+        console.warn(
+          `[enterprise-scan] score failed for ${id}:`,
+          err instanceof Error ? err.message : err
+        );
+      }
+      done += 1;
+      if (opts.onProgress && (done % 5 === 0 || done === total)) {
+        await opts.onProgress(done, total);
+      }
     }
   }
 
@@ -287,10 +462,14 @@ async function populateEnterprisePipeline(entries: ExecutiveFundingReportEntry[]
 
 async function prepareQualifiedDrafts(
   entries: ExecutiveFundingReportEntry[],
-  opts?: { actorEmail?: string }
+  opts?: { actorEmail?: string; maxDrafts?: number; onProgress?: (done: number, total: number) => void | Promise<void> }
 ): Promise<EnterpriseDraftResult[]> {
-  const qualified = entries.filter((e) => e.qualified);
+  const qualified = entries
+    .filter((e) => e.qualified)
+    .sort((a, b) => b.matchScore - a.matchScore)
+    .slice(0, opts?.maxDrafts ?? MAX_DRAFTS_PER_SCAN);
   const results: EnterpriseDraftResult[] = [];
+  let done = 0;
 
   for (let i = 0; i < qualified.length; i += DRAFT_BATCH_CONCURRENCY) {
     const batch = qualified.slice(i, i + DRAFT_BATCH_CONCURRENCY);
@@ -340,6 +519,8 @@ async function prepareQualifiedDrafts(
       })
     );
     results.push(...batchResults);
+    done += batch.length;
+    await opts?.onProgress?.(done, qualified.length);
   }
 
   return results;
@@ -353,21 +534,34 @@ export async function runEnterpriseFundingScan(opts?: {
   prepareDrafts?: boolean;
   minScore?: number;
   maxOpportunities?: number;
+  onProgress?: (update: { phase: EnterpriseJobPhase; progress: number; message: string }) => void | Promise<void>;
 }): Promise<{
   report: ExecutiveFundingReport;
   draftResults: EnterpriseDraftResult[];
   pipelineUpdated: number;
 }> {
+  const notify = async (phase: EnterpriseJobPhase, progress: number, message: string) => {
+    await opts?.onProgress?.({ phase, progress, message });
+  };
+
   if (opts?.syncFeeds) {
+    await notify("syncing_feeds", 5, "Refreshing Grants.gov and SAM.gov live feeds…");
     try {
-      await runGrantIntelligenceSync({ actorEmail: opts.actorEmail });
-    } catch {
-      /* optional */
+      await Promise.race([
+        runGrantIntelligenceSync({ actorEmail: opts.actorEmail }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Feed sync timeout")), 90_000)),
+      ]);
+    } catch (err) {
+      console.warn(
+        "[enterprise-scan] feed sync skipped:",
+        err instanceof Error ? err.message : err
+      );
     }
   }
 
+  await notify("scoring", 15, "Enriching and scoring live opportunities…");
   try {
-    await enrichAllOpportunities(200);
+    await enrichAllOpportunities(ENRICH_LIMIT);
   } catch {
     /* optional */
   }
@@ -389,9 +583,14 @@ export async function runEnterpriseFundingScan(opts?: {
   const scored = await scoreOpportunitiesInBatches(rows, {
     actorEmail: opts?.actorEmail,
     minScore,
-    concurrency: 5,
+    concurrency: 8,
+    onProgress: async (done, total) => {
+      const pct = 15 + Math.round((done / Math.max(total, 1)) * 50);
+      await notify("scoring", pct, `Scored ${done}/${total} live opportunities…`);
+    },
   });
 
+  await notify("building_report", 70, "Building Executive Funding Report…");
   const opportunities = Array.from(scored.values())
     .map(({ intel, row }) => toReportEntry(intel, row, kbCoverage))
     .sort((a, b) => b.matchScore - a.matchScore);
@@ -400,12 +599,21 @@ export async function runEnterpriseFundingScan(opts?: {
 
   let pipelineUpdated = 0;
   if (opts?.populatePipeline !== false) {
+    await notify("populating_pipeline", 78, "Populating Enterprise Funding Pipeline…");
     pipelineUpdated = await populateEnterprisePipeline(opportunities);
   }
 
   let draftResults: EnterpriseDraftResult[] = [];
   if (opts?.prepareDrafts) {
-    draftResults = await prepareQualifiedDrafts(opportunities, { actorEmail: opts?.actorEmail });
+    await notify("preparing_drafts", 85, "Queuing Grant Writer Studio drafts for qualified matches…");
+    draftResults = await prepareQualifiedDrafts(opportunities, {
+      actorEmail: opts?.actorEmail,
+      maxDrafts: MAX_DRAFTS_PER_SCAN,
+      onProgress: async (done, total) => {
+        const pct = 85 + Math.round((done / Math.max(total, 1)) * 12);
+        await notify("preparing_drafts", pct, `Queued drafts ${done}/${total}…`);
+      },
+    });
   }
 
   const report: ExecutiveFundingReport = {
@@ -433,7 +641,148 @@ export async function runEnterpriseFundingScan(opts?: {
     /* optional */
   }
 
+  await notify("completed", 100, "Enterprise Funding Report ready for founder review.");
   return { report, draftResults, pipelineUpdated };
+}
+
+/** Start enterprise scan as a background job — returns immediately with progress handle. */
+export async function startEnterpriseFundingScanJob(opts?: {
+  actorEmail?: string;
+  syncFeeds?: boolean;
+  populatePipeline?: boolean;
+  prepareDrafts?: boolean;
+  minScore?: number;
+  maxOpportunities?: number;
+}): Promise<{ jobId: string; status: string; message: string }> {
+  await ensureEnterpriseJobTables();
+  const now = new Date().toISOString();
+  const jobId = grantId();
+  const job: EnterpriseFundingJob = {
+    jobId,
+    status: "queued",
+    phase: "queued",
+    progress: 0,
+    message: "Enterprise scan accepted — AURA is starting live funding research now.",
+    steps: defaultSteps(),
+    report: null,
+    draftResults: [],
+    pipelineUpdated: 0,
+    error: null,
+    actorEmail: opts?.actorEmail ?? null,
+    startedAt: now,
+    updatedAt: now,
+    completedAt: null,
+  };
+  enterpriseJobs.set(jobId, job);
+  await persistJob(job, opts as Record<string, unknown>);
+
+  void (async () => {
+    try {
+      await updateJobProgress(job, {
+        status: "running",
+        phase: "syncing_feeds",
+        progress: 2,
+        message: "Enterprise mode engaged — syncing live federal feeds…",
+      });
+
+      const result = await runEnterpriseFundingScan({
+        ...opts,
+        onProgress: async ({ phase, progress, message }) => {
+          await updateJobProgress(job, { phase, progress, message, status: "running" });
+        },
+      });
+
+      await updateJobProgress(job, {
+        status: "completed",
+        phase: "completed",
+        progress: 100,
+        message: `Ready: ${result.report.totals.matchingGrants} matches · ${result.report.totals.draftsPrepared} drafts queued for founder review.`,
+        report: result.report,
+        draftResults: result.draftResults,
+        pipelineUpdated: result.pipelineUpdated,
+        completedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Enterprise funding scan failed";
+      console.error("[enterprise-scan] job failed:", message);
+      await updateJobProgress(job, {
+        status: "failed",
+        phase: "failed",
+        progress: job.progress,
+        message,
+        error: message,
+        completedAt: new Date().toISOString(),
+      });
+    }
+  })();
+
+  return {
+    jobId,
+    status: "queued",
+    message: job.message,
+  };
+}
+
+export async function getEnterpriseFundingJob(jobId: string): Promise<EnterpriseFundingJob | null> {
+  const cached = enterpriseJobs.get(jobId);
+  if (cached) return serializeJob(cached) as EnterpriseFundingJob;
+
+  await ensureEnterpriseJobTables();
+  const db = await getDb();
+  const row = await db.get<Record<string, unknown>>(
+    "SELECT * FROM grant_enterprise_scan_jobs WHERE id = ?",
+    jobId
+  );
+  if (!row) return null;
+
+  const parseJson = <T>(raw: unknown, fallback: T): T => {
+    if (!raw) return fallback;
+    try {
+      return JSON.parse(String(raw)) as T;
+    } catch {
+      return fallback;
+    }
+  };
+
+  const job: EnterpriseFundingJob = {
+    jobId: String(row.id),
+    status: String(row.status) as EnterpriseFundingJob["status"],
+    phase: String(row.phase) as EnterpriseJobPhase,
+    progress: Number(row.progress ?? 0),
+    message: String(row.message ?? ""),
+    steps: parseJson(row.steps_json, defaultSteps()),
+    report: parseJson(row.report_json, null),
+    draftResults: parseJson(row.draft_results_json, []),
+    pipelineUpdated: Number(row.pipeline_updated ?? 0),
+    error: row.error ? String(row.error) : null,
+    actorEmail: row.actor_email ? String(row.actor_email) : null,
+    startedAt: String(row.started_at),
+    updatedAt: String(row.updated_at),
+    completedAt: row.completed_at ? String(row.completed_at) : null,
+  };
+  enterpriseJobs.set(jobId, job);
+  return serializeJob(job) as EnterpriseFundingJob;
+}
+
+export function formatEnterpriseJobAck(jobId: string, prepareDrafts: boolean): string {
+  return [
+    "## Enterprise Mode Started",
+    "",
+    "AURA acknowledged your request and is running as IFCDC's Director of Grants in the background.",
+    "",
+    "**Live pipeline in progress:**",
+    "1. Sync Grants.gov + SAM.gov",
+    "2. Score opportunities across every program, department, and initiative",
+    "3. Build the Executive Funding Report",
+    "4. Populate the Enterprise Funding Pipeline",
+    prepareDrafts
+      ? "5. Queue Grant Writer Studio drafts for qualified opportunities"
+      : "5. Skip draft generation unless you request proposals",
+    "",
+    `Job ID: \`${jobId}\``,
+    "",
+    "I will keep updating progress. When finished, the complete report will be ready — drafts require **Founder Review** before any submission.",
+  ].join("\n");
 }
 
 export function formatExecutiveFundingReportAnswer(

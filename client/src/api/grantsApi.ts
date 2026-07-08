@@ -986,17 +986,34 @@ export const grantsApi = {
     ),
   enterpriseFundingScan: (opts?: { syncFeeds?: boolean; prepareDrafts?: boolean; populatePipeline?: boolean; minScore?: number }) =>
     apiFetch<{
-      report: Record<string, unknown>;
-      draftResults: { opportunityId: string; title: string; applicationId?: string; ok: boolean }[];
-      pipelineUpdated: number;
+      jobId: string;
+      status: string;
+      message: string;
+      pollUrl?: string;
       humanReviewRequired: boolean;
       founderApprovalRequired: boolean;
     }>("/intelligence/enterprise/scan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(opts ?? {}),
-      timeoutMs: 300_000,
+      timeoutMs: 45_000,
     }),
+  enterpriseFundingJob: (jobId: string) =>
+    apiFetch<{
+      job: {
+        jobId: string;
+        status: string;
+        phase: string;
+        progress: number;
+        message: string;
+        steps: { phase: string; label: string; status: string }[];
+        report: Record<string, unknown> | null;
+        draftResults: { opportunityId: string; title: string; applicationId?: string; ok: boolean }[];
+        pipelineUpdated: number;
+        error: string | null;
+      };
+      narrative: string;
+    }>(`/intelligence/enterprise/jobs/${jobId}`, { timeoutMs: 30_000 }),
   executiveFundingReport: () =>
     apiFetch<{ report: Record<string, unknown> }>("/intelligence/enterprise/report", { timeoutMs: 60_000 }),
   pipelineIntelligence: (opportunityId: string) =>
