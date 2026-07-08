@@ -3,21 +3,20 @@ import { useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   Sparkles, MessageSquare, FileBarChart, Lightbulb, TrendingUp, Shield,
-  Briefcase, Building2, AlertTriangle, Activity, Compass, ExternalLink,
+  Building2, AlertTriangle, Activity, Compass, ExternalLink,
 } from "lucide-react";
 import HQLayout from "../../layouts/HQLayout";
 import { hqApi } from "../../api/hqApi";
 import { intelligenceApi } from "../../api/intelligenceApi";
-import { grantsApi } from "../../api/grantsApi";
 import { warehouseApi } from "../../api/warehouseApi";
 import { StatusBadge } from "../../components/hq/StatusBadge";
 import { KpiCard } from "../../components/hq/KpiCard";
 import { formatLocaleNumber } from "../../utils/safeFormat";
-import { isAuraNavigationQuery, isGrantAuraQuery, AURA_NAV_SUGGESTIONS } from "../../utils/auraNavigation";
 import { HqApiError } from "../../api/hqApiFetch";
+import { AuraExecutiveChatWorkspace } from "../../components/hq/aura/AuraExecutiveChatWorkspace";
+import { AURA_NAV_SUGGESTIONS } from "../../utils/auraNavigation";
 
 type AuraMode = "ask" | "brief" | "intelligence" | "monitor" | "navigate";
-type AskMode = "general" | "operations" | "enterprise";
 
 const SUMMARIZE_OPTIONS = [
   { id: "full", label: "Full Organization Summary" },
@@ -53,9 +52,6 @@ function errorMessage(err: unknown): string {
 const AuraCommandCenterPage: React.FC = () => {
   const navigate = useNavigate();
   const [mode, setMode] = useState<AuraMode>("ask");
-  const [askMode, setAskMode] = useState<AskMode>("general");
-  const [message, setMessage] = useState("");
-  const [history, setHistory] = useState<{ role: "user" | "aura"; text: string }[]>([]);
   const [summary, setSummary] = useState<string | null>(null);
   const [briefing, setBriefing] = useState<string | null>(null);
   const [execSummary, setExecSummary] = useState<string | null>(null);
@@ -77,53 +73,9 @@ const AuraCommandCenterPage: React.FC = () => {
   const morningBriefing = useQuery({ queryKey: ["copilot-morning"], queryFn: intelligenceApi.morningBriefing, enabled: mode === "brief" });
   const correctiveActions = useQuery({ queryKey: ["copilot-corrective"], queryFn: intelligenceApi.correctiveActions, enabled: mode === "monitor" || mode === "intelligence" });
 
-  const appendChat = useCallback((user: string, aura: string) => {
-    setHistory((h) => [...h, { role: "user", text: user }, { role: "aura", text: aura }]);
-  }, []);
-
-  const appendChatError = useCallback((user: string, err: unknown) => {
-    appendChat(user, `⚠ ${errorMessage(err)}`);
-  }, [appendChat]);
-
-  const copilotAskMutation = useMutation({
-    mutationFn: (q: string) => intelligenceApi.ask(q),
-    onSuccess: (data, msg) => {
-      appendChat(msg, String(data.answer ?? data.response ?? "No response received."));
-      setMessage("");
-    },
-    onError: (err, msg) => appendChatError(msg, err),
-  });
-
   const automateMutation = useMutation({
     mutationFn: (action: string) => intelligenceApi.automate(action),
     onError: (err) => setIntelError(errorMessage(err)),
-  });
-
-  const opsAskMutation = useMutation({
-    mutationFn: (q: string) => hqApi.auraOperationsAsk(q),
-    onSuccess: (data, msg) => {
-      appendChat(msg, data.answer);
-      setMessage("");
-    },
-    onError: (err, msg) => appendChatError(msg, err),
-  });
-
-  const enterpriseAskMutation = useMutation({
-    mutationFn: (q: string) => hqApi.auraEnterpriseAsk(q),
-    onSuccess: (data, msg) => {
-      appendChat(msg, data.answer);
-      setMessage("");
-    },
-    onError: (err, msg) => appendChatError(msg, err),
-  });
-
-  const grantAuraMutation = useMutation({
-    mutationFn: (q: string) => grantsApi.askGrantAura(q),
-    onSuccess: (data, msg) => {
-      appendChat(msg, String(data.answer ?? "No grant matches returned."));
-      setMessage("");
-    },
-    onError: (err, msg) => appendChatError(msg, err),
   });
 
   const summarizeMutation = useMutation({
@@ -182,58 +134,19 @@ const AuraCommandCenterPage: React.FC = () => {
     mutationFn: (q: string) => hqApi.auraNavigate(q),
   });
 
-  const pending =
-    copilotAskMutation.isPending ||
-    opsAskMutation.isPending ||
-    enterpriseAskMutation.isPending ||
-    grantAuraMutation.isPending ||
-    navMutation.isPending;
-
   const handleNavigation = useCallback(
-    (trimmed: string, opts?: { autoNavigate?: boolean; showInChat?: boolean }) => {
+    (trimmed: string, opts?: { autoNavigate?: boolean }) => {
       const autoNavigate = opts?.autoNavigate !== false;
-      const showInChat = opts?.showInChat !== false;
-      setMessage("");
       navMutation.mutate(trimmed, {
         onSuccess: (data) => {
           setNavResult(data as Record<string, unknown>);
-          if (showInChat) {
-            appendChat(trimmed, String(data.message ?? `Opening ${data.label ?? "module"}…`));
-          }
-          if (autoNavigate && data.intent === "navigate" && data.path) {
-            window.setTimeout(() => navigate(data.path!), 350);
-          } else if (autoNavigate && data.intent === "search" && data.path) {
+          if (autoNavigate && data.path && (data.intent === "navigate" || data.intent === "search")) {
             window.setTimeout(() => navigate(data.path!), 350);
           }
-        },
-        onError: (err) => {
-          if (showInChat) appendChatError(trimmed, err);
         },
       });
     },
-    [appendChat, appendChatError, navigate, navMutation]
-  );
-
-  const runMessage = useCallback(
-    (rawText?: string) => {
-      const trimmed = (rawText ?? message).trim();
-      if (!trimmed || pending) return;
-
-      if (isAuraNavigationQuery(trimmed)) {
-        handleNavigation(trimmed, { autoNavigate: true, showInChat: true });
-        return;
-      }
-
-      if (isGrantAuraQuery(trimmed)) {
-        grantAuraMutation.mutate(trimmed);
-        return;
-      }
-
-      if (askMode === "operations") opsAskMutation.mutate(trimmed);
-      else if (askMode === "enterprise") enterpriseAskMutation.mutate(trimmed);
-      else copilotAskMutation.mutate(trimmed);
-    },
-    [message, pending, handleNavigation, askMode, opsAskMutation, enterpriseAskMutation, copilotAskMutation, grantAuraMutation]
+    [navigate, navMutation]
   );
 
   const moduleCount = (moduleMonitor.data?.modules as unknown[] | undefined)?.length;
@@ -241,7 +154,12 @@ const AuraCommandCenterPage: React.FC = () => {
   const risks = (health?.risks ?? []) as { level: string; area: string; detail: string }[];
 
   return (
-    <HQLayout title="AURA Command Center" subtitle="Enterprise operations hub — ask, brief, monitor, and navigate every Headquarters module">
+    <HQLayout
+      title="AURA Command Center"
+      subtitle="Enterprise operations hub — ask, brief, monitor, and navigate every Headquarters module"
+      auraModule="aura"
+      auraActions={["ask", "enterprise_scan", "summarize", "explain"]}
+    >
       {status && (
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
           <StatusBadge label={status.auraCore ? "AURA Core Connected" : "Enterprise Mode"} variant={status.auraCore ? "success" : "gold"} pulse={status.auraCore} />
@@ -270,53 +188,14 @@ const AuraCommandCenterPage: React.FC = () => {
       {mode === "ask" && (
         <div className="hq-aura-chat hq-panel hq-fade-in">
           <div className="hq-panel-body">
-            <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem", flexWrap: "wrap" }}>
-              {(["general", "operations", "enterprise"] as AskMode[]).map((m) => (
-                <button key={m} type="button" className={`hq-btn hq-btn-sm ${askMode === m ? "hq-btn-primary" : "hq-btn-ghost"}`} onClick={() => setAskMode(m)}>
-                  {m === "general" ? "Executive Chat" : m === "operations" ? "Operations Copilot" : "Enterprise Intelligence"}
-                </button>
-              ))}
-            </div>
-            <div className="hq-aura-messages">
-              {history.length === 0 && (
-                <div className="hq-empty">
-                  <Sparkles size={32} style={{ margin: "0 auto 1rem", display: "block", color: "#f5c842", opacity: 0.5 }} />
-                  Ask AURA anything — or tap a suggestion below. Say &quot;Go to Grant Center&quot; or &quot;Open Financial Center&quot; to navigate instantly.
-                </div>
-              )}
-              {history.map((entry, i) => (
-                <div key={i} className={`hq-aura-msg ${entry.role} hq-stagger-in`}>
-                  <div className="hq-aura-bubble">{entry.text}</div>
-                </div>
-              ))}
-              {pending && <div className="hq-aura-msg aura"><div className="hq-aura-bubble hq-aura-typing">AURA is analyzing organization data…</div></div>}
-            </div>
-            <div className="hq-aura-input-row">
-              <input
-                className="hq-aura-input"
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); runMessage(); } }}
-                placeholder="Ask or navigate — e.g. Open Financial Center…"
-                disabled={pending}
-              />
-              <button type="button" className="hq-btn hq-btn-primary" onClick={() => runMessage()} disabled={pending || !message.trim()}>
-                {pending ? "Sending…" : "Send"}
-              </button>
-            </div>
-            <div className="hq-aura-suggestions">
-              {AURA_NAV_SUGGESTIONS.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  className="hq-aura-suggestion"
-                  disabled={pending}
-                  onClick={() => runMessage(s)}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
+            <AuraExecutiveChatWorkspace
+              variant="page"
+              module="aura"
+              suggestions={[
+                "Run enterprise mode — funding report for all IFCDC programs",
+                ...AURA_NAV_SUGGESTIONS.slice(0, 3),
+              ]}
+            />
           </div>
         </div>
       )}
@@ -351,7 +230,7 @@ const AuraCommandCenterPage: React.FC = () => {
                 </div>
               )}
               {(summary || briefing || execSummary || boardReportMutation.data) && (
-                <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: "0.85rem", lineHeight: 1.65, maxHeight: 400, overflow: "auto" }}>
+                <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: "0.85rem", lineHeight: 1.65, maxHeight: "min(55dvh, 520px)", overflow: "auto" }}>
                   {summary ?? briefing ?? execSummary ?? formatBoardReport(boardReportMutation.data as Record<string, unknown>)}
                 </pre>
               )}
@@ -364,7 +243,7 @@ const AuraCommandCenterPage: React.FC = () => {
                 <Lightbulb size={16} /> Generate Executive Action Plan
               </button>
               {actionPlanMutation.data?.plan && (
-                <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", marginTop: "1rem", fontSize: "0.85rem", lineHeight: 1.65 }}>{actionPlanMutation.data.plan}</pre>
+                <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", marginTop: "1rem", fontSize: "0.85rem", lineHeight: 1.65, maxHeight: "min(55dvh, 520px)", overflow: "auto" }}>{actionPlanMutation.data.plan}</pre>
               )}
             </div>
           </div>
@@ -403,7 +282,7 @@ const AuraCommandCenterPage: React.FC = () => {
                 {riskMutation.data && <p style={{ fontSize: "0.85rem" }}>Risk: {riskMutation.data.riskLevel} ({riskMutation.data.riskScore}/100)</p>}
                 {complianceTrackerMutation.data && <p style={{ fontSize: "0.85rem" }}>{complianceTrackerMutation.data.overdue} overdue · {complianceTrackerMutation.data.dueNext14Days} due in 14 days</p>}
                 {(recommendations || forecast) && (
-                  <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: "0.82rem", lineHeight: 1.6, marginTop: "0.75rem" }}>{recommendations ?? forecast}</pre>
+                  <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: "0.82rem", lineHeight: 1.6, marginTop: "0.75rem", maxHeight: "min(45dvh, 420px)", overflow: "auto" }}>{recommendations ?? forecast}</pre>
                 )}
               </div>
             </div>
@@ -502,7 +381,7 @@ const AuraCommandCenterPage: React.FC = () => {
                 </div>
                 {automateMutation.data && <p style={{ fontSize: "0.82rem", color: "var(--hq-success)" }}>Automation queued: {automateMutation.data.action}</p>}
                 <button type="button" className="hq-btn hq-btn-ghost hq-btn-sm" disabled={deptMutation.isPending} onClick={() => deptMutation.mutate()}>Refresh Department Monitor</button>
-                {deptMutation.data && <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", marginTop: "0.75rem", fontSize: "0.82rem" }}>{deptMutation.data.summary}</pre>}
+                {deptMutation.data && <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", marginTop: "0.75rem", fontSize: "0.82rem", maxHeight: "min(40dvh, 360px)", overflow: "auto" }}>{deptMutation.data.summary}</pre>}
               </div>
             </div>
           </div>
@@ -523,7 +402,7 @@ const AuraCommandCenterPage: React.FC = () => {
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && navQuery.trim().length >= 2 && !navMutation.isPending) {
                     e.preventDefault();
-                    handleNavigation(navQuery.trim(), { autoNavigate: true, showInChat: false });
+                    handleNavigation(navQuery.trim(), { autoNavigate: true });
                   }
                 }}
                 placeholder="Navigate or search Headquarters…"
@@ -533,7 +412,7 @@ const AuraCommandCenterPage: React.FC = () => {
                 type="button"
                 className="hq-btn hq-btn-primary"
                 disabled={navQuery.trim().length < 2 || navMutation.isPending}
-                onClick={() => handleNavigation(navQuery.trim(), { autoNavigate: true, showInChat: false })}
+                onClick={() => handleNavigation(navQuery.trim(), { autoNavigate: true })}
               >
                 {navMutation.isPending ? "Going…" : "Go"}
               </button>
@@ -545,7 +424,7 @@ const AuraCommandCenterPage: React.FC = () => {
                   type="button"
                   className="hq-aura-suggestion"
                   disabled={navMutation.isPending}
-                  onClick={() => { setNavQuery(s); handleNavigation(s, { autoNavigate: true, showInChat: false }); }}
+                  onClick={() => { setNavQuery(s); handleNavigation(s, { autoNavigate: true }); }}
                 >
                   {s}
                 </button>
