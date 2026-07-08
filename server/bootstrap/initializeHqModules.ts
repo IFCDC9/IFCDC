@@ -23,6 +23,7 @@ import { purgeHqSampleData } from "../hq/hqProductionCleanup";
 import { purgeWorkflowDemoData } from "../hq/workflowProductionCleanup";
 import { ensureGrantWriterTables } from "../hq/grantWriterEngine";
 import { ensureAuraMemoryTables } from "../hq/auraMemory";
+import { ensureKnowledgeBaseTables } from "../hq/knowledgeBaseEngine";
 import { logOpenAiConfigAtBoot } from "../lib/openaiConfig";
 import { ensureMissionControlTables } from "../hq/missionControlSchema";
 import { initGoogleOAuth } from "../monolith/googleOAuth";
@@ -57,6 +58,19 @@ export async function initializeHqModules(founder: FounderSeedConfig): Promise<v
   await ensureBackupTables();
   await ensureSecuritySessionTables();
   await ensureAuraMemoryTables();
+  await ensureKnowledgeBaseTables();
+  // Build AURA's institutional knowledge base from live HQ data. Deferred so
+  // dashboard reads are not blocked at boot; embedding controlled by env flag.
+  setTimeout(() => {
+    import("../hq/knowledgeBaseEngine")
+      .then(({ syncKnowledgeBaseFromHq }) =>
+        syncKnowledgeBaseFromHq({ embed: process.env.AURA_KB_AUTOEMBED !== "false" })
+      )
+      .then((r) => {
+        if (r) console.log(`AURA knowledge base sync: ingested ${r.ingested}, skipped ${r.skipped}`);
+      })
+      .catch((e) => console.warn("Knowledge base boot sync skipped:", e?.message));
+  }, 90_000);
   getOrGenerateDailyBriefing().catch((e) => console.warn("Morning briefing generation skipped:", e?.message));
   await initGoogleOAuth();
   import("../hq/warehouseScheduler").then(({ startHqScheduler }) => startHqScheduler()).catch(() => undefined);

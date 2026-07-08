@@ -4,6 +4,7 @@ const MODULE_ROUTES: { keywords: string[]; path: string; label: string }[] = [
   { keywords: ["executive dashboard", "dashboard", "command center", "home"], path: "/hq", label: "Executive Dashboard" },
   { keywords: ["finance", "financial", "financial center", "ledger", "general ledger", "accounts payable", "accounts receivable", "budget", "invoice", "payroll"], path: "/hq/finance", label: "Financial Center" },
   { keywords: ["grant", "grants", "funder", "compliance deadline", "award"], path: "/hq/grants", label: "Grant Center" },
+  { keywords: ["knowledge base", "knowledge", "institutional memory", "grant writer memory"], path: "/hq/knowledge", label: "AURA Knowledge Base" },
   { keywords: ["people", "hr", "human resources", "employee", "volunteer", "onboarding", "certification"], path: "/hq/people", label: "People Management" },
   { keywords: ["intelligence", "analytics", "warehouse", "kpi", "forecast"], path: "/hq/intelligence", label: "Enterprise Intelligence" },
   { keywords: ["aura", "ai assistant", "copilot"], path: "/hq/aura", label: "AURA Command Center" },

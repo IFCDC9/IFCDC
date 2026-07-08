@@ -42,7 +42,7 @@ function searchHeaders(): Record<string, string> {
 
 export const GRANT_AI_TIMEOUT_MS = 90_000;
 
-const IFCDC_ORG_PROFILE = {
+export const IFCDC_ORG_PROFILE = {
   legalName: "Imperial Foundation Community Development Corporation (IFCDC)",
   ein: process.env.IFCDC_EIN ?? "501(c)(3) nonprofit",
   location: "Asbury Park / Monmouth County, New Jersey",
@@ -212,8 +212,25 @@ export async function buildGrantWriterContext(opts: {
     ? await db.get("SELECT * FROM grant_opportunity_scores WHERE opportunity_id = ? ORDER BY created_at DESC LIMIT 1", opp.id).catch(() => null)
     : null;
 
+  // Retrieve grounded IFCDC facts from the organizational knowledge base BEFORE
+  // writing — keeps every section consistent with real budgets, programs,
+  // registration data, and prior approved narratives.
+  let knowledgeGrounding = "";
+  try {
+    const { buildGrantGroundingContext } = await import("./knowledgeBaseEngine");
+    knowledgeGrounding = await buildGrantGroundingContext({
+      sectionKey: opts.sectionKey,
+      application: app,
+      opportunity: opp ?? null,
+    });
+  } catch (err) {
+    console.warn("[grant-writer] knowledge grounding unavailable:", err instanceof Error ? err.message : err);
+  }
+
   const context = [
     executiveContext,
+    "",
+    knowledgeGrounding,
     "",
     "=== IFCDC ORGANIZATIONAL PROFILE (USE FOR ALL NARRATIVES) ===",
     `Legal name: ${IFCDC_ORG_PROFILE.legalName}`,

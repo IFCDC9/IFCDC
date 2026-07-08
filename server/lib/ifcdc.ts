@@ -122,6 +122,31 @@ export async function auraExecutiveChat(prompt: string, context?: string): Promi
   }
 }
 
+/**
+ * Generate an embedding vector for a piece of text using the same unified
+ * OpenAI credential system as the rest of AURA. Used by the organizational
+ * knowledge base for semantic retrieval.
+ */
+export async function auraEmbed(text: string): Promise<number[]> {
+  const input = (text ?? "").trim();
+  if (!input) return [];
+  const model = process.env.AURA_EMBED_MODEL || "text-embedding-3-small";
+  try {
+    const { result } = await withOpenAiCredentialFallback(async (_creds, client) => {
+      const response = await client.embeddings.create({ model, input: input.slice(0, 8000) });
+      return response.data[0]?.embedding ?? [];
+    });
+    return result as number[];
+  } catch (err) {
+    throw new Error(formatOpenAiAuthError(err, resolveOpenAiCredentials()));
+  }
+}
+
+/** True when a usable OpenAI key is configured (embeddings + chat available). */
+export function auraEmbeddingsConfigured(): boolean {
+  return Boolean(resolveOpenAiCredentials());
+}
+
 export async function auraReceptionistChat(
   history: { role: "user" | "assistant"; content: string }[],
   systemPrompt: string,

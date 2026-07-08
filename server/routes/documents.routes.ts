@@ -6,6 +6,7 @@ import { docId, ensureDocumentTables } from "../hq/documentsSchema";
 import { saveHqFileBase64 } from "../hq/hqFileStorage";
 import { grantId } from "../hq/grantsSchema";
 import { toHQRole } from "../hq/enterpriseRoles";
+import { indexUploadedDocument } from "../hq/knowledgeBaseEngine";
 
 const router = Router();
 
@@ -177,6 +178,8 @@ router.post("/upload", async (req: Request, res: Response) => {
     if (grant_id) {
       await linkGrantDocument(db, String(grant_id), title, saved.url, req.hqUser?.email ?? "");
     }
+    // Auto-learn: index the new document into AURA's knowledge base.
+    void indexUploadedDocument(id, req.hqUser?.email).catch(() => undefined);
     res.status(201).json({
       document: await db.get("SELECT * FROM hq_documents WHERE id = ?", id),
       file: saved,
@@ -237,6 +240,7 @@ router.post("/", async (req: Request, res: Response) => {
   if (grant_id && file_url) {
     await linkGrantDocument(db, String(grant_id), title, file_url, req.hqUser?.email ?? "");
   }
+  void indexUploadedDocument(id, req.hqUser?.email).catch(() => undefined);
   res.status(201).json({ document: await db.get("SELECT * FROM hq_documents WHERE id = ?", id) });
 });
 
@@ -274,6 +278,7 @@ router.post("/:id/versions", async (req: Request, res: Response) => {
     req.hqUser?.email ?? "",
     now
   );
+  void indexUploadedDocument(req.params.id, req.hqUser?.email).catch(() => undefined);
   res.status(201).json({
     document: await db.get("SELECT * FROM hq_documents WHERE id = ?", req.params.id),
     version: nextVersion,
@@ -314,6 +319,8 @@ router.post("/:id/ocr-index", async (req: Request, res: Response) => {
   if (!doc) return res.status(404).json({ error: "Document not found" });
   const now = new Date().toISOString();
   await db.run(`UPDATE hq_documents SET ocr_text = ?, updated_at = ? WHERE id = ?`, text.slice(0, 50000), now, req.params.id);
+  // Re-index with the newly extracted text so AURA learns the content.
+  void indexUploadedDocument(req.params.id, req.hqUser?.email).catch(() => undefined);
   res.json({ document: await db.get("SELECT id, title, ocr_text, updated_at FROM hq_documents WHERE id = ?", req.params.id) });
 });
 
@@ -354,6 +361,9 @@ router.patch("/:id/approval", requireHQPermission("hq.settings", "hq.executive")
     now,
     req.params.id
   );
+  if (status === "approved") {
+    void indexUploadedDocument(req.params.id, req.hqUser?.email).catch(() => undefined);
+  }
   res.json({ document: await db.get("SELECT * FROM hq_documents WHERE id = ?", req.params.id) });
 });
 

@@ -29,6 +29,7 @@ import {
   GitBranch,
   LineChart,
   Plug,
+  Brain,
 } from "lucide-react";
 
 export interface HQNavItem {
@@ -77,6 +78,7 @@ export const HQ_NAV_ITEMS: HQNavItem[] = [
 
   { label: "Financial Center", path: "/hq/finance", icon: Landmark, section: "Finance" },
   { label: "Grant Center", path: "/hq/grants", icon: FileText, section: "Finance" },
+  { label: "AURA Knowledge Base", path: "/hq/knowledge", icon: Brain, section: "Finance", badge: "New" },
   { label: "Donations", path: "/hq/donations", icon: Heart, section: "Finance" },
 
   { label: "Community Programs", path: "/hq/programs", icon: Users, section: "Programs" },
@@ -187,6 +189,13 @@ export const HQ_MODULE_CONFIGS: Record<string, HQModuleConfig> = {
     subtitle: "Content, broadcast, and communications",
     description: "Manage IFCDC Radio, content production, social media, and organizational communications.",
     features: ["Content library", "Broadcast scheduling", "Multi-channel publishing", "Media analytics"],
+    status: "live",
+  },
+  knowledge: {
+    title: "AURA Knowledge Base",
+    subtitle: "IFCDC institutional memory for the enterprise grant writer",
+    description: "Secure organizational knowledge base AURA reads before generating any grant content — budgets, program descriptions, financials, registration, mission/vision, and prior approved narratives.",
+    features: ["Semantic retrieval", "Auto-indexing on upload", "Version supersession", "Grant grounding", "Reindex from HQ"],
     status: "live",
   },
   documents: {

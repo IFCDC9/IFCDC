@@ -47,6 +47,7 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   "/hq/scholarships": "hq.programs",
   "/hq/media": "hq.programs",
   "/hq/documents": "hq.settings",
+  "/hq/knowledge": "hq.grants",
   "/hq/assets": "hq.settings",
   "/hq/fleet": "hq.settings",
   "/hq/facilities": "hq.settings",

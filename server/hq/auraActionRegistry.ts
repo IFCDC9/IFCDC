@@ -408,6 +408,45 @@ const prepareForApproval: AuraAction = {
   },
 };
 
+const knowledgeLookup: AuraAction = {
+  id: "knowledge_lookup",
+  label: "Look Up IFCDC Data",
+  module: "global",
+  kind: "read",
+  description:
+    "Retrieve verified IFCDC institutional data (budgets, program descriptions, financials, registration, mission/vision, prior approved narratives) from the organizational knowledge base and answer grounded in those sources.",
+  parameters: {
+    query: { type: "string", description: "What IFCDC information to retrieve (required)." },
+  },
+  async run(args, _ctx) {
+    const query = str(args.query);
+    if (!query) return { status: "error", summary: "What IFCDC information should I look up?" };
+    const { retrieveKnowledge } = await import("./knowledgeBaseEngine");
+    const results = await retrieveKnowledge(query, { topK: 6 });
+    if (!results.length) {
+      return {
+        status: "done",
+        summary:
+          "The knowledge base has no indexed IFCDC records for that yet. Open the AURA Knowledge Base and run Reindex from HQ, or upload the source document.",
+        navigation: { path: "/hq/knowledge", label: "Open AURA Knowledge Base" },
+      };
+    }
+    const grounding = results
+      .map((r, i) => `[Source ${i + 1}] ${r.title} (${r.sourceType})\n${r.content.slice(0, 1200)}`)
+      .join("\n\n");
+    const reply = await auraExecutiveChat(
+      `Answer this using ONLY the IFCDC knowledge base sources below. Cite figures exactly; do not invent data.\n\nQuestion: ${query}\n\n${grounding}`,
+      "You are AURA, IFCDC's institutional grant writer. Ground every answer in the provided IFCDC sources."
+    );
+    return {
+      status: "done",
+      summary: reply,
+      data: { sources: results.map((r) => ({ title: r.title, sourceType: r.sourceType, score: r.score })) },
+      navigation: { path: "/hq/knowledge", label: "Open AURA Knowledge Base" },
+    };
+  },
+};
+
 const fixWorkflow: AuraAction = {
   id: "fix_workflow",
   label: "Fix This Workflow",
@@ -448,6 +487,7 @@ export const AURA_ACTIONS: AuraAction[] = [
   explain,
   prepareForApproval,
   fixWorkflow,
+  knowledgeLookup,
 ];
 
 const ACTION_MAP = new Map(AURA_ACTIONS.map((a) => [a.id, a]));

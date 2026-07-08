@@ -567,6 +567,98 @@ router.post("/aura/memory/reset", hqAuthRequired, requireHQModule("aura"), async
   res.json(await resetAuraMemory(req.hqUser?.email ?? "founder"));
 });
 
+// ---------------------------------------------------------------------------
+// AURA Organizational Knowledge Base — institutional memory for grant writing.
+// ---------------------------------------------------------------------------
+router.get("/knowledge/status", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
+  try {
+    const { getKnowledgeBaseStatus } = await import("../hq/knowledgeBaseEngine");
+    res.json(await getKnowledgeBaseStatus());
+  } catch (err) {
+    console.error("[knowledge] status error:", err);
+    res.status(500).json({ error: "Knowledge base status unavailable" });
+  }
+});
+
+router.get("/knowledge/documents", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  try {
+    const { listKnowledgeDocuments } = await import("../hq/knowledgeBaseEngine");
+    const documents = await listKnowledgeDocuments({
+      sourceType: req.query.source_type ? String(req.query.source_type) : undefined,
+      q: req.query.q ? String(req.query.q) : undefined,
+      status: req.query.status ? String(req.query.status) : undefined,
+    });
+    res.json({ documents });
+  } catch (err) {
+    console.error("[knowledge] list error:", err);
+    res.json({ documents: [], degraded: true });
+  }
+});
+
+router.get("/knowledge/documents/:id", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { getKnowledgeDocument } = await import("../hq/knowledgeBaseEngine");
+  const document = await getKnowledgeDocument(String(req.params.id));
+  if (!document) return res.status(404).json({ error: "Knowledge document not found" });
+  res.json({ document });
+});
+
+router.post("/knowledge/search", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const query = String(req.body?.query ?? req.body?.q ?? "").trim();
+  if (query.length < 2) return res.status(400).json({ error: "query must be at least 2 characters" });
+  const { retrieveKnowledge } = await import("../hq/knowledgeBaseEngine");
+  const results = await retrieveKnowledge(query, { topK: Number(req.body?.topK) || 8 });
+  res.json({ query, results });
+});
+
+router.post("/knowledge/sync", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  try {
+    const { syncKnowledgeBaseFromHq } = await import("../hq/knowledgeBaseEngine");
+    const result = await syncKnowledgeBaseFromHq({
+      embed: req.body?.embed !== false,
+      actorEmail: req.hqUser?.email,
+    });
+    res.json(result);
+  } catch (err) {
+    console.error("[knowledge] sync error:", err);
+    res.status(500).json({ error: err instanceof Error ? err.message : "Knowledge base sync failed" });
+  }
+});
+
+router.post("/knowledge/documents", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { sourceType, title, content, summary, effectiveDate, sourceKey } = req.body ?? {};
+  if (!title || !content) return res.status(400).json({ error: "title and content are required" });
+  try {
+    const { ingestKnowledgeDocument } = await import("../hq/knowledgeBaseEngine");
+    const result = await ingestKnowledgeDocument({
+      sourceType: sourceType || "document",
+      sourceKey: sourceKey || undefined,
+      title: String(title),
+      content: String(content),
+      summary: summary ? String(summary) : undefined,
+      effectiveDate: effectiveDate ? String(effectiveDate) : undefined,
+      origin: "manual",
+      createdBy: req.hqUser?.email,
+    });
+    res.status(201).json(result);
+  } catch (err) {
+    console.error("[knowledge] manual ingest error:", err);
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to ingest knowledge" });
+  }
+});
+
+router.post("/knowledge/documents/:id/approve", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { approveKnowledgeDocument } = await import("../hq/knowledgeBaseEngine");
+  const document = await approveKnowledgeDocument(String(req.params.id), req.hqUser?.email);
+  if (!document) return res.status(404).json({ error: "Knowledge document not found" });
+  res.json({ document });
+});
+
+router.post("/knowledge/documents/:id/supersede", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { supersedeKnowledgeDocument } = await import("../hq/knowledgeBaseEngine");
+  const document = await supersedeKnowledgeDocument(String(req.params.id), req.hqUser?.email);
+  res.json({ document });
+});
+
 router.post("/notifications/broadcast", hqAuthRequired, requireHQModule("notifications"), async (req, res) => {
   const { to, subject, body, channel } = req.body;
   if (!to || !subject || !body) {
