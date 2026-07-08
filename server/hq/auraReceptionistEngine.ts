@@ -47,8 +47,10 @@ PERSONALITY
 
 IDENTITY & TRUST (CRITICAL)
 - Never assume every caller is the Founder. The official HQ line (+1 331-316-8167) is shared and must stay secure.
-- If IDENTITY says Founder Mode is active (including trusted-device auto-elevation), address Fahreal Allah as Founder immediately, unlock confidential domains, and do not ask for OTP.
-- If Founder Mode is NOT active and someone claims to be the Founder from an unregistered number, ask them to say "verify founder" so a one-time code can be sent (OTP only when needed).
+- Never grant Founder privileges based on phone number alone.
+- If IDENTITY says Founder Mode is active (OTP already completed for this session), address Fahreal Allah as Founder, unlock confidential domains, and do not ask for another code.
+- If IDENTITY shows a recognized Founder candidate phone but Founder Mode is NOT active, greet them warmly and invite them to say "verify founder" so a one-time code can be emailed to service@ifcdc.org.
+- If Founder Mode is NOT active and someone claims to be the Founder, ask them to say "verify founder".
 - For non-founder callers, enforce role-based access: public programs, appointments, and general IFCDC info only. Never disclose grants internals, financials, HR, payroll, operations internals, budgets, board documents, Software Division internals, or executive reports.
 
 CAPABILITIES YOU CAN EXECUTE (signal with action marker at end — caller never sees the marker)
@@ -178,21 +180,20 @@ export async function processReceptionistTurn(opts: {
   if (message) {
     session = await appendSessionTurn(session, "user", message);
 
-    // Founder claim from untrusted line → OTP step-up only when needed.
-    // Trusted phones already elevated in resolvePhoneCallerIdentity (no OTP).
+    // Founder verification: candidate phone recognized, but OTP to service@ifcdc.org is always required.
+    // Already-verified sessions reuse Founder Mode via getPhoneFounderSession (no re-prompt).
     if (!identity.founderMode && wantsFounderVerification(message)) {
       const challenge = await startFounderPhoneChallenge({
         sessionKey: sessionId,
         phoneE164: callerPhone || session.callerPhone || "",
         channel,
-        preferSeamless: true,
       });
       if (challenge.ok && challenge.identity) {
         identity = challenge.identity;
         const updated = await appendSessionTurn(session, "assistant", challenge.message);
         await logAuraIdentityAction({
           identity,
-          action: "aura_phone_founder_seamless",
+          action: "aura_phone_founder_session_reuse",
           detail: challenge.message.slice(0, 240),
           metadata: { seamless: true },
         });
@@ -211,7 +212,7 @@ export async function processReceptionistTurn(opts: {
         identity,
         action: "aura_phone_founder_challenge",
         detail: challenge.message.slice(0, 240),
-        metadata: { smsSent: challenge.smsSent },
+        metadata: { smsSent: challenge.smsSent, emailSent: challenge.emailSent },
       });
       return {
         reply: challenge.message,
@@ -323,7 +324,7 @@ export async function processReceptionistTurn(opts: {
 export function getVoiceGreeting(
   session: ReceptionistSession,
   calledNumber: string,
-  opts?: { founderMode?: boolean; displayName?: string | null }
+  opts?: { founderMode?: boolean; displayName?: string | null; founderCandidate?: boolean }
 ): string {
   if (session.greeted || session.turns.length > 0) {
     return opts?.founderMode
@@ -333,6 +334,9 @@ export function getVoiceGreeting(
   if (opts?.founderMode) {
     const name = opts.displayName || "Fahreal";
     return `Welcome back, ${name}. Founder Mode is active. This is AURA — full Super Admin access is unlocked for this call. How may I assist you?`;
+  }
+  if (opts?.founderCandidate) {
+    return "Welcome. I recognize this as your Founder phone. For security, please say verify founder and I'll email a one-time code to service at I F C D C dot org. How else may I help you today?";
   }
   if (calledNumber.includes("3313168167") || calledNumber.endsWith("13313168167")) {
     return "Thank you for calling Imperial Foundation Community Development Center. This is AURA — how may I help you today?";
@@ -344,20 +348,56 @@ export async function resolveVoiceGreeting(
   session: ReceptionistSession,
   calledNumber: string,
   callerPhone?: string | null
-): Promise<{ greeting: string; founderMode: boolean; identityAssurance?: string }> {
-  const { resolvePhoneCallerIdentity } = await import("./auraFounderTrustEngine");
-  const identity = await resolvePhoneCallerIdentity({
+): Promise<{ greeting: string; founderMode: boolean; identityAssurance?: string; founderCandidate?: boolean }> {
+  const {
+    resolvePhoneCallerIdentity,
+    startFounderPhoneChallenge,
+    getPhoneFounderSession,
+  } = await import("./auraFounderTrustEngine");
+
+  let identity = await resolvePhoneCallerIdentity({
     sessionKey: session.sessionId,
     channel: "voice",
     callerPhone: callerPhone ?? session.callerPhone,
   });
+
+  // Candidate Founder phone on a fresh call: email OTP immediately (never elevate from ANI alone).
+  if (
+    !identity.founderMode
+    && identity.founderCandidate
+    && !(session.greeted || session.turns.length > 0)
+    && (callerPhone || session.callerPhone)
+  ) {
+    const existing = await getPhoneFounderSession(session.sessionId);
+    if (!existing?.founderMode) {
+      const challenge = await startFounderPhoneChallenge({
+        sessionKey: session.sessionId,
+        phoneE164: callerPhone || session.callerPhone || "",
+        channel: "voice",
+      });
+      if (challenge.ok && challenge.identity) {
+        identity = challenge.identity;
+      } else if (challenge.emailSent) {
+        return {
+          greeting:
+            "Welcome. I recognize this as your Founder phone. For security I just emailed a one-time code to service at I F C D C dot org. Please say the six digit code to unlock Founder Mode.",
+          founderMode: false,
+          identityAssurance: identity.assurance,
+          founderCandidate: true,
+        };
+      }
+    }
+  }
+
   return {
     greeting: getVoiceGreeting(session, calledNumber, {
       founderMode: identity.founderMode,
       displayName: identity.displayName,
+      founderCandidate: Boolean(identity.founderCandidate),
     }),
     founderMode: identity.founderMode,
     identityAssurance: identity.assurance,
+    founderCandidate: Boolean(identity.founderCandidate),
   };
 }
 
