@@ -294,15 +294,24 @@ async function buildPayPalCard(): Promise<IntegrationHubCard> {
 
 async function buildResendCard(): Promise<IntegrationHubCard> {
   const required = ["RESEND_API_KEY"];
-  const optional = ["RESEND_FROM_EMAIL"];
+  const optional = ["RESEND_FROM_EMAIL", "EMAIL_FROM", "SMTP_FROM"];
   const now = new Date().toISOString();
+  const apiKeySet =
+    envSet("RESEND_API_KEY") || envSet("EMAIL_API_KEY") || envSet("SMTP_API_KEY");
+  const fromSet =
+    envSet("RESEND_FROM_EMAIL") || envSet("EMAIL_FROM") || envSet("SMTP_FROM");
+  const from =
+    process.env.RESEND_FROM_EMAIL
+    || process.env.EMAIL_FROM
+    || process.env.SMTP_FROM
+    || "IFCDC Headquarters <service@ifcdc.org>";
   const health = await probe("resend", async () => {
-    if (!envSet("RESEND_API_KEY")) return { healthy: false, message: "RESEND_API_KEY not set" };
+    if (!apiKeySet) return { healthy: false, message: "RESEND_API_KEY not set" };
     return {
       healthy: true,
-      message: envSet("RESEND_FROM_EMAIL")
-        ? `Sender ${process.env.RESEND_FROM_EMAIL} configured`
-        : "API key present — set RESEND_FROM_EMAIL for outbound mail",
+      message: fromSet
+        ? `Sender ${from} configured`
+        : "API key present — using default service@ifcdc.org (verify domain in Resend)",
     };
   }, { healthy: false, message: "Health probe timed out" });
 
@@ -310,17 +319,17 @@ async function buildResendCard(): Promise<IntegrationHubCard> {
     id: "resend",
     name: "Email (Resend)",
     category: "Communications",
-    description: "Transactional email for Communications Center and HQ notifications",
+    description: "Transactional email for AURA Founder OTP, Communications Center, and HQ notifications",
     status: health.healthy ? "configured" : statusFromEnv(required, optional),
     lastChecked: now,
     environmentReadiness: {
-      ready: envSet("RESEND_API_KEY"),
+      ready: apiKeySet,
       missing: [...required, ...optional].filter((k) => !envSet(k)),
       configured: [...required, ...optional].filter((k) => envSet(k)),
     },
     requiredCredentials: [
       credential("RESEND_API_KEY", "Resend API key"),
-      credential("RESEND_FROM_EMAIL", "From email address"),
+      credential("RESEND_FROM_EMAIL", "From email address (or EMAIL_FROM / SMTP_FROM)"),
     ],
     health,
     actions: [
@@ -328,8 +337,8 @@ async function buildResendCard(): Promise<IntegrationHubCard> {
       { id: "test", label: "Test Connection", kind: "secondary", action: "test" },
       {
         id: "configure",
-        label: envSet("RESEND_API_KEY") ? "Configured on Render" : "Not configured",
-        kind: envSet("RESEND_API_KEY") ? "secondary" : "disabled",
+        label: apiKeySet ? "Configured on Render" : "Not configured",
+        kind: apiKeySet ? "secondary" : "disabled",
         action: "configure",
         reason: "Set RESEND_API_KEY on Render",
       },

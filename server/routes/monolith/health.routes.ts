@@ -10,6 +10,7 @@ import {
   getSuperAdminEmail,
 } from "../../config/credentials";
 import { openAiConfigStatus } from "../../lib/openaiConfig";
+import { getEmailDeliveryStatus, resolveResendFromEmail } from "../../lib/notifications";
 
 export function registerHealthRoutes(app: Express): void {
   app.get("/api/health", async (_req, res) => {
@@ -26,6 +27,7 @@ export function registerHealthRoutes(app: Express): void {
     const twilioWebhookSync = getLastTwilioWebhookSync();
     const twilioWebhooks = getTwilioWebhookUrls();
     const openai = openAiConfigStatus();
+    const email = getEmailDeliveryStatus();
 
     let knowledgeBase: {
       total: number;
@@ -120,6 +122,15 @@ export function registerHealthRoutes(app: Express): void {
             sms: twilioWebhooks.incomingSms,
             status: twilioWebhooks.voiceStatus,
           },
+        },
+        email: {
+          configured: email.configured,
+          provider: email.provider,
+          apiKeySet: email.apiKeySet,
+          from: email.apiKeySet ? resolveResendFromEmail() : null,
+          founderOtpTo: process.env.MASTER_OWNER_EMAIL || process.env.FOUNDER_EMAIL || "service@ifcdc.org",
+          inlineOnly: email.inlineOnly,
+          notificationsUrlSet: Boolean(email.notificationsUrl),
         },
       },
     });
