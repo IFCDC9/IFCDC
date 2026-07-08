@@ -333,6 +333,8 @@ const FinancialCenterPage: React.FC = () => {
     <HQLayout
       title="Financial Center"
       subtitle="Complete financial management platform — the accounting backbone for every Headquarters module"
+      auraModule="finance"
+      auraActions={["ask", "summarize", "generate_report", "explain"]}
     >
       <nav className="hq-tabs">
         {TABS.map((t) => (

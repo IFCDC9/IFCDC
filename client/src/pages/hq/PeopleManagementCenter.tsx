@@ -291,6 +291,8 @@ const PeopleManagementCenter: React.FC = () => {
     <HQLayout
       title="People Management Center"
       subtitle="Master people database for the entire IFCDC ecosystem — employees, volunteers, board, contractors, mentors, participants, barbers, clients, donors, and grant managers"
+      auraModule="hr"
+      auraActions={["ask", "summarize", "explain"]}
     >
       <div className="hq-people-toolbar">
         <div className="hq-search-bar">

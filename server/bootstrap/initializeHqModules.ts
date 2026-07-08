@@ -22,6 +22,7 @@ import { purgeGrantDevSeedData } from "../hq/grantProductionCleanup";
 import { purgeHqSampleData } from "../hq/hqProductionCleanup";
 import { purgeWorkflowDemoData } from "../hq/workflowProductionCleanup";
 import { ensureGrantWriterTables } from "../hq/grantWriterEngine";
+import { ensureAuraMemoryTables } from "../hq/auraMemory";
 import { logOpenAiConfigAtBoot } from "../lib/openaiConfig";
 import { ensureMissionControlTables } from "../hq/missionControlSchema";
 import { initGoogleOAuth } from "../monolith/googleOAuth";
@@ -55,6 +56,7 @@ export async function initializeHqModules(founder: FounderSeedConfig): Promise<v
   await ensureHqFileRegistry();
   await ensureBackupTables();
   await ensureSecuritySessionTables();
+  await ensureAuraMemoryTables();
   getOrGenerateDailyBriefing().catch((e) => console.warn("Morning briefing generation skipped:", e?.message));
   await initGoogleOAuth();
   import("../hq/warehouseScheduler").then(({ startHqScheduler }) => startHqScheduler()).catch(() => undefined);

@@ -100,8 +100,44 @@ export interface SoftwareDivisionFramework {
   timestamp: string;
 }
 
+export interface AuraExecutedAction {
+  id: string;
+  label: string;
+  status: "done" | "prepared" | "pending_approval" | "error";
+  summary: string;
+  data?: unknown;
+  navigation?: { path: string; label: string };
+  approval?: { path: string; label: string };
+}
+
+export interface AuraCommandResponse {
+  reply: string;
+  actions: AuraExecutedAction[];
+  navigation?: { path: string; label: string };
+  approvalsCreated: Array<{ path: string; label: string }>;
+  poweredBy: string;
+}
+
+export interface AuraActionCatalogItem {
+  id: string;
+  label: string;
+  module: string;
+  kind: "read" | "prepare" | "mutating";
+  description: string;
+}
+
+export interface AuraMemoryTurn {
+  id: string;
+  module: string | null;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+}
+
 import { hqApiFetch } from "./hqApiFetch";
 import { EXECUTIVE_OVERVIEW_FETCH_TIMEOUT_MS } from "../data/founderDashboardDefaults";
+
+const AURA_COMMAND_TIMEOUT_MS = 120_000;
 
 async function hqFetch<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
   const { timeoutMs, ...init } = options ?? {};
@@ -184,4 +220,25 @@ export const hqApi = {
   appDiagnostics: (appId: string) => hqFetch<AppDiagnostics>(`/software-division/${appId}/diagnostics`),
   allDiagnostics: () => hqFetch<{ diagnostics: AppDiagnostics[] }>("/software-division/diagnostics"),
   auraStatus: () => hqFetch<{ auraCore: boolean; capabilities: string[] }>("/aura/status"),
+  auraCommand: (command: string, opts?: { module?: string; contextRef?: Record<string, unknown> }) =>
+    hqFetch<AuraCommandResponse>("/aura/command", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command, module: opts?.module, contextRef: opts?.contextRef }),
+      timeoutMs: AURA_COMMAND_TIMEOUT_MS,
+    }),
+  auraAction: (
+    actionId: string,
+    opts?: { args?: Record<string, unknown>; module?: string; contextRef?: Record<string, unknown> }
+  ) =>
+    hqFetch<AuraCommandResponse>(`/aura/action/${actionId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ args: opts?.args ?? {}, module: opts?.module, contextRef: opts?.contextRef }),
+      timeoutMs: AURA_COMMAND_TIMEOUT_MS,
+    }),
+  auraActions: () => hqFetch<{ actions: AuraActionCatalogItem[] }>("/aura/actions"),
+  auraMemory: () => hqFetch<{ turns: AuraMemoryTurn[] }>("/aura/memory"),
+  auraMemoryReset: () =>
+    hqFetch<{ cleared: number }>("/aura/memory/reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }),
 };

@@ -303,7 +303,7 @@ const GrantCenterPage: React.FC = () => {
   const dash = dashboard.data;
 
   return (
-    <HQLayout title="Grant Center" subtitle="Enterprise funding command hub — opportunities, writer studio, library, compliance, and financial integration">
+    <HQLayout title="Grant Center" subtitle="Enterprise funding command hub — opportunities, writer studio, library, compliance, and financial integration" auraModule="grants" auraActions={["ask", "find_funding", "summarize", "prepare_approval", "explain"]}>
       <nav className="hq-tabs">
         {GRANT_TABS.map((t) => (
           <button key={t.id} type="button" className={`hq-tab ${tab === t.id ? "active" : ""}`} onClick={() => selectTab(t.id)}>

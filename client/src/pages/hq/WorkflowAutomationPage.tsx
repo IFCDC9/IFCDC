@@ -112,6 +112,8 @@ const WorkflowAutomationPage: React.FC = () => {
     <HQLayout
       title="Workflow Automation"
       subtitle="Live approval workflows, scheduled jobs, and executive task processing"
+      auraModule="workflow"
+      auraActions={["ask", "fix_workflow", "prepare_approval", "explain"]}
     >
       {feedback && (
         <div

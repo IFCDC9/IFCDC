@@ -81,6 +81,8 @@ const CommunicationsCenterPage: React.FC = () => {
     <HQLayout
       title="Communications Center"
       subtitle="Internal messaging, announcements, and organization-wide updates"
+      auraModule="communications"
+      auraActions={["ask", "summarize", "prepare_approval", "explain"]}
     >
       {overview.data && (
         <div className="hq-kpi-grid hq-fade-in" style={{ marginBottom: "1.25rem" }}>

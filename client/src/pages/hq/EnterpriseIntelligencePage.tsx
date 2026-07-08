@@ -212,6 +212,8 @@ const EnterpriseIntelligencePage: React.FC = () => {
     <HQLayout
       title="Enterprise Intelligence"
       subtitle="Organization-wide data warehouse — executive analytics, forecasting, and KPI drill-downs"
+      auraModule="intelligence"
+      auraActions={["ask", "summarize", "generate_report", "explain"]}
     >
       <HqQueryBoundary
         query={overview}

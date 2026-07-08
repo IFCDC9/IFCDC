@@ -168,7 +168,7 @@ const SoftwareDivisionPage: React.FC = () => {
   };
 
   return (
-    <HQLayout title="Software Division" subtitle="Enterprise app registry, health monitoring, and integration framework">
+    <HQLayout title="Software Division" subtitle="Enterprise app registry, health monitoring, and integration framework" auraModule="software" auraActions={["ask", "summarize", "explain"]}>
       <div className="hq-sd-toolbar">
         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
           <StatusBadge label={`${healthy} / ${total} healthy`} variant={healthy === total && total > 0 ? "success" : "warning"} pulse />

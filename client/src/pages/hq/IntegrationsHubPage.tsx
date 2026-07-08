@@ -129,6 +129,8 @@ const IntegrationsHubPage: React.FC = () => {
     <HQLayout
       title="Integrations Hub"
       subtitle="Enterprise connector registry — federal grants, payments, communications, AI, infrastructure, and division apps"
+      auraModule="integrations"
+      auraActions={["ask", "explain", "summarize"]}
     >
       <HqQueryBoundary
         query={hubQuery}

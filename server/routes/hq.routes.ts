@@ -320,8 +320,9 @@ router.post("/aura/chat", hqAuthRequired, requireHQModule("aura"), async (req, r
     const response = await auraExecutiveChat(modePrefix + message, orgContext);
     res.json({ response, poweredBy: "AURA Enterprise", mode: mode ?? "chat" });
   } catch (error) {
-    console.error("AURA HQ chat error:", error);
-    res.status(500).json({ error: "AURA assistant unavailable" });
+    const message = error instanceof Error ? error.message : "AURA assistant unavailable";
+    console.error("AURA HQ chat error:", message);
+    res.status(/401|api key/i.test(message) ? 400 : 500).json({ error: message });
   }
 });
 
@@ -501,6 +502,69 @@ router.post("/aura/navigate", hqAuthRequired, requireHQModule("aura"), async (re
   if (query.length < 2) return res.status(400).json({ error: "query must be at least 2 characters" });
   const { auraNavigate } = await import("../hq/auraNlNavigation");
   res.json(await auraNavigate(query));
+});
+
+// AURA native command layer — free-form command dispatch across all of HQ.
+router.post("/aura/command", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  try {
+    const command = String(req.body?.command ?? "").trim();
+    if (command.length < 2) return res.status(400).json({ error: "command must be at least 2 characters" });
+    const module = typeof req.body?.module === "string" ? req.body.module : undefined;
+    const contextRef =
+      req.body?.contextRef && typeof req.body.contextRef === "object" ? req.body.contextRef : undefined;
+    const { runAuraCommand } = await import("../hq/auraCommandLayer");
+    const result = await runAuraCommand({
+      command,
+      module,
+      contextRef,
+      actorEmail: req.hqUser?.email ?? "founder",
+    });
+    res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "AURA command failed";
+    console.error("AURA command error:", message);
+    res.status(/401|api key/i.test(message) ? 400 : 500).json({ error: message });
+  }
+});
+
+// Directly invoke a registered AURA action (contextual UI buttons).
+router.post("/aura/action/:actionId", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  try {
+    const actionId = String(req.params.actionId);
+    const args = req.body?.args && typeof req.body.args === "object" ? req.body.args : {};
+    const module = typeof req.body?.module === "string" ? req.body.module : undefined;
+    const contextRef =
+      req.body?.contextRef && typeof req.body.contextRef === "object" ? req.body.contextRef : undefined;
+    const { runAuraAction } = await import("../hq/auraCommandLayer");
+    const result = await runAuraAction(actionId, args, {
+      actorEmail: req.hqUser?.email ?? "founder",
+      module,
+      contextRef,
+    });
+    res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "AURA action failed";
+    console.error("AURA action error:", message);
+    res.status(/401|api key/i.test(message) ? 400 : 500).json({ error: message });
+  }
+});
+
+// Catalog of AURA actions for rendering buttons.
+router.get("/aura/actions", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
+  const { listAuraActions } = await import("../hq/auraCommandLayer");
+  res.json({ actions: listAuraActions() });
+});
+
+// AURA conversation memory.
+router.get("/aura/memory", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { getRecentAuraTurns } = await import("../hq/auraMemory");
+  const turns = await getRecentAuraTurns(req.hqUser?.email ?? "founder", 20);
+  res.json({ turns });
+});
+
+router.post("/aura/memory/reset", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resetAuraMemory } = await import("../hq/auraMemory");
+  res.json(await resetAuraMemory(req.hqUser?.email ?? "founder"));
 });
 
 router.post("/notifications/broadcast", hqAuthRequired, requireHQModule("notifications"), async (req, res) => {

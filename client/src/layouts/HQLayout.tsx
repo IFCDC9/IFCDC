@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Menu, X, Bell, Search } from "lucide-react";
+import { Menu, X, Bell, Search, Sparkles } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "../auth/AuthContext";
 import { HQ_NAV_ITEMS, HQ_NAV_SECTIONS } from "../config/hqNavigation";
 import { CommandPalette, useCommandPalette } from "../components/hq/CommandPalette";
+import { AuraCommandBar } from "../components/hq/aura/AuraCommandBar";
+import { AuraActionButtons, type AuraButtonId } from "../components/hq/aura/AuraActionButtons";
+import { openAura } from "../components/hq/aura/auraBus";
 import { KeyboardShortcutsHelp } from "../components/hq/phase10/KeyboardShortcutsHelp";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { HqMobileNav } from "../components/hq/HqMobileNav";
@@ -16,6 +19,10 @@ interface HQLayoutProps {
   children: React.ReactNode;
   title?: string;
   subtitle?: string;
+  /** When set, renders a contextual AURA action bar at the top of the page. */
+  auraModule?: string;
+  auraActions?: AuraButtonId[];
+  auraContextRef?: Record<string, unknown>;
 }
 
 function navPathBase(path: string): string {
@@ -26,6 +33,9 @@ const HQLayout: React.FC<HQLayoutProps> = ({
   children,
   title = "IFCDC Headquarters",
   subtitle = "Enterprise Operating System",
+  auraModule,
+  auraActions,
+  auraContextRef,
 }) => {
   const { user, canAccessRoute } = useAuth();
   const location = useLocation();
@@ -81,6 +91,7 @@ const HQLayout: React.FC<HQLayoutProps> = ({
   return (
     <div className="hq-shell">
       <CommandPalette open={command.open} onClose={command.close} />
+      <AuraCommandBar />
       <KeyboardShortcutsHelp open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
 
       <div
@@ -152,6 +163,15 @@ const HQLayout: React.FC<HQLayoutProps> = ({
           <div className="hq-topbar-right">
             <button
               type="button"
+              className="hq-topbar-btn hq-aura-topbar-btn"
+              onClick={() => openAura()}
+              aria-label="Ask AURA"
+            >
+              <Sparkles size={16} />
+              <span className="hq-aura-topbar-label">Ask AURA</span>
+            </button>
+            <button
+              type="button"
               className="hq-topbar-btn hq-command-trigger"
               onClick={command.toggle}
               aria-label="Search Headquarters"
@@ -174,6 +194,14 @@ const HQLayout: React.FC<HQLayoutProps> = ({
 
         <div className="hq-content">
           <ExecutiveLoginBriefing />
+          {auraModule && (
+            <div className="hq-aura-pagebar">
+              <span className="hq-aura-pagebar-label">
+                <Sparkles size={13} /> AURA
+              </span>
+              <AuraActionButtons module={auraModule} actions={auraActions} contextRef={auraContextRef} />
+            </div>
+          )}
           {children}
         </div>
       </div>

@@ -243,7 +243,7 @@ const DocumentCenterPage: React.FC = () => {
   const overviewData = overview.data ?? EMPTY_DOCUMENTS_OVERVIEW;
 
   return (
-    <HQLayout title="Document Management" subtitle="Secure vault — grants, board records, policies, contracts, and founder approvals">
+    <HQLayout title="Document Management" subtitle="Secure vault — grants, board records, policies, contracts, and founder approvals" auraModule="documents" auraActions={["ask", "summarize", "prepare_approval", "explain"]}>
       <HqQueryBoundary
         query={list}
         title="Document library unavailable"
