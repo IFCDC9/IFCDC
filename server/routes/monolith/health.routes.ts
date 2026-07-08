@@ -12,7 +12,7 @@ import {
 import { openAiConfigStatus } from "../../lib/openaiConfig";
 
 export function registerHealthRoutes(app: Express): void {
-  app.get("/api/health", (_req, res) => {
+  app.get("/api/health", async (_req, res) => {
     const build = getBuildInfo();
     const commit =
       process.env.RENDER_GIT_COMMIT?.slice(0, 7) ??
@@ -26,6 +26,37 @@ export function registerHealthRoutes(app: Express): void {
     const twilioWebhookSync = getLastTwilioWebhookSync();
     const twilioWebhooks = getTwilioWebhookUrls();
     const openai = openAiConfigStatus();
+
+    let knowledgeBase: {
+      total: number;
+      embedded: number;
+      chunks: number;
+      embeddingsConfigured: boolean;
+      bySource: { source_type: string; count: number }[];
+      lastSync: { finished_at: string; status: string; ingested: number; skipped: number } | null;
+    } | null = null;
+    try {
+      const { getKnowledgeBaseStatus } = await import("../../hq/knowledgeBaseEngine");
+      const kb = await getKnowledgeBaseStatus();
+      knowledgeBase = {
+        total: kb.total,
+        embedded: kb.embedded,
+        chunks: kb.chunks,
+        embeddingsConfigured: kb.embeddingsConfigured,
+        bySource: kb.bySource ?? [],
+        lastSync: kb.lastSync
+          ? {
+              finished_at: kb.lastSync.finished_at,
+              status: kb.lastSync.status,
+              ingested: kb.lastSync.ingested,
+              skipped: kb.lastSync.skipped,
+            }
+          : null,
+      };
+    } catch {
+      knowledgeBase = null;
+    }
+
     res.json({
       app: "ifcdc-headquarters",
       status: "healthy",
@@ -47,6 +78,7 @@ export function registerHealthRoutes(app: Express): void {
         completedAt: qaReport.completedAt ?? null,
         reportUrl: "/api/hq/grants/qa/report",
       },
+      knowledgeBase,
       credentials: {
         superAdminEmail: getSuperAdminEmail(),
         grantsOperatorEmail: getGrantsOperatorEmail(),

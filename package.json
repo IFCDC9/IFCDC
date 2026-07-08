@@ -46,6 +46,7 @@
     "hq:phase1-verify": "node script/phase1-production-hardening-verify.mjs",
     "comms:readiness": "node script/communications-readiness.mjs",
     "docs:readiness": "node script/documents-readiness.mjs",
+    "kb:readiness": "node script/knowledge-base-readiness.mjs",
     "platform:audit": "node script/platform-audit.mjs",
     "enterprise:verify": "node script/enterprise-production-verify.mjs",
     "render:sync-env": "node script/render-sync-production-env.mjs",
