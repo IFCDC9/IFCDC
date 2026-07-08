@@ -9,6 +9,7 @@ import { fmtGrantDeadline, fmtGrantAmount } from "../../../utils/grantFormat";
 import { formatCurrency } from "../../../utils/safeFormat";
 import { useGrantManage } from "../../../hooks/useGrantManage";
 import { GrantApplicationWorkflowPanel } from "./GrantApplicationWorkflowPanel";
+import { openAura } from "../aura/auraBus";
 
 const AI_SECTIONS = [
   { key: "executive_summary", label: "Executive Summary" },
@@ -32,6 +33,10 @@ export const GrantFullApplicationWorkspace: React.FC<{
   const [activeSection, setActiveSection] = useState("executive_summary");
   const [draftProgress, setDraftProgress] = useState<{ completed: number; total: number } | null>(null);
   const [genError, setGenError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [changeNote, setChangeNote] = useState("");
+  const [showChangeForm, setShowChangeForm] = useState(false);
 
   const workspace = useQuery({
     queryKey: ["grant-full-workspace", applicationId],
@@ -41,44 +46,103 @@ export const GrantFullApplicationWorkspace: React.FC<{
     refetchInterval: draftProgress ? 3000 : false,
   });
 
+  const invalidateWorkspace = () => {
+    qc.invalidateQueries({ queryKey: ["grant-full-workspace", applicationId] });
+    qc.invalidateQueries({ queryKey: ["grant-writer-studio", applicationId] });
+    qc.invalidateQueries({ queryKey: ["grant-enriched-applications"] });
+    qc.invalidateQueries({ queryKey: ["grants-applications"] });
+    qc.invalidateQueries({ queryKey: ["grant-enterprise-pipeline"] });
+    onUpdated?.();
+  };
+
   const generateFull = useMutation({
     mutationFn: () =>
       grantsApi.generateFullProposalDraft(String(applicationId), undefined, (job) => {
         setDraftProgress({ completed: Number(job.completed ?? 0), total: Number(job.total ?? 10) });
       }),
+    onMutate: () => {
+      setGenError(null);
+      setActionError(null);
+      setActionMessage("Starting full proposal generation…");
+    },
     onSuccess: (result) => {
       setDraftProgress(null);
       setGenError(result.error ?? null);
-      qc.invalidateQueries({ queryKey: ["grant-full-workspace", applicationId] });
-      qc.invalidateQueries({ queryKey: ["grant-writer-studio", applicationId] });
-      onUpdated?.();
+      setActionMessage(
+        result.error
+          ? null
+          : `Full proposal package ready (${result.completed}/${result.total} sections). Founder review still required before federal submit.`
+      );
+      invalidateWorkspace();
     },
     onError: (err: Error) => {
       setDraftProgress(null);
       setGenError(err.message);
+      setActionMessage(null);
+      setActionError(err.message);
     },
   });
 
   const aiSection = useMutation({
     mutationFn: (sectionKey: string) => grantsApi.writerAiAssist(String(applicationId), sectionKey),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["grant-full-workspace", applicationId] }),
+    onError: (err: Error) => setActionError(err.message),
   });
 
   const founderAction = useMutation({
-    mutationFn: (action: "approve" | "request_changes" | "mark_ready") =>
-      grantsApi.founderApproval(String(applicationId), action),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["grant-full-workspace", applicationId] });
-      qc.invalidateQueries({ queryKey: ["grant-enriched-applications"] });
-      onUpdated?.();
+    mutationFn: (payload: { action: "approve" | "request_changes" | "mark_ready"; note?: string }) =>
+      grantsApi.founderApproval(String(applicationId), payload.action, payload.note),
+    onMutate: () => {
+      setActionError(null);
+      setActionMessage(null);
+    },
+    onSuccess: (result, variables) => {
+      if (result?.ok === false) {
+        setActionError("Founder action was not saved.");
+        return;
+      }
+      if (variables.action === "approve") {
+        setActionMessage("Founder approval saved. Application is ready for submission packaging.");
+        setShowChangeForm(false);
+      } else if (variables.action === "request_changes") {
+        setActionMessage("Change request recorded. Writers can revise sections and resubmit for approval.");
+        setShowChangeForm(false);
+        setChangeNote("");
+      } else {
+        setActionMessage("Marked ready to submit.");
+      }
+      if (result.workspace) {
+        qc.setQueryData(["grant-full-workspace", applicationId], result.workspace);
+      }
+      invalidateWorkspace();
+    },
+    onError: (err: Error) => {
+      setActionError(err.message || "Founder action failed");
     },
   });
+
+  const openGrantAura = () => {
+    openAura({
+      module: "grants",
+      contextRef: { applicationId },
+      prefill: applicationId
+        ? `Review application ${applicationId} — summarize readiness, risks, and next Founder actions.`
+        : undefined,
+    });
+  };
 
   if (!applicationId) {
     return <p className="hq-muted-text">Select an application or click Start Application on an opportunity.</p>;
   }
 
   if (workspace.isLoading) return <HqLoading />;
+  if (workspace.isError) {
+    return (
+      <p className="hq-muted-text" style={{ color: "var(--hq-danger)" }}>
+        {(workspace.error as Error)?.message || "Workspace failed to load."}
+      </p>
+    );
+  }
   if (!workspace.data) return <p className="hq-muted-text">Application workspace not found.</p>;
 
   const ws = workspace.data;
@@ -92,7 +156,7 @@ export const GrantFullApplicationWorkspace: React.FC<{
   const checklist = ws.documentChecklist as { byCategory?: { category: string; documents: unknown[] }[]; totalDocuments?: number };
 
   return (
-    <div style={{ display: "grid", gap: "1.25rem" }}>
+    <div className="hq-grant-workspace" style={{ display: "grid", gap: "1.25rem" }}>
       <HqPanel title="Application Workspace" subtitle={`${String(ws.application?.title ?? "")} · ${workflow?.label ?? "Drafting"}`}>
         <div className="hq-kpi-grid" style={{ marginBottom: "1rem" }}>
           <div><div className="hq-muted-text" style={{ fontSize: "0.72rem" }}>Match Score</div><strong>{(ws.intelligence as { composite?: number })?.composite ?? "—"}%</strong></div>
@@ -131,19 +195,83 @@ export const GrantFullApplicationWorkspace: React.FC<{
         </div>
 
         {canManage && (
-          <div className="hq-founder-command-strip" style={{ marginBottom: "1rem", flexWrap: "wrap" }}>
-            <button type="button" className="hq-btn hq-btn-sm hq-btn-primary" disabled={founderAction.isPending} onClick={() => founderAction.mutate("approve")}>
-              <Shield size={14} /> Founder Approve
+          <div className="hq-founder-command-strip" style={{ marginBottom: "1rem", flexWrap: "wrap" }} role="toolbar" aria-label="Founder grant actions">
+            <button
+              type="button"
+              className="hq-btn hq-btn-sm hq-btn-primary"
+              disabled={founderAction.isPending}
+              onClick={() => founderAction.mutate({ action: "approve" })}
+            >
+              <Shield size={14} /> {founderAction.isPending ? "Saving…" : "Founder Approve"}
             </button>
-            <button type="button" className="hq-btn hq-btn-sm hq-btn-secondary" disabled={founderAction.isPending} onClick={() => founderAction.mutate("request_changes")}>
+            <button
+              type="button"
+              className="hq-btn hq-btn-sm hq-btn-secondary"
+              disabled={founderAction.isPending}
+              onClick={() => {
+                setShowChangeForm(true);
+                setActionError(null);
+                setActionMessage(null);
+              }}
+            >
               Request Changes
             </button>
-            <button type="button" className="hq-btn hq-btn-sm hq-btn-secondary" disabled={generateFull.isPending || !!draftProgress} onClick={() => generateFull.mutate()}>
-              <Sparkles size={14} /> {generateFull.isPending || draftProgress ? `Generating ${draftProgress?.completed ?? 0}/${draftProgress?.total ?? 10}…` : "Generate Full Proposal"}
+            <button
+              type="button"
+              className="hq-btn hq-btn-sm hq-btn-secondary"
+              disabled={generateFull.isPending || !!draftProgress}
+              onClick={() => generateFull.mutate()}
+            >
+              <Sparkles size={14} />{" "}
+              {generateFull.isPending || draftProgress
+                ? `Generating ${draftProgress?.completed ?? 0}/${draftProgress?.total ?? 10}…`
+                : "Generate Full Proposal"}
+            </button>
+            <button type="button" className="hq-btn hq-btn-sm hq-btn-ghost" onClick={openGrantAura}>
+              <Sparkles size={14} /> Ask AURA
             </button>
           </div>
         )}
-        {genError && <p className="hq-muted-text" style={{ color: "var(--hq-danger)", fontSize: "0.75rem" }}>{genError}</p>}
+
+        {showChangeForm && canManage && (
+          <div className="hq-panel" style={{ marginBottom: "1rem", padding: "0.85rem 1rem" }}>
+            <label style={{ display: "block", fontSize: "0.78rem", color: "var(--hq-text-muted)", marginBottom: "0.35rem" }}>
+              What needs to change before Founder approval?
+            </label>
+            <textarea
+              className="hq-input"
+              rows={3}
+              style={{ width: "100%", marginBottom: "0.65rem" }}
+              value={changeNote}
+              onChange={(e) => setChangeNote(e.target.value)}
+              placeholder="List required revisions, missing attachments, budget notes…"
+            />
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="hq-btn hq-btn-sm hq-btn-primary"
+                disabled={founderAction.isPending || !changeNote.trim()}
+                onClick={() => founderAction.mutate({ action: "request_changes", note: changeNote.trim() })}
+              >
+                Submit Change Request
+              </button>
+              <button type="button" className="hq-btn hq-btn-sm hq-btn-ghost" onClick={() => setShowChangeForm(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {actionMessage && (
+          <p style={{ color: "var(--hq-success)", fontSize: "0.8rem", marginBottom: "0.5rem" }} role="status">
+            {actionMessage}
+          </p>
+        )}
+        {(actionError || genError) && (
+          <p className="hq-muted-text" style={{ color: "var(--hq-danger)", fontSize: "0.75rem" }} role="alert">
+            {actionError || genError}
+          </p>
+        )}
         <p className="hq-muted-text" style={{ fontSize: "0.75rem" }}>Federal submission requires founder approval. AURA never submits automatically.</p>
       </HqPanel>
 

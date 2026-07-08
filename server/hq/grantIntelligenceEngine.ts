@@ -314,7 +314,7 @@ export async function setFounderApproval(
   const now = new Date().toISOString();
   if (action === "approve") {
     await db.run(
-      `UPDATE grant_applications SET founder_approval_status = 'approved', founder_approved_at = ?, founder_approved_by = ?, ready_to_submit = 1, lifecycle_stage = 'internal_approval', updated_at = ? WHERE id = ?`,
+      `UPDATE grant_applications SET founder_approval_status = 'approved', founder_approved_at = ?, founder_approved_by = ?, ready_to_submit = 1, lifecycle_stage = 'internal_approval', pipeline_stage = 'ready_for_submission', updated_at = ? WHERE id = ?`,
       now,
       opts?.actorEmail ?? null,
       now,
@@ -322,7 +322,7 @@ export async function setFounderApproval(
     );
   } else if (action === "request_changes") {
     await db.run(
-      `UPDATE grant_applications SET founder_approval_status = 'changes_requested', ready_to_submit = 0, updated_at = ? WHERE id = ?`,
+      `UPDATE grant_applications SET founder_approval_status = 'changes_requested', ready_to_submit = 0, lifecycle_stage = 'application_drafting', pipeline_stage = 'internal_review', updated_at = ? WHERE id = ?`,
       now,
       applicationId
     );
@@ -335,13 +335,32 @@ export async function setFounderApproval(
       return { ok: false, error: "Founder must approve before marking ready to submit." };
     }
     await db.run(
-      `UPDATE grant_applications SET ready_to_submit = 1, lifecycle_stage = 'application_drafting', updated_at = ? WHERE id = ?`,
+      `UPDATE grant_applications SET ready_to_submit = 1, lifecycle_stage = 'application_drafting', pipeline_stage = 'ready_for_submission', updated_at = ? WHERE id = ?`,
       now,
       applicationId
     );
   }
 
   await logGrantActivity("application", applicationId, `founder_${action}`, opts?.note ?? action, opts?.actorEmail);
+  try {
+    const { logHqAudit } = await import("./hqAuditLog");
+    await logHqAudit({
+      action: `grant_founder_${action}`,
+      entityType: "grant_application",
+      entityId: applicationId,
+      actorEmail: opts?.actorEmail,
+      detail: opts?.note ?? action,
+      metadata: { action },
+    });
+  } catch {
+    /* audit optional */
+  }
+  try {
+    const { notifyHqDataChange } = await import("./hqRealtimeEvents");
+    notifyHqDataChange("grants");
+  } catch {
+    /* optional realtime */
+  }
   return { ok: true, workspace: await buildFullApplicationWorkspace(applicationId, opts) };
 }
 

@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Sparkles } from "lucide-react";
 import { AuraExecutiveChatWorkspace } from "./AuraExecutiveChatWorkspace";
 import { AURA_OPEN_EVENT, type AuraOpenDetail } from "./auraBus";
 
 /**
  * Floating AURA entry + fullscreen Enterprise Workspace drawer.
- * Long reports scroll indefinitely; jobs keep processing with live status.
+ * Portaled to document.body so Grant Center stacking/transforms never block clicks.
  */
 export function AuraCommandBar(): React.ReactElement {
   const [open, setOpen] = useState(false);
@@ -33,9 +34,6 @@ export function AuraCommandBar(): React.ReactElement {
         setAutoCommand({ text: detail.prefill });
       } else {
         setAutoCommand(undefined);
-        if (detail.prefill) {
-          /* workspace loads; user can edit — prefill handled by opening input focus */
-        }
       }
       setOpen(true);
     };
@@ -60,19 +58,21 @@ export function AuraCommandBar(): React.ReactElement {
     };
   }, [open]);
 
-  return (
+  const openDrawer = () => {
+    setModule(undefined);
+    setContextRef(undefined);
+    setAutoCommand(undefined);
+    setSession((s) => s + 1);
+    setOpen(true);
+  };
+
+  const ui = (
     <>
       {!open && (
         <button
           type="button"
           className="hq-aura-fab"
-          onClick={() => {
-            setModule(undefined);
-            setContextRef(undefined);
-            setAutoCommand(undefined);
-            setSession((s) => s + 1);
-            setOpen(true);
-          }}
+          onClick={openDrawer}
           aria-label="Ask AURA"
           title="Ask AURA"
         >
@@ -95,6 +95,9 @@ export function AuraCommandBar(): React.ReactElement {
       )}
     </>
   );
+
+  if (typeof document === "undefined") return ui;
+  return createPortal(ui, document.body);
 }
 
 export default AuraCommandBar;

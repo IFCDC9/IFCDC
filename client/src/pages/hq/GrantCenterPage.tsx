@@ -164,6 +164,15 @@ const GrantCenterPage: React.FC = () => {
       setSelectedFunderId(funderId);
       setTab("funders");
     }
+    const applicationId =
+      searchParams.get("application")
+      || searchParams.get("applicationId")
+      || searchParams.get("app");
+    if (applicationId) {
+      setSelectedApplicationId(applicationId);
+      setTab("applications");
+      setAppsSection(tabParam === "writer-studio" || tabParam === "studio" ? "studio" : "list");
+    }
   }, [searchParams]);
 
   const selectTab = (next: GrantTab) => {
