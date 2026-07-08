@@ -27,14 +27,28 @@ export function reportProductionEnvGaps(): void {
   const missing = OPTIONAL_PRODUCTION_VARS.filter(({ key }) => !(process.env[key] || "").trim());
   if (missing.length === 0) {
     console.log("Production env: all optional integration variables configured");
-    return;
+  } else {
+    console.warn("Production env: optional variables not set (features may be limited):");
+    for (const { key, purpose } of missing) {
+      console.warn(`  - ${key} (${purpose})`);
+    }
+    if (!process.env.HQ_BARBERS_HEALTH_URL?.trim()) {
+      console.warn("  → Set HQ_BARBERS_HEALTH_URL to the live Barbers app /api/health URL (flagship app)");
+    }
   }
 
-  console.warn("Production env: optional variables not set (features may be limited):");
-  for (const { key, purpose } of missing) {
-    console.warn(`  - ${key} (${purpose})`);
-  }
-  if (!process.env.HQ_BARBERS_HEALTH_URL?.trim()) {
-    console.warn("  → Set HQ_BARBERS_HEALTH_URL to the live Barbers app /api/health URL (flagship app)");
+  // Founder OTP critical path
+  const resendKey = Boolean((process.env.RESEND_API_KEY || process.env.EMAIL_API_KEY || "").trim());
+  const from =
+    process.env.RESEND_FROM_EMAIL
+    || process.env.EMAIL_FROM
+    || process.env.SMTP_FROM
+    || "(default service@ifcdc.org)";
+  if (!resendKey) {
+    console.error(
+      "CRITICAL: RESEND_API_KEY missing — AURA cannot email Founder verification codes to service@ifcdc.org"
+    );
+  } else {
+    console.log(`Email delivery: Resend configured · from=${from}`);
   }
 }

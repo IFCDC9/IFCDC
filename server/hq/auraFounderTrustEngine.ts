@@ -22,7 +22,7 @@ import {
   type Permission,
 } from "./enterpriseRoles";
 import { logHqAudit } from "./hqAuditLog";
-import { sendHqNotification } from "../lib/notifications";
+import { sendFounderSecurityEmail, getEmailDeliveryStatus } from "../lib/notifications";
 import { IFCDC_HQ_PHONE_E164, normalizeE164, resolveTwilioPhoneNumber } from "./twilioIntegrationEngine";
 
 export type AuraChannel = "hq_web" | "voice" | "sms";
@@ -415,8 +415,17 @@ export async function persistPhoneFounderSession(identity: AuraTrustedIdentity):
 async function sendFounderOtpEmail(code: string): Promise<{ ok: boolean; error?: string; to: string }> {
   const to = getFounderEmail();
   const minutes = Math.round(OTP_TTL_MS / 60_000);
-  const result = await sendHqNotification({
-    channel: "email",
+  const status = getEmailDeliveryStatus();
+  if (!status.configured) {
+    console.error("[founder-otp] Email not configured — RESEND_API_KEY missing");
+    return {
+      ok: false,
+      error: "RESEND_API_KEY is not configured on Headquarters",
+      to,
+    };
+  }
+
+  const result = await sendFounderSecurityEmail({
     to,
     subject: "IFCDC AURA Founder verification code",
     body: [
@@ -431,32 +440,38 @@ async function sendFounderOtpEmail(code: string): Promise<{ ok: boolean; error?:
       "— IFCDC Headquarters · AURA Security",
     ].join("\n"),
   });
+
   if (!result.success) {
+    console.error(`[founder-otp] Email to ${to} failed: ${result.error}`);
     return { ok: false, error: result.error || "Email delivery failed", to };
   }
+  console.log(`[founder-otp] Email delivered to ${to} messageId=${result.messageId ?? "n/a"}`);
   return { ok: true, to };
 }
 
-/** Optional SMS mirror — email is the primary Founder OTP channel. */
+/** Twilio SMS backup for Founder OTP — on by default so voice verification works if Resend fails. */
 async function sendFounderOtpSms(toPhone: string, code: string): Promise<{ ok: boolean; error?: string }> {
   try {
+    if (process.env.AURA_FOUNDER_OTP_SMS === "false") {
+      return { ok: false, error: "SMS OTP disabled by AURA_FOUNDER_OTP_SMS=false" };
+    }
     const sid = (process.env.TWILIO_ACCOUNT_SID || "").trim();
     const token = (process.env.TWILIO_AUTH_TOKEN || "").trim();
     const from = resolveTwilioPhoneNumber() || IFCDC_HQ_PHONE_E164;
-    if (!sid || !token) return { ok: false, error: "Twilio not configured" };
-    if (process.env.AURA_FOUNDER_OTP_SMS !== "true") {
-      return { ok: false, error: "SMS OTP mirror disabled (email is primary)" };
-    }
+    if (!sid || !token || !from) return { ok: false, error: "Twilio not configured" };
     const twilio = await import("twilio");
     const client = twilio.default(sid, token);
     await client.messages.create({
       to: toPhone,
       from,
-      body: `IFCDC AURA Founder verification code: ${code}. Valid ${Math.round(OTP_TTL_MS / 60_000)} minutes. Do not share this code.`,
+      body: `IFCDC AURA Founder verification code: ${code}. Valid ${Math.round(OTP_TTL_MS / 60_000)} minutes. Do not share.`,
     });
+    console.log(`[founder-otp] SMS delivered to ${toPhone}`);
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "SMS failed" };
+    const message = err instanceof Error ? err.message : "SMS failed";
+    console.error(`[founder-otp] SMS failed: ${message}`);
+    return { ok: false, error: message };
   }
 }
 
@@ -530,50 +545,66 @@ export async function startFounderPhoneChallenge(opts: {
     expiresAt
   );
 
-  const email = await sendFounderOtpEmail(code);
-  const sms =
-    process.env.AURA_FOUNDER_OTP_SMS === "true"
-      ? await sendFounderOtpSms(phone, code)
-      : { ok: false, error: "SMS mirror off" };
+  // Parallel delivery — keep Twilio voice webhooks under the provider timeout budget.
+  const [email, sms] = await Promise.all([
+    sendFounderOtpEmail(code),
+    sendFounderOtpSms(phone, code),
+  ]);
 
   await logHqAudit({
-    action: "aura_founder_otp_sent",
+    action: email.ok || sms.ok ? "aura_founder_otp_sent" : "aura_founder_otp_send_failed",
     entityType: "aura_identity",
     entityId: challengeId,
     detail: email.ok
-      ? `Founder OTP emailed to ${actorEmail}`
-      : `Founder OTP created but email failed: ${email.error}`,
+      ? `Founder OTP emailed to ${actorEmail}${sms.ok ? " (+ SMS backup)" : ""}`
+      : sms.ok
+        ? `Founder OTP SMS sent to ${phone} (email failed: ${email.error})`
+        : `Founder OTP delivery failed email=${email.error}; sms=${sms.error}`,
     actorEmail,
     metadata: {
       phone,
       channel: opts.channel,
       emailSent: email.ok,
       emailTo: actorEmail,
+      emailError: email.ok ? undefined : email.error,
       smsSent: sms.ok,
+      smsError: sms.ok ? undefined : sms.error,
+      emailStatus: getEmailDeliveryStatus(),
       otpTtlMinutes: Math.round(OTP_TTL_MS / 60_000),
       stepUp: true,
       candidatePhone: true,
     },
   });
 
-  if (!email.ok) {
+  if (!email.ok && !sms.ok) {
     return {
-      ok: true,
+      ok: false,
       challengeId,
       smsSent: false,
       emailSent: false,
       message:
-        `I recognized your Founder phone, but could not deliver the verification code to ${actorEmail}. Please confirm Resend email is configured on Headquarters, then say "verify founder" again.`,
+        `I recognized your Founder phone, but could not deliver the verification code to ${actorEmail} or by SMS (${email.error || "email failed"}). Please ensure RESEND_API_KEY and RESEND_FROM_EMAIL are set on Render, then say "verify founder" again.`,
+    };
+  }
+
+  if (email.ok) {
+    return {
+      ok: true,
+      challengeId,
+      smsSent: sms.ok,
+      emailSent: true,
+      message:
+        `I recognize this as your Founder phone. For security I emailed a 6-digit code to ${actorEmail}${sms.ok ? " and also texted a backup copy to this phone" : ""}. Please say or text that code to unlock Founder Mode. The code expires in ${Math.round(OTP_TTL_MS / 60_000)} minutes.`,
     };
   }
 
   return {
     ok: true,
     challengeId,
-    smsSent: sms.ok,
-    emailSent: true,
+    smsSent: true,
+    emailSent: false,
     message:
-      `I recognize this as your Founder phone. For security I emailed a 6-digit code to ${actorEmail}. Please say or text that code to unlock Founder Mode. The code expires in ${Math.round(OTP_TTL_MS / 60_000)} minutes.`,
+      `I recognize this as your Founder phone. Email delivery to ${actorEmail} is temporarily unavailable, so I texted a 6-digit code to this phone. Please say or text that code to unlock Founder Mode. The code expires in ${Math.round(OTP_TTL_MS / 60_000)} minutes.`,
   };
 }
 

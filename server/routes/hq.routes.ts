@@ -8,7 +8,7 @@ import peopleRouter from "./people.routes";
 import clientsHqRouter from "./clients-hq.routes";
 import enterpriseAuthRouter from "./enterpriseAuth.routes";
 import { checkIfcdcServices, auraExecutiveChat } from "../lib/ifcdc";
-import { sendHqNotification } from "../lib/notifications";
+import { sendHqNotification, getEmailDeliveryStatus, resolveResendFromEmail } from "../lib/notifications";
 import { getOrganizationMetrics, getRecentActivity, getMonthlyTrend } from "../hq/metrics";
 import grantsRouter from "./grants.routes";
 import financeRouter from "./finance.routes";
@@ -100,6 +100,17 @@ router.get("/health", (_req: Request, res: Response) => {
     status: "healthy",
     version: "1.0.0",
     platform: "IFCDC Enterprise Operating System",
+  });
+});
+
+/** Non-secret email delivery readiness (Founder OTP depends on this). */
+router.get("/email/status", (_req: Request, res: Response) => {
+  const status = getEmailDeliveryStatus();
+  res.json({
+    ...status,
+    fromPreview: status.apiKeySet ? resolveResendFromEmail() : null,
+    founderOtpTo: process.env.MASTER_OWNER_EMAIL || process.env.FOUNDER_EMAIL || "service@ifcdc.org",
+    purpose: "AURA Founder verification OTP + Communications Center",
   });
 });
 

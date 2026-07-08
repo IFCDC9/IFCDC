@@ -52,9 +52,14 @@ services:
         sync: false
       - key: IFCDC_NOTIFICATIONS_URL
         sync: false
+      # Prefer inline Resend from HQ (Founder OTP). Set URL only if a remote notifications service exists.
+      - key: IFCDC_NOTIFICATIONS_INLINE
+        value: "true"
       - key: RESEND_API_KEY
         sync: false
       - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: EMAIL_FROM
         sync: false
       - key: GRANTS_GOV_SEARCH_KEYWORD
         value: "community development nonprofit"
