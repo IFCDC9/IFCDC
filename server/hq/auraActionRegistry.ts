@@ -46,11 +46,15 @@ export type AuraModule =
   | "integrations"
   | "global";
 
+import type { AuraTrustedIdentity } from "./auraFounderTrustEngine";
+
 export interface AuraActionContext {
   actorEmail: string;
   module?: string;
   /** Page-supplied entity references, e.g. { applicationId, workflowInstanceId, reportType, programSlug }. */
   contextRef?: Record<string, unknown>;
+  /** Resolved Founder Identity & Trust session for this turn. */
+  identity?: AuraTrustedIdentity;
 }
 
 export interface AuraActionResult {

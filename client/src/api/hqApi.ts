@@ -117,6 +117,18 @@ export interface AuraCommandResponse {
   approvalsCreated: Array<{ path: string; label: string }>;
   poweredBy: string;
   enterpriseJobId?: string;
+  identity?: {
+    founderMode: boolean;
+    isFounder: boolean;
+    displayName: string | null;
+    email: string | null;
+    enterpriseRole: string;
+    enterpriseRoleLabel: string;
+    assurance: string;
+    channel: string;
+    modules: string[];
+    verifiedAt: string | null;
+  };
 }
 
 export interface AuraActionCatalogItem {
@@ -240,6 +252,21 @@ export const hqApi = {
     }),
   auraActions: () => hqFetch<{ actions: AuraActionCatalogItem[] }>("/aura/actions"),
   auraMemory: () => hqFetch<{ turns: AuraMemoryTurn[] }>("/aura/memory"),
+  auraIdentity: () =>
+    hqFetch<{
+      identity: {
+        founderMode: boolean;
+        isFounder: boolean;
+        displayName: string | null;
+        email: string | null;
+        enterpriseRole: string;
+        enterpriseRoleLabel: string;
+        assurance: string;
+        channel: string;
+        modules: string[];
+        verifiedAt: string | null;
+      };
+    }>("/aura/identity"),
   auraMemoryReset: () =>
     hqFetch<{ cleared: number }>("/aura/memory/reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }),
 };

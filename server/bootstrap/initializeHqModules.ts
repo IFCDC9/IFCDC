@@ -24,6 +24,7 @@ import { purgeWorkflowDemoData } from "../hq/workflowProductionCleanup";
 import { ensureGrantWriterTables } from "../hq/grantWriterEngine";
 import { ensureAuraMemoryTables } from "../hq/auraMemory";
 import { ensureKnowledgeBaseTables } from "../hq/knowledgeBaseEngine";
+import { ensureAuraTrustTables } from "../hq/auraFounderTrustEngine";
 import { logOpenAiConfigAtBoot } from "../lib/openaiConfig";
 import { ensureMissionControlTables } from "../hq/missionControlSchema";
 import { initGoogleOAuth } from "../monolith/googleOAuth";
@@ -59,6 +60,7 @@ export async function initializeHqModules(founder: FounderSeedConfig): Promise<v
   await ensureSecuritySessionTables();
   await ensureAuraMemoryTables();
   await ensureKnowledgeBaseTables();
+  await ensureAuraTrustTables();
   // Build AURA's institutional knowledge base from live HQ data. Deferred so
   // dashboard reads are not blocked at boot; embedding controlled by env flag.
   setTimeout(() => {

@@ -109,6 +109,8 @@ export function AuraExecutiveChatWorkspace({
   const [toast, setToast] = useState<string | null>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
   const [jobTracking, setJobTracking] = useState<{ jobId: string; messageId: string } | null>(null);
+  const [founderMode, setFounderMode] = useState(false);
+  const [identityLabel, setIdentityLabel] = useState<string | null>(null);
 
   const moduleRef = useRef(module);
   const contextRefBox = useRef(contextRef);
@@ -152,7 +154,18 @@ export function AuraExecutiveChatWorkspace({
     historyLoaded.current = true;
     void (async () => {
       try {
-        const { turns } = await hqApi.auraMemory();
+        const [{ turns }, identityRes] = await Promise.all([
+          hqApi.auraMemory(),
+          hqApi.auraIdentity().catch(() => null),
+        ]);
+        if (identityRes?.identity) {
+          setFounderMode(Boolean(identityRes.identity.founderMode));
+          setIdentityLabel(
+            identityRes.identity.founderMode
+              ? `Founder Mode · ${identityRes.identity.displayName || "Fahreal Allah"}`
+              : identityRes.identity.enterpriseRoleLabel
+          );
+        }
         if (!turns?.length) return;
         setMessages(
           turns.map((t) => ({
@@ -177,6 +190,14 @@ export function AuraExecutiveChatWorkspace({
 
   const applyResponse = useCallback(
     (res: AuraCommandResponse) => {
+      if (res.identity) {
+        setFounderMode(Boolean(res.identity.founderMode));
+        setIdentityLabel(
+          res.identity.founderMode
+            ? `Founder Mode · ${res.identity.displayName || "Fahreal Allah"}`
+            : res.identity.enterpriseRoleLabel
+        );
+      }
       const jobId = extractEnterpriseJobId(res);
       const full = res.reply || "";
       const id = newMessageId();
@@ -411,6 +432,13 @@ export function AuraExecutiveChatWorkspace({
           <Sparkles size={16} />
           <span>AURA</span>
           <span className="hq-aura-cmd-badge">Executive Workspace</span>
+          {founderMode ? (
+            <span className="hq-aura-job-pill" title={identityLabel || "Founder Mode"}>
+              Founder Mode
+            </span>
+          ) : identityLabel ? (
+            <span className="hq-aura-cmd-badge">{identityLabel}</span>
+          ) : null}
           {activeJob && (
             <span className="hq-aura-job-pill" title={activeJob.jobId}>
               <Loader2 size={12} className="hq-spin" />

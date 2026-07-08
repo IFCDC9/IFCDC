@@ -512,12 +512,20 @@ router.post("/aura/command", hqAuthRequired, requireHQModule("aura"), async (req
     const module = typeof req.body?.module === "string" ? req.body.module : undefined;
     const contextRef =
       req.body?.contextRef && typeof req.body.contextRef === "object" ? req.body.contextRef : undefined;
+    const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+    const identity = resolveIdentityFromHqUser({
+      user: req.hqUser,
+      channel: "hq_web",
+      sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+    });
     const { runAuraCommand } = await import("../hq/auraCommandLayer");
     const result = await runAuraCommand({
       command,
       module,
       contextRef,
-      actorEmail: req.hqUser?.email ?? "founder",
+      actorEmail: req.hqUser?.email ?? identity.email ?? "unknown",
+      actorUser: req.hqUser,
+      identity,
     });
     res.json(result);
   } catch (error) {
@@ -535,11 +543,18 @@ router.post("/aura/action/:actionId", hqAuthRequired, requireHQModule("aura"), a
     const module = typeof req.body?.module === "string" ? req.body.module : undefined;
     const contextRef =
       req.body?.contextRef && typeof req.body.contextRef === "object" ? req.body.contextRef : undefined;
+    const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+    const identity = resolveIdentityFromHqUser({
+      user: req.hqUser,
+      channel: "hq_web",
+      sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+    });
     const { runAuraAction } = await import("../hq/auraCommandLayer");
     const result = await runAuraAction(actionId, args, {
-      actorEmail: req.hqUser?.email ?? "founder",
+      actorEmail: req.hqUser?.email ?? identity.email ?? "unknown",
       module,
       contextRef,
+      identity,
     });
     res.json(result);
   } catch (error) {
@@ -547,6 +562,20 @@ router.post("/aura/action/:actionId", hqAuthRequired, requireHQModule("aura"), a
     console.error("AURA action error:", message);
     res.status(/401|api key/i.test(message) ? 400 : 500).json({ error: message });
   }
+});
+
+/** Founder Identity & Trust — current AURA identity for this HQ session. */
+router.get("/aura/identity", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser, publicIdentitySummary, ensureAuraTrustTables } = await import(
+    "../hq/auraFounderTrustEngine"
+  );
+  await ensureAuraTrustTables();
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  res.json({ identity: publicIdentitySummary(identity) });
 });
 
 // Catalog of AURA actions for rendering buttons.

@@ -30,6 +30,8 @@ export type ReceptionistTurnResult = {
   transferTo: string | null;
   session: ReceptionistSession;
   bookingConfirmed: boolean;
+  founderMode?: boolean;
+  identityAssurance?: string;
 };
 
 const RECEPTIONIST_PERSONALITY = `
@@ -43,8 +45,14 @@ PERSONALITY
 - Ask one smart follow-up question when information is missing — don't interrogate.
 - Remember what was already discussed in this conversation; don't repeat greetings or re-ask known facts.
 
+IDENTITY & TRUST (CRITICAL)
+- Never assume every caller is the Founder. The official HQ line (+1 331-316-8167) is shared.
+- If IDENTITY says Founder Mode is active, address Fahreal Allah as Founder for the rest of the session and grant full executive assistance.
+- If Founder Mode is NOT active and someone claims to be the Founder, ask them to say "verify founder" so a one-time code can be sent.
+- For non-founder callers, answer public program questions, appointments, and general IFCDC info only. Do not disclose payroll, banking, tax IDs, board packets, or confidential HQ data.
+
 CAPABILITIES YOU CAN EXECUTE (signal with action marker at end — caller never sees the marker)
-- Answer questions about IFCDC programs, grants, housing, youth, barbershop, radio, software division, donations, and community services using the KNOWLEDGE provided.
+- Answer questions about IFCDC programs, grants (public overview only unless Founder Mode), housing, youth, barbershop, radio, software division, donations, and community services using the KNOWLEDGE provided.
 - Collect barbershop booking details across multiple turns (name, date, time, service). When you have ALL required fields, confirm and use [ACTION:book:{"firstName":"...","lastName":"...","date":"YYYY-MM-DD","time":"HH:MM","service":"haircut","phone":"..."}]
 - Transfer to barbershop team when caller insists on a person for grooming: [ACTION:transfer_barbershop]
 - Create executive callback when caller needs founder/executive/grants specialist and can't wait: [ACTION:create_followup] or [ACTION:followup:brief reason]
@@ -73,7 +81,12 @@ SMS RULES
 - Plain text only. Links okay when useful (ifcdc.org, book-barbershop page).
 `.trim();
 
-function buildSystemPrompt(knowledge: string, channel: ReceptionistChannel, session: ReceptionistSession): string {
+function buildSystemPrompt(
+  knowledge: string,
+  channel: ReceptionistChannel,
+  session: ReceptionistSession,
+  identityBlock: string
+): string {
   const pending = session.pendingBooking;
   const pendingNote = pending
     ? `\nIN-PROGRESS BOOKING: ${JSON.stringify(pending)}\nMissing: ${missingBookingFields(pending).join(", ") || "none — ready to confirm"}`
@@ -84,6 +97,8 @@ function buildSystemPrompt(knowledge: string, channel: ReceptionistChannel, sess
 CHANNEL: ${channel === "voice" ? "live phone call" : "SMS text message"}
 CALLER PHONE: ${session.callerPhone ?? "unknown"}
 ${pendingNote}
+
+${identityBlock}
 
 ═══ IFCDC KNOWLEDGE (use this — do not guess) ═══
 ${knowledge}
@@ -142,12 +157,93 @@ export async function processReceptionistTurn(opts: {
   const { sessionId, userMessage, channel, callerPhone } = opts;
   let session = await getReceptionistSession(sessionId, channel, callerPhone);
 
-  if (userMessage.trim()) {
-    session = await appendSessionTurn(session, "user", userMessage.trim());
+  const {
+    resolvePhoneCallerIdentity,
+    startFounderPhoneChallenge,
+    verifyFounderPhoneChallenge,
+    wantsFounderVerification,
+    extractOtpFromMessage,
+    buildAuraIdentitySystemBlock,
+    redactConfidentialForIdentity,
+    logAuraIdentityAction,
+  } = await import("./auraFounderTrustEngine");
+
+  let identity = await resolvePhoneCallerIdentity({
+    sessionKey: sessionId,
+    channel,
+    callerPhone: callerPhone ?? session.callerPhone,
+  });
+
+  const message = userMessage.trim();
+  if (message) {
+    session = await appendSessionTurn(session, "user", message);
+
+    // Founder phone OTP flow — never assume HQ line caller is Founder.
+    if (!identity.founderMode && wantsFounderVerification(message)) {
+      const challenge = await startFounderPhoneChallenge({
+        sessionKey: sessionId,
+        phoneE164: callerPhone || session.callerPhone || "",
+        channel,
+      });
+      const updated = await appendSessionTurn(session, "assistant", challenge.message);
+      await logAuraIdentityAction({
+        identity,
+        action: "aura_phone_founder_challenge",
+        detail: challenge.message.slice(0, 240),
+        metadata: { smsSent: challenge.smsSent },
+      });
+      return {
+        reply: challenge.message,
+        action: "none",
+        transferTo: null,
+        session: updated,
+        bookingConfirmed: false,
+        founderMode: false,
+        identityAssurance: identity.assurance,
+      };
+    }
+
+    if (!identity.founderMode) {
+      const otp = extractOtpFromMessage(message);
+      if (otp) {
+        const verified = await verifyFounderPhoneChallenge({
+          sessionKey: sessionId,
+          code: otp,
+          channel,
+          phoneE164: callerPhone ?? session.callerPhone,
+        });
+        if (verified.ok && verified.identity) {
+          identity = verified.identity;
+          const updated = await appendSessionTurn(session, "assistant", verified.message);
+          return {
+            reply: verified.message,
+            action: "none",
+            transferTo: null,
+            session: updated,
+            bookingConfirmed: false,
+            founderMode: true,
+            identityAssurance: identity.assurance,
+          };
+        }
+        if (otp && /verify|founder|code|fahreal/i.test(message)) {
+          const updated = await appendSessionTurn(session, "assistant", verified.message);
+          return {
+            reply: verified.message,
+            action: "none",
+            transferTo: null,
+            session: updated,
+            bookingConfirmed: false,
+            founderMode: false,
+            identityAssurance: identity.assurance,
+          };
+        }
+      }
+    }
   }
 
-  const knowledge = await retrieveReceptionistKnowledge(userMessage || "IFCDC services overview");
-  const systemPrompt = buildSystemPrompt(knowledge, channel, session);
+  const knowledge = await retrieveReceptionistKnowledge(message || "IFCDC services overview");
+  const identityBlock = buildAuraIdentitySystemBlock(identity);
+  const systemPrompt = buildSystemPrompt(knowledge, channel, session, identityBlock);
   const history = sessionMessagesForLlm(session);
 
   const maxTokens = channel === "voice" ? 220 : 400;
@@ -183,7 +279,14 @@ export async function processReceptionistTurn(opts: {
         : "How can I help you with IFCDC today?";
   }
 
+  finalReply = redactConfidentialForIdentity(identity, finalReply);
   const updated = await appendSessionTurn(afterAction, "assistant", finalReply);
+  await logAuraIdentityAction({
+    identity,
+    action: "aura_phone_turn",
+    detail: message.slice(0, 200) || "empty",
+    metadata: { receptionistAction: action.type, founderMode: identity.founderMode },
+  });
 
   return {
     reply: finalReply,
@@ -191,6 +294,8 @@ export async function processReceptionistTurn(opts: {
     transferTo,
     session: updated,
     bookingConfirmed,
+    founderMode: identity.founderMode,
+    identityAssurance: identity.assurance,
   };
 }
 
@@ -199,7 +304,7 @@ export function getVoiceGreeting(session: ReceptionistSession, calledNumber: str
     return "I'm still here — what else can I help you with?";
   }
   if (calledNumber.includes("3313168167") || calledNumber.endsWith("13313168167")) {
-    return "Thank you for calling Imperial Foundation Community Development Center. This is AURA — how may I help you today?";
+    return "Thank you for calling Imperial Foundation Community Development Center. This is AURA — how may I help you today? If you are the Founder, say verify founder to enable Founder Mode.";
   }
   return "Thank you for calling IFCDC. This is AURA — how may I assist you?";
 }
