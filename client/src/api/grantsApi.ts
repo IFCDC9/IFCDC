@@ -984,6 +984,21 @@ export const grantsApi = {
       "/pipeline/enterprise/sync",
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}), timeoutMs: 120_000 }
     ),
+  enterpriseFundingScan: (opts?: { syncFeeds?: boolean; prepareDrafts?: boolean; populatePipeline?: boolean; minScore?: number }) =>
+    apiFetch<{
+      report: Record<string, unknown>;
+      draftResults: { opportunityId: string; title: string; applicationId?: string; ok: boolean }[];
+      pipelineUpdated: number;
+      humanReviewRequired: boolean;
+      founderApprovalRequired: boolean;
+    }>("/intelligence/enterprise/scan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(opts ?? {}),
+      timeoutMs: 300_000,
+    }),
+  executiveFundingReport: () =>
+    apiFetch<{ report: Record<string, unknown> }>("/intelligence/enterprise/report", { timeoutMs: 60_000 }),
   pipelineIntelligence: (opportunityId: string) =>
     apiFetch<Record<string, unknown>>(`/pipeline/enterprise/intelligence/${opportunityId}`, { timeoutMs: 45_000 }),
   founderCommandCenter: (params?: Record<string, string | undefined>) => {

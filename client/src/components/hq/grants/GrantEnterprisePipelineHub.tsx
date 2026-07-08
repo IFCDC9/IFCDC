@@ -24,7 +24,7 @@ export const GrantEnterprisePipelineHub: React.FC<{
 }> = ({ onOpenApplication }) => {
   const qc = useQueryClient();
   const { canManage } = useGrantManage();
-  const [section, setSection] = useState<"board" | "metrics" | "founder" | "intelligence">("board");
+  const [section, setSection] = useState<"board" | "metrics" | "founder" | "intelligence" | "report">("board");
   const [selectedOpp, setSelectedOpp] = useState<string | null>(null);
   const [filters, setFilters] = useState({ program: "", agency: "", status: "", priority: "", q: "" });
 
@@ -61,6 +61,24 @@ export const GrantEnterprisePipelineHub: React.FC<{
     enabled: section === "intelligence" && !!selectedOpp,
     retry: 0,
     staleTime: 60_000,
+  });
+
+  const executiveReport = useQuery({
+    queryKey: ["executive-funding-report"],
+    queryFn: () => grantsApi.executiveFundingReport(),
+    enabled: section === "report",
+    retry: 0,
+    staleTime: 30_000,
+  });
+
+  const enterpriseScan = useMutation({
+    mutationFn: () => grantsApi.enterpriseFundingScan({ syncFeeds: true, prepareDrafts: true, populatePipeline: true }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["executive-funding-report"] });
+      qc.invalidateQueries({ queryKey: ["pipeline-enterprise-metrics"] });
+      qc.invalidateQueries({ queryKey: ["pipeline-enterprise-board"] });
+      qc.invalidateQueries({ queryKey: ["pipeline-founder"] });
+    },
   });
 
   const syncPipeline = useMutation({
@@ -146,6 +164,7 @@ export const GrantEnterprisePipelineHub: React.FC<{
       <GrantSubNav
         items={[
           { id: "board", label: "Live Pipeline" },
+          { id: "report", label: "Executive Report" },
           { id: "metrics", label: "Metrics & Reports" },
           { id: "founder", label: "Founder Command" },
           { id: "intelligence", label: "AI Intelligence" },
@@ -202,6 +221,126 @@ export const GrantEnterprisePipelineHub: React.FC<{
             </div>
           )}
         </GrantQueryBoundary>
+      )}
+
+      {section === "report" && (
+        <HqPanel
+          title="Executive Funding Report"
+          subtitle="AURA Enterprise Mode — every program, department, and initiative evaluated"
+          headerExtra={
+            canManage ? (
+              <button
+                type="button"
+                className="hq-btn hq-btn-sm hq-btn-primary"
+                disabled={enterpriseScan.isPending}
+                onClick={() => enterpriseScan.mutate()}
+              >
+                <Sparkles size={14} /> {enterpriseScan.isPending ? "Scanning…" : "Run Enterprise Scan"}
+              </button>
+            ) : undefined
+          }
+        >
+          {enterpriseScan.isError && (
+            <div className="hq-empty" style={{ color: "var(--hq-warning)", marginBottom: "0.75rem" }}>
+              <AlertTriangle size={14} style={{ verticalAlign: "middle", marginRight: 6 }} />
+              {(enterpriseScan.error as Error)?.message ?? "Enterprise scan failed."}
+            </div>
+          )}
+          {enterpriseScan.isSuccess && (
+            <div className="hq-muted-text" style={{ marginBottom: "0.75rem", fontSize: "0.82rem" }}>
+              Scan complete: {(enterpriseScan.data?.report as { totals?: { matchingGrants?: number; draftsPrepared?: number } })?.totals?.matchingGrants ?? 0} matches ·{" "}
+              {(enterpriseScan.data?.report as { totals?: { draftsPrepared?: number } })?.totals?.draftsPrepared ?? 0} drafts queued for founder review.
+            </div>
+          )}
+          <GrantQueryBoundary
+            query={executiveReport}
+            title="No executive report yet"
+            message='Run "Enterprise Scan" to evaluate every IFCDC program and generate the full funding report.'
+            loadingMessage="Loading executive funding report…"
+          >
+            {(() => {
+              const report = (enterpriseScan.data?.report ?? executiveReport.data?.report) as {
+                totals?: { programsEvaluated?: number; matchingGrants?: number; qualifiedGrants?: number; draftsPrepared?: number };
+                programEvaluations?: { programLabel: string; matchingOpportunities: number; qualifiedOpportunities: number; topMatchScore: number | null }[];
+                opportunities?: Array<{
+                  opportunityId: string;
+                  title: string;
+                  fundingAgency: string;
+                  awardAmountLabel: string;
+                  deadline: string | null;
+                  matchScore: number;
+                  probabilityOfSuccess: number;
+                  organizationalReadiness: number;
+                  organizationalReadinessGrade: string;
+                  recommendedPriority: string;
+                  programAssignment: { label: string };
+                  pipelineStage: string;
+                  qualified: boolean;
+                }>;
+                generatedAt?: string;
+              } | undefined;
+              if (!report?.opportunities?.length) {
+                return <p className="hq-muted-text">No matching grants in the latest report. Sync pipeline feeds and run Enterprise Scan.</p>;
+              }
+              return (
+                <>
+                  <div className="hq-kpi-grid" style={{ marginBottom: "1rem" }}>
+                    <KpiCard label="Programs Evaluated" value={report.totals?.programsEvaluated ?? 0} />
+                    <KpiCard label="Matching Grants" value={report.totals?.matchingGrants ?? 0} variant="success" />
+                    <KpiCard label="Qualified" value={report.totals?.qualifiedGrants ?? 0} variant="gold" />
+                    <KpiCard label="Drafts Prepared" value={report.totals?.draftsPrepared ?? 0} variant="warning" />
+                  </div>
+                  <p className="hq-muted-text" style={{ fontSize: "0.75rem", marginBottom: "0.75rem" }}>
+                    Generated {report.generatedAt ? fmtGrantSyncDate(report.generatedAt) : "recently"} · Founder approval required before any submission.
+                  </p>
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="hq-table" style={{ fontSize: "0.78rem", minWidth: 960 }}>
+                      <thead>
+                        <tr>
+                          <th>Grant</th>
+                          <th>Agency</th>
+                          <th>Award</th>
+                          <th>Deadline</th>
+                          <th>Match</th>
+                          <th>Success %</th>
+                          <th>Readiness</th>
+                          <th>Priority</th>
+                          <th>Program</th>
+                          <th>Stage</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {report.opportunities.map((o) => (
+                          <tr key={o.opportunityId}>
+                            <td>
+                              <button
+                                type="button"
+                                className="hq-btn hq-btn-ghost"
+                                style={{ padding: 0, fontWeight: 600, textAlign: "left" }}
+                                onClick={() => { setSelectedOpp(o.opportunityId); setSection("intelligence"); }}
+                              >
+                                {o.title.length > 56 ? `${o.title.slice(0, 56)}…` : o.title}
+                              </button>
+                            </td>
+                            <td>{o.fundingAgency}</td>
+                            <td>{o.awardAmountLabel}</td>
+                            <td>{fmtGrantDeadline(o.deadline)}</td>
+                            <td>{o.matchScore}%</td>
+                            <td>{o.probabilityOfSuccess}%</td>
+                            <td>{o.organizationalReadiness}% <span className="hq-muted-text">({o.organizationalReadinessGrade})</span></td>
+                            <td><StatusBadge status={o.recommendedPriority} /></td>
+                            <td>{o.programAssignment.label}</td>
+                            <td>{o.pipelineStage}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              );
+            })()}
+          </GrantQueryBoundary>
+        </HqPanel>
       )}
 
       {section === "metrics" && (

@@ -990,14 +990,15 @@ export async function buildProgramGrantQueues(opts?: { programSlug?: string; lim
 
 function formatMatchesAnswer(
   data: Awaited<ReturnType<typeof buildOrgWideGrantMatches>>,
-  opts?: { programLabel?: string; sortLabel?: string }
+  opts?: { programLabel?: string; sortLabel?: string; showAll?: boolean }
 ): string {
   const scope = data.programFilter
     ? `for ${opts?.programLabel ?? data.programFilter}`
     : "across the entire IFCDC organization";
   const sortNote = opts?.sortLabel ? ` (sorted by ${opts.sortLabel})` : "";
   const lines = [`Found ${data.matches.length} live grant matches ${scope}${sortNote}:\n`];
-  for (const m of data.matches.slice(0, 12)) {
+  const displayLimit = opts?.showAll ? data.matches.length : 12;
+  for (const m of data.matches.slice(0, displayLimit)) {
     const amt = formatFundingAmount(m.fundingAmount.min, m.fundingAmount.max);
     const dl = m.deadline ? new Date(m.deadline).toLocaleDateString() : "rolling/TBD";
     lines.push(
@@ -1009,13 +1010,14 @@ function formatMatchesAnswer(
 }
 
 export type GrantAuraCommandResult = {
-  commandType: "answer" | "matches" | "sync" | "started_applications" | "draft";
+  commandType: "answer" | "matches" | "sync" | "started_applications" | "draft" | "enterprise_report";
   answer: string;
   matches: OrgWideGrantMatch[];
   actions: string[];
   humanReviewRequired: boolean;
   dashboard: Record<string, unknown> | null;
   startedApplications?: { title: string; applicationId?: string; ok: boolean }[];
+  executiveReport?: Record<string, unknown> | null;
   offline?: boolean;
   askedBy: string | null;
   generatedAt: string;
@@ -1062,6 +1064,45 @@ export async function processGrantAuraCommand(
     || wholeOrg
     || !!programSlug;
 
+  const wantsDrafts = /draft.*grant|draft for founder|founder approval|prepare.*application|populate.*pipeline/.test(q);
+  const enterpriseMode =
+    (await import("./grantEnterpriseDirectorEngine")).isEnterpriseFundingQuery(question)
+    || (wholeOrg && /report|scan|evaluate|director|enterprise|complete|every|all program/.test(q))
+    || wantsDrafts;
+
+  if (enterpriseMode) {
+    const {
+      runEnterpriseFundingScan,
+      formatExecutiveFundingReportAnswer,
+      toOrgWideGrantMatch,
+    } = await import("./grantEnterpriseDirectorEngine");
+    const scan = await runEnterpriseFundingScan({
+      actorEmail: opts?.actorEmail,
+      syncFeeds: /live|today|real.?time|sync/.test(q),
+      populatePipeline: true,
+      prepareDrafts: wantsDrafts,
+    });
+    const { report, draftResults } = scan;
+    return {
+      ...base,
+      commandType: wantsDrafts ? "draft" : "enterprise_report",
+      matches: report.opportunities.map(toOrgWideGrantMatch),
+      executiveReport: report as unknown as Record<string, unknown>,
+      startedApplications: draftResults.map((d) => ({
+        title: d.title,
+        applicationId: d.applicationId,
+        ok: d.ok,
+      })),
+      actions: [
+        `programs_evaluated:${report.totals.programsEvaluated}`,
+        `matching_grants:${report.totals.matchingGrants}`,
+        `pipeline_updated:${report.totals.pipelineUpdated}`,
+        ...(wantsDrafts ? [`drafts_prepared:${report.totals.draftsPrepared}`] : []),
+      ],
+      answer: formatExecutiveFundingReportAnswer(report, { includeDrafts: wantsDrafts }),
+    };
+  }
+
   if (/start application|top five|top 5|begin application/.test(q)) {
     const matches = await buildOrgWideGrantMatches({
       programSlug,
@@ -1088,38 +1129,11 @@ export async function processGrantAuraCommand(
     };
   }
 
-  if (/draft.*grant|draft for founder|founder approval|prepare.*application/.test(q)) {
-    const matches = await buildOrgWideGrantMatches({
-      programSlug,
-      sort: "fit",
-      limit: 1,
-      actorEmail: opts?.actorEmail,
-    });
-    const top = matches.matches[0];
-    if (!top) {
-      return { ...base, answer: "No matching grants found to draft. Try syncing Grants.gov or broadening your search." };
-    }
-    const workflow = await startGrantApplicationWorkflow(top.opportunityId, {
-      actorEmail: opts?.actorEmail,
-      generateDrafts: true,
-    });
-    if (workflow.applicationId) {
-      await generateFullProposalDraft(workflow.applicationId, { actorEmail: opts?.actorEmail });
-    }
-    return {
-      ...base,
-      commandType: "draft",
-      matches: [top],
-      actions: ["application_drafted", "writer_sections_generated", "awaiting_founder_approval"],
-      answer: `Started full grant draft for **${top.title}** (${top.funder}).\n\nMatch score: ${top.matchScore}% → ${top.bestProgram.label}\nEligibility: ${top.eligibility.grade}\n\nAURA is generating all narrative sections in Writer Studio. **Founder review required** before any submission.`,
-    };
-  }
-
   if (findIntent) {
     const matches = await buildOrgWideGrantMatches({
       programSlug,
       sort,
-      limit: 15,
+      limit: wholeOrg ? 50 : 15,
       syncFeeds: /live|today|real.?time|available today/.test(q),
       actorEmail: opts?.actorEmail,
     });
@@ -1132,7 +1146,7 @@ export async function processGrantAuraCommand(
       commandType: "matches",
       matches: matches.matches,
       actions: matches.matches.slice(0, 5).map((m) => m.recommendedNextStep),
-      answer: formatMatchesAnswer(matches, { programLabel, sortLabel }),
+      answer: formatMatchesAnswer(matches, { programLabel, sortLabel, showAll: wholeOrg }),
     };
   }
 

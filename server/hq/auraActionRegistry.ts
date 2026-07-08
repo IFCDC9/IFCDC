@@ -21,6 +21,10 @@ import {
   generateFullProposalDraft,
   resolveProgramSlugFromQuery,
 } from "./grantIntelligenceEngine";
+import {
+  runEnterpriseFundingScan,
+  formatExecutiveFundingReportAnswer,
+} from "./grantEnterpriseDirectorEngine";
 import { assistWriterSectionProduction } from "./grantWriterEngine";
 import { executeCopilotAutomation } from "./auraExecutiveCopilot";
 import { parseNavigationIntent } from "./auraNlNavigation";
@@ -111,13 +115,14 @@ const findGrants: AuraAction = {
     program: { type: "string", description: "Program slug or name (e.g. housing, youth, mental_health). Optional." },
     sort: { type: "string", enum: ["fit", "funding", "deadline"], description: "Ranking order. Default fit." },
     query: { type: "string", description: "Free-text focus for the search. Optional." },
-    limit: { type: "number", description: "Max results (default 15)." },
+    limit: { type: "number", description: "Max results (default 50 for org-wide, 25 for program)." },
   },
   async run(args, ctx) {
     const program =
       str(args.program) ?? ctxRef(ctx, "programSlug") ?? (str(args.query) ? resolveProgramSlugFromQuery(String(args.query)) : undefined);
     const sort = (str(args.sort) as "fit" | "funding" | "deadline") ?? "fit";
-    const limit = typeof args.limit === "number" ? args.limit : 15;
+    const defaultLimit = program ? 25 : 50;
+    const limit = typeof args.limit === "number" ? args.limit : defaultLimit;
     const result = (await buildOrgWideGrantMatches({
       programSlug: program,
       sort,
@@ -178,6 +183,39 @@ const syncGrants: AuraAction = {
       summary: `Synced live grant feeds — enriched ${sync.enriched ?? 0} opportunities and filled ${sync.deadlinesFilled ?? 0} missing deadlines.`,
       data: sync,
       navigation: { path: "/hq/grants", label: "Open Grant Center" },
+    };
+  },
+};
+
+const enterpriseFundingScan: AuraAction = {
+  id: "enterprise_funding_scan",
+  label: "Enterprise Funding Scan",
+  module: "grants",
+  kind: "prepare",
+  description:
+    "Run IFCDC Enterprise Grants Mode: scan every program, department, and initiative; return a complete Executive Funding Report; populate the Enterprise Funding Pipeline; and prepare draft proposals for all qualified opportunities (founder approval required before submission).",
+  parameters: {
+    syncFeeds: { type: "boolean", description: "Refresh Grants.gov/SAM.gov feeds before scanning. Default true." },
+    prepareDrafts: { type: "boolean", description: "Queue full proposal drafts for qualified matches (composite >= 60). Default true." },
+    minScore: { type: "number", description: "Minimum match score to include (default 40)." },
+  },
+  async run(args, ctx) {
+    const syncFeeds = args.syncFeeds !== false;
+    const prepareDrafts = args.prepareDrafts !== false;
+    const minScore = typeof args.minScore === "number" ? args.minScore : undefined;
+    const scan = await runEnterpriseFundingScan({
+      actorEmail: ctx.actorEmail,
+      syncFeeds,
+      populatePipeline: true,
+      prepareDrafts,
+      minScore,
+    });
+    return {
+      status: "prepared",
+      summary: `Enterprise scan complete: ${scan.report.totals.matchingGrants} matching grants across ${scan.report.totals.programsEvaluated} programs. ${scan.report.totals.draftsPrepared} drafts queued for founder review.`,
+      data: { report: scan.report, draftResults: scan.draftResults, narrative: formatExecutiveFundingReportAnswer(scan.report, { includeDrafts: prepareDrafts }) },
+      navigation: { path: "/hq/grants?tab=pipeline", label: "Open Enterprise Funding Pipeline" },
+      approval: APPROVAL_LINK,
     };
   },
 };
@@ -475,6 +513,7 @@ const fixWorkflow: AuraAction = {
 
 export const AURA_ACTIONS: AuraAction[] = [
   findGrants,
+  enterpriseFundingScan,
   matchProgram,
   syncGrants,
   startApplication,

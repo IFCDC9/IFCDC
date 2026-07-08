@@ -345,6 +345,34 @@ router.post("/intelligence/aura/ask", async (req: Request, res: Response) => {
   res.json(await processGrantAuraCommand(question, { actorEmail: req.hqUser?.email }));
 });
 
+router.post("/intelligence/enterprise/scan", async (req: Request, res: Response) => {
+  const { runEnterpriseFundingScan } = await import("../hq/grantEnterpriseDirectorEngine");
+  try {
+    const result = await runEnterpriseFundingScan({
+      actorEmail: req.hqUser?.email,
+      syncFeeds: req.body?.syncFeeds !== false,
+      populatePipeline: req.body?.populatePipeline !== false,
+      prepareDrafts: req.body?.prepareDrafts !== false,
+      minScore: typeof req.body?.minScore === "number" ? req.body.minScore : undefined,
+    });
+    res.status(202).json({
+      ...result,
+      humanReviewRequired: true,
+      founderApprovalRequired: true,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Enterprise funding scan failed";
+    console.error("[grants] enterprise/scan:", message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.get("/intelligence/enterprise/report", async (_req, res) => {
+  const { getLatestExecutiveFundingReport } = await import("../hq/grantEnterpriseDirectorEngine");
+  const report = getLatestExecutiveFundingReport();
+  res.json({ report });
+});
+
 router.post("/opportunities/:id/score-intelligence", async (req: Request, res: Response) => {
   const score = await scoreOpportunityIntelligence(req.params.id, {
     divisionSlug: req.body?.divisionSlug,
