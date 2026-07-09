@@ -1,5 +1,5 @@
 /**
- * Founder OTP delivery — Resend email + Twilio SMS with full provider audit logging.
+ * Founder OTP delivery — Resend + Twilio with fallback, audit logging, and challenge status updates.
  */
 import crypto from "crypto";
 import { getDb } from "../db";
@@ -13,9 +13,10 @@ import {
 import { logHqAudit } from "./hqAuditLog";
 import { normalizeE164 } from "./twilioIntegrationEngine";
 
-const OTP_TTL_MS = 10 * 60_000;
+export const OTP_TTL_MS = 10 * 60_000;
 
 export type OtpDeliveryChannel = "email" | "sms";
+export type ChallengeDeliveryStatus = "pending" | "sent" | "partial" | "failed" | "verified" | "expired";
 
 export type OtpDeliveryResult = {
   ok: boolean;
@@ -93,14 +94,48 @@ export async function logOtpDeliveryAttempt(opts: {
   );
 
   const level = result.ok ? "log" : "error";
-  const msg =
+  console[level](
     `[founder-otp] ${result.channel.toUpperCase()} ${result.ok ? "OK" : "FAIL"}`
     + ` dest=${result.destination} provider=${result.provider}`
     + ` durationMs=${result.durationMs}`
     + (result.messageId ? ` messageId=${result.messageId}` : "")
     + (result.error ? ` error=${result.error}` : "")
-    + (result.errorCode != null ? ` code=${result.errorCode}` : "");
-  console[level](msg);
+    + (result.errorCode != null ? ` code=${result.errorCode}` : "")
+  );
+}
+
+export async function updateChallengeDeliveryRecord(
+  challengeId: string,
+  patch: {
+    deliveryStatus: ChallengeDeliveryStatus;
+    emailSent?: boolean;
+    smsSent?: boolean;
+    emailMessageId?: string | null;
+    smsMessageId?: string | null;
+    preferredChannel?: OtpDeliveryChannel | null;
+    lastDeliveryError?: string | null;
+  }
+): Promise<void> {
+  const db = await getDb();
+  await db.run(
+    `UPDATE aura_identity_challenges SET
+      delivery_status = ?,
+      email_sent = COALESCE(?, email_sent),
+      sms_sent = COALESCE(?, sms_sent),
+      email_message_id = COALESCE(?, email_message_id),
+      sms_message_id = COALESCE(?, sms_message_id),
+      preferred_channel = COALESCE(?, preferred_channel),
+      last_delivery_error = ?
+     WHERE id = ?`,
+    patch.deliveryStatus,
+    patch.emailSent === undefined ? null : patch.emailSent ? 1 : 0,
+    patch.smsSent === undefined ? null : patch.smsSent ? 1 : 0,
+    patch.emailMessageId ?? null,
+    patch.smsMessageId ?? null,
+    patch.preferredChannel ?? null,
+    patch.lastDeliveryError ?? null,
+    challengeId
+  );
 }
 
 export async function sendFounderOtpEmailDelivery(
@@ -128,6 +163,24 @@ export async function sendFounderOtpEmailDelivery(
     return result;
   }
 
+  const resendProbe = await probeResendSender();
+  if (!resendProbe.ok) {
+    const result: OtpDeliveryResult = {
+      ok: false,
+      channel: "email",
+      destination: to,
+      provider: "resend",
+      error: resendProbe.error || "Resend sender/domain not verified",
+      errorCode: "resend_domain_unverified",
+      providerStatus: resendProbe.providerStatus,
+      providerResponse: { resendProbe, from: resendProbe.from },
+      durationMs: Date.now() - started,
+      timestamp,
+    };
+    await logOtpDeliveryAttempt({ challengeId, ...opts, result });
+    return result;
+  }
+
   const send = await sendFounderSecurityEmail({
     to,
     subject: "IFCDC AURA Founder verification code",
@@ -145,12 +198,12 @@ export async function sendFounderOtpEmailDelivery(
   });
 
   const result: OtpDeliveryResult = {
-    ok: send.success,
+    ok: send.success && Boolean(send.messageId),
     channel: "email",
     destination: to,
     provider: "resend",
     messageId: send.messageId,
-    error: send.error,
+    error: send.success && !send.messageId ? "Resend accepted but no message id returned" : send.error,
     errorCode: send.providerCode,
     providerStatus: send.providerStatus,
     providerResponse: send.providerResponse,
@@ -170,6 +223,21 @@ export async function sendFounderOtpSmsDelivery(
   const started = Date.now();
   const timestamp = new Date().toISOString();
   const destination = normalizeE164(toPhone) || toPhone;
+
+  if (!/^\+[1-9]\d{7,14}$/.test(destination)) {
+    const result: OtpDeliveryResult = {
+      ok: false,
+      channel: "sms",
+      destination,
+      provider: "none",
+      error: `Invalid E.164 phone: ${destination}`,
+      errorCode: "invalid_e164",
+      durationMs: Date.now() - started,
+      timestamp,
+    };
+    await logOtpDeliveryAttempt({ challengeId, ...opts, result });
+    return result;
+  }
 
   if (process.env.AURA_FOUNDER_OTP_SMS === "false") {
     const result: OtpDeliveryResult = {
@@ -191,12 +259,12 @@ export async function sendFounderOtpSmsDelivery(
   });
 
   const result: OtpDeliveryResult = {
-    ok: send.success,
+    ok: send.success && Boolean(send.messageId),
     channel: "sms",
     destination,
     provider: "twilio",
     messageId: send.messageId,
-    error: send.error,
+    error: send.success && !send.messageId ? "Twilio accepted but no message sid returned" : send.error,
     errorCode: send.providerCode,
     providerStatus: send.providerStatus,
     providerResponse: send.providerResponse,
@@ -207,54 +275,116 @@ export async function sendFounderOtpSmsDelivery(
   return result;
 }
 
-export async function deliverFounderOtpChannels(opts: {
+/** Email first, then SMS fallback — only reports success when a provider confirms. */
+export async function deliverFounderOtpWithFallback(opts: {
   challengeId: string;
   code: string;
   phoneE164: string;
   sessionKey: string;
   callerChannel: string;
   actorEmail: string;
-}): Promise<{ email: OtpDeliveryResult; sms: OtpDeliveryResult }> {
+  /** Force a single channel (resend / alternate method). */
+  channelPreference?: OtpDeliveryChannel | "both";
+}): Promise<{
+  email: OtpDeliveryResult;
+  sms: OtpDeliveryResult;
+  deliveryStatus: ChallengeDeliveryStatus;
+  emailSent: boolean;
+  smsSent: boolean;
+}> {
   const deliveryOpts = {
     sessionKey: opts.sessionKey,
     callerChannel: opts.callerChannel,
   };
-  const [email, sms] = await Promise.all([
-    sendFounderOtpEmailDelivery(opts.code, opts.challengeId, deliveryOpts),
-    sendFounderOtpSmsDelivery(opts.phoneE164, opts.code, opts.challengeId, deliveryOpts),
-  ]);
+
+  let email: OtpDeliveryResult = {
+    ok: false,
+    channel: "email",
+    destination: opts.actorEmail,
+    provider: "none",
+    durationMs: 0,
+    timestamp: new Date().toISOString(),
+    error: "skipped",
+  };
+  let sms: OtpDeliveryResult = {
+    ok: false,
+    channel: "sms",
+    destination: opts.phoneE164,
+    provider: "none",
+    durationMs: 0,
+    timestamp: new Date().toISOString(),
+    error: "skipped",
+  };
+
+  const pref = opts.channelPreference ?? "both";
+
+  if (pref === "email" || pref === "both") {
+    email = await sendFounderOtpEmailDelivery(opts.code, opts.challengeId, deliveryOpts);
+  }
+  if ((pref === "sms" || pref === "both") && (!email.ok || pref === "sms")) {
+    sms = await sendFounderOtpSmsDelivery(opts.phoneE164, opts.code, opts.challengeId, deliveryOpts);
+  }
+  if (pref === "sms" && !sms.ok && !email.ok) {
+    email = await sendFounderOtpEmailDelivery(opts.code, opts.challengeId, deliveryOpts);
+  }
+
+  const emailSent = email.ok;
+  const smsSent = sms.ok;
+  let deliveryStatus: ChallengeDeliveryStatus = "failed";
+  if (emailSent && smsSent) deliveryStatus = "sent";
+  else if (emailSent || smsSent) deliveryStatus = "partial";
+  else deliveryStatus = "failed";
+
+  const lastError = !emailSent && !smsSent
+    ? `email=${email.error || "failed"}; sms=${sms.error || "failed"}`
+    : !emailSent
+      ? email.error || null
+      : !smsSent
+        ? sms.error || null
+        : null;
+
+  await updateChallengeDeliveryRecord(opts.challengeId, {
+    deliveryStatus,
+    emailSent,
+    smsSent,
+    emailMessageId: email.messageId ?? null,
+    smsMessageId: sms.messageId ?? null,
+    preferredChannel: pref === "sms" ? "sms" : pref === "email" ? "email" : emailSent ? "email" : smsSent ? "sms" : null,
+    lastDeliveryError: lastError,
+  });
 
   await logHqAudit({
-    action: email.ok || sms.ok ? "aura_founder_otp_sent" : "aura_founder_otp_send_failed",
+    action: emailSent || smsSent ? "aura_founder_otp_sent" : "aura_founder_otp_send_failed",
     entityType: "aura_identity",
     entityId: opts.challengeId,
-    detail: email.ok
-      ? `Founder OTP emailed to ${opts.actorEmail}${sms.ok ? " (+ SMS backup)" : ""}`
-      : sms.ok
+    detail: emailSent
+      ? `Founder OTP emailed to ${opts.actorEmail}${smsSent ? " (+ SMS backup)" : ""}`
+      : smsSent
         ? `Founder OTP SMS sent to ${opts.phoneE164} (email failed: ${email.error})`
         : `Founder OTP delivery failed email=${email.error}; sms=${sms.error}`,
     actorEmail: opts.actorEmail,
     metadata: {
       phone: opts.phoneE164,
       channel: opts.callerChannel,
-      emailSent: email.ok,
+      deliveryStatus,
+      emailSent,
       emailTo: opts.actorEmail,
-      emailError: email.ok ? undefined : email.error,
+      emailMessageId: email.messageId,
+      emailError: emailSent ? undefined : email.error,
       emailProviderStatus: email.providerStatus,
       emailProviderCode: email.errorCode,
-      smsSent: sms.ok,
+      smsSent,
       smsTo: opts.phoneE164,
-      smsError: sms.ok ? undefined : sms.error,
+      smsMessageId: sms.messageId,
+      smsError: smsSent ? undefined : sms.error,
       smsProviderStatus: sms.providerStatus,
       smsProviderCode: sms.errorCode,
       emailStatus: getEmailDeliveryStatus(),
       otpTtlMinutes: Math.round(OTP_TTL_MS / 60_000),
-      stepUp: true,
-      candidatePhone: true,
     },
   });
 
-  return { email, sms };
+  return { email, sms, deliveryStatus, emailSent, smsSent };
 }
 
 export async function getRecentOtpDeliveryLogs(limit = 20): Promise<unknown[]> {
@@ -269,7 +399,6 @@ export async function getRecentOtpDeliveryLogs(limit = 20): Promise<unknown[]> {
   );
 }
 
-/** Production probe — sends real test messages and returns provider responses (no OTP code in response). */
 export async function probeFounderVerificationDelivery(opts?: {
   smsTo?: string | null;
 }): Promise<{

@@ -22,7 +22,7 @@ import {
   type Permission,
 } from "./enterpriseRoles";
 import { logHqAudit } from "./hqAuditLog";
-import { deliverFounderOtpChannels } from "./auraFounderOtpDelivery";
+import { deliverFounderOtpWithFallback, OTP_TTL_MS as DELIVERY_OTP_TTL } from "./auraFounderOtpDelivery";
 import { normalizeE164 } from "./twilioIntegrationEngine";
 
 export type AuraChannel = "hq_web" | "voice" | "sms";
@@ -68,8 +68,8 @@ export type PhoneTrustChallenge = {
 };
 
 const FOUNDER_DISPLAY_NAME = "Fahreal Allah";
-/** OTP lifetime — short window (5–10 minutes). */
-const OTP_TTL_MS = 10 * 60_000;
+/** OTP lifetime — 10 minutes; session stays open for code entry entire time. */
+const OTP_TTL_MS = DELIVERY_OTP_TTL;
 /** After verified OTP, remember Founder Mode for this call/SMS session. */
 const PHONE_FOUNDER_SESSION_TTL_MS = 8 * 60 * 60_000;
 const TRUSTED_DEVICE_TTL_MS = 90 * 24 * 60 * 60_000;
@@ -231,6 +231,20 @@ export async function ensureAuraTrustTables(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_aura_trusted_devices_email ON aura_trusted_devices(email);
   `);
+  // Non-destructive column adds for delivery tracking (ignore if already present).
+  const alters = [
+    "ALTER TABLE aura_identity_challenges ADD COLUMN code_sealed TEXT",
+    "ALTER TABLE aura_identity_challenges ADD COLUMN delivery_status TEXT DEFAULT 'pending'",
+    "ALTER TABLE aura_identity_challenges ADD COLUMN email_sent INTEGER DEFAULT 0",
+    "ALTER TABLE aura_identity_challenges ADD COLUMN sms_sent INTEGER DEFAULT 0",
+    "ALTER TABLE aura_identity_challenges ADD COLUMN email_message_id TEXT",
+    "ALTER TABLE aura_identity_challenges ADD COLUMN sms_message_id TEXT",
+    "ALTER TABLE aura_identity_challenges ADD COLUMN preferred_channel TEXT",
+    "ALTER TABLE aura_identity_challenges ADD COLUMN last_delivery_error TEXT",
+  ];
+  for (const sql of alters) {
+    await db.run(sql).catch(() => undefined);
+  }
   tablesReady = true;
 }
 
@@ -280,6 +294,37 @@ export async function elevateFounderFromTrustedPhone(_opts: {
 
 function hashOtp(code: string): string {
   return crypto.createHash("sha256").update(`ifcdc-aura-otp:${code}`).digest("hex");
+}
+
+function sealOtp(code: string): string {
+  const secret = (process.env.JWT_SECRET || "ifcdc-aura-otp-seal").slice(0, 32).padEnd(32, "0");
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", Buffer.from(secret), iv);
+  const enc = Buffer.concat([cipher.update(code, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${iv.toString("base64")}.${tag.toString("base64")}.${enc.toString("base64")}`;
+}
+
+function unsealOtp(sealed: string | null | undefined): string | null {
+  if (!sealed) return null;
+  try {
+    const [ivB64, tagB64, encB64] = sealed.split(".");
+    if (!ivB64 || !tagB64 || !encB64) return null;
+    const secret = (process.env.JWT_SECRET || "ifcdc-aura-otp-seal").slice(0, 32).padEnd(32, "0");
+    const decipher = crypto.createDecipheriv(
+      "aes-256-gcm",
+      Buffer.from(secret),
+      Buffer.from(ivB64, "base64")
+    );
+    decipher.setAuthTag(Buffer.from(tagB64, "base64"));
+    const dec = Buffer.concat([
+      decipher.update(Buffer.from(encB64, "base64")),
+      decipher.final(),
+    ]);
+    return dec.toString("utf8");
+  } catch {
+    return null;
+  }
 }
 
 function generateOtp(): string {
@@ -469,54 +514,106 @@ export async function persistPhoneFounderSession(identity: AuraTrustedIdentity):
   });
 }
 
+export type FounderChallengeRow = {
+  id: string;
+  session_key: string;
+  phone_e164: string;
+  code_hash: string;
+  code_sealed?: string | null;
+  status: string;
+  attempts: number;
+  actor_email: string | null;
+  created_at: string;
+  expires_at: string;
+  delivery_status?: string | null;
+  email_sent?: number | null;
+  sms_sent?: number | null;
+  email_message_id?: string | null;
+  sms_message_id?: string | null;
+  preferred_channel?: string | null;
+  last_delivery_error?: string | null;
+};
+
+export async function getActiveFounderChallenge(sessionKey: string): Promise<FounderChallengeRow | null> {
+  await ensureAuraTrustTables();
+  const db = await getDb();
+  const row = await db.get<FounderChallengeRow>(
+    `SELECT * FROM aura_identity_challenges
+     WHERE session_key = ? AND status = 'pending'
+     ORDER BY created_at DESC LIMIT 1`,
+    sessionKey
+  );
+  if (!row) return null;
+  if (new Date(row.expires_at).getTime() < Date.now()) {
+    await db.run(`UPDATE aura_identity_challenges SET status = 'expired', delivery_status = 'expired' WHERE id = ?`, row.id);
+    return null;
+  }
+  return row;
+}
+
+function formatDeliverySuccessMessage(opts: {
+  actorEmail: string;
+  emailSent: boolean;
+  smsSent: boolean;
+  deliveryStatus: string;
+}): string {
+  const mins = Math.round(OTP_TTL_MS / 60_000);
+  if (opts.emailSent && opts.smsSent) {
+    return `Your verification code is on its way to ${opts.actorEmail} and to this phone by text. Please say or text the 6-digit code when you receive it. I'll keep this verification open for ${mins} minutes. You can say resend code or try another method if needed.`;
+  }
+  if (opts.emailSent) {
+    return `Resend confirmed delivery to ${opts.actorEmail}. Message ID logged. Please say or text the 6-digit code from that email. I'll wait up to ${mins} minutes. Say resend code or try text message if you don't see it.`;
+  }
+  if (opts.smsSent) {
+    return `Email delivery failed, but I texted your 6-digit code to this phone. Please say or text the code now. I'll wait up to ${mins} minutes. Say try email or resend code if you need another copy.`;
+  }
+  return `I could not confirm delivery to ${opts.actorEmail} or by SMS (${opts.deliveryStatus}). Say resend code, try text message, or try email.`;
+}
+
+function formatPendingChallengeMessage(row: FounderChallengeRow): string {
+  const mins = Math.max(1, Math.round((new Date(row.expires_at).getTime() - Date.now()) / 60_000));
+  const emailOk = Boolean(row.email_sent);
+  const smsOk = Boolean(row.sms_sent);
+  if (emailOk || smsOk) {
+    return `You still have an active Founder verification code${emailOk ? " emailed to service@ifcdc.org" : ""}${smsOk ? " and texted to this phone" : ""}. Please say or text the 6-digit code. It expires in about ${mins} minutes. Say resend code or try another method if you need help.`;
+  }
+  return `Your Founder verification is still open for about ${mins} more minutes. Say resend code and I'll try delivery again, or say try text message / try email.`;
+}
+
 async function finalizeFounderChallengeDelivery(opts: {
   challengeId: string;
-  code: string;
-  phone: string;
-  sessionKey: string;
-  channel: AuraChannel;
   actorEmail: string;
-  email: { ok: boolean; error?: string };
-  sms: { ok: boolean; error?: string };
+  emailSent: boolean;
+  smsSent: boolean;
+  deliveryStatus: string;
+  emailError?: string;
+  smsError?: string;
 }): Promise<{
   ok: boolean;
   challengeId: string;
   message: string;
   smsSent: boolean;
   emailSent: boolean;
-  deliveryPending?: boolean;
 }> {
-  const { challengeId, phone, channel, actorEmail, email, sms } = opts;
+  const { challengeId, actorEmail, emailSent, smsSent, deliveryStatus } = opts;
 
-  if (!email.ok && !sms.ok) {
+  if (!emailSent && !smsSent) {
     return {
       ok: false,
       challengeId,
       smsSent: false,
       emailSent: false,
       message:
-        `I recognized your Founder phone, but could not deliver the verification code to ${actorEmail} or by SMS (${email.error || "email failed"}). Please check Render logs for provider errors, then say "verify founder" again.`,
-    };
-  }
-
-  if (email.ok) {
-    return {
-      ok: true,
-      challengeId,
-      smsSent: sms.ok,
-      emailSent: true,
-      message:
-        `I recognize this as your Founder phone. For security I emailed a 6-digit code to ${actorEmail}${sms.ok ? " and also texted a backup copy to this phone" : ""}. Please say or text that code to unlock Founder Mode. The code expires in ${Math.round(OTP_TTL_MS / 60_000)} minutes.`,
+        `I could not confirm delivery to ${actorEmail} or by SMS (${opts.emailError || "email failed"}; ${opts.smsError || "sms failed"}). Say resend code, try text message, or try email.`,
     };
   }
 
   return {
     ok: true,
     challengeId,
-    smsSent: true,
-    emailSent: false,
-    message:
-      `I recognize this as your Founder phone. Email delivery to ${actorEmail} is temporarily unavailable, so I texted a 6-digit code to this phone. Please say or text that code to unlock Founder Mode. The code expires in ${Math.round(OTP_TTL_MS / 60_000)} minutes.`,
+    smsSent,
+    emailSent,
+    message: formatDeliverySuccessMessage({ actorEmail, emailSent, smsSent, deliveryStatus }),
   };
 }
 
@@ -524,8 +621,11 @@ export async function startFounderPhoneChallenge(opts: {
   sessionKey: string;
   phoneE164: string;
   channel: AuraChannel;
-  /** Ignored for phone elevation — OTP is always required (security policy). */
   preferSeamless?: boolean;
+  /** Reuse pending challenge instead of issuing a new code. */
+  skipIfPending?: boolean;
+  /** email | sms | both — for resend / alternate method */
+  channelPreference?: "email" | "sms" | "both";
 }): Promise<{
   ok: boolean;
   challengeId?: string;
@@ -533,6 +633,8 @@ export async function startFounderPhoneChallenge(opts: {
   smsSent: boolean;
   emailSent?: boolean;
   deliveryPending?: boolean;
+  awaitingCode?: boolean;
+  deliveryStatus?: string;
   identity?: AuraTrustedIdentity;
   seamless?: boolean;
 }> {
@@ -571,68 +673,141 @@ export async function startFounderPhoneChallenge(opts: {
     };
   }
 
+  const actorEmail = getFounderEmail();
+
+  if (opts.skipIfPending !== false) {
+    const pending = await getActiveFounderChallenge(opts.sessionKey);
+    if (pending) {
+      return {
+        ok: true,
+        challengeId: pending.id,
+        smsSent: Boolean(pending.sms_sent),
+        emailSent: Boolean(pending.email_sent),
+        awaitingCode: true,
+        deliveryStatus: pending.delivery_status || "pending",
+        message: formatPendingChallengeMessage(pending),
+      };
+    }
+  }
+
   const code = generateOtp();
   const challengeId = crypto.randomUUID();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + OTP_TTL_MS).toISOString();
-  const user = await lookupUserByPhone(phone);
-  const actorEmail = getFounderEmail();
   const db = await getDb();
   await db.run(
     `INSERT INTO aura_identity_challenges (
-      id, session_key, phone_e164, code_hash, status, attempts, actor_email, created_at, expires_at
-    ) VALUES (?, ?, ?, ?, 'pending', 0, ?, ?, ?)`,
+      id, session_key, phone_e164, code_hash, code_sealed, status, attempts, actor_email,
+      created_at, expires_at, delivery_status
+    ) VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, 'pending')`,
     challengeId,
     opts.sessionKey,
     phone,
     hashOtp(code),
+    sealOtp(code),
     actorEmail,
     now.toISOString(),
     expiresAt
   );
 
-  // Voice webhooks must return TwiML quickly — deliver OTP in background to avoid Twilio aborting sends.
-  if (opts.channel === "voice") {
-    void deliverFounderOtpChannels({
-      challengeId,
-      code,
-      phoneE164: phone,
-      sessionKey: opts.sessionKey,
-      callerChannel: opts.channel,
-      actorEmail,
-    }).catch((err) => {
-      console.error("[founder-otp] Background voice delivery failed:", err instanceof Error ? err.message : err);
-    });
-    return {
-      ok: true,
-      challengeId,
-      smsSent: false,
-      emailSent: false,
-      deliveryPending: true,
-      message:
-        `I recognize this as your Founder phone. I'm sending a 6-digit verification code to ${actorEmail} and this phone now. Please say or text the code when you receive it. The code expires in ${Math.round(OTP_TTL_MS / 60_000)} minutes.`,
-    };
-  }
-
-  const { email, sms } = await deliverFounderOtpChannels({
+  const { email, sms, deliveryStatus, emailSent, smsSent } = await deliverFounderOtpWithFallback({
     challengeId,
     code,
     phoneE164: phone,
     sessionKey: opts.sessionKey,
     callerChannel: opts.channel,
     actorEmail,
+    channelPreference: opts.channelPreference ?? "both",
   });
 
-  return finalizeFounderChallengeDelivery({
+  const result = await finalizeFounderChallengeDelivery({
     challengeId,
-    code,
-    phone,
-    sessionKey: opts.sessionKey,
-    channel: opts.channel,
     actorEmail,
-    email: { ok: email.ok, error: email.error },
-    sms: { ok: sms.ok, error: sms.error },
+    emailSent,
+    smsSent,
+    deliveryStatus,
+    emailError: email.error,
+    smsError: sms.error,
   });
+
+  return {
+    ...result,
+    awaitingCode: result.ok,
+    deliveryStatus,
+  };
+}
+
+/** Resend the same active code — does not invalidate until expiry or successful verify. */
+export async function resendFounderOtp(opts: {
+  sessionKey: string;
+  phoneE164: string;
+  channel: AuraChannel;
+  channelPreference?: "email" | "sms" | "both";
+}): Promise<{
+  ok: boolean;
+  message: string;
+  emailSent: boolean;
+  smsSent: boolean;
+  deliveryStatus?: string;
+}> {
+  await ensureAuraTrustTables();
+  const pending = await getActiveFounderChallenge(opts.sessionKey);
+  if (!pending) {
+    return {
+      ok: false,
+      message: 'No active verification code. Say "verify founder" to start a new one.',
+      emailSent: false,
+      smsSent: false,
+    };
+  }
+  const code = unsealOtp(pending.code_sealed);
+  if (!code) {
+    return {
+      ok: false,
+      message: "I cannot resend this session's code securely. Say verify founder to start a fresh code.",
+      emailSent: false,
+      smsSent: false,
+    };
+  }
+  const actorEmail = pending.actor_email || getFounderEmail();
+  const phone = normalizeE164(opts.phoneE164) || pending.phone_e164;
+  const { email, sms, deliveryStatus, emailSent, smsSent } = await deliverFounderOtpWithFallback({
+    challengeId: pending.id,
+    code,
+    phoneE164: phone,
+    sessionKey: opts.sessionKey,
+    callerChannel: opts.channel,
+    actorEmail,
+    channelPreference: opts.channelPreference ?? "both",
+  });
+  const finalized = await finalizeFounderChallengeDelivery({
+    challengeId: pending.id,
+    actorEmail,
+    emailSent,
+    smsSent,
+    deliveryStatus,
+    emailError: email.error,
+    smsError: sms.error,
+  });
+  return {
+    ok: finalized.ok,
+    message: finalized.ok
+      ? `Resent your verification code. ${finalized.message}`
+      : finalized.message,
+    emailSent,
+    smsSent,
+    deliveryStatus,
+  };
+}
+
+export async function tryAlternateFounderDelivery(opts: {
+  sessionKey: string;
+  phoneE164: string;
+  channel: AuraChannel;
+}): Promise<ReturnType<typeof resendFounderOtp>> {
+  const pending = await getActiveFounderChallenge(opts.sessionKey);
+  const prefer: "email" | "sms" = pending?.preferred_channel === "email" ? "sms" : "email";
+  return resendFounderOtp({ ...opts, channelPreference: prefer });
 }
 
 export async function verifyFounderPhoneChallenge(opts: {
@@ -706,7 +881,7 @@ export async function verifyFounderPhoneChallenge(opts: {
 
   const now = new Date().toISOString();
   await db.run(
-    `UPDATE aura_identity_challenges SET status = 'verified', verified_at = ?, attempts = attempts + 1 WHERE id = ?`,
+    `UPDATE aura_identity_challenges SET status = 'verified', verified_at = ?, attempts = attempts + 1, delivery_status = 'verified' WHERE id = ?`,
     now,
     row.id
   );
@@ -810,9 +985,32 @@ export function wantsFounderVerification(message: string): boolean {
   );
 }
 
+export function wantsResendFounderCode(message: string): boolean {
+  const q = message.trim().toLowerCase();
+  return /\b(resend|send again|another code|new code|didn't get|did not get|never got|no code)\b/.test(q);
+}
+
+export function wantsAlternateFounderDelivery(message: string): boolean {
+  const q = message.trim().toLowerCase();
+  return (
+    /\b(try (another|a different) method|other method|use (text|sms|email)|try (text|sms|email)|send (by|via) (text|sms|email))\b/.test(q)
+    || /\btext (message|me)\b/.test(q)
+    || /\bemail (instead|me)\b/.test(q)
+  );
+}
+
 export function extractOtpFromMessage(message: string): string | null {
+  const digits = message.replace(/\D/g, "");
+  if (digits.length >= 6) {
+    const match = digits.match(/(\d{6})/);
+    if (match) return match[1];
+  }
   const match = message.match(/\b(\d{6})\b/);
   return match?.[1] ?? null;
+}
+
+export async function hasActiveFounderVerification(sessionKey: string): Promise<boolean> {
+  return Boolean(await getActiveFounderChallenge(sessionKey));
 }
 
 export function identityAllowsPermission(identity: AuraTrustedIdentity, permission: Permission): boolean {

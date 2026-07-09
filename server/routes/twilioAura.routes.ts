@@ -58,20 +58,29 @@ function publicBaseUrl(): string {
     .replace(/\/$/, "");
 }
 
-function buildGatherUrl(turn: number, callSid?: string): string {
+function buildGatherUrl(turn: number, callSid?: string, founderVerify = false): string {
   const base = publicBaseUrl();
   const qs = new URLSearchParams({ turn: String(turn) });
   if (callSid) qs.set("CallSid", callSid);
+  if (founderVerify) qs.set("founderVerify", "1");
   return `${base}/api/twilio/aura/voice/respond?${qs.toString()}`;
 }
 
-function appendGather(twiml: InstanceType<typeof VoiceResponse>, turn: number, callSid?: string): void {
+function buildFounderDeliverUrl(callSid?: string): string {
+  const base = publicBaseUrl();
+  const qs = new URLSearchParams();
+  if (callSid) qs.set("CallSid", callSid);
+  return `${base}/api/twilio/aura/voice/founder-deliver?${qs.toString()}`;
+}
+
+function appendGather(twiml: InstanceType<typeof VoiceResponse>, turn: number, callSid?: string, founderVerify = false): void {
   twiml.gather({
     input: ["speech"],
-    speechTimeout: "auto",
+    speechTimeout: founderVerify ? "5" : "auto",
+    timeout: founderVerify ? 30 : 5,
     speechModel: "phone_call",
     enhanced: true,
-    action: buildGatherUrl(turn, callSid),
+    action: buildGatherUrl(turn, callSid, founderVerify),
     method: "POST",
     language: "en-US",
     bargeIn: true,
@@ -107,11 +116,8 @@ async function handleIncomingVoice(req: Request, res: Response): Promise<void> {
 
   const sid = sessionKey(callSid, from);
   const session = await getReceptionistSession(sid, "voice", from);
-  const { greeting, founderMode, identityAssurance } = await resolveVoiceGreeting(
-    session,
-    calledNumber || IFCDC_HQ_PHONE_E164,
-    from
-  );
+  const { greeting, founderMode, identityAssurance, founderVerifyRedirect, awaitingFounderCode } =
+    await resolveVoiceGreeting(session, calledNumber || IFCDC_HQ_PHONE_E164, from);
 
   void logTwilioCommunicationEvent({
     id: cryptoRandomId(),
@@ -128,9 +134,43 @@ async function handleIncomingVoice(req: Request, res: Response): Promise<void> {
   await initializeReceptionistGreeting(sid, "voice", from);
 
   const twiml = new VoiceResponse();
+  if (founderVerifyRedirect) {
+    sayNatural(twiml, greeting);
+    twiml.redirect({ method: "POST" }, buildFounderDeliverUrl(callSid));
+    return respondXml(res, twiml.toString());
+  }
   sayNatural(twiml, greeting);
-  appendGather(twiml, 1, callSid);
-  twiml.say({ voice: VOICE }, "I didn't hear anything. Goodbye.");
+  appendGather(twiml, 1, callSid, awaitingFounderCode);
+  if (!awaitingFounderCode) {
+    twiml.say({ voice: VOICE }, "I didn't hear anything. Goodbye.");
+  } else {
+    twiml.say({ voice: VOICE }, "I'm still here whenever you're ready with your six digit code.");
+  }
+  respondXml(res, twiml.toString());
+}
+
+async function handleFounderDeliver(req: Request, res: Response): Promise<void> {
+  const from = normalizeE164(req.body.From);
+  const callSid = (req.body.CallSid || req.query.CallSid) as string | undefined;
+  const sid = sessionKey(callSid, from);
+  const twiml = new VoiceResponse();
+
+  const { startFounderPhoneChallenge } = await import("../hq/auraFounderTrustEngine");
+  const challenge = await startFounderPhoneChallenge({
+    sessionKey: sid,
+    phoneE164: from || "",
+    channel: "voice",
+    skipIfPending: true,
+  });
+
+  sayNatural(twiml, challenge.message);
+  if (challenge.ok && (challenge.awaitingCode || challenge.emailSent || challenge.smsSent)) {
+    appendGather(twiml, 1, callSid, true);
+    twiml.say({ voice: VOICE }, "Take your time. I'm waiting for your six digit code.");
+  } else {
+    twiml.say({ voice: VOICE }, "Say verify founder to try again, or call back in a moment.");
+    twiml.hangup();
+  }
   respondXml(res, twiml.toString());
 }
 
@@ -140,11 +180,18 @@ async function handleVoiceRespond(req: Request, res: Response): Promise<void> {
   const calledNumber = normalizeE164(req.body.To);
   const callSid = (req.body.CallSid || req.query.CallSid) as string | undefined;
   const turn = Math.min(parseInt(String(req.query.turn || "1"), 10) || 1, MAX_VOICE_TURNS);
+  const founderVerify = req.query.founderVerify === "1";
   const sid = sessionKey(callSid, from);
 
   const twiml = new VoiceResponse();
 
   if (!speech) {
+    if (founderVerify) {
+      sayNatural(twiml, "I'm still waiting for your six digit Founder verification code. Say the code when you have it, or say resend code.");
+      if (turn < MAX_VOICE_TURNS) appendGather(twiml, turn + 1, callSid, true);
+      else twiml.say({ voice: VOICE }, "Your verification window is still open if you call back within ten minutes. Goodbye for now.");
+      return respondXml(res, twiml.toString());
+    }
     sayNatural(twiml, "I didn't catch that — go ahead, I'm listening.");
     if (turn < MAX_VOICE_TURNS) appendGather(twiml, turn + 1, callSid);
     else {
@@ -183,9 +230,16 @@ async function handleVoiceRespond(req: Request, res: Response): Promise<void> {
 
   sayNatural(twiml, result.reply);
 
+  const keepVerifying = founderVerify || result.awaitingFounderCode;
   if (turn < MAX_VOICE_TURNS) {
-    appendGather(twiml, turn + 1, callSid);
-    twiml.say({ voice: VOICE }, "Thank you for calling IFCDC. Goodbye.");
+    appendGather(twiml, turn + 1, callSid, keepVerifying);
+    if (!keepVerifying) {
+      twiml.say({ voice: VOICE }, "Thank you for calling IFCDC. Goodbye.");
+    } else {
+      twiml.say({ voice: VOICE }, "I'm still here when you're ready with your code.");
+    }
+  } else if (keepVerifying) {
+    twiml.say({ voice: VOICE }, "Your verification code remains valid for the rest of the ten minute window if you call back. Goodbye for now.");
   } else {
     twiml.say({ voice: VOICE }, "Thank you for calling IFCDC. Goodbye.");
     twiml.hangup();
@@ -272,6 +326,16 @@ export function registerTwilioAuraRoutes(app: Express): void {
       console.error("Twilio AURA voice error:", err);
       const twiml = new VoiceResponse();
       twiml.say({ voice: VOICE }, "We're experiencing technical difficulties. Please try again later.");
+      respondXml(res, twiml.toString());
+    });
+  });
+
+  app.post("/api/twilio/aura/voice/founder-deliver", twilioForm, (req, res) => {
+    void handleFounderDeliver(req, res).catch((err) => {
+      console.error("Twilio AURA founder-deliver error:", err);
+      const twiml = new VoiceResponse();
+      twiml.say({ voice: VOICE }, "Sorry, I could not send the verification code right now. Please try again.");
+      twiml.hangup();
       respondXml(res, twiml.toString());
     });
   });

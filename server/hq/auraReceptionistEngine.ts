@@ -32,6 +32,8 @@ export type ReceptionistTurnResult = {
   bookingConfirmed: boolean;
   founderMode?: boolean;
   identityAssurance?: string;
+  /** Keep call open — waiting for Founder OTP digits. */
+  awaitingFounderCode?: boolean;
 };
 
 const RECEPTIONIST_PERSONALITY = `
@@ -163,7 +165,12 @@ export async function processReceptionistTurn(opts: {
     resolvePhoneCallerIdentity,
     startFounderPhoneChallenge,
     verifyFounderPhoneChallenge,
+    resendFounderOtp,
+    tryAlternateFounderDelivery,
+    getActiveFounderChallenge,
     wantsFounderVerification,
+    wantsResendFounderCode,
+    wantsAlternateFounderDelivery,
     extractOtpFromMessage,
     buildAuraIdentitySystemBlock,
     redactConfidentialForIdentity,
@@ -177,16 +184,95 @@ export async function processReceptionistTurn(opts: {
   });
 
   const message = userMessage.trim();
+  const pendingChallenge = !identity.founderMode
+    ? await getActiveFounderChallenge(sessionId)
+    : null;
+
   if (message) {
     session = await appendSessionTurn(session, "user", message);
 
+    if (!identity.founderMode && wantsResendFounderCode(message)) {
+      const resent = await resendFounderOtp({
+        sessionKey: sessionId,
+        phoneE164: callerPhone || session.callerPhone || "",
+        channel,
+      });
+      const updated = await appendSessionTurn(session, "assistant", resent.message);
+      return {
+        reply: resent.message,
+        action: "none",
+        transferTo: null,
+        session: updated,
+        bookingConfirmed: false,
+        founderMode: false,
+        identityAssurance: identity.assurance,
+        awaitingFounderCode: resent.ok,
+      };
+    }
+
+    if (!identity.founderMode && wantsAlternateFounderDelivery(message)) {
+      const alt = await tryAlternateFounderDelivery({
+        sessionKey: sessionId,
+        phoneE164: callerPhone || session.callerPhone || "",
+        channel,
+      });
+      const updated = await appendSessionTurn(session, "assistant", alt.message);
+      return {
+        reply: alt.message,
+        action: "none",
+        transferTo: null,
+        session: updated,
+        bookingConfirmed: false,
+        founderMode: false,
+        identityAssurance: identity.assurance,
+        awaitingFounderCode: alt.ok,
+      };
+    }
+
+    if (!identity.founderMode) {
+      const otp = extractOtpFromMessage(message);
+      if (otp || pendingChallenge) {
+        if (otp) {
+          const verified = await verifyFounderPhoneChallenge({
+            sessionKey: sessionId,
+            code: otp,
+            channel,
+            phoneE164: callerPhone ?? session.callerPhone,
+          });
+          const updated = await appendSessionTurn(session, "assistant", verified.message);
+          if (verified.ok && verified.identity) {
+            identity = verified.identity;
+            return {
+              reply: verified.message,
+              action: "none",
+              transferTo: null,
+              session: updated,
+              bookingConfirmed: false,
+              founderMode: true,
+              identityAssurance: identity.assurance,
+            };
+          }
+          return {
+            reply: verified.message,
+            action: "none",
+            transferTo: null,
+            session: updated,
+            bookingConfirmed: false,
+            founderMode: false,
+            identityAssurance: identity.assurance,
+            awaitingFounderCode: Boolean(pendingChallenge),
+          };
+        }
+      }
+    }
+
     // Founder verification: candidate phone recognized, but OTP to service@ifcdc.org is always required.
-    // Already-verified sessions reuse Founder Mode via getPhoneFounderSession (no re-prompt).
     if (!identity.founderMode && wantsFounderVerification(message)) {
       const challenge = await startFounderPhoneChallenge({
         sessionKey: sessionId,
         phoneE164: callerPhone || session.callerPhone || "",
         channel,
+        skipIfPending: true,
       });
       if (challenge.ok && challenge.identity) {
         identity = challenge.identity;
@@ -222,44 +308,24 @@ export async function processReceptionistTurn(opts: {
         bookingConfirmed: false,
         founderMode: false,
         identityAssurance: identity.assurance,
+        awaitingFounderCode: challenge.ok && (challenge.awaitingCode || challenge.emailSent || challenge.smsSent),
       };
     }
 
-    if (!identity.founderMode) {
-      const otp = extractOtpFromMessage(message);
-      if (otp) {
-        const verified = await verifyFounderPhoneChallenge({
-          sessionKey: sessionId,
-          code: otp,
-          channel,
-          phoneE164: callerPhone ?? session.callerPhone,
-        });
-        if (verified.ok && verified.identity) {
-          identity = verified.identity;
-          const updated = await appendSessionTurn(session, "assistant", verified.message);
-          return {
-            reply: verified.message,
-            action: "none",
-            transferTo: null,
-            session: updated,
-            bookingConfirmed: false,
-            founderMode: true,
-            identityAssurance: identity.assurance,
-          };
-        }
-        if (otp && /verify|founder|code|fahreal/i.test(message)) {
-          const updated = await appendSessionTurn(session, "assistant", verified.message);
-          return {
-            reply: verified.message,
-            action: "none",
-            transferTo: null,
-            session: updated,
-            bookingConfirmed: false,
-            founderMode: false,
-            identityAssurance: identity.assurance,
-          };
-        }
-      }
+    if (!identity.founderMode && pendingChallenge) {
+      const reminder =
+        "I'm still waiting for your 6-digit Founder verification code. Please say or text the code from your email or text message. You can also say resend code or try another method.";
+      const updated = await appendSessionTurn(session, "assistant", reminder);
+      return {
+        reply: reminder,
+        action: "none",
+        transferTo: null,
+        session: updated,
+        bookingConfirmed: false,
+        founderMode: false,
+        identityAssurance: identity.assurance,
+        awaitingFounderCode: true,
+      };
     }
   }
 
@@ -348,11 +414,18 @@ export async function resolveVoiceGreeting(
   session: ReceptionistSession,
   calledNumber: string,
   callerPhone?: string | null
-): Promise<{ greeting: string; founderMode: boolean; identityAssurance?: string; founderCandidate?: boolean }> {
+): Promise<{
+  greeting: string;
+  founderMode: boolean;
+  identityAssurance?: string;
+  founderCandidate?: boolean;
+  founderVerifyRedirect?: boolean;
+  awaitingFounderCode?: boolean;
+}> {
   const {
     resolvePhoneCallerIdentity,
-    startFounderPhoneChallenge,
     getPhoneFounderSession,
+    getActiveFounderChallenge,
   } = await import("./auraFounderTrustEngine");
 
   let identity = await resolvePhoneCallerIdentity({
@@ -361,7 +434,18 @@ export async function resolveVoiceGreeting(
     callerPhone: callerPhone ?? session.callerPhone,
   });
 
-  // Candidate Founder phone on a fresh call: email OTP immediately (never elevate from ANI alone).
+  const pending = await getActiveFounderChallenge(session.sessionId);
+  if (!identity.founderMode && pending) {
+    return {
+      greeting:
+        "Welcome back. You still have an active Founder verification. Please say or text your six digit code when ready. I'll stay on the line for up to ten minutes. You can also say resend code or try another method.",
+      founderMode: false,
+      identityAssurance: identity.assurance,
+      founderCandidate: true,
+      awaitingFounderCode: true,
+    };
+  }
+
   if (
     !identity.founderMode
     && identity.founderCandidate
@@ -370,37 +454,14 @@ export async function resolveVoiceGreeting(
   ) {
     const existing = await getPhoneFounderSession(session.sessionId);
     if (!existing?.founderMode) {
-      const challenge = await startFounderPhoneChallenge({
-        sessionKey: session.sessionId,
-        phoneE164: callerPhone || session.callerPhone || "",
-        channel: "voice",
-      });
-      if (challenge.ok && challenge.identity) {
-        identity = challenge.identity;
-      } else if (challenge.ok && (challenge.emailSent || challenge.smsSent || challenge.deliveryPending)) {
-        const spoken = challenge.deliveryPending
-          ? "Welcome. I recognize this as your Founder phone. I'm sending a one-time verification code to service at I F C D C dot org and this phone right now. Please say the six digit code when you receive it."
-          : challenge.emailSent
-            ? "Welcome. I recognize this as your Founder phone. For security I just emailed a one-time code to service at I F C D C dot org"
-              + (challenge.smsSent ? ", and also texted a backup copy to this phone" : "")
-              + ". Please say the six digit code to unlock Founder Mode."
-            : "Welcome. I recognize this as your Founder phone. Email delivery is delayed, so I texted a one-time code to this phone. Please say the six digit code to unlock Founder Mode.";
-        return {
-          greeting: spoken,
-          founderMode: false,
-          identityAssurance: identity.assurance,
-          founderCandidate: true,
-        };
-      } else if (!challenge.ok) {
-        return {
-          greeting:
-            challenge.message
-            || "Welcome. I recognize this as your Founder phone, but I could not deliver the verification code yet. Please try again in a moment, or say verify founder.",
-          founderMode: false,
-          identityAssurance: identity.assurance,
-          founderCandidate: true,
-        };
-      }
+      return {
+        greeting:
+          "Welcome. I recognize this as your Founder phone. One moment while I send your verification code.",
+        founderMode: false,
+        identityAssurance: identity.assurance,
+        founderCandidate: true,
+        founderVerifyRedirect: true,
+      };
     }
   }
 
