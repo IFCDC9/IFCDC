@@ -61,9 +61,11 @@ export function normalizeE164(raw: string | null | undefined): string | null {
 export function resolveTwilioPhoneNumber(): string | null {
   const candidates = [
     process.env.TWILIO_PHONE_NUMBER,
+    process.env.HQ_PHONE_NUMBER,
     process.env.TWILIO_SMS_FROM,
     process.env.TWILIO_VOICE_FROM,
     process.env.TWILIO_FROM_NUMBER,
+    process.env.PUBLIC_IFCDC_PHONE,
     IFCDC_HQ_PHONE_E164,
   ];
   for (const c of candidates) {
@@ -73,14 +75,51 @@ export function resolveTwilioPhoneNumber(): string | null {
   return null;
 }
 
+export function getTwilioPhoneEnvSources(): {
+  twilioPhoneNumberSet: boolean;
+  hqPhoneNumberSet: boolean;
+  twilioSmsFromSet: boolean;
+  twilioVoiceFromSet: boolean;
+  twilioFromNumberSet: boolean;
+  publicIfcdcPhoneSet: boolean;
+  resolvedFrom: string | null;
+} {
+  const checks: [string, boolean][] = [
+    ["TWILIO_PHONE_NUMBER", Boolean((process.env.TWILIO_PHONE_NUMBER || "").trim())],
+    ["HQ_PHONE_NUMBER", Boolean((process.env.HQ_PHONE_NUMBER || "").trim())],
+    ["TWILIO_SMS_FROM", Boolean((process.env.TWILIO_SMS_FROM || "").trim())],
+    ["TWILIO_VOICE_FROM", Boolean((process.env.TWILIO_VOICE_FROM || "").trim())],
+    ["TWILIO_FROM_NUMBER", Boolean((process.env.TWILIO_FROM_NUMBER || "").trim())],
+    ["PUBLIC_IFCDC_PHONE", Boolean((process.env.PUBLIC_IFCDC_PHONE || "").trim())],
+  ];
+  const resolved = resolveTwilioPhoneNumber();
+  const resolvedFrom =
+    checks.find(([key]) => {
+      const val = process.env[key as keyof NodeJS.ProcessEnv];
+      return val && normalizeE164(val) === resolved;
+    })?.[0] ?? (resolved === IFCDC_HQ_PHONE_E164 ? "built_in_default" : null);
+
+  return {
+    twilioPhoneNumberSet: checks[0][1],
+    hqPhoneNumberSet: checks[1][1],
+    twilioSmsFromSet: checks[2][1],
+    twilioVoiceFromSet: checks[3][1],
+    twilioFromNumberSet: checks[4][1],
+    publicIfcdcPhoneSet: checks[5][1],
+    resolvedFrom,
+  };
+}
+
 export function getTwilioEnvStatus(): TwilioEnvStatus {
   const accountSidConfigured = Boolean((process.env.TWILIO_ACCOUNT_SID || "").trim());
   const authTokenConfigured = Boolean((process.env.TWILIO_AUTH_TOKEN || "").trim());
   const phoneNumberRaw =
     (process.env.TWILIO_PHONE_NUMBER || "").trim() ||
+    (process.env.HQ_PHONE_NUMBER || "").trim() ||
     (process.env.TWILIO_SMS_FROM || "").trim() ||
     (process.env.TWILIO_VOICE_FROM || "").trim() ||
     (process.env.TWILIO_FROM_NUMBER || "").trim() ||
+    (process.env.PUBLIC_IFCDC_PHONE || "").trim() ||
     null;
   const phoneNumber = resolveTwilioPhoneNumber();
   const messagingServiceConfigured = Boolean((process.env.TWILIO_MESSAGING_SERVICE_SID || "").trim());

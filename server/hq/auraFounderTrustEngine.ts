@@ -117,15 +117,72 @@ export function getFounderEmail(): string {
   return getSuperAdminEmail();
 }
 
-function parseCandidatePhones(): string[] {
-  const fromEnv = (process.env.FOUNDER_TRUSTED_PHONES || process.env.AURA_FOUNDER_PHONES || "")
-    .split(",")
+function parsePhoneList(raw: string | undefined): string[] {
+  if (!raw?.trim()) return [];
+  return raw
+    .split(/[,;\n\r]+/)
+    .flatMap((part) => part.split(/\s+/))
     .map((p) => normalizeE164(p.trim()))
     .filter((p): p is string => Boolean(p));
+}
+
+/** Phones recognized as Founder candidates (ANI). OTP still required before Founder Mode. */
+export function getLoadedFounderCandidatePhones(): string[] {
+  const fromEnv = [
+    ...parsePhoneList(process.env.FOUNDER_TRUSTED_PHONES),
+    ...parsePhoneList(process.env.FOUNDER_PHONE),
+    ...parsePhoneList(process.env.AURA_FOUNDER_PHONES),
+  ];
   const defaults = DEFAULT_FOUNDER_CANDIDATE_PHONES
     .map((p) => normalizeE164(p))
     .filter((p): p is string => Boolean(p));
   return Array.from(new Set([...defaults, ...fromEnv]));
+}
+
+function parseCandidatePhones(): string[] {
+  return getLoadedFounderCandidatePhones();
+}
+
+export function getFounderPhoneEnvSources(): {
+  founderTrustedPhonesSet: boolean;
+  founderPhoneSet: boolean;
+  auraFounderPhonesSet: boolean;
+  builtInDefaults: string[];
+  loadedCount: number;
+} {
+  const builtInDefaults = DEFAULT_FOUNDER_CANDIDATE_PHONES
+    .map((p) => normalizeE164(p))
+    .filter((p): p is string => Boolean(p));
+  return {
+    founderTrustedPhonesSet: Boolean((process.env.FOUNDER_TRUSTED_PHONES || "").trim()),
+    founderPhoneSet: Boolean((process.env.FOUNDER_PHONE || "").trim()),
+    auraFounderPhonesSet: Boolean((process.env.AURA_FOUNDER_PHONES || "").trim()),
+    builtInDefaults,
+    loadedCount: getLoadedFounderCandidatePhones().length,
+  };
+}
+
+export async function getFounderPhoneReadiness(): Promise<{
+  trustedPhones: string[];
+  sources: ReturnType<typeof getFounderPhoneEnvSources>;
+  matchTests: Record<string, boolean>;
+  hqPhone: string | null;
+  otpEmail: string;
+}> {
+  const trustedPhones = getLoadedFounderCandidatePhones();
+  const tests = ["+18484694448", "+17327615075", "+13313168167", "+15555550100"];
+  const matchTests: Record<string, boolean> = {};
+  for (const phone of tests) {
+    matchTests[phone] = await isTrustedFounderPhone(phone);
+  }
+  const { resolveTwilioPhoneNumber } = await import("./twilioIntegrationEngine");
+  return {
+    trustedPhones,
+    sources: getFounderPhoneEnvSources(),
+    matchTests,
+    hqPhone: resolveTwilioPhoneNumber(),
+    otpEmail: getFounderEmail(),
+  };
 }
 
 export async function ensureAuraTrustTables(): Promise<void> {

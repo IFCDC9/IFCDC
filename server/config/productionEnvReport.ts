@@ -2,6 +2,8 @@
  * Logs production configuration gaps at startup (non-fatal).
  * Required secrets are enforced by assertProductionEnv().
  */
+import { getLoadedFounderCandidatePhones, getFounderPhoneEnvSources } from "../hq/auraFounderTrustEngine";
+import { resolveTwilioPhoneNumber, getTwilioPhoneEnvSources } from "../hq/twilioIntegrationEngine";
 
 const OPTIONAL_PRODUCTION_VARS: { key: string; purpose: string }[] = [
   { key: "AURA_OPENAI_API_KEY", purpose: "AURA AI — canonical production key (all AURA surfaces)" },
@@ -12,6 +14,9 @@ const OPTIONAL_PRODUCTION_VARS: { key: string; purpose: string }[] = [
   { key: "TWILIO_ACCOUNT_SID", purpose: "Twilio AURA voice + SMS" },
   { key: "TWILIO_AUTH_TOKEN", purpose: "Twilio AURA voice + SMS" },
   { key: "TWILIO_PHONE_NUMBER", purpose: "IFCDC HQ line +13313168167" },
+  { key: "HQ_PHONE_NUMBER", purpose: "IFCDC HQ line alias" },
+  { key: "FOUNDER_TRUSTED_PHONES", purpose: "AURA Founder candidate dialers (comma/newline E.164)" },
+  { key: "FOUNDER_PHONE", purpose: "AURA Founder phone alias" },
   { key: "HQ_BARBERS_HEALTH_URL", purpose: "IFCDC Barbers production health monitoring" },
   { key: "HQ_MUSIC_HEALTH_URL", purpose: "IFCDC Music app monitoring" },
   { key: "HQ_TAPIS_HEALTH_URL", purpose: "IFCDC Tapis monitoring" },
@@ -50,5 +55,25 @@ export function reportProductionEnvGaps(): void {
     );
   } else {
     console.log(`Email delivery: Resend configured · from=${from}`);
+  }
+
+  // Founder + HQ phone config (read at startup — no cache)
+  try {
+    const founderPhones = getLoadedFounderCandidatePhones();
+    const founderSources = getFounderPhoneEnvSources();
+    const hqPhone = resolveTwilioPhoneNumber();
+    const twilioSources = getTwilioPhoneEnvSources();
+    console.log(
+      `AURA Founder phones loaded (${founderPhones.length}): ${founderPhones.join(", ")}`
+      + ` · sources: FOUNDER_TRUSTED_PHONES=${founderSources.founderTrustedPhonesSet}`
+      + ` FOUNDER_PHONE=${founderSources.founderPhoneSet}`
+      + ` AURA_FOUNDER_PHONES=${founderSources.auraFounderPhonesSet}`
+    );
+    console.log(
+      `HQ/Twilio outbound line: ${hqPhone ?? "unset"}`
+      + ` · resolved from ${twilioSources.resolvedFrom ?? "unknown"}`
+    );
+  } catch (err) {
+    console.warn("Startup phone config report failed:", err instanceof Error ? err.message : err);
   }
 }

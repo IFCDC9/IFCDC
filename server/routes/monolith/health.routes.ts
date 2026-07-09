@@ -3,7 +3,8 @@ import { getBuildInfo } from "../../buildInfo";
 import { isApplicationReady } from "../../bootstrap/applicationState";
 import { getGrantCenterQaReport, grantCenterQaEnvReady } from "../../hq/grantCenterQaCache";
 import { getPayPalEnvStatus } from "../../hq/paypalIntegrationEngine";
-import { getTwilioEnvStatus, getLastTwilioWebhookSync, getTwilioWebhookUrls } from "../../hq/twilioIntegrationEngine";
+import { getTwilioEnvStatus, getLastTwilioWebhookSync, getTwilioWebhookUrls, getTwilioPhoneEnvSources } from "../../hq/twilioIntegrationEngine";
+import { getFounderPhoneReadiness } from "../../hq/auraFounderTrustEngine";
 import {
   credentialsAreSeparated,
   getGrantsOperatorEmail,
@@ -28,6 +29,13 @@ export function registerHealthRoutes(app: Express): void {
     const twilioWebhooks = getTwilioWebhookUrls();
     const openai = openAiConfigStatus();
     const email = getEmailDeliveryStatus();
+    const twilioPhoneSources = getTwilioPhoneEnvSources();
+    let founderReadiness: Awaited<ReturnType<typeof getFounderPhoneReadiness>> | null = null;
+    try {
+      founderReadiness = await getFounderPhoneReadiness();
+    } catch {
+      founderReadiness = null;
+    }
 
     let knowledgeBase: {
       total: number;
@@ -112,6 +120,8 @@ export function registerHealthRoutes(app: Express): void {
           authTokenConfigured: twilioEnv.authTokenConfigured,
           phoneNumberConfigured: twilioEnv.phoneNumberConfigured,
           phoneNumber: twilioEnv.phoneNumber,
+          phoneNumberRaw: twilioEnv.phoneNumberRaw,
+          resolvedFrom: twilioPhoneSources.resolvedFrom,
           auraConfigured: twilioEnv.auraConfigured,
           ready: twilioEnv.ready,
           webhookSync: twilioWebhookSync
@@ -121,6 +131,14 @@ export function registerHealthRoutes(app: Express): void {
             voice: twilioWebhooks.incomingVoice,
             sms: twilioWebhooks.incomingSms,
             status: twilioWebhooks.voiceStatus,
+          },
+          envSources: {
+            TWILIO_PHONE_NUMBER: twilioPhoneSources.twilioPhoneNumberSet,
+            HQ_PHONE_NUMBER: twilioPhoneSources.hqPhoneNumberSet,
+            TWILIO_SMS_FROM: twilioPhoneSources.twilioSmsFromSet,
+            TWILIO_VOICE_FROM: twilioPhoneSources.twilioVoiceFromSet,
+            TWILIO_FROM_NUMBER: twilioPhoneSources.twilioFromNumberSet,
+            PUBLIC_IFCDC_PHONE: twilioPhoneSources.publicIfcdcPhoneSet,
           },
         },
         email: {
@@ -132,6 +150,15 @@ export function registerHealthRoutes(app: Express): void {
           inlineOnly: email.inlineOnly,
           notificationsUrlSet: Boolean(email.notificationsUrl),
         },
+        founder: founderReadiness
+          ? {
+              trustedPhones: founderReadiness.trustedPhones,
+              otpEmail: founderReadiness.otpEmail,
+              hqPhone: founderReadiness.hqPhone,
+              envSources: founderReadiness.sources,
+              matchTests: founderReadiness.matchTests,
+            }
+          : null,
       },
     });
   });

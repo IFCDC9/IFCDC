@@ -635,11 +635,15 @@ async function buildTwilioCard(): Promise<IntegrationHubCard> {
   const requiredKeys = ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "AURA_OPENAI_API_KEY"];
   const optionalKeys = [
     "TWILIO_PHONE_NUMBER",
+    "HQ_PHONE_NUMBER",
     "TWILIO_SMS_FROM",
     "TWILIO_VOICE_FROM",
     "TWILIO_FROM_NUMBER",
     "TWILIO_MESSAGING_SERVICE_SID",
     "PUBLIC_IFCDC_PHONE",
+    "FOUNDER_TRUSTED_PHONES",
+    "FOUNDER_PHONE",
+    "AURA_FOUNDER_PHONES",
   ];
 
   return {
