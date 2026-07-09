@@ -377,13 +377,14 @@ export async function resolveVoiceGreeting(
       });
       if (challenge.ok && challenge.identity) {
         identity = challenge.identity;
-      } else if (challenge.ok && (challenge.emailSent || challenge.smsSent)) {
-        // Prefer the challenge message so SMS-only / email+SMS paths are spoken correctly.
-        const spoken = challenge.emailSent
-          ? "Welcome. I recognize this as your Founder phone. For security I just emailed a one-time code to service at I F C D C dot org"
-            + (challenge.smsSent ? ", and also texted a backup copy to this phone" : "")
-            + ". Please say the six digit code to unlock Founder Mode."
-          : "Welcome. I recognize this as your Founder phone. Email delivery is delayed, so I texted a one-time code to this phone. Please say the six digit code to unlock Founder Mode.";
+      } else if (challenge.ok && (challenge.emailSent || challenge.smsSent || challenge.deliveryPending)) {
+        const spoken = challenge.deliveryPending
+          ? "Welcome. I recognize this as your Founder phone. I'm sending a one-time verification code to service at I F C D C dot org and this phone right now. Please say the six digit code when you receive it."
+          : challenge.emailSent
+            ? "Welcome. I recognize this as your Founder phone. For security I just emailed a one-time code to service at I F C D C dot org"
+              + (challenge.smsSent ? ", and also texted a backup copy to this phone" : "")
+              + ". Please say the six digit code to unlock Founder Mode."
+            : "Welcome. I recognize this as your Founder phone. Email delivery is delayed, so I texted a one-time code to this phone. Please say the six digit code to unlock Founder Mode.";
         return {
           greeting: spoken,
           founderMode: false,

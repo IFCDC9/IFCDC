@@ -695,6 +695,45 @@ router.post("/aura/identity/trust-device", hqAuthRequired, requireHQModule("aura
   res.json({ ...result, identity: publicIdentitySummary(elevated) });
 });
 
+/** Founder OTP delivery audit — recent channel attempts with provider responses. */
+router.get("/aura/founder-verification/logs", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { getRecentOtpDeliveryLogs } = await import("../hq/auraFounderOtpDelivery");
+  const { getEmailDeliveryStatus, probeResendSender } = await import("../lib/notifications");
+  const { getTwilioEnvStatus } = await import("../hq/twilioIntegrationEngine");
+  const limit = Math.min(parseInt(String(req.query.limit ?? "25"), 10) || 25, 100);
+  const [logs, resendProbe] = await Promise.all([
+    getRecentOtpDeliveryLogs(limit),
+    probeResendSender().catch(() => null),
+  ]);
+  res.json({
+    logs,
+    email: getEmailDeliveryStatus(),
+    resendProbe,
+    twilio: getTwilioEnvStatus(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+/** Production probe — sends real test Founder OTP email/SMS and returns provider responses. */
+router.post("/aura/founder-verification/probe", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { probeFounderVerificationDelivery } = await import("../hq/auraFounderOtpDelivery");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.isFounder) {
+    return res.status(403).json({ error: "Founder access required for verification probe." });
+  }
+  const smsTo = typeof req.body?.smsTo === "string" ? req.body.smsTo.trim() : null;
+  const result = await probeFounderVerificationDelivery({ smsTo });
+  res.json({
+    ...result,
+    note: "Test code 000000 was used — discard any test messages. Check providerResponse for failure details.",
+  });
+});
+
 router.delete("/aura/identity/trust-device", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
   const { revokeTrustedFounderDevice, resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
   const identity = resolveIdentityFromHqUser({ user: req.hqUser, channel: "hq_web" });

@@ -10,6 +10,13 @@ import {
 } from "@ifcdc/notifications";
 import { IFCDC_SERVICE_URLS } from "./ifcdc";
 
+/** Extended provider result for Founder OTP audit logging. */
+export type HqDeliveryResult = NotificationResult & {
+  providerCode?: string | number;
+  providerStatus?: string | number;
+  providerResponse?: Record<string, unknown>;
+};
+
 function resolveResendApiKey(): string | null {
   const key = (
     process.env.RESEND_API_KEY
@@ -64,7 +71,7 @@ function createResendEmailProvider() {
   const apiKey = resolveResendApiKey();
   if (!apiKey) return undefined;
   return {
-    async send(payload: NotificationPayload): Promise<NotificationResult> {
+    async send(payload: NotificationPayload): Promise<HqDeliveryResult> {
       const from = resolveResendFromEmail();
       const text = payload.body;
       const html = text
@@ -94,6 +101,7 @@ function createResendEmailProvider() {
           message?: string;
           name?: string;
           error?: string;
+          statusCode?: number;
         };
         if (!res.ok) {
           const err =
@@ -101,15 +109,26 @@ function createResendEmailProvider() {
             || data.error
             || data.name
             || `Resend error ${res.status}`;
-          console.error(`[email] Resend failed status=${res.status}: ${err}`);
-          return { success: false, error: err };
+          console.error(`[email] Resend failed status=${res.status}: ${err}`, JSON.stringify(data));
+          return {
+            success: false,
+            error: err,
+            providerCode: data.name || data.statusCode || res.status,
+            providerStatus: res.status,
+            providerResponse: data as Record<string, unknown>,
+          };
         }
         console.log(`[email] Resend ok id=${data.id ?? "unknown"}`);
-        return { success: true, messageId: data.id };
+        return {
+          success: true,
+          messageId: data.id,
+          providerStatus: res.status,
+          providerResponse: data as Record<string, unknown>,
+        };
       } catch (err) {
         const message = err instanceof Error ? err.message : "Email send failed";
         console.error(`[email] Resend exception: ${message}`);
-        return { success: false, error: message };
+        return { success: false, error: message, providerResponse: { exception: message } };
       }
     },
   };
@@ -185,12 +204,13 @@ export async function sendFounderSecurityEmail(opts: {
   to: string;
   subject: string;
   body: string;
-}): Promise<NotificationResult> {
+}): Promise<HqDeliveryResult> {
   const provider = createResendEmailProvider();
   if (!provider) {
     return {
       success: false,
       error: "RESEND_API_KEY is not configured on Headquarters (Render env)",
+      providerCode: "missing_api_key",
     };
   }
   return provider.send({
@@ -199,4 +219,169 @@ export async function sendFounderSecurityEmail(opts: {
     subject: opts.subject,
     body: opts.body,
   });
+}
+
+function twilioErrorFields(err: unknown): {
+  message: string;
+  code?: number;
+  status?: number;
+  moreInfo?: string;
+} {
+  if (err && typeof err === "object") {
+    const e = err as { message?: string; code?: number; status?: number; moreInfo?: string };
+    return {
+      message: e.message || "SMS send failed",
+      code: e.code,
+      status: e.status,
+      moreInfo: e.moreInfo,
+    };
+  }
+  return { message: err instanceof Error ? err.message : "SMS send failed" };
+}
+
+/** Direct Twilio SMS for Founder OTP with full error capture. */
+export async function sendFounderSecuritySms(opts: {
+  to: string;
+  body: string;
+}): Promise<HqDeliveryResult> {
+  const sid = (process.env.TWILIO_ACCOUNT_SID || "").trim();
+  const token = (process.env.TWILIO_AUTH_TOKEN || "").trim();
+  const messagingServiceSid = (process.env.TWILIO_MESSAGING_SERVICE_SID || "").trim();
+  const from = (
+    process.env.TWILIO_PHONE_NUMBER
+    || process.env.HQ_PHONE_NUMBER
+    || process.env.TWILIO_SMS_FROM
+    || process.env.TWILIO_FROM_NUMBER
+    || ""
+  ).trim();
+
+  if (!sid || !token) {
+    return {
+      success: false,
+      error: "Twilio credentials missing (TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN)",
+      providerCode: "missing_twilio_credentials",
+    };
+  }
+  if (!messagingServiceSid && !from) {
+    return {
+      success: false,
+      error: "Twilio from number missing (TWILIO_PHONE_NUMBER or TWILIO_MESSAGING_SERVICE_SID)",
+      providerCode: "missing_from_number",
+    };
+  }
+
+  const to = opts.to.trim();
+  if (!/^\+[1-9]\d{7,14}$/.test(to)) {
+    return {
+      success: false,
+      error: `Invalid E.164 destination: ${to}`,
+      providerCode: "invalid_e164",
+      providerResponse: { to },
+    };
+  }
+
+  try {
+    const twilio = await import("twilio");
+    const client = twilio.default(sid, token);
+    if (messagingServiceSid) {
+      console.log(`[sms] Twilio send → to=${to} messagingServiceSid=${messagingServiceSid}`);
+    } else {
+      const fromE164 = from.startsWith("+") ? from : `+${from.replace(/\D/g, "")}`;
+      console.log(`[sms] Twilio send → to=${to} from=${fromE164}`);
+    }
+
+    const message = await client.messages.create(
+      messagingServiceSid
+        ? { to, body: opts.body, messagingServiceSid }
+        : { to, body: opts.body, from: from.startsWith("+") ? from : `+${from.replace(/\D/g, "")}` }
+    );
+    console.log(`[sms] Twilio ok sid=${message.sid} status=${message.status}`);
+    return {
+      success: true,
+      messageId: message.sid,
+      providerStatus: message.status,
+      providerResponse: {
+        sid: message.sid,
+        status: message.status,
+        to: message.to,
+        from: message.from,
+        errorCode: message.errorCode,
+        errorMessage: message.errorMessage,
+      },
+    };
+  } catch (err) {
+    const detail = twilioErrorFields(err);
+    console.error(
+      `[sms] Twilio failed code=${detail.code ?? "n/a"} status=${detail.status ?? "n/a"}: ${detail.message}`
+      + (detail.moreInfo ? ` moreInfo=${detail.moreInfo}` : "")
+    );
+    return {
+      success: false,
+      error: detail.message,
+      providerCode: detail.code,
+      providerStatus: detail.status,
+      providerResponse: {
+        code: detail.code,
+        status: detail.status,
+        moreInfo: detail.moreInfo,
+        message: detail.message,
+      },
+    };
+  }
+}
+
+/** Probe Resend sender/domain authorization without sending email. */
+export async function probeResendSender(): Promise<{
+  ok: boolean;
+  apiKeySet: boolean;
+  from: string;
+  domains?: { name: string; status: string }[];
+  error?: string;
+  providerStatus?: number;
+}> {
+  const apiKey = resolveResendApiKey();
+  const from = resolveResendFromEmail();
+  if (!apiKey) {
+    return { ok: false, apiKeySet: false, from, error: "RESEND_API_KEY not set" };
+  }
+  try {
+    const res = await fetch("https://api.resend.com/domains", {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(8_000),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      data?: { name: string; status: string }[];
+      message?: string;
+      error?: string;
+    };
+    if (!res.ok) {
+      return {
+        ok: false,
+        apiKeySet: true,
+        from,
+        error: data.message || data.error || `Resend domains API ${res.status}`,
+        providerStatus: res.status,
+      };
+    }
+    const domains = (data.data || []).map((d) => ({ name: d.name, status: d.status }));
+    const fromDomain = from.match(/@([a-z0-9.-]+)/i)?.[1]?.toLowerCase();
+    const domainOk = fromDomain
+      ? domains.some((d) => d.name.toLowerCase() === fromDomain && d.status === "verified")
+      : false;
+    return {
+      ok: domainOk || domains.some((d) => d.status === "verified"),
+      apiKeySet: true,
+      from,
+      domains,
+      error: domainOk ? undefined : `Sender domain may be unverified (from=${from})`,
+      providerStatus: res.status,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      apiKeySet: true,
+      from,
+      error: err instanceof Error ? err.message : "Resend probe failed",
+    };
+  }
 }
