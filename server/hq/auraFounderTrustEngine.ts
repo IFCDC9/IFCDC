@@ -582,18 +582,22 @@ function formatDeliverySuccessMessage(opts: {
   emailSent: boolean;
   smsSent: boolean;
   deliveryStatus: string;
+  emailError?: string;
+  smsError?: string;
 }): string {
   const mins = Math.round(OTP_TTL_MS / 60_000);
+  const emailErr = opts.emailError ? ` Email error: ${opts.emailError.slice(0, 160)}.` : "";
+  const smsErr = opts.smsError ? ` SMS error: ${opts.smsError.slice(0, 160)}.` : "";
   if (opts.emailSent && opts.smsSent) {
     return `Provider accepted your verification code for ${opts.actorEmail} and for this phone by text. Status: sent. Please say or text the 6-digit code when you receive it. I'll keep this verification open for ${mins} minutes. Say resend code or try another method if needed.`;
   }
   if (opts.emailSent) {
-    return `Email provider accepted the send to ${opts.actorEmail}. Status: partial — SMS not confirmed. Please say or text the 6-digit code from that email. I'll wait up to ${mins} minutes. Say resend code or try text message if you don't see it.`;
+    return `Email provider accepted the send to ${opts.actorEmail}. Status: partial — SMS not confirmed.${smsErr} Please say or text the 6-digit code from that email. I'll wait up to ${mins} minutes. Say resend code or try text message if you don't see it.`;
   }
   if (opts.smsSent) {
-    return `SMS provider accepted the send to this phone. Status: partial — email not confirmed. Please say or text the 6-digit code now. I'll wait up to ${mins} minutes. Say try email or resend code if you need another copy.`;
+    return `SMS provider accepted the send to this phone. Status: partial — email not confirmed.${emailErr} Please say or text the 6-digit code now. I'll wait up to ${mins} minutes. Say try email or resend code if you need another copy.`;
   }
-  return `I could not confirm delivery to ${opts.actorEmail} or by SMS (${opts.deliveryStatus}). Say resend code, try text message, or try email.`;
+  return `I could not confirm delivery to ${opts.actorEmail} or by SMS (${opts.deliveryStatus}).${emailErr}${smsErr} Say resend code, try text message, or try email.`;
 }
 
 function formatPendingChallengeMessage(row: FounderChallengeRow): string {
@@ -639,7 +643,14 @@ async function finalizeFounderChallengeDelivery(opts: {
     challengeId,
     smsSent,
     emailSent,
-    message: formatDeliverySuccessMessage({ actorEmail, emailSent, smsSent, deliveryStatus }),
+    message: formatDeliverySuccessMessage({
+      actorEmail,
+      emailSent,
+      smsSent,
+      deliveryStatus,
+      emailError: opts.emailError,
+      smsError: opts.smsError,
+    }),
   };
 }
 

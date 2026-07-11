@@ -165,20 +165,9 @@ export async function sendFounderOtpEmailDelivery(
 
   const resendProbe = await probeResendSender();
   if (!resendProbe.ok) {
-    const result: OtpDeliveryResult = {
-      ok: false,
-      channel: "email",
-      destination: to,
-      provider: "resend",
-      error: resendProbe.error || "Resend sender/domain not verified",
-      errorCode: "resend_domain_unverified",
-      providerStatus: resendProbe.providerStatus,
-      providerResponse: { resendProbe, from: resendProbe.from },
-      durationMs: Date.now() - started,
-      timestamp,
-    };
-    await logOtpDeliveryAttempt({ challengeId, ...opts, result });
-    return result;
+    console.warn(
+      `[founder-otp] Resend domain probe failed (will still attempt send): ${resendProbe.error || "unknown"}`
+    );
   }
 
   const send = await sendFounderSecurityEmail({
@@ -203,10 +192,15 @@ export async function sendFounderOtpEmailDelivery(
     destination: to,
     provider: "resend",
     messageId: send.messageId,
-    error: send.success && !send.messageId ? "Resend accepted but no message id returned" : send.error,
-    errorCode: send.providerCode,
-    providerStatus: send.providerStatus,
-    providerResponse: send.providerResponse,
+    error: send.success && !send.messageId
+      ? "Resend accepted but no message id returned"
+      : send.error || (!resendProbe.ok ? resendProbe.error : undefined),
+    errorCode: send.providerCode || (!resendProbe.ok ? "resend_domain_unverified" : undefined),
+    providerStatus: send.providerStatus ?? resendProbe.providerStatus,
+    providerResponse: {
+      ...(send.providerResponse || {}),
+      resendProbe,
+    },
     durationMs: Date.now() - started,
     timestamp,
   };

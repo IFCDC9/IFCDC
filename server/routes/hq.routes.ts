@@ -104,13 +104,21 @@ router.get("/health", (_req: Request, res: Response) => {
 });
 
 /** Non-secret email delivery readiness (Founder OTP depends on this). */
-router.get("/email/status", (_req: Request, res: Response) => {
+router.get("/email/status", async (_req: Request, res: Response) => {
   const status = getEmailDeliveryStatus();
+  const { probeResendSender } = await import("../lib/notifications");
+  const resendProbe = await probeResendSender().catch((err) => ({
+    ok: false,
+    apiKeySet: status.apiKeySet,
+    from: status.from || "",
+    error: err instanceof Error ? err.message : "probe failed",
+  }));
   res.json({
     ...status,
     fromPreview: status.apiKeySet ? resolveResendFromEmail() : null,
     founderOtpTo: process.env.MASTER_OWNER_EMAIL || process.env.FOUNDER_EMAIL || "service@ifcdc.org",
     purpose: "AURA Founder verification OTP + Communications Center",
+    resendProbe,
   });
 });
 
