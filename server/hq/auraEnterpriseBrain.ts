@@ -23,6 +23,9 @@ export type BrainIntent =
   | "org_model"
   | "predictive"
   | "monitor"
+  | "executive_decision"
+  | "weekly_review"
+  | "simulation"
   | "general";
 
 export type ExplainableRecommendation = {
@@ -124,6 +127,9 @@ export function wantsEnterpriseBrain(message: string): boolean {
     || /\bstrategic goals?\b|\bpredict(ive)? intelligence\b|\bpredict (risks?|issues?)\b/i.test(m)
     || /\borganization(al)? (health|status|snapshot|model)\b/i.test(m)
     || /\bcontinuous monitoring\b|\bmonitor (the )?(entire )?(organization|hq|system)\b/i.test(m)
+    || /\b(should we (apply|hire|expand|launch)|can we afford|what happens if|what if we)\b/i.test(m)
+    || /\b(executive decision|decision intelligence|scorecard|weekly (executive )?review)\b/i.test(m)
+    || /\b(opportunity intelligence|enterprise (brain )?dashboard|simulat(e|ion))\b/i.test(m)
   );
 }
 
@@ -132,6 +138,9 @@ export function classifyBrainIntent(message: string): BrainIntent {
   if (/\braise\s+\$?\d+|\$\s?10\s*million|funding strategy|capital (campaign|plan)|five[- ]year/i.test(message)) {
     return "capital_strategy";
   }
+  if (/\bweekly (executive )?review\b/i.test(message)) return "weekly_review";
+  if (/\bwhat (happens|if)|simulat/i.test(message)) return "simulation";
+  if (/\b(should we (apply|hire|expand)|can we afford)\b/i.test(message)) return "executive_decision";
   if (/\bwhat should i (work on|focus on|do) today\b/i.test(message)) return "work_today";
   if (/\b(daily|morning|executive) briefing\b/i.test(message)) return "daily_briefing";
   if (/\bbiggest (organizational )?risks?\b|\borg(anization(al)?)? risks?\b/i.test(message)) return "org_risks";
@@ -673,6 +682,66 @@ export async function runEnterpriseBrain(opts: {
   }
 
   let intent = classifyBrainIntent(opts.request);
+
+  // Phase 3 — Executive Decision Intelligence (decisions, simulations, weekly, scorecard, goals, opportunities)
+  {
+    const { wantsExecutiveDecisionIntelligence, runExecutiveDecisionIntelligence } = await import(
+      "./auraExecutiveDecisionIntelligence"
+    );
+    if (
+      wantsExecutiveDecisionIntelligence(opts.request)
+      || intent === "executive_decision"
+      || intent === "weekly_review"
+      || intent === "simulation"
+      || intent === "strategic_goals"
+    ) {
+      const edi = await runExecutiveDecisionIntelligence({
+        request: opts.request,
+        channel: opts.channel,
+        founderMode: true,
+      });
+      const orgModel = await buildDigitalOrganizationModel();
+      const predictions = await buildPredictiveIntelligenceSignals(orgModel);
+      const resultPayload: EnterpriseBrainResult = {
+        brainVersion: "2.0",
+        orchestrationId,
+        intent:
+          edi.kind === "weekly"
+            ? "weekly_review"
+            : edi.kind === "simulation"
+              ? "simulation"
+              : edi.kind === "goals"
+                ? "strategic_goals"
+                : "executive_decision",
+        generatedAt: new Date().toISOString(),
+        orgModel,
+        predictions,
+        recommendations: [],
+        unifiedBriefing: edi.unifiedBriefing,
+        speechSummary: edi.speechSummary,
+        smsSummary: edi.smsSummary,
+        founderApprovalRequired: edi.founderApprovalRequired,
+        agentsDelegated: ["enterprise_brain", "executive_decision_intelligence"],
+        multiAgent: edi.payload,
+      };
+      await ensureEnterpriseBrainTables();
+      const db = await getDb();
+      await db.run(
+        `INSERT INTO aura_enterprise_brain_runs (id, intent, request, founder_approval_required, actor_email, channel, result_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        orchestrationId,
+        resultPayload.intent,
+        opts.request.slice(0, 2000),
+        resultPayload.founderApprovalRequired ? 1 : 0,
+        opts.actorEmail || null,
+        opts.channel,
+        JSON.stringify({ kind: edi.kind, speech: edi.speechSummary }).slice(0, 50_000),
+        resultPayload.generatedAt
+      );
+      return resultPayload;
+    }
+  }
+
   // Also catch multi-agent style requests through Brain facade
   const { wantsMultiAgentOrchestration, classifyExecutiveIntent, orchestrateExecutiveAgentTeam } =
     await import("./auraExecutiveAgentOrchestrator");
@@ -731,33 +800,6 @@ export async function runEnterpriseBrain(opts: {
     unifiedBriefing = ma.unifiedBriefing || "Multi-agent briefing unavailable.";
     speechSummary = ma.speechSummary || speechSummary;
     smsSummary = ma.smsSummary || smsSummary;
-  } else if (intent === "strategic_goals") {
-    recommendations = [
-      {
-        recommendation: "Align near-term execution to funded pipeline and compliance clearance before expansion.",
-        whyItMatters: "Strategic progress depends on funded capacity and clean compliance posture.",
-        evidence: [
-          `Org health: ${orgModel.organizationHealth ?? "n/a"}`,
-          `Pipeline: ${orgModel.grants.pipelineValue ?? "n/a"}`,
-          `Compliance overdue: ${orgModel.compliance.overdue}`,
-        ],
-        systemsUsed: ["digital_organization_model", "grants", "compliance"],
-        assumptions: ["Strategic goals are inferred from live HQ health and pipeline signals until a formal goals document is indexed."],
-        missingInformation: [
-          ...orgModel.gaps,
-          "Formal strategic plan document may need Knowledge Base sync for precise goal tracking",
-        ],
-        risks: predictions.map((p) => p.title),
-        alternatives: ["Run five-year capital strategy multi-agent plan", "Request Knowledge Librarian sync of strategic plan"],
-        confidence: orgModel.gaps.length ? "low" : "medium",
-        founderApprovalRequired: true,
-      },
-      ...recommendations.slice(0, 2),
-    ];
-    const synth = synthesizeBrainSpeech({ intent, org: orgModel, predictions, recommendations });
-    unifiedBriefing = synth.briefing;
-    speechSummary = synth.speech;
-    smsSummary = synth.sms;
   } else {
     const synth = synthesizeBrainSpeech({ intent, org: orgModel, predictions, recommendations });
     unifiedBriefing = synth.briefing;

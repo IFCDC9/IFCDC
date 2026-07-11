@@ -199,6 +199,7 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   "/hq/notifications": "hq.notifications",
   "/hq/communications": "hq.notifications",
   "/hq/aura": "hq.aura",
+  "/hq/executive-brain": "hq.aura",
   "/hq/software": "hq.software",
   "/hq/developer": "hq.software",
   "/hq/sso": "hq.software",

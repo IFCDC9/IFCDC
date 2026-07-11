@@ -760,6 +760,143 @@ router.post("/aura/brain/feedback", hqAuthRequired, requireHQModule("aura"), asy
   );
 });
 
+/** Phase 3 — Executive Decision Intelligence */
+router.post("/aura/edi/decide", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser, publicIdentitySummary } = await import("../hq/auraFounderTrustEngine");
+  const { runExecutiveDecisionIntelligence } = await import("../hq/auraExecutiveDecisionIntelligence");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  const request = String(req.body?.request ?? req.body?.question ?? "").trim();
+  if (request.length < 3) return res.status(400).json({ error: "request must be at least 3 characters" });
+  const result = await runExecutiveDecisionIntelligence({
+    request,
+    channel: "hq_web",
+    founderMode: Boolean(identity.founderMode || identity.isFounder),
+  });
+  res.json({ ...result, identity: publicIdentitySummary(identity) });
+});
+
+router.get("/aura/edi/dashboard", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { buildEnterpriseBrainDashboard } = await import("../hq/auraExecutiveDecisionIntelligence");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Executive Decision Intelligence requires Founder access." });
+  }
+  res.json(await buildEnterpriseBrainDashboard());
+});
+
+router.get("/aura/edi/scorecard", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { buildOrganizationPerformanceScorecard } = await import("../hq/auraExecutiveDecisionIntelligence");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Scorecard requires Founder access." });
+  }
+  res.json(await buildOrganizationPerformanceScorecard());
+});
+
+router.get("/aura/edi/goals", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { listStrategicGoals } = await import("../hq/strategicGoalsEngine");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Strategic Goals Center requires Founder access." });
+  }
+  res.json(await listStrategicGoals());
+});
+
+router.post("/aura/edi/goals", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { upsertStrategicGoal } = await import("../hq/strategicGoalsEngine");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Updating strategic goals requires Founder access." });
+  }
+  const title = String(req.body?.title ?? "").trim();
+  const category = String(req.body?.category ?? "").trim();
+  if (!title || !category) return res.status(400).json({ error: "title and category required" });
+  res.json(
+    await upsertStrategicGoal({
+      id: typeof req.body?.id === "string" ? req.body.id : undefined,
+      category: category as "funding" | "program" | "community_impact" | "technology" | "hr" | "financial",
+      title,
+      description: typeof req.body?.description === "string" ? req.body.description : undefined,
+      targetValue: typeof req.body?.targetValue === "number" ? req.body.targetValue : undefined,
+      unit: typeof req.body?.unit === "string" ? req.body.unit : undefined,
+      owner: typeof req.body?.owner === "string" ? req.body.owner : undefined,
+      targetDate: typeof req.body?.targetDate === "string" ? req.body.targetDate : undefined,
+      actorEmail: identity.email || req.hqUser?.email,
+    })
+  );
+});
+
+router.get("/aura/edi/opportunities", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { buildOpportunityIntelligence } = await import("../hq/auraExecutiveDecisionIntelligence");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Opportunity Intelligence requires Founder access." });
+  }
+  res.json({ opportunities: await buildOpportunityIntelligence() });
+});
+
+router.get("/aura/edi/weekly-review", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { buildWeeklyExecutiveReview } = await import("../hq/auraExecutiveDecisionIntelligence");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Weekly Executive Review requires Founder access." });
+  }
+  res.json(await buildWeeklyExecutiveReview());
+});
+
+router.post("/aura/edi/simulate", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser, publicIdentitySummary } = await import("../hq/auraFounderTrustEngine");
+  const { runExecutiveDecisionEngine } = await import("../hq/auraExecutiveDecisionIntelligence");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Simulations require Founder access." });
+  }
+  const request = String(req.body?.request ?? req.body?.question ?? "").trim();
+  if (request.length < 3) return res.status(400).json({ error: "request must be at least 3 characters" });
+  const result = await runExecutiveDecisionEngine(
+    /\bwhat (happens|if)\b/i.test(request) ? request : `What happens if ${request}`
+  );
+  res.json({ ...result, identity: publicIdentitySummary(identity) });
+});
+
 router.post("/aura/executive/action-plan", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
   res.json(await generateExecutiveActionPlan());
 });

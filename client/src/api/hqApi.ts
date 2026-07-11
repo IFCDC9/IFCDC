@@ -286,6 +286,50 @@ export const hqApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
+  auraEdiDashboard: () => hqFetch<{
+    generatedAt: string;
+    organizationHealth: number | null;
+    healthGrade: string | null;
+    enterpriseHealthScore: number | null;
+    enterpriseGrade: string;
+    strategicGoals: Array<{
+      id: string;
+      category: string;
+      title: string;
+      progressPercent: number;
+      status: string;
+      blockers: string[];
+      recommendedActions: string[];
+      owner: string;
+    }>;
+    goalsSummary: { onTrack: number; atRisk: number; blocked: number; achieved: number; avgProgress: number };
+    fundingPipeline: { pipelineValue: number | null; activeAwards: number | null };
+    financialPosition: { cashFlow: number | null; financialHealthScore: number | null; budgetRemaining: number | null };
+    activeRisks: Array<{ id: string; title: string; whyItMatters: string; confidence: string; recommendedAction: string }>;
+    opportunities: Array<{ id: string; title: string; whyItMatters: string; recommendedNextStep: string }>;
+    founderPriorities: string[];
+    auraRecommendations: string[];
+    orgModel?: { technology?: { healthScore?: number | null } };
+    scorecard?: { dimensions: Array<{ id: string; label: string; score: number | null; grade: string }> };
+  }>("/aura/edi/dashboard"),
+  auraEdiDecide: (request: string) =>
+    hqFetch<{ kind: string; speechSummary: string; unifiedBriefing: string; founderApprovalRequired: boolean; payload: unknown }>(
+      "/aura/edi/decide",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request }),
+      }
+    ),
+  auraEdiSimulate: (request: string) =>
+    hqFetch<Record<string, unknown>>("/aura/edi/simulate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ request }),
+    }),
+  auraEdiWeeklyReview: () => hqFetch<Record<string, unknown>>("/aura/edi/weekly-review"),
+  auraEdiGoals: () => hqFetch<Record<string, unknown>>("/aura/edi/goals"),
+  auraEdiScorecard: () => hqFetch<Record<string, unknown>>("/aura/edi/scorecard"),
   auraNavigate: (query: string) => hqFetch<{
     intent: string; path?: string; label?: string; message: string;
     results?: { type: string; id: string; title: string; subtitle: string; path: string }[];

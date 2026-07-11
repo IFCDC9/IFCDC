@@ -742,6 +742,41 @@ const enterpriseBrain: AuraAction = {
   },
 };
 
+const executiveDecisionIntelligence: AuraAction = {
+  id: "executive_decision_intelligence",
+  label: "Executive Decision Intelligence",
+  module: "executive",
+  kind: "read",
+  description:
+    "Phase 3 EDI — should we apply/hire/expand, affordability, what-if simulations, scorecard, strategic goals, opportunities, weekly review. Live HQ evidence only; Founder approval for major actions.",
+  parameters: {
+    request: {
+      type: "string",
+      description: "e.g. Should we hire five employees? What happens if we receive a $2 million grant?",
+    },
+  },
+  async run(args, ctx) {
+    if (!ctx.identity?.founderMode && !ctx.identity?.isFounder) {
+      return { status: "error", summary: "Executive Decision Intelligence requires Founder Mode." };
+    }
+    const { runExecutiveDecisionIntelligence } = await import("./auraExecutiveDecisionIntelligence");
+    const result = await runExecutiveDecisionIntelligence({
+      request: str(args.request) || "Show the Enterprise Brain Dashboard",
+      channel: "hq_web",
+      founderMode: true,
+    });
+    return {
+      status: "done",
+      summary: result.speechSummary,
+      data: result,
+      navigation: { path: "/hq/executive-brain", label: "Open Enterprise Brain Dashboard" },
+      approval: result.founderApprovalRequired
+        ? { path: "/hq/workflows", label: "Founder approval required for execution" }
+        : undefined,
+    };
+  },
+};
+
 export const AURA_ACTIONS: AuraAction[] = [
   findGrants,
   enterpriseFundingScan,
@@ -765,6 +800,7 @@ export const AURA_ACTIONS: AuraAction[] = [
   intelligenceMetrics,
   executiveAgentTeam,
   enterpriseBrain,
+  executiveDecisionIntelligence,
 ];
 
 const ACTION_MAP = new Map(AURA_ACTIONS.map((a) => [a.id, a]));
