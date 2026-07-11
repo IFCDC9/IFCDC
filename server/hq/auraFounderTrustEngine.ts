@@ -880,26 +880,13 @@ export async function verifyFounderPhoneChallenge(opts: {
   }
 
   const db = await getDb();
-  const row = await db.get<{
-    id: string;
-    phone_e164: string;
-    code_hash: string;
-    status: string;
-    attempts: number;
-    expires_at: string;
-    actor_email: string | null;
-  }>(
-    `SELECT * FROM aura_identity_challenges
-     WHERE session_key = ? AND status = 'pending'
-     ORDER BY created_at DESC LIMIT 1`,
-    opts.sessionKey
-  );
+  const row = await getActiveFounderChallenge(opts.sessionKey, opts.phoneE164);
 
   if (!row) {
     return { ok: false, message: "I don't have an active Founder verification request. Say \"verify founder\" to start one." };
   }
   if (new Date(row.expires_at).getTime() < Date.now()) {
-    await db.run(`UPDATE aura_identity_challenges SET status = 'expired' WHERE id = ?`, row.id);
+    await db.run(`UPDATE aura_identity_challenges SET status = 'expired', delivery_status = 'expired' WHERE id = ?`, row.id);
     await logHqAudit({
       action: "aura_founder_otp_expired",
       entityType: "aura_identity",
@@ -908,7 +895,7 @@ export async function verifyFounderPhoneChallenge(opts: {
       actorEmail: row.actor_email || getFounderEmail(),
       metadata: { phone: row.phone_e164, channel: opts.channel },
     });
-    return { ok: false, message: "That verification code expired. Say \"verify founder\" and I'll email a new one to service@ifcdc.org." };
+    return { ok: false, message: "That verification code expired. Say \"verify founder\" and I'll send a fresh code." };
   }
   if (row.attempts >= MAX_OTP_ATTEMPTS) {
     await db.run(`UPDATE aura_identity_challenges SET status = 'failed' WHERE id = ?`, row.id);
