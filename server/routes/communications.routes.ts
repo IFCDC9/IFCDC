@@ -178,4 +178,40 @@ router.post("/broadcast-segment", async (req: Request, res: Response) => {
   });
 });
 
+router.get("/voice/live", async (_req, res) => {
+  const {
+    ensureAuraVoiceReliabilityTables,
+    listLiveCallMonitors,
+    listRecentVoiceJobs,
+  } = await import("../hq/auraVoiceJobQueue");
+  await ensureAuraVoiceReliabilityTables();
+  const calls = listLiveCallMonitors();
+  const jobs = await listRecentVoiceJobs(25);
+  res.json({
+    calls,
+    jobs: jobs.map((j) => ({
+      id: j.id,
+      sessionId: j.sessionId,
+      callSid: j.callSid,
+      callerPhone: j.callerPhone,
+      speech: j.speech,
+      commandType: j.commandType,
+      status: j.status,
+      stage: j.stage,
+      stageLabel: j.stageLabel,
+      progressPercent: j.progressPercent,
+      latencyMs: j.latencyMs,
+      founderConfirmRequired: j.founderConfirmRequired,
+      founderConfirmed: j.founderConfirmed,
+      error: j.error,
+      startedAt: j.startedAt,
+      finishedAt: j.finishedAt,
+      deliveredTo: j.deliveredTo,
+      providerErrors: j.providerErrors,
+      resultPreview: j.result?.reply?.slice(0, 400) || j.streamPartial?.slice(0, 400) || null,
+    })),
+    generatedAt: new Date().toISOString(),
+  });
+});
+
 export default router;

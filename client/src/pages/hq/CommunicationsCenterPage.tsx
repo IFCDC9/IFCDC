@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Megaphone, Mail, Send, Plus, Inbox, Bell, Users } from "lucide-react";
+import { Megaphone, Mail, Send, Plus, Inbox, Bell, Users, PhoneCall } from "lucide-react";
 import HQLayout from "../../layouts/HQLayout";
 import { communicationsApi } from "../../api/communicationsApi";
 import { enterpriseApi } from "../../api/enterpriseApi";
@@ -10,7 +10,13 @@ import { HqPanel } from "../../components/hq/HqPanel";
 import { StatusBadge } from "../../components/hq/StatusBadge";
 import { HqLoading } from "../../components/hq/HqLoading";
 
-type Tab = "announcements" | "inbox" | "sent" | "compose" | "email" | "campaigns" | "notifications";
+type Tab = "announcements" | "inbox" | "sent" | "compose" | "email" | "campaigns" | "notifications" | "voice";
+
+function formatDuration(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
 
 const CommunicationsCenterPage: React.FC = () => {
   const { user } = useAuth();
@@ -20,6 +26,7 @@ const CommunicationsCenterPage: React.FC = () => {
   const [msgForm, setMsgForm] = useState({ to_email: "", to_name: "", subject: "", body: "" });
   const [emailForm, setEmailForm] = useState({ to: "", subject: "", body: "" });
   const [campaignForm, setCampaignForm] = useState({ segment: "employees", subject: "", body: "", channel: "email" });
+  const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
   const qc = useQueryClient();
 
   const overview = useQuery({ queryKey: ["comms-overview"], queryFn: communicationsApi.overview });
@@ -28,6 +35,12 @@ const CommunicationsCenterPage: React.FC = () => {
   const sent = useQuery({ queryKey: ["comms-sent"], queryFn: () => communicationsApi.messages("sent"), enabled: tab === "sent" });
   const enterpriseNotifs = useQuery({ queryKey: ["comms-notifications"], queryFn: enterpriseApi.notifications, enabled: tab === "notifications" });
   const audiences = useQuery({ queryKey: ["comms-audiences"], queryFn: communicationsApi.audiences, enabled: tab === "campaigns" || tab === "email" });
+  const liveVoice = useQuery({
+    queryKey: ["comms-voice-live"],
+    queryFn: communicationsApi.liveCalls,
+    enabled: tab === "voice",
+    refetchInterval: tab === "voice" ? 4000 : false,
+  });
 
   const createAnnounce = useMutation({
     mutationFn: communicationsApi.createAnnouncement,
@@ -77,10 +90,18 @@ const CommunicationsCenterPage: React.FC = () => {
     low: "muted",
   };
 
+  const calls = liveVoice.data?.calls ?? [];
+  const jobs = liveVoice.data?.jobs ?? [];
+  const selectedCall =
+    calls.find((c) => (c.callSid || c.sessionId) === selectedCallId) ||
+    calls[0] ||
+    null;
+  const activeCalls = calls.filter((c) => c.status === "in_progress" || c.status === "processing" || c.status === "ringing");
+
   return (
     <HQLayout
       title="Communications Center"
-      subtitle="Internal messaging, announcements, and organization-wide updates"
+      subtitle="Internal messaging, announcements, AURA Voice monitoring, and organization-wide updates"
       auraModule="communications"
       auraActions={["ask", "summarize", "prepare_approval", "explain"]}
     >
@@ -88,12 +109,21 @@ const CommunicationsCenterPage: React.FC = () => {
         <div className="hq-kpi-grid hq-fade-in" style={{ marginBottom: "1.25rem" }}>
           <KpiCard label="Published Announcements" value={overview.data.announcements} icon={Megaphone} variant="gold" />
           <KpiCard label="Messages Sent" value={overview.data.messages} icon={Mail} />
+          {tab === "voice" && (
+            <>
+              <KpiCard label="Live Voice Sessions" value={activeCalls.length} icon={PhoneCall} variant="gold" />
+              <KpiCard label="Recent Voice Jobs" value={jobs.length} icon={PhoneCall} />
+            </>
+          )}
         </div>
       )}
 
       <nav className="hq-tabs">
         <button type="button" className={`hq-tab ${tab === "announcements" ? "active" : ""}`} onClick={() => setTab("announcements")}>
           <Megaphone size={16} /> Announcement Board
+        </button>
+        <button type="button" className={`hq-tab ${tab === "voice" ? "active" : ""}`} onClick={() => setTab("voice")}>
+          <PhoneCall size={16} /> AURA Voice Monitor
         </button>
         <button type="button" className={`hq-tab ${tab === "inbox" ? "active" : ""}`} onClick={() => setTab("inbox")}>
           <Inbox size={16} /> Inbox
@@ -116,6 +146,133 @@ const CommunicationsCenterPage: React.FC = () => {
       </nav>
 
       <div className="hq-tab-content hq-fade-in">
+        {tab === "voice" && (
+          liveVoice.isLoading ? <HqLoading /> : (
+            <div className="hq-grid-2">
+              <HqPanel title="Live & Recent Calls" subtitle="Caller identity, duration, task, latency, job stage">
+                <ul className="hq-notif-list">
+                  {calls.map((c) => {
+                    const key = c.callSid || c.sessionId;
+                    const active = (selectedCall?.callSid || selectedCall?.sessionId) === key;
+                    return (
+                      <li
+                        key={key}
+                        className={`hq-notif-item ${active ? "unread" : "read"}`}
+                        style={{ cursor: "pointer" }}
+                        onClick={() => setSelectedCallId(key)}
+                      >
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                            <StatusBadge
+                              label={c.status}
+                              variant={c.status === "in_progress" || c.status === "processing" ? "gold" : c.status === "failed" ? "warning" : "muted"}
+                            />
+                            {c.founderMode && <StatusBadge label="Founder" variant="gold" />}
+                            <strong style={{ fontSize: "0.9rem" }}>{c.callerIdentity}</strong>
+                          </div>
+                          <div style={{ fontSize: "0.78rem", color: "var(--hq-text-muted)", marginTop: "0.25rem" }}>
+                            {c.callerPhone || "—"} · {formatDuration(c.durationSec)}
+                            {c.aiLatencyMs != null ? ` · AI ${c.aiLatencyMs}ms` : ""}
+                          </div>
+                          <p style={{ fontSize: "0.82rem", marginTop: "0.35rem", color: "var(--hq-text-muted)" }}>
+                            {c.currentTask || c.lastSpeech || "No active task"}
+                          </p>
+                          {(c.jobStage || c.jobStatus) && (
+                            <div style={{ fontSize: "0.75rem", marginTop: "0.25rem", color: "var(--hq-text-dim)" }}>
+                              Job: {c.jobStage || c.jobStatus}
+                              {c.jobProgress != null ? ` (${Math.round(c.jobProgress)}%)` : ""}
+                            </div>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                  {!calls.length && <li className="hq-empty">No live AURA Voice sessions. Calls appear here when the HQ line is active.</li>}
+                </ul>
+              </HqPanel>
+
+              <HqPanel
+                title={selectedCall ? `Session · ${selectedCall.callerIdentity}` : "Call detail"}
+                subtitle={selectedCall ? `${selectedCall.callSid || selectedCall.sessionId}` : "Select a call"}
+              >
+                {selectedCall ? (
+                  <>
+                    <div className="hq-form-grid" style={{ marginBottom: "1rem" }}>
+                      <div>
+                        <div className="hq-muted-text">Duration</div>
+                        <div>{formatDuration(selectedCall.durationSec)}</div>
+                      </div>
+                      <div>
+                        <div className="hq-muted-text">AI latency</div>
+                        <div>{selectedCall.aiLatencyMs != null ? `${selectedCall.aiLatencyMs} ms` : "—"}</div>
+                      </div>
+                      <div>
+                        <div className="hq-muted-text">Background job</div>
+                        <div>{selectedCall.activeJobId || "—"}</div>
+                      </div>
+                      <div>
+                        <div className="hq-muted-text">Stage</div>
+                        <div>{selectedCall.jobStage || selectedCall.jobStatus || "—"}</div>
+                      </div>
+                    </div>
+                    {selectedCall.providerErrors?.length > 0 && (
+                      <p style={{ color: "var(--hq-danger)", fontSize: "0.82rem", marginBottom: "0.75rem" }}>
+                        Provider errors: {selectedCall.providerErrors.join(" · ")}
+                      </p>
+                    )}
+                    <div style={{ fontSize: "0.78rem", color: "var(--hq-text-muted)", marginBottom: "0.5rem" }}>Transcript</div>
+                    <ul className="hq-notif-list" style={{ maxHeight: 320, overflow: "auto" }}>
+                      {selectedCall.transcript.map((t, i) => (
+                        <li key={`${t.at}-${i}`} className="hq-notif-item read">
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 600, fontSize: "0.78rem", textTransform: "uppercase", color: "var(--hq-text-dim)" }}>
+                              {t.role} · {new Date(t.at).toLocaleTimeString()}
+                            </div>
+                            <p style={{ fontSize: "0.85rem", marginTop: "0.25rem", whiteSpace: "pre-wrap" }}>{t.content}</p>
+                          </div>
+                        </li>
+                      ))}
+                      {!selectedCall.transcript.length && <li className="hq-empty">Transcript will appear as the call progresses.</li>}
+                    </ul>
+                    {selectedCall.lastReply && (
+                      <p style={{ marginTop: "0.75rem", fontSize: "0.82rem", color: "var(--hq-text-muted)" }}>
+                        Final / latest reply: {selectedCall.lastReply}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p className="hq-muted-text">No call selected.</p>
+                )}
+              </HqPanel>
+
+              <HqPanel title="Background Voice Jobs" subtitle="Job ID, stage, progress, Founder confirmation">
+                <ul className="hq-notif-list">
+                  {jobs.map((j) => (
+                    <li key={j.id} className="hq-notif-item read">
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", alignItems: "center" }}>
+                          <StatusBadge label={j.status} variant={j.status === "done" ? "gold" : j.status === "error" ? "warning" : "muted"} />
+                          <StatusBadge label={j.commandType.replace(/_/g, " ")} variant="muted" />
+                          {j.founderConfirmRequired && (
+                            <StatusBadge label={j.founderConfirmed ? "confirmed" : "needs confirm"} variant={j.founderConfirmed ? "gold" : "warning"} />
+                          )}
+                        </div>
+                        <div style={{ fontSize: "0.78rem", color: "var(--hq-text-muted)", marginTop: "0.3rem" }}>
+                          {j.id} · {j.stageLabel} · {Math.round(j.progressPercent)}%
+                          {j.latencyMs != null ? ` · ${j.latencyMs}ms` : ""}
+                        </div>
+                        <p style={{ fontSize: "0.82rem", marginTop: "0.35rem" }}>{j.speech}</p>
+                        {j.error && <p style={{ color: "var(--hq-danger)", fontSize: "0.78rem" }}>{j.error}</p>}
+                      </div>
+                    </li>
+                  ))}
+                  {!jobs.length && <li className="hq-empty">No recent voice background jobs.</li>}
+                </ul>
+              </HqPanel>
+            </div>
+          )
+        )}
+
         {tab === "announcements" && (
           <>
             <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "1rem" }}>

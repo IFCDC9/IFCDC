@@ -31,8 +31,8 @@ export type ReceptionistSession = {
   updatedAt: number;
 };
 
-const SESSION_TTL_MS = 45 * 60_000;
-const MAX_TURNS = 14;
+const SESSION_TTL_MS = 90 * 60_000; // Preserve context across disconnect / callback
+const MAX_TURNS = 40;
 const memory = new Map<string, ReceptionistSession>();
 
 function pruneMemory(): void {

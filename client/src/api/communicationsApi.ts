@@ -36,7 +36,50 @@ export const communicationsApi = {
     api<{ segment: string; sent: number; failed: number; total: number }>("/broadcast-segment", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
     }),
+  liveCalls: () =>
+    api<{ calls: LiveVoiceCall[]; jobs: LiveVoiceJob[]; generatedAt: string }>("/voice/live"),
 };
+
+export interface LiveVoiceCall {
+  callSid: string | null;
+  sessionId: string;
+  callerPhone: string | null;
+  callerIdentity: string;
+  founderMode: boolean;
+  startedAt: string;
+  durationSec: number;
+  status: string;
+  currentTask: string | null;
+  activeJobId: string | null;
+  jobStatus: string | null;
+  jobStage: string | null;
+  jobProgress: number | null;
+  lastSpeech: string | null;
+  lastReply: string | null;
+  aiLatencyMs: number | null;
+  providerErrors: string[];
+  transcript: Array<{ role: string; content: string; at: string }>;
+  updatedAt: string;
+}
+
+export interface LiveVoiceJob {
+  id: string;
+  sessionId: string;
+  callSid: string | null;
+  callerPhone: string | null;
+  speech: string;
+  commandType: string;
+  status: string;
+  stage: string;
+  stageLabel: string;
+  progressPercent: number;
+  latencyMs: number | null;
+  founderConfirmRequired: boolean;
+  founderConfirmed: boolean;
+  error: string | null;
+  startedAt: number;
+  finishedAt: number | null;
+}
 
 export interface Announcement {
   id: string;
@@ -52,6 +95,7 @@ export interface HQMessage {
   from_email: string;
   from_name: string;
   to_email: string;
+  to_name?: string;
   subject: string;
   body: string;
   read_at: string | null;

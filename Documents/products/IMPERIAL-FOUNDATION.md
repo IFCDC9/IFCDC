@@ -9,6 +9,26 @@
 
 ---
 
+## AURA Voice Reliability & Intelligence (July 2026)
+
+Keeps the HQ phone line connected during long Founder requests and recovers cleanly from disconnects.
+
+| Capability | Implementation |
+|------------|----------------|
+| Streaming / fast first answer | ~4.5s ack budget → immediate spoken ack + background job |
+| Background jobs | Job ID, stage, progress %, latency · `auraVoiceJobQueue` |
+| Live progress + barge-in | Wait loop with Gather barge-in; caller can redirect mid-update |
+| Deferred delivery | SMS · email · HQ notification · workspace report |
+| Reconnect / resume | Phone-stable session + resumable jobs on callback |
+| Founder auth persistence | Existing OTP session; no re-verify within window |
+| High-impact confirmation | Explicit “confirm” before submit/send/pay/deploy/delete/security |
+| Secure voice commands | Grant search/draft, exec reports, health, pipeline, approvals, comms, workflows |
+| Live monitoring | Communications Center → **AURA Voice Monitor** · `GET /api/hq/communications/voice/live` |
+
+**Try after Founder verification:** long Brain/OS requests · interrupt mid-progress · hang up and call back saying “continue” · “send by text” / “send by email” · high-impact: “submit the grant” then “confirm”.
+
+---
+
 ## AURA Multi-Agent Executive Architecture (July 2026)
 
 Founder speaks only to **AURA**. Behind the scenes, AURA convenes a live specialist team and returns one unified briefing.
