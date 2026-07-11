@@ -185,7 +185,7 @@ export async function processReceptionistTurn(opts: {
 
   const message = userMessage.trim();
   const pendingChallenge = !identity.founderMode
-    ? await getActiveFounderChallenge(sessionId)
+    ? await getActiveFounderChallenge(sessionId, callerPhone ?? session.callerPhone)
     : null;
 
   if (message) {
@@ -434,7 +434,7 @@ export async function resolveVoiceGreeting(
     callerPhone: callerPhone ?? session.callerPhone,
   });
 
-  const pending = await getActiveFounderChallenge(session.sessionId);
+  const pending = await getActiveFounderChallenge(session.sessionId, callerPhone ?? session.callerPhone);
   if (!identity.founderMode && pending) {
     return {
       greeting:
@@ -456,7 +456,7 @@ export async function resolveVoiceGreeting(
     if (!existing?.founderMode) {
       return {
         greeting:
-          "Welcome. I recognize this as your Founder phone. One moment while I send your verification code.",
+          "Welcome. I recognize this as your Founder phone. One moment while I start secure verification — I will only confirm a channel after the provider accepts the send.",
         founderMode: false,
         identityAssurance: identity.assurance,
         founderCandidate: true,

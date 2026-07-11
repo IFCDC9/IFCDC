@@ -275,7 +275,13 @@ export async function sendFounderOtpSmsDelivery(
   return result;
 }
 
-/** Email first, then SMS fallback — only reports success when a provider confirms. */
+/**
+ * Deliver Founder OTP.
+ * - "both": send email AND SMS in parallel (acceptance requires both channels).
+ * - "email": email first; SMS fallback if email fails.
+ * - "sms": SMS first; email fallback if SMS fails.
+ * Only reports success when a provider returns a message id.
+ */
 export async function deliverFounderOtpWithFallback(opts: {
   challengeId: string;
   code: string;
@@ -318,14 +324,24 @@ export async function deliverFounderOtpWithFallback(opts: {
 
   const pref = opts.channelPreference ?? "both";
 
-  if (pref === "email" || pref === "both") {
+  if (pref === "both") {
+    // Always attempt both channels so Founder has email + SMS copies.
+    const [emailResult, smsResult] = await Promise.all([
+      sendFounderOtpEmailDelivery(opts.code, opts.challengeId, deliveryOpts),
+      sendFounderOtpSmsDelivery(opts.phoneE164, opts.code, opts.challengeId, deliveryOpts),
+    ]);
+    email = emailResult;
+    sms = smsResult;
+  } else if (pref === "email") {
     email = await sendFounderOtpEmailDelivery(opts.code, opts.challengeId, deliveryOpts);
-  }
-  if ((pref === "sms" || pref === "both") && (!email.ok || pref === "sms")) {
+    if (!email.ok) {
+      sms = await sendFounderOtpSmsDelivery(opts.phoneE164, opts.code, opts.challengeId, deliveryOpts);
+    }
+  } else {
     sms = await sendFounderOtpSmsDelivery(opts.phoneE164, opts.code, opts.challengeId, deliveryOpts);
-  }
-  if (pref === "sms" && !sms.ok && !email.ok) {
-    email = await sendFounderOtpEmailDelivery(opts.code, opts.challengeId, deliveryOpts);
+    if (!sms.ok) {
+      email = await sendFounderOtpEmailDelivery(opts.code, opts.challengeId, deliveryOpts);
+    }
   }
 
   const emailSent = email.ok;
@@ -357,15 +373,18 @@ export async function deliverFounderOtpWithFallback(opts: {
     action: emailSent || smsSent ? "aura_founder_otp_sent" : "aura_founder_otp_send_failed",
     entityType: "aura_identity",
     entityId: opts.challengeId,
-    detail: emailSent
-      ? `Founder OTP emailed to ${opts.actorEmail}${smsSent ? " (+ SMS backup)" : ""}`
-      : smsSent
-        ? `Founder OTP SMS sent to ${opts.phoneE164} (email failed: ${email.error})`
-        : `Founder OTP delivery failed email=${email.error}; sms=${sms.error}`,
+    detail: emailSent && smsSent
+      ? `Founder OTP accepted by Resend (${opts.actorEmail}) and Twilio (${opts.phoneE164})`
+      : emailSent
+        ? `Founder OTP email accepted for ${opts.actorEmail} (SMS: ${sms.error || "not sent"})`
+        : smsSent
+          ? `Founder OTP SMS accepted for ${opts.phoneE164} (email: ${email.error || "not sent"})`
+          : `Founder OTP delivery failed email=${email.error}; sms=${sms.error}`,
     actorEmail: opts.actorEmail,
     metadata: {
       phone: opts.phoneE164,
       channel: opts.callerChannel,
+      channelPreference: pref,
       deliveryStatus,
       emailSent,
       emailTo: opts.actorEmail,
@@ -373,14 +392,17 @@ export async function deliverFounderOtpWithFallback(opts: {
       emailError: emailSent ? undefined : email.error,
       emailProviderStatus: email.providerStatus,
       emailProviderCode: email.errorCode,
+      emailProviderResponse: email.providerResponse,
       smsSent,
       smsTo: opts.phoneE164,
       smsMessageId: sms.messageId,
       smsError: smsSent ? undefined : sms.error,
       smsProviderStatus: sms.providerStatus,
       smsProviderCode: sms.errorCode,
+      smsProviderResponse: sms.providerResponse,
       emailStatus: getEmailDeliveryStatus(),
       otpTtlMinutes: Math.round(OTP_TTL_MS / 60_000),
+      timestamp: new Date().toISOString(),
     },
   });
 

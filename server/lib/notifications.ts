@@ -295,6 +295,27 @@ export async function sendFounderSecuritySms(opts: {
         ? { to, body: opts.body, messagingServiceSid }
         : { to, body: opts.body, from: from.startsWith("+") ? from : `+${from.replace(/\D/g, "")}` }
     );
+    if (message.errorCode) {
+      console.error(
+        `[sms] Twilio accepted with error sid=${message.sid} status=${message.status}`
+        + ` errorCode=${message.errorCode} errorMessage=${message.errorMessage || ""}`
+      );
+      return {
+        success: false,
+        error: message.errorMessage || `Twilio error ${message.errorCode}`,
+        messageId: message.sid,
+        providerCode: message.errorCode,
+        providerStatus: message.status,
+        providerResponse: {
+          sid: message.sid,
+          status: message.status,
+          to: message.to,
+          from: message.from,
+          errorCode: message.errorCode,
+          errorMessage: message.errorMessage,
+        },
+      };
+    }
     console.log(`[sms] Twilio ok sid=${message.sid} status=${message.status}`);
     return {
       success: true,
@@ -365,15 +386,23 @@ export async function probeResendSender(): Promise<{
     }
     const domains = (data.data || []).map((d) => ({ name: d.name, status: d.status }));
     const fromDomain = from.match(/@([a-z0-9.-]+)/i)?.[1]?.toLowerCase();
-    const domainOk = fromDomain
-      ? domains.some((d) => d.name.toLowerCase() === fromDomain && d.status === "verified")
-      : false;
+    const matched = fromDomain
+      ? domains.find((d) => d.name.toLowerCase() === fromDomain)
+      : undefined;
+    const domainOk = Boolean(matched && matched.status === "verified");
+    // Fail closed: the From domain itself must be verified — not just any domain on the account.
     return {
-      ok: domainOk || domains.some((d) => d.status === "verified"),
+      ok: domainOk,
       apiKeySet: true,
       from,
       domains,
-      error: domainOk ? undefined : `Sender domain may be unverified (from=${from})`,
+      error: domainOk
+        ? undefined
+        : fromDomain
+          ? matched
+            ? `Sender domain ${fromDomain} status=${matched.status} (must be verified)`
+            : `Sender domain ${fromDomain} is not registered in Resend`
+          : `Could not parse domain from RESEND_FROM_EMAIL (${from})`,
       providerStatus: res.status,
     };
   } catch (err) {

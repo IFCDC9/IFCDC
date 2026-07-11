@@ -75,8 +75,8 @@ const PHONE_FOUNDER_SESSION_TTL_MS = 8 * 60 * 60_000;
 const TRUSTED_DEVICE_TTL_MS = 90 * 24 * 60 * 60_000;
 const MAX_OTP_ATTEMPTS = 5;
 
-/** Built-in Founder candidate ANI — still requires email OTP (never sole auth). */
-const DEFAULT_FOUNDER_CANDIDATE_PHONES = ["+18484694448"];
+/** Built-in Founder candidate ANIs — still require OTP (never sole auth). */
+const DEFAULT_FOUNDER_CANDIDATE_PHONES = ["+18484694448", "+17327615075"];
 
 /** Confidential domains that non-Founder sessions must never discuss. */
 export const FOUNDER_ONLY_TOPIC_PATTERNS: RegExp[] = [
@@ -534,18 +534,44 @@ export type FounderChallengeRow = {
   last_delivery_error?: string | null;
 };
 
-export async function getActiveFounderChallenge(sessionKey: string): Promise<FounderChallengeRow | null> {
+export async function getActiveFounderChallenge(
+  sessionKey: string,
+  phoneE164?: string | null
+): Promise<FounderChallengeRow | null> {
   await ensureAuraTrustTables();
   const db = await getDb();
-  const row = await db.get<FounderChallengeRow>(
+  let row = await db.get<FounderChallengeRow>(
     `SELECT * FROM aura_identity_challenges
      WHERE session_key = ? AND status = 'pending'
      ORDER BY created_at DESC LIMIT 1`,
     sessionKey
   );
+  // Voice CallSid changes on callback — recover pending OTP by Founder phone.
+  if (!row && phoneE164) {
+    const phone = normalizeE164(phoneE164);
+    if (phone) {
+      row = await db.get<FounderChallengeRow>(
+        `SELECT * FROM aura_identity_challenges
+         WHERE phone_e164 = ? AND status = 'pending'
+         ORDER BY created_at DESC LIMIT 1`,
+        phone
+      );
+      if (row) {
+        await db.run(
+          `UPDATE aura_identity_challenges SET session_key = ? WHERE id = ?`,
+          sessionKey,
+          row.id
+        );
+        row = { ...row, session_key: sessionKey };
+      }
+    }
+  }
   if (!row) return null;
   if (new Date(row.expires_at).getTime() < Date.now()) {
-    await db.run(`UPDATE aura_identity_challenges SET status = 'expired', delivery_status = 'expired' WHERE id = ?`, row.id);
+    await db.run(
+      `UPDATE aura_identity_challenges SET status = 'expired', delivery_status = 'expired' WHERE id = ?`,
+      row.id
+    );
     return null;
   }
   return row;
@@ -559,13 +585,13 @@ function formatDeliverySuccessMessage(opts: {
 }): string {
   const mins = Math.round(OTP_TTL_MS / 60_000);
   if (opts.emailSent && opts.smsSent) {
-    return `Your verification code is on its way to ${opts.actorEmail} and to this phone by text. Please say or text the 6-digit code when you receive it. I'll keep this verification open for ${mins} minutes. You can say resend code or try another method if needed.`;
+    return `Provider accepted your verification code for ${opts.actorEmail} and for this phone by text. Status: sent. Please say or text the 6-digit code when you receive it. I'll keep this verification open for ${mins} minutes. Say resend code or try another method if needed.`;
   }
   if (opts.emailSent) {
-    return `Resend confirmed delivery to ${opts.actorEmail}. Message ID logged. Please say or text the 6-digit code from that email. I'll wait up to ${mins} minutes. Say resend code or try text message if you don't see it.`;
+    return `Email provider accepted the send to ${opts.actorEmail}. Status: partial — SMS not confirmed. Please say or text the 6-digit code from that email. I'll wait up to ${mins} minutes. Say resend code or try text message if you don't see it.`;
   }
   if (opts.smsSent) {
-    return `Email delivery failed, but I texted your 6-digit code to this phone. Please say or text the code now. I'll wait up to ${mins} minutes. Say try email or resend code if you need another copy.`;
+    return `SMS provider accepted the send to this phone. Status: partial — email not confirmed. Please say or text the 6-digit code now. I'll wait up to ${mins} minutes. Say try email or resend code if you need another copy.`;
   }
   return `I could not confirm delivery to ${opts.actorEmail} or by SMS (${opts.deliveryStatus}). Say resend code, try text message, or try email.`;
 }
@@ -676,8 +702,39 @@ export async function startFounderPhoneChallenge(opts: {
   const actorEmail = getFounderEmail();
 
   if (opts.skipIfPending !== false) {
-    const pending = await getActiveFounderChallenge(opts.sessionKey);
+    const pending = await getActiveFounderChallenge(opts.sessionKey, phone);
     if (pending) {
+      const deliveryFailed =
+        pending.delivery_status === "failed"
+        || (!pending.email_sent && !pending.sms_sent);
+      if (deliveryFailed) {
+        const code = unsealOtp(pending.code_sealed);
+        if (code) {
+          const { email, sms, deliveryStatus, emailSent, smsSent } = await deliverFounderOtpWithFallback({
+            challengeId: pending.id,
+            code,
+            phoneE164: phone,
+            sessionKey: opts.sessionKey,
+            callerChannel: opts.channel,
+            actorEmail,
+            channelPreference: opts.channelPreference ?? "both",
+          });
+          const result = await finalizeFounderChallengeDelivery({
+            challengeId: pending.id,
+            actorEmail,
+            emailSent,
+            smsSent,
+            deliveryStatus,
+            emailError: email.error,
+            smsError: sms.error,
+          });
+          return {
+            ...result,
+            awaitingCode: result.ok,
+            deliveryStatus,
+          };
+        }
+      }
       return {
         ok: true,
         challengeId: pending.id,
@@ -751,7 +808,7 @@ export async function resendFounderOtp(opts: {
   deliveryStatus?: string;
 }> {
   await ensureAuraTrustTables();
-  const pending = await getActiveFounderChallenge(opts.sessionKey);
+  const pending = await getActiveFounderChallenge(opts.sessionKey, opts.phoneE164);
   if (!pending) {
     return {
       ok: false,
@@ -805,7 +862,7 @@ export async function tryAlternateFounderDelivery(opts: {
   phoneE164: string;
   channel: AuraChannel;
 }): Promise<ReturnType<typeof resendFounderOtp>> {
-  const pending = await getActiveFounderChallenge(opts.sessionKey);
+  const pending = await getActiveFounderChallenge(opts.sessionKey, opts.phoneE164);
   const prefer: "email" | "sms" = pending?.preferred_channel === "email" ? "sms" : "email";
   return resendFounderOtp({ ...opts, channelPreference: prefer });
 }

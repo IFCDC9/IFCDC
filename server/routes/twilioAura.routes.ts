@@ -88,6 +88,10 @@ function appendGather(twiml: InstanceType<typeof VoiceResponse>, turn: number, c
 }
 
 function sessionKey(callSid?: string, from?: string | null): string {
+  // Prefer phone-stable keys so a callback within the 10-minute OTP window
+  // can still find the pending Founder challenge.
+  const phone = normalizeE164(from || "");
+  if (phone) return `voice-${phone}`;
   return callSid || `sms-${from || "unknown"}`;
 }
 
@@ -166,10 +170,12 @@ async function handleFounderDeliver(req: Request, res: Response): Promise<void> 
   sayNatural(twiml, challenge.message);
   if (challenge.ok && (challenge.awaitingCode || challenge.emailSent || challenge.smsSent)) {
     appendGather(twiml, 1, callSid, true);
-    twiml.say({ voice: VOICE }, "Take your time. I'm waiting for your six digit code.");
+    twiml.say({ voice: VOICE }, "Take your time. I'm waiting for your six digit code. You can also say resend code or try another method.");
   } else {
-    twiml.say({ voice: VOICE }, "Say verify founder to try again, or call back in a moment.");
-    twiml.hangup();
+    appendGather(twiml, 1, callSid, true);
+    twiml.say({
+      voice: VOICE,
+      }, "Delivery was not confirmed. Say resend code, try text message, or try email, and I'll try again.");
   }
   respondXml(res, twiml.toString());
 }
