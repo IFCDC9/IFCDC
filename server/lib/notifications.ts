@@ -199,26 +199,125 @@ export async function sendHqNotificationBulk(payloads: NotificationPayload[]): P
   return results;
 }
 
+/** Prefer configured From; if its domain is unverified, fall back to a verified Resend domain. */
+export async function resolveVerifiedResendFromEmail(): Promise<{
+  from: string;
+  configuredFrom: string;
+  usedFallback: boolean;
+  probe: Awaited<ReturnType<typeof probeResendSender>>;
+}> {
+  const configuredFrom = resolveResendFromEmail();
+  const probe = await probeResendSender();
+  if (probe.ok) {
+    return { from: configuredFrom, configuredFrom, usedFallback: false, probe };
+  }
+  const verified = (probe.domains || []).find((d) => d.status === "verified");
+  if (!verified) {
+    return { from: configuredFrom, configuredFrom, usedFallback: false, probe };
+  }
+  const local =
+    configuredFrom.match(/<([^@>]+)@/)?.[1]
+    || configuredFrom.match(/^([^@\s]+)@/)?.[1]
+    || "service";
+  const from = `IFCDC Headquarters <${local}@${verified.name}>`;
+  console.warn(
+    `[email] RESEND_FROM_EMAIL domain unverified (${configuredFrom}). Falling back to verified domain: ${from}`
+  );
+  return { from, configuredFrom, usedFallback: true, probe };
+}
+
 /** Direct Resend path for security-critical Founder OTP (skips microservice). */
 export async function sendFounderSecurityEmail(opts: {
   to: string;
   subject: string;
   body: string;
 }): Promise<HqDeliveryResult> {
-  const provider = createResendEmailProvider();
-  if (!provider) {
+  const apiKey = resolveResendApiKey();
+  if (!apiKey) {
     return {
       success: false,
       error: "RESEND_API_KEY is not configured on Headquarters (Render env)",
       providerCode: "missing_api_key",
     };
   }
-  return provider.send({
-    channel: "email",
-    to: opts.to,
-    subject: opts.subject,
-    body: opts.body,
-  });
+
+  const verified = await resolveVerifiedResendFromEmail();
+  const text = opts.body;
+  const html = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\n/g, "<br>");
+
+  try {
+    console.log(
+      `[email] Resend Founder OTP → to=${opts.to} from=${verified.from}`
+      + (verified.usedFallback ? ` (fallback; configured=${verified.configuredFrom})` : "")
+    );
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: verified.from,
+        to: [opts.to],
+        subject: opts.subject,
+        text,
+        html,
+      }),
+      signal: AbortSignal.timeout(12_000),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      id?: string;
+      message?: string;
+      name?: string;
+      error?: string;
+    };
+    if (!res.ok) {
+      const err = data.message || data.error || data.name || `Resend error ${res.status}`;
+      console.error(`[email] Resend failed status=${res.status}: ${err}`, JSON.stringify(data));
+      return {
+        success: false,
+        error: err,
+        providerCode: data.name || res.status,
+        providerStatus: res.status,
+        providerResponse: {
+          ...data,
+          resendProbe: verified.probe,
+          fromUsed: verified.from,
+          configuredFrom: verified.configuredFrom,
+          usedFallback: verified.usedFallback,
+        },
+      };
+    }
+    console.log(`[email] Resend ok id=${data.id ?? "unknown"} from=${verified.from}`);
+    return {
+      success: true,
+      messageId: data.id,
+      providerStatus: res.status,
+      providerResponse: {
+        ...data,
+        resendProbe: verified.probe,
+        fromUsed: verified.from,
+        configuredFrom: verified.configuredFrom,
+        usedFallback: verified.usedFallback,
+      },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Email send failed";
+    console.error(`[email] Resend exception: ${message}`);
+    return {
+      success: false,
+      error: message,
+      providerResponse: {
+        exception: message,
+        resendProbe: verified.probe,
+        fromUsed: verified.from,
+      },
+    };
+  }
 }
 
 function twilioErrorFields(err: unknown): {
