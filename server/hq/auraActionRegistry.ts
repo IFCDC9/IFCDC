@@ -777,6 +777,42 @@ const executiveDecisionIntelligence: AuraAction = {
   },
 };
 
+const enterpriseOs: AuraAction = {
+  id: "enterprise_os",
+  label: "Enterprise OS 4.0",
+  module: "executive",
+  kind: "read",
+  description:
+    "AURA Enterprise OS 4.0 — Mission Control, autonomous workflows, task orchestration, knowledge graph, enterprise search, scenario planning, executive automation. Founder approval for high-impact actions.",
+  parameters: {
+    request: {
+      type: "string",
+      description: "e.g. Show Mission Control, orchestrate grant opportunity, knowledge graph, monthly board packet",
+    },
+  },
+  async run(args, ctx) {
+    if (!ctx.identity?.founderMode && !ctx.identity?.isFounder) {
+      return { status: "error", summary: "Enterprise OS requires Founder Mode." };
+    }
+    const { runEnterpriseOs } = await import("./auraEnterpriseOs4");
+    const result = await runEnterpriseOs({
+      request: str(args.request) || "Show Mission Control",
+      channel: "hq_web",
+      founderMode: true,
+      actorEmail: ctx.actorEmail,
+    });
+    return {
+      status: "done",
+      summary: result.speechSummary,
+      data: result,
+      navigation: { path: "/hq/enterprise-os", label: "Open Enterprise OS Mission Control" },
+      approval: result.founderApprovalRequired
+        ? { path: "/hq/workflows", label: "Founder approval required for execution" }
+        : undefined,
+    };
+  },
+};
+
 export const AURA_ACTIONS: AuraAction[] = [
   findGrants,
   enterpriseFundingScan,
@@ -801,6 +837,7 @@ export const AURA_ACTIONS: AuraAction[] = [
   executiveAgentTeam,
   enterpriseBrain,
   executiveDecisionIntelligence,
+  enterpriseOs,
 ];
 
 const ACTION_MAP = new Map(AURA_ACTIONS.map((a) => [a.id, a]));

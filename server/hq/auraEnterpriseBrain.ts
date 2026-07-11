@@ -131,6 +131,8 @@ export function wantsEnterpriseBrain(message: string): boolean {
     || /\b(what should we work on first|biggest risk (to|for) ifcdc|enterprise brain 3)\b/i.test(m)
     || /\b(executive decision|decision intelligence|scorecard|weekly (executive )?review)\b/i.test(m)
     || /\b(opportunity intelligence|enterprise (brain )?dashboard|simulat(e|ion))\b/i.test(m)
+    || /\benterprise os\b|\baura os\b|\bmission control\b|\bknowledge graph\b|\benterprise search\b/i.test(m)
+    || /\b(monthly board packet|compliance calendar|autonomous workflow|orchestrat)\b/i.test(m)
   );
 }
 
@@ -683,6 +685,51 @@ export async function runEnterpriseBrain(opts: {
   }
 
   let intent = classifyBrainIntent(opts.request);
+
+  // Enterprise OS 4.0 — Mission Control, orchestration, graph, search, automation
+  {
+    const { wantsEnterpriseOs, runEnterpriseOs } = await import("./auraEnterpriseOs4");
+    if (wantsEnterpriseOs(opts.request)) {
+      const os = await runEnterpriseOs({
+        request: opts.request,
+        channel: opts.channel,
+        founderMode: true,
+        actorEmail: opts.actorEmail,
+      });
+      const orgModel = await buildDigitalOrganizationModel();
+      const predictions = await buildPredictiveIntelligenceSignals(orgModel);
+      const resultPayload: EnterpriseBrainResult = {
+        brainVersion: "2.0",
+        orchestrationId,
+        intent: "general",
+        generatedAt: new Date().toISOString(),
+        orgModel,
+        predictions,
+        recommendations: [],
+        unifiedBriefing: os.unifiedBriefing,
+        speechSummary: os.speechSummary,
+        smsSummary: os.smsSummary,
+        founderApprovalRequired: os.founderApprovalRequired,
+        agentsDelegated: ["enterprise_os_4", "enterprise_brain"],
+        multiAgent: os.payload,
+      };
+      await ensureEnterpriseBrainTables();
+      const db = await getDb();
+      await db.run(
+        `INSERT INTO aura_enterprise_brain_runs (id, intent, request, founder_approval_required, actor_email, channel, result_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        orchestrationId,
+        "enterprise_os_4",
+        opts.request.slice(0, 2000),
+        resultPayload.founderApprovalRequired ? 1 : 0,
+        opts.actorEmail || null,
+        opts.channel,
+        JSON.stringify({ kind: os.kind, osVersion: os.osVersion }).slice(0, 50_000),
+        resultPayload.generatedAt
+      );
+      return resultPayload;
+    }
+  }
 
   // Phase 3 — Executive Decision Intelligence (decisions, simulations, weekly, scorecard, goals, opportunities)
   {

@@ -32,6 +32,10 @@ const EnterpriseBrainDashboardPage = lazyWithRetry(
   () => import("./pages/hq/EnterpriseBrainDashboardPage"),
   "EnterpriseBrainDashboardPage"
 );
+const EnterpriseOsMissionControlPage = lazyWithRetry(
+  () => import("./pages/hq/EnterpriseOsMissionControlPage"),
+  "EnterpriseOsMissionControlPage"
+);
 const PeopleManagementCenter = lazyWithRetry(() => import("./pages/hq/PeopleManagementCenter"), "PeopleManagementCenter");
 const ClientCaseManagementPage = lazyWithRetry(() => import("./pages/hq/ClientCaseManagementPage"), "ClientCaseManagementPage");
 const StaffSelfServicePage = lazyWithRetry(() => import("./pages/hq/StaffSelfServicePage"), "StaffSelfServicePage");
@@ -147,6 +151,7 @@ const App: React.FC = () => (
           <Route path="/hq/developer" element={<HqRoute path="/hq/developer"><DeveloperPortalPage /></HqRoute>} />
           <Route path="/hq/aura" element={<HqRoute path="/hq/aura"><AuraCommandCenterPage /></HqRoute>} />
           <Route path="/hq/executive-brain" element={<HqRoute path="/hq/executive-brain"><EnterpriseBrainDashboardPage /></HqRoute>} />
+          <Route path="/hq/enterprise-os" element={<HqRoute path="/hq/enterprise-os"><EnterpriseOsMissionControlPage /></HqRoute>} />
           <Route path="/hq/people" element={<HqRoute path="/hq/people"><PeopleManagementCenter /></HqRoute>} />
           <Route path="/hq/clients" element={<HqRoute path="/hq/clients"><ClientCaseManagementPage /></HqRoute>} />
           <Route path="/hq/my-workspace" element={<HqRoute path="/hq/my-workspace"><StaffSelfServicePage /></HqRoute>} />

@@ -333,6 +333,48 @@ export const hqApi = {
   auraEdiWeeklyReview: () => hqFetch<Record<string, unknown>>("/aura/edi/weekly-review"),
   auraEdiGoals: () => hqFetch<Record<string, unknown>>("/aura/edi/goals"),
   auraEdiScorecard: () => hqFetch<Record<string, unknown>>("/aura/edi/scorecard"),
+  auraOsMissionControl: () => hqFetch<{
+    osVersion?: string;
+    brainVersion?: string;
+    organizationHealth: number | null;
+    enterpriseHealthScore: number | null;
+    enterpriseGrade: string | null;
+    fundingPipeline: { pipelineValue: number | null; activeAwards: number | null };
+    financialHealth: { cashFlow: number | null; financialHealthScore: number | null; budgetRemaining: number | null };
+    grantStatus: string;
+    hrStatus: string;
+    operations: string;
+    softwareHealth: { score: number | null; label: string | null; deployAligned: boolean | null };
+    security: string;
+    compliance: { overdue: number; dueNext14Days: number };
+    activeRisks: Array<{ id: string; title: string; confidence: string }>;
+    opportunities: Array<{ id: string; title: string }>;
+    founderPriorities: string[];
+    liveAlerts: Array<{ id: string; title: string; explanation: string; severity: string; preparedWork: string[]; founderApprovalRequired: boolean }>;
+    preparedActions: Array<{ id: string; title: string; explanation: string; preparedWork: string[]; founderApprovalRequired: boolean }>;
+    pendingApprovals: number;
+  }>("/aura/os/mission-control"),
+  auraOsRun: (request: string) =>
+    hqFetch<{ kind: string; osVersion?: string; speechSummary: string; unifiedBriefing: string; founderApprovalRequired: boolean; payload: unknown }>(
+      "/aura/os/run",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request }),
+      }
+    ),
+  auraOsKnowledgeGraph: () =>
+    hqFetch<{
+      nodes: Array<{ id: string; type: string; label: string; meta?: string }>;
+      edges: Array<{ id: string; from: string; to: string; relation: string; evidence: string }>;
+      gaps: string[];
+    }>("/aura/os/knowledge-graph"),
+  auraOsSearch: (question: string) =>
+    hqFetch<Record<string, unknown>>("/aura/os/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    }),
   auraNavigate: (query: string) => hqFetch<{
     intent: string; path?: string; label?: string; message: string;
     results?: { type: string; id: string; title: string; subtitle: string; path: string }[];

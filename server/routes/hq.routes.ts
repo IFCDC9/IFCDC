@@ -899,6 +899,124 @@ router.post("/aura/edi/simulate", hqAuthRequired, requireHQModule("aura"), async
   res.json({ ...result, identity: publicIdentitySummary(identity) });
 });
 
+/** AURA Enterprise OS 4.0 */
+router.get("/aura/os/mission-control", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { buildEnterpriseOsMissionControl } = await import("../hq/auraEnterpriseOs4");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Enterprise OS Mission Control requires Founder access." });
+  }
+  res.json(await buildEnterpriseOsMissionControl());
+});
+
+router.post("/aura/os/run", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser, publicIdentitySummary } = await import("../hq/auraFounderTrustEngine");
+  const { runEnterpriseOs } = await import("../hq/auraEnterpriseOs4");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  const request = String(req.body?.request ?? req.body?.command ?? "").trim();
+  if (request.length < 3) return res.status(400).json({ error: "request must be at least 3 characters" });
+  const result = await runEnterpriseOs({
+    request,
+    channel: "hq_web",
+    founderMode: Boolean(identity.founderMode || identity.isFounder),
+    actorEmail: identity.email || req.hqUser?.email,
+  });
+  res.json({ ...result, identity: publicIdentitySummary(identity) });
+});
+
+router.get("/aura/os/workflows", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { runAutonomousWorkflowScan } = await import("../hq/auraEnterpriseOs4");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Autonomous workflows require Founder access." });
+  }
+  res.json({ actions: await runAutonomousWorkflowScan() });
+});
+
+router.get("/aura/os/knowledge-graph", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { buildExecutiveKnowledgeGraph } = await import("../hq/auraEnterpriseOs4");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Knowledge graph requires Founder access." });
+  }
+  res.json(await buildExecutiveKnowledgeGraph());
+});
+
+router.post("/aura/os/search", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { runEnterpriseOsSearch } = await import("../hq/auraEnterpriseOs4");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Enterprise search requires Founder access." });
+  }
+  const question = String(req.body?.question ?? req.body?.request ?? "").trim();
+  if (question.length < 3) return res.status(400).json({ error: "question must be at least 3 characters" });
+  res.json(await runEnterpriseOsSearch(question));
+});
+
+router.post("/aura/os/orchestrate", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { orchestrateGrantOpportunityWorkflow } = await import("../hq/auraEnterpriseOs4");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Orchestration requires Founder access." });
+  }
+  res.json(
+    await orchestrateGrantOpportunityWorkflow({
+      opportunityTitle: typeof req.body?.opportunityTitle === "string" ? req.body.opportunityTitle : undefined,
+      request: typeof req.body?.request === "string" ? req.body.request : undefined,
+    })
+  );
+});
+
+router.post("/aura/os/automate", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { buildExecutiveAutomationPackage } = await import("../hq/auraEnterpriseOs4");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Executive automation requires Founder access." });
+  }
+  const kind = String(req.body?.kind ?? "weekly_executive").trim() as
+    | "weekly_executive"
+    | "monthly_board"
+    | "compliance_calendar"
+    | "grant_status"
+    | "financial_summary"
+    | "technology_report";
+  res.json(await buildExecutiveAutomationPackage(kind));
+});
+
 router.post("/aura/executive/action-plan", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
   res.json(await generateExecutiveActionPlan());
 });

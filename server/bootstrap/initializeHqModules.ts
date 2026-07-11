@@ -69,6 +69,8 @@ export async function initializeHqModules(founder: FounderSeedConfig): Promise<v
   await ensureEnterpriseBrainTables();
   const { ensureExecutiveDecisionIntelligenceTables } = await import("../hq/auraExecutiveDecisionIntelligence");
   await ensureExecutiveDecisionIntelligenceTables();
+  const { ensureEnterpriseOsTables } = await import("../hq/auraEnterpriseOs4");
+  await ensureEnterpriseOsTables();
   // Build AURA's institutional knowledge base from live HQ data. Deferred so
   // dashboard reads are not blocked at boot; embedding controlled by env flag.
   setTimeout(() => {
