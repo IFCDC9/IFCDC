@@ -1,5 +1,9 @@
 /**
  * Twilio AURA voice + SMS — executive receptionist for +1 (331) 316-8167.
+ *
+ * Voice session rule: never block the Twilio webhook on long HQ/AI work.
+ * Acknowledge quickly, process in background, keep the caller engaged via wait-loop,
+ * or offer email/SMS delivery if the task cannot finish during the call.
  */
 import type { Express, Request, Response } from "express";
 import express from "express";
@@ -9,6 +13,7 @@ import {
   initializeReceptionistGreeting,
   processReceptionistTurn,
   resolveVoiceGreeting,
+  type ReceptionistTurnResult,
 } from "../hq/auraReceptionistEngine";
 import { getReceptionistSession } from "../hq/auraReceptionistSession";
 import {
@@ -16,12 +21,26 @@ import {
   logTwilioCommunicationEvent,
   normalizeE164,
 } from "../hq/twilioIntegrationEngine";
+import {
+  VOICE_ACK_BUDGET_MS,
+  ackPhrase,
+  bumpAuraVoiceJobPoll,
+  createAuraVoiceJob,
+  getAuraVoiceJob,
+  markAuraVoiceJobDone,
+  markAuraVoiceJobError,
+  markDeferredOfferSent,
+  progressPhrase,
+  raceVoiceTurn,
+  shouldDeferAuraVoiceJob,
+} from "../hq/auraVoiceJobQueue";
 
 const VoiceResponse = twilio.twiml.VoiceResponse;
 const MessagingResponse = twilio.twiml.MessagingResponse;
 const twilioForm = express.urlencoded({ extended: false });
 
-const MAX_VOICE_TURNS = 12;
+/** Raised so 5–10 minute Founder sessions are not cut off by turn caps. */
+const MAX_VOICE_TURNS = 48;
 const RADIO_NUMBER = "+18587588791";
 const VOICE = "Polly.Joanna" as const;
 
@@ -73,11 +92,19 @@ function buildFounderDeliverUrl(callSid?: string): string {
   return `${base}/api/twilio/aura/voice/founder-deliver?${qs.toString()}`;
 }
 
+function buildWaitUrl(jobId: string, turn: number, callSid?: string, founderVerify = false): string {
+  const base = publicBaseUrl();
+  const qs = new URLSearchParams({ jobId, turn: String(turn) });
+  if (callSid) qs.set("CallSid", callSid);
+  if (founderVerify) qs.set("founderVerify", "1");
+  return `${base}/api/twilio/aura/voice/wait?${qs.toString()}`;
+}
+
 function appendGather(twiml: InstanceType<typeof VoiceResponse>, turn: number, callSid?: string, founderVerify = false): void {
   twiml.gather({
     input: ["speech"],
     speechTimeout: founderVerify ? "5" : "auto",
-    timeout: founderVerify ? 30 : 5,
+    timeout: founderVerify ? 30 : 8,
     speechModel: "phone_call",
     enhanced: true,
     action: buildGatherUrl(turn, callSid, founderVerify),
@@ -87,12 +114,95 @@ function appendGather(twiml: InstanceType<typeof VoiceResponse>, turn: number, c
   });
 }
 
+function appendContinueListening(
+  twiml: InstanceType<typeof VoiceResponse>,
+  turn: number,
+  callSid?: string,
+  keepVerifying = false
+): void {
+  if (turn < MAX_VOICE_TURNS) {
+    appendGather(twiml, turn + 1, callSid, keepVerifying);
+    if (!keepVerifying) {
+      // Played only if gather times out (silence) — keep session open longer for Founder work.
+      twiml.say({ voice: VOICE }, "I'm still here if you need anything else. Or say goodbye when you're done.");
+      appendGather(twiml, turn + 2, callSid, false);
+      twiml.say({ voice: VOICE }, "Thank you for calling IFCDC. Goodbye.");
+    } else {
+      twiml.say({ voice: VOICE }, "I'm still here when you're ready with your code.");
+    }
+  } else if (keepVerifying) {
+    twiml.say({
+      voice: VOICE,
+    }, "Your verification code remains valid for the rest of the ten minute window if you call back. Goodbye for now.");
+  } else {
+    twiml.say({ voice: VOICE }, "Thank you for calling IFCDC. Goodbye.");
+    twiml.hangup();
+  }
+}
+
 function sessionKey(callSid?: string, from?: string | null): string {
-  // Prefer phone-stable keys so a callback within the 10-minute OTP window
-  // can still find the pending Founder challenge.
   const phone = normalizeE164(from || "");
   if (phone) return `voice-${phone}`;
   return callSid || `sms-${from || "unknown"}`;
+}
+
+function startBackgroundTurn(jobId: string, work: Promise<ReceptionistTurnResult>): void {
+  void work
+    .then((result) => {
+      markAuraVoiceJobDone(jobId, result);
+    })
+    .catch((err) => {
+      console.error("AURA voice background turn failed:", err);
+      markAuraVoiceJobError(jobId, err instanceof Error ? err.message : "Processing failed");
+    });
+}
+
+async function offerDeferredDelivery(jobId: string): Promise<string> {
+  const job = getAuraVoiceJob(jobId);
+  if (!job) {
+    return "I wasn't able to finish that during this call. I can email or text the report when it's ready if you'd like.";
+  }
+  if (job.deferredOfferSent) {
+    return "I'm still preparing that report. I'll send it by email or text when it's ready. What else can I help with while we wait, or you can end the call whenever you like.";
+  }
+
+  markDeferredOfferSent(jobId);
+
+  // Continue work in background; when done, try SMS/email follow-up.
+  const finishAndNotify = async () => {
+    const latest = getAuraVoiceJob(jobId);
+    if (!latest) return;
+    // Wait up to 3 more minutes for completion
+    const deadline = Date.now() + 180_000;
+    while (Date.now() < deadline) {
+      const j = getAuraVoiceJob(jobId);
+      if (!j) return;
+      if (j.status === "done" && j.result) {
+        try {
+          const { deliverFounderCallFollowUp } = await import("../hq/auraFounderCallReport");
+          const session = await getReceptionistSession(j.sessionId, "voice", j.callerPhone);
+          await deliverFounderCallFollowUp({
+            session,
+            channel: "voice",
+            summary: [
+              `Deferred voice report for: ${j.speech.slice(0, 240)}`,
+              j.result.reply.slice(0, 1200),
+            ].join("\n\n"),
+            prefer: ["hq", "email", "sms"],
+            smsTo: j.callerPhone || session.callerPhone,
+          });
+        } catch (err) {
+          console.error("Deferred voice follow-up delivery failed:", err);
+        }
+        return;
+      }
+      if (j.status === "error") return;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  };
+  void finishAndNotify();
+
+  return "This is taking longer than expected. I'll keep preparing it and send the completed report by email and text when it's ready. You can stay on the line for something else, or end the call whenever you like.";
 }
 
 function handleRadioVoicemail(_req: Request, res: Response): void {
@@ -146,7 +256,9 @@ async function handleIncomingVoice(req: Request, res: Response): Promise<void> {
   sayNatural(twiml, greeting);
   appendGather(twiml, 1, callSid, awaitingFounderCode);
   if (!awaitingFounderCode) {
-    twiml.say({ voice: VOICE }, "I didn't hear anything. Goodbye.");
+    twiml.say({ voice: VOICE }, "I didn't hear anything. I'm still here if you'd like to try again.");
+    appendGather(twiml, 2, callSid, false);
+    twiml.say({ voice: VOICE }, "Thank you for calling IFCDC. Goodbye.");
   } else {
     twiml.say({ voice: VOICE }, "I'm still here whenever you're ready with your six digit code.");
   }
@@ -175,9 +287,29 @@ async function handleFounderDeliver(req: Request, res: Response): Promise<void> 
     appendGather(twiml, 1, callSid, true);
     twiml.say({
       voice: VOICE,
-      }, "Delivery was not confirmed. Say resend code, try text message, or try email, and I'll try again.");
+    }, "Delivery was not confirmed. Say resend code, try text message, or try email, and I'll try again.");
   }
   respondXml(res, twiml.toString());
+}
+
+function speakTurnResult(
+  twiml: InstanceType<typeof VoiceResponse>,
+  result: ReceptionistTurnResult,
+  turn: number,
+  callSid: string | undefined,
+  founderVerify: boolean
+): void {
+  if (result.transferTo) {
+    sayNatural(twiml, "One moment — connecting you now.");
+    twiml.dial({ timeout: 30 }, result.transferTo);
+    twiml.say({ voice: VOICE }, "We couldn't reach someone right now. I'll make sure our team calls you back. You can stay on the line or hang up.");
+    appendContinueListening(twiml, turn, callSid, false);
+    return;
+  }
+
+  sayNatural(twiml, result.reply);
+  const keepVerifying = founderVerify || Boolean(result.awaitingFounderCode);
+  appendContinueListening(twiml, turn, callSid, keepVerifying);
 }
 
 async function handleVoiceRespond(req: Request, res: Response): Promise<void> {
@@ -199,20 +331,52 @@ async function handleVoiceRespond(req: Request, res: Response): Promise<void> {
       return respondXml(res, twiml.toString());
     }
     sayNatural(twiml, "I didn't catch that — go ahead, I'm listening.");
-    if (turn < MAX_VOICE_TURNS) appendGather(twiml, turn + 1, callSid);
-    else {
-      twiml.say({ voice: VOICE }, "Thank you for calling IFCDC. Goodbye.");
-      twiml.hangup();
-    }
+    appendContinueListening(twiml, turn, callSid, false);
     return respondXml(res, twiml.toString());
   }
 
-  const result = await processReceptionistTurn({
+  // Soft goodbye intents — end cleanly without hanging up abruptly mid-session.
+  if (/^(goodbye|good bye|bye|hang up|end (the )?call|that's all|that is all)\b/i.test(speech)) {
+    sayNatural(twiml, "Thank you for calling IFCDC. Goodbye.");
+    twiml.hangup();
+    return respondXml(res, twiml.toString());
+  }
+
+  const work = processReceptionistTurn({
     sessionId: sid,
     userMessage: speech,
     channel: "voice",
     callerPhone: from,
   });
+
+  const raced = await raceVoiceTurn(work, VOICE_ACK_BUDGET_MS);
+
+  if (!raced.timedOut) {
+    const result = raced.value;
+    void logTwilioCommunicationEvent({
+      id: cryptoRandomId(),
+      direction: "inbound",
+      channel: "voice",
+      fromNumber: from,
+      toNumber: calledNumber,
+      callSid,
+      status: result.transferTo ? "transfer" : "answered",
+      body: speech,
+      auraResponse: result.reply,
+      metadata: { turn, action: result.action, bookingConfirmed: result.bookingConfirmed, mode: "sync" },
+    });
+    speakTurnResult(twiml, result, turn, callSid, founderVerify);
+    return respondXml(res, twiml.toString());
+  }
+
+  // Long-running path — acknowledge immediately and keep the webhook under Twilio's timeout.
+  const job = createAuraVoiceJob({
+    sessionId: sid,
+    callSid,
+    callerPhone: from,
+    speech,
+  });
+  startBackgroundTurn(job.id, raced.pending);
 
   void logTwilioCommunicationEvent({
     id: cryptoRandomId(),
@@ -221,36 +385,76 @@ async function handleVoiceRespond(req: Request, res: Response): Promise<void> {
     fromNumber: from,
     toNumber: calledNumber,
     callSid,
-    status: result.transferTo ? "transfer" : "answered",
+    status: "processing",
     body: speech,
-    auraResponse: result.reply,
-    metadata: { turn, action: result.action, bookingConfirmed: result.bookingConfirmed },
+    metadata: { turn, jobId: job.id, mode: "async_ack" },
   });
 
-  if (result.transferTo) {
-    sayNatural(twiml, "One moment — connecting you now.");
-    twiml.dial({ timeout: 30 }, result.transferTo);
-    twiml.say({ voice: VOICE }, "We couldn't reach someone right now. I'll make sure our team calls you back. Goodbye.");
+  sayNatural(twiml, ackPhrase(speech));
+  twiml.pause({ length: 1 });
+  twiml.redirect({ method: "POST" }, buildWaitUrl(job.id, turn, callSid, founderVerify));
+  respondXml(res, twiml.toString());
+}
+
+async function handleVoiceWait(req: Request, res: Response): Promise<void> {
+  const jobId = String(req.query.jobId || req.body.jobId || "").trim();
+  const from = normalizeE164(req.body.From);
+  const callSid = (req.body.CallSid || req.query.CallSid) as string | undefined;
+  const turn = Math.min(parseInt(String(req.query.turn || "1"), 10) || 1, MAX_VOICE_TURNS);
+  const founderVerify = req.query.founderVerify === "1";
+  const twiml = new VoiceResponse();
+
+  const job = getAuraVoiceJob(jobId);
+  if (!job) {
+    sayNatural(
+      twiml,
+      "I lost track of that lookup. I can try again, or I can email and text the report when it's ready. What would you like to do?"
+    );
+    appendContinueListening(twiml, turn, callSid, founderVerify);
     return respondXml(res, twiml.toString());
   }
 
-  sayNatural(twiml, result.reply);
-
-  const keepVerifying = founderVerify || result.awaitingFounderCode;
-  if (turn < MAX_VOICE_TURNS) {
-    appendGather(twiml, turn + 1, callSid, keepVerifying);
-    if (!keepVerifying) {
-      twiml.say({ voice: VOICE }, "Thank you for calling IFCDC. Goodbye.");
-    } else {
-      twiml.say({ voice: VOICE }, "I'm still here when you're ready with your code.");
-    }
-  } else if (keepVerifying) {
-    twiml.say({ voice: VOICE }, "Your verification code remains valid for the rest of the ten minute window if you call back. Goodbye for now.");
-  } else {
-    twiml.say({ voice: VOICE }, "Thank you for calling IFCDC. Goodbye.");
-    twiml.hangup();
+  if (job.status === "done" && job.result) {
+    void logTwilioCommunicationEvent({
+      id: cryptoRandomId(),
+      direction: "inbound",
+      channel: "voice",
+      fromNumber: from || job.callerPhone,
+      toNumber: normalizeE164(req.body.To),
+      callSid: callSid || job.callSid || undefined,
+      status: job.result.transferTo ? "transfer" : "answered",
+      body: job.speech,
+      auraResponse: job.result.reply,
+      metadata: { turn, jobId, mode: "async_complete", polls: job.polls },
+    });
+    speakTurnResult(twiml, job.result, turn, callSid || job.callSid || undefined, founderVerify);
+    return respondXml(res, twiml.toString());
   }
 
+  if (job.status === "error") {
+    sayNatural(
+      twiml,
+      "I ran into a problem gathering that information. I can email or text you the report when Headquarters is available again. Would you like me to keep working on something else?"
+    );
+    appendContinueListening(twiml, turn, callSid || job.callSid || undefined, founderVerify);
+    return respondXml(res, twiml.toString());
+  }
+
+  const polls = bumpAuraVoiceJobPoll(jobId);
+  if (shouldDeferAuraVoiceJob(job) || polls >= 24) {
+    const deferMsg = await offerDeferredDelivery(jobId);
+    sayNatural(twiml, deferMsg);
+    appendContinueListening(twiml, turn, callSid || job.callSid || undefined, founderVerify);
+    return respondXml(res, twiml.toString());
+  }
+
+  // Keep the live session warm — brief progress, short pause, redirect (valid TwiML within timeout).
+  sayNatural(twiml, progressPhrase(polls));
+  twiml.pause({ length: 2 });
+  twiml.redirect(
+    { method: "POST" },
+    buildWaitUrl(jobId, turn, callSid || job.callSid || undefined, founderVerify)
+  );
   respondXml(res, twiml.toString());
 }
 
@@ -264,7 +468,12 @@ async function handleVoiceStatus(req: Request, res: Response): Promise<void> {
     callSid: req.body.CallSid,
     status: req.body.CallStatus ?? "unknown",
     body: "status_callback",
-    metadata: { duration: req.body.CallDuration },
+    metadata: {
+      duration: req.body.CallDuration,
+      sipResponseCode: req.body.SipResponseCode,
+      errorCode: req.body.ErrorCode,
+      errorMessage: req.body.ErrorMessage,
+    },
   });
   respondXml(res, "<Response></Response>");
 }
@@ -331,7 +540,9 @@ export function registerTwilioAuraRoutes(app: Express): void {
     void handleIncomingVoice(req, res).catch((err) => {
       console.error("Twilio AURA voice error:", err);
       const twiml = new VoiceResponse();
-      twiml.say({ voice: VOICE }, "We're experiencing technical difficulties. Please try again later.");
+      twiml.say({ voice: VOICE }, "We're experiencing a brief technical issue. Please stay on the line or call back in a moment.");
+      appendGather(twiml, 1, req.body.CallSid as string | undefined, false);
+      twiml.say({ voice: VOICE }, "Thank you for calling IFCDC. Goodbye.");
       respondXml(res, twiml.toString());
     });
   });
@@ -340,8 +551,8 @@ export function registerTwilioAuraRoutes(app: Express): void {
     void handleFounderDeliver(req, res).catch((err) => {
       console.error("Twilio AURA founder-deliver error:", err);
       const twiml = new VoiceResponse();
-      twiml.say({ voice: VOICE }, "Sorry, I could not send the verification code right now. Please try again.");
-      twiml.hangup();
+      twiml.say({ voice: VOICE }, "Sorry, I could not send the verification code right now. Please stay on the line and say resend code, or try again shortly.");
+      appendGather(twiml, 1, (req.body.CallSid || req.query.CallSid) as string | undefined, true);
       respondXml(res, twiml.toString());
     });
   });
@@ -350,7 +561,23 @@ export function registerTwilioAuraRoutes(app: Express): void {
     void handleVoiceRespond(req, res).catch((err) => {
       console.error("Twilio AURA voice respond error:", err);
       const twiml = new VoiceResponse();
-      twiml.say({ voice: VOICE }, "Sorry, something went wrong. Goodbye.");
+      twiml.say({
+        voice: VOICE,
+      }, "Sorry, something went wrong on my side. I can email or text a report when it's ready. Would you like to try another question?");
+      appendGather(twiml, 1, (req.body.CallSid || req.query.CallSid) as string | undefined, false);
+      twiml.say({ voice: VOICE }, "Thank you for calling IFCDC. Goodbye.");
+      respondXml(res, twiml.toString());
+    });
+  });
+
+  app.post("/api/twilio/aura/voice/wait", twilioForm, (req, res) => {
+    void handleVoiceWait(req, res).catch((err) => {
+      console.error("Twilio AURA voice wait error:", err);
+      const twiml = new VoiceResponse();
+      twiml.say({
+        voice: VOICE,
+      }, "I hit a snag while holding that request. I can send the completed report by email or text. What else can I help with?");
+      appendGather(twiml, 1, (req.body.CallSid || req.query.CallSid) as string | undefined, false);
       respondXml(res, twiml.toString());
     });
   });
