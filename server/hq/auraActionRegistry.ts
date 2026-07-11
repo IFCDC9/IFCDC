@@ -748,7 +748,7 @@ const executiveDecisionIntelligence: AuraAction = {
   module: "executive",
   kind: "read",
   description:
-    "Phase 3 EDI — should we apply/hire/expand, affordability, what-if simulations, scorecard, strategic goals, opportunities, weekly review. Live HQ evidence only; Founder approval for major actions.",
+    "AURA Enterprise Brain 3.0 — Executive Decision Intelligence: apply/hire/expand/afford, multi-scenario what-if, scorecard, strategic goals, opportunities, weekly review. Live HQ evidence; Founder approval for major actions.",
   parameters: {
     request: {
       type: "string",
@@ -761,7 +761,7 @@ const executiveDecisionIntelligence: AuraAction = {
     }
     const { runExecutiveDecisionIntelligence } = await import("./auraExecutiveDecisionIntelligence");
     const result = await runExecutiveDecisionIntelligence({
-      request: str(args.request) || "Show the Enterprise Brain Dashboard",
+      request: str(args.request) || "Show the Enterprise Brain 3.0 Dashboard",
       channel: "hq_web",
       founderMode: true,
     });

@@ -288,6 +288,7 @@ export const hqApi = {
     }),
   auraEdiDashboard: () => hqFetch<{
     generatedAt: string;
+    brainVersion?: string;
     organizationHealth: number | null;
     healthGrade: string | null;
     enterpriseHealthScore: number | null;
@@ -301,19 +302,21 @@ export const hqApi = {
       blockers: string[];
       recommendedActions: string[];
       owner: string;
+      department?: string;
     }>;
     goalsSummary: { onTrack: number; atRisk: number; blocked: number; achieved: number; avgProgress: number };
     fundingPipeline: { pipelineValue: number | null; activeAwards: number | null };
     financialPosition: { cashFlow: number | null; financialHealthScore: number | null; budgetRemaining: number | null };
     activeRisks: Array<{ id: string; title: string; whyItMatters: string; confidence: string; recommendedAction: string }>;
-    opportunities: Array<{ id: string; title: string; whyItMatters: string; recommendedNextStep: string }>;
+    opportunities: Array<{ id: string; title: string; whyItMatters: string; recommendedNextStep: string; expectedBenefit?: string }>;
     founderPriorities: string[];
+    executiveAlerts?: Array<{ id: string; severity: string; title: string; detail: string; requiresFounderAttention: boolean }>;
     auraRecommendations: string[];
     orgModel?: { technology?: { healthScore?: number | null } };
-    scorecard?: { dimensions: Array<{ id: string; label: string; score: number | null; grade: string }> };
+    scorecard?: { dimensions: Array<{ id: string; label: string; score: number | null; grade: string; evidence?: string[]; gap?: string }> };
   }>("/aura/edi/dashboard"),
   auraEdiDecide: (request: string) =>
-    hqFetch<{ kind: string; speechSummary: string; unifiedBriefing: string; founderApprovalRequired: boolean; payload: unknown }>(
+    hqFetch<{ kind: string; brainVersion?: string; speechSummary: string; unifiedBriefing: string; founderApprovalRequired: boolean; payload: unknown }>(
       "/aura/edi/decide",
       {
         method: "POST",

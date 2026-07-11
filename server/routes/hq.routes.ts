@@ -824,6 +824,7 @@ router.get("/aura/edi/goals", hqAuthRequired, requireHQModule("aura"), async (re
 router.post("/aura/edi/goals", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
   const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
   const { upsertStrategicGoal } = await import("../hq/strategicGoalsEngine");
+  type GoalCat = import("../hq/strategicGoalsEngine").StrategicGoalCategory;
   const identity = resolveIdentityFromHqUser({
     user: req.hqUser,
     channel: "hq_web",
@@ -833,17 +834,18 @@ router.post("/aura/edi/goals", hqAuthRequired, requireHQModule("aura"), async (r
     return res.status(403).json({ error: "Updating strategic goals requires Founder access." });
   }
   const title = String(req.body?.title ?? "").trim();
-  const category = String(req.body?.category ?? "").trim();
+  const category = String(req.body?.category ?? "").trim() as GoalCat;
   if (!title || !category) return res.status(400).json({ error: "title and category required" });
   res.json(
     await upsertStrategicGoal({
       id: typeof req.body?.id === "string" ? req.body.id : undefined,
-      category: category as "funding" | "program" | "community_impact" | "technology" | "hr" | "financial",
+      category,
       title,
       description: typeof req.body?.description === "string" ? req.body.description : undefined,
       targetValue: typeof req.body?.targetValue === "number" ? req.body.targetValue : undefined,
       unit: typeof req.body?.unit === "string" ? req.body.unit : undefined,
       owner: typeof req.body?.owner === "string" ? req.body.owner : undefined,
+      department: typeof req.body?.department === "string" ? req.body.department : undefined,
       targetDate: typeof req.body?.targetDate === "string" ? req.body.targetDate : undefined,
       actorEmail: identity.email || req.hqUser?.email,
     })

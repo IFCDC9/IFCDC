@@ -128,6 +128,7 @@ export function wantsEnterpriseBrain(message: string): boolean {
     || /\borganization(al)? (health|status|snapshot|model)\b/i.test(m)
     || /\bcontinuous monitoring\b|\bmonitor (the )?(entire )?(organization|hq|system)\b/i.test(m)
     || /\b(should we (apply|hire|expand|launch)|can we afford|what happens if|what if we)\b/i.test(m)
+    || /\b(what should we work on first|biggest risk (to|for) ifcdc|enterprise brain 3)\b/i.test(m)
     || /\b(executive decision|decision intelligence|scorecard|weekly (executive )?review)\b/i.test(m)
     || /\b(opportunity intelligence|enterprise (brain )?dashboard|simulat(e|ion))\b/i.test(m)
   );
