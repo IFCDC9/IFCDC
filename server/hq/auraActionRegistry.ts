@@ -687,9 +687,45 @@ const executiveAgentTeam: AuraAction = {
     if (!ctx.identity?.founderMode && !ctx.identity?.isFounder) {
       return { status: "error", summary: "Executive Agent Team requires Founder Mode." };
     }
-    const { orchestrateExecutiveAgentTeam } = await import("./auraExecutiveAgentOrchestrator");
-    const result = await orchestrateExecutiveAgentTeam({
+    const { runEnterpriseBrain } = await import("./auraEnterpriseBrain");
+    const result = await runEnterpriseBrain({
       request: str(args.request) || "Prepare an executive multi-agent briefing",
+      channel: "hq_web",
+      actorEmail: ctx.actorEmail,
+      founderMode: true,
+    });
+    return {
+      status: "done",
+      summary: result.speechSummary,
+      data: result,
+      navigation: { path: "/hq/aura", label: "Open AURA Command" },
+      approval: result.founderApprovalRequired
+        ? { path: "/hq/workflows", label: "Founder approval required for execution" }
+        : undefined,
+    };
+  },
+};
+
+const enterpriseBrain: AuraAction = {
+  id: "enterprise_brain",
+  label: "Enterprise Brain 2.0",
+  module: "executive",
+  kind: "read",
+  description:
+    "AURA Enterprise Brain 2.0 — daily briefing, digital org model, predictive risks, strategic goals proximity, and Founder focus list. Uses live HQ data only.",
+  parameters: {
+    request: {
+      type: "string",
+      description: "e.g. daily briefing, what should I work on today, biggest risks, strategic goals",
+    },
+  },
+  async run(args, ctx) {
+    if (!ctx.identity?.founderMode && !ctx.identity?.isFounder) {
+      return { status: "error", summary: "Enterprise Brain requires Founder Mode." };
+    }
+    const { runEnterpriseBrain } = await import("./auraEnterpriseBrain");
+    const result = await runEnterpriseBrain({
+      request: str(args.request) || "What should I work on today?",
       channel: "hq_web",
       actorEmail: ctx.actorEmail,
       founderMode: true,
@@ -728,6 +764,7 @@ export const AURA_ACTIONS: AuraAction[] = [
   decisionSupportAsk,
   intelligenceMetrics,
   executiveAgentTeam,
+  enterpriseBrain,
 ];
 
 const ACTION_MAP = new Map(AURA_ACTIONS.map((a) => [a.id, a]));

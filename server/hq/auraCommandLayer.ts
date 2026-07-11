@@ -246,11 +246,12 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
     }
   }
 
-  // Multi-Agent Executive Team — Founder speaks only to AURA; specialists collaborate behind the scenes.
+  // AURA Enterprise Brain 2.0 — unified Founder operating intelligence (delegates to specialists).
   {
-    const { wantsMultiAgentOrchestration, orchestrateExecutiveAgentTeam } = await import("./auraExecutiveAgentOrchestrator");
-    if (wantsMultiAgentOrchestration(command)) {
-      const orch = await orchestrateExecutiveAgentTeam({
+    const { wantsEnterpriseBrain, runEnterpriseBrain } = await import("./auraEnterpriseBrain");
+    const { wantsMultiAgentOrchestration } = await import("./auraExecutiveAgentOrchestrator");
+    if (wantsEnterpriseBrain(command) || wantsMultiAgentOrchestration(command)) {
+      const brain = await runEnterpriseBrain({
         request: command,
         channel: "hq_web",
         actorEmail: identity.email || input.actorEmail,
@@ -258,25 +259,29 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
       });
       await logAuraIdentityAction({
         identity,
-        action: "aura_multi_agent_orchestrate",
-        detail: orch.speechSummary.slice(0, 240),
-        metadata: { intent: orch.intent, agents: orch.agentsInvoked, orchestrationId: orch.orchestrationId },
+        action: "aura_enterprise_brain",
+        detail: brain.speechSummary.slice(0, 240),
+        metadata: {
+          intent: brain.intent,
+          orchestrationId: brain.orchestrationId,
+          agentsDelegated: brain.agentsDelegated,
+        },
       });
       return {
-        reply: orch.unifiedBriefing,
+        reply: brain.unifiedBriefing,
         actions: [
           {
-            id: "executive_agent_team",
-            label: "Executive Agent Team",
+            id: "enterprise_brain",
+            label: "Enterprise Brain 2.0",
             status: "done",
-            summary: orch.speechSummary,
-            data: orch,
+            summary: brain.speechSummary,
+            data: brain,
           },
         ],
-        approvalsCreated: orch.founderApprovalRequired
+        approvalsCreated: brain.founderApprovalRequired
           ? [{ path: "/hq/workflows", label: "Founder approval required for execution" }]
           : [],
-        poweredBy: "AURA Executive Agent Team",
+        poweredBy: "AURA Enterprise Brain 2.0",
         identity: publicIdentitySummary(identity),
       };
     }

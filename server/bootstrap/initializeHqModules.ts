@@ -27,6 +27,7 @@ import { ensureKnowledgeBaseTables } from "../hq/knowledgeBaseEngine";
 import { ensureAuraTrustTables } from "../hq/auraFounderTrustEngine";
 import { ensureTechCommandTables } from "../hq/auraTechnicalCommandEngine";
 import { ensureProactiveIntelligenceTables } from "../hq/auraProactiveIntelligence";
+import { ensureEnterpriseBrainTables } from "../hq/auraEnterpriseBrain";
 import { logOpenAiConfigAtBoot } from "../lib/openaiConfig";
 import { ensureMissionControlTables } from "../hq/missionControlSchema";
 import { initGoogleOAuth } from "../monolith/googleOAuth";
@@ -65,6 +66,7 @@ export async function initializeHqModules(founder: FounderSeedConfig): Promise<v
   await ensureAuraTrustTables();
   await ensureTechCommandTables();
   await ensureProactiveIntelligenceTables();
+  await ensureEnterpriseBrainTables();
   // Build AURA's institutional knowledge base from live HQ data. Deferred so
   // dashboard reads are not blocked at boot; embedding controlled by env flag.
   setTimeout(() => {

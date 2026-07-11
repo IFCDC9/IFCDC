@@ -282,6 +282,39 @@ const AuraCommandCenterPage: React.FC = () => {
                 <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.75rem" }}>
                   <button
                     type="button"
+                    className="hq-btn hq-btn-primary hq-btn-sm"
+                    onClick={() =>
+                      hqApi.auraEnterpriseBrain("Prepare my daily executive briefing")
+                        .then((r) => setRecommendations(String((r as { unifiedBriefing?: string; speechSummary?: string }).unifiedBriefing || (r as { speechSummary?: string }).speechSummary || JSON.stringify(r))))
+                        .catch((err) => setIntelError(errorMessage(err)))
+                    }
+                  >
+                    Enterprise Brain Briefing
+                  </button>
+                  <button
+                    type="button"
+                    className="hq-btn hq-btn-secondary hq-btn-sm"
+                    onClick={() =>
+                      hqApi.auraEnterpriseBrain("What should I work on today?")
+                        .then((r) => setRecommendations(String((r as { unifiedBriefing?: string; speechSummary?: string }).unifiedBriefing || (r as { speechSummary?: string }).speechSummary || JSON.stringify(r))))
+                        .catch((err) => setIntelError(errorMessage(err)))
+                    }
+                  >
+                    Work Today
+                  </button>
+                  <button
+                    type="button"
+                    className="hq-btn hq-btn-secondary hq-btn-sm"
+                    onClick={() =>
+                      hqApi.auraEnterpriseBrain("Show our biggest organizational risks")
+                        .then((r) => setRecommendations(String((r as { unifiedBriefing?: string; speechSummary?: string }).unifiedBriefing || (r as { speechSummary?: string }).speechSummary || JSON.stringify(r))))
+                        .catch((err) => setIntelError(errorMessage(err)))
+                    }
+                  >
+                    Org Risks
+                  </button>
+                  <button
+                    type="button"
                     className="hq-btn hq-btn-secondary hq-btn-sm"
                     onClick={() => hqApi.auraProactiveScan(false).then(() => intelligenceMetrics.refetch())}
                   >

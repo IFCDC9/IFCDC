@@ -264,6 +264,28 @@ export const hqApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ request }),
     }),
+  auraEnterpriseBrain: (request: string) =>
+    hqFetch<Record<string, unknown>>("/aura/brain", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ request }),
+    }),
+  auraEnterpriseBrainOrgModel: () => hqFetch<Record<string, unknown>>("/aura/brain/org-model"),
+  auraEnterpriseBrainDailyBriefing: () => hqFetch<Record<string, unknown>>("/aura/brain/daily-briefing"),
+  auraEnterpriseBrainPredictions: () =>
+    hqFetch<{ predictions: Array<Record<string, unknown>> }>("/aura/brain/predictions"),
+  auraEnterpriseBrainFeedback: (body: {
+    brainRunId?: string;
+    feedbackType: "approved" | "rejected" | "correction" | "useful" | "not_useful";
+    rating?: number;
+    note?: string;
+    decisionRef?: string;
+  }) =>
+    hqFetch<{ ok: boolean; id: string }>("/aura/brain/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
   auraNavigate: (query: string) => hqFetch<{
     intent: string; path?: string; label?: string; message: string;
     results?: { type: string; id: string; title: string; subtitle: string; path: string }[];

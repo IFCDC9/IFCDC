@@ -656,7 +656,7 @@ router.get("/aura/agents", hqAuthRequired, requireHQModule("aura"), async (req, 
 
 router.post("/aura/agents/orchestrate", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
   const { resolveIdentityFromHqUser, publicIdentitySummary } = await import("../hq/auraFounderTrustEngine");
-  const { orchestrateExecutiveAgentTeam } = await import("../hq/auraExecutiveAgentOrchestrator");
+  const { runEnterpriseBrain } = await import("../hq/auraEnterpriseBrain");
   const identity = resolveIdentityFromHqUser({
     user: req.hqUser,
     channel: "hq_web",
@@ -664,13 +664,100 @@ router.post("/aura/agents/orchestrate", hqAuthRequired, requireHQModule("aura"),
   });
   const request = String(req.body?.request ?? req.body?.command ?? "").trim();
   if (request.length < 3) return res.status(400).json({ error: "request must be at least 3 characters" });
-  const result = await orchestrateExecutiveAgentTeam({
+  const result = await runEnterpriseBrain({
     request,
     channel: "hq_web",
     actorEmail: identity.email || req.hqUser?.email,
     founderMode: Boolean(identity.founderMode || identity.isFounder),
   });
   res.json({ ...result, identity: publicIdentitySummary(identity) });
+});
+
+/** AURA Enterprise Brain 2.0 */
+router.post("/aura/brain", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser, publicIdentitySummary } = await import("../hq/auraFounderTrustEngine");
+  const { runEnterpriseBrain } = await import("../hq/auraEnterpriseBrain");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  const request = String(req.body?.request ?? req.body?.command ?? "").trim();
+  if (request.length < 3) return res.status(400).json({ error: "request must be at least 3 characters" });
+  const result = await runEnterpriseBrain({
+    request,
+    channel: "hq_web",
+    actorEmail: identity.email || req.hqUser?.email,
+    founderMode: Boolean(identity.founderMode || identity.isFounder),
+  });
+  res.json({ ...result, identity: publicIdentitySummary(identity) });
+});
+
+router.get("/aura/brain/org-model", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { buildDigitalOrganizationModel } = await import("../hq/auraEnterpriseBrain");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Enterprise Brain requires Founder access." });
+  }
+  res.json(await buildDigitalOrganizationModel());
+});
+
+router.get("/aura/brain/daily-briefing", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { buildEnterpriseBrainDailyBriefing } = await import("../hq/auraEnterpriseBrain");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Enterprise Brain requires Founder access." });
+  }
+  res.json(await buildEnterpriseBrainDailyBriefing());
+});
+
+router.get("/aura/brain/predictions", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { buildPredictiveIntelligenceSignals } = await import("../hq/auraEnterpriseBrain");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Enterprise Brain requires Founder access." });
+  }
+  res.json({ predictions: await buildPredictiveIntelligenceSignals() });
+});
+
+router.post("/aura/brain/feedback", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { recordFounderBrainFeedback } = await import("../hq/auraEnterpriseBrain");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Enterprise Brain feedback requires Founder access." });
+  }
+  const feedbackType = String(req.body?.feedbackType ?? "").trim();
+  if (!feedbackType) return res.status(400).json({ error: "feedbackType required" });
+  res.json(
+    await recordFounderBrainFeedback({
+      brainRunId: typeof req.body?.brainRunId === "string" ? req.body.brainRunId : undefined,
+      feedbackType: feedbackType as "approved" | "rejected" | "correction" | "useful" | "not_useful",
+      rating: typeof req.body?.rating === "number" ? req.body.rating : undefined,
+      note: typeof req.body?.note === "string" ? req.body.note : undefined,
+      decisionRef: typeof req.body?.decisionRef === "string" ? req.body.decisionRef : undefined,
+      actorEmail: identity.email || req.hqUser?.email,
+    })
+  );
 });
 
 router.post("/aura/executive/action-plan", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {

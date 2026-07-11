@@ -357,20 +357,25 @@ export async function processReceptionistTurn(opts: {
       };
     }
 
-    const { wantsMultiAgentOrchestration, orchestrateExecutiveAgentTeam } = await import("./auraExecutiveAgentOrchestrator");
-    if (wantsMultiAgentOrchestration(message)) {
-      const orch = await orchestrateExecutiveAgentTeam({
+    const { wantsEnterpriseBrain, runEnterpriseBrain } = await import("./auraEnterpriseBrain");
+    const { wantsMultiAgentOrchestration } = await import("./auraExecutiveAgentOrchestrator");
+    if (wantsEnterpriseBrain(message) || wantsMultiAgentOrchestration(message)) {
+      const brain = await runEnterpriseBrain({
         request: message,
         channel,
         actorEmail: identity.email || null,
         founderMode: true,
       });
-      const reply = channel === "sms" ? orch.smsSummary : orch.speechSummary;
+      const reply = channel === "sms" ? brain.smsSummary : brain.speechSummary;
       await logAuraIdentityAction({
         identity,
-        action: "aura_multi_agent_orchestrate",
+        action: "aura_enterprise_brain",
         detail: reply.slice(0, 240),
-        metadata: { intent: orch.intent, agents: orch.agentsInvoked, orchestrationId: orch.orchestrationId },
+        metadata: {
+          intent: brain.intent,
+          orchestrationId: brain.orchestrationId,
+          agentsDelegated: brain.agentsDelegated,
+        },
       });
       const updated = await appendSessionTurn(session, "assistant", reply);
       return {
