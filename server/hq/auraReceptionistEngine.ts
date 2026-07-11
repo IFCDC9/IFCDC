@@ -329,6 +329,35 @@ export async function processReceptionistTurn(opts: {
     }
   }
 
+  // Founder Technical Command Mode — live ops briefing / repair tickets (no LLM guesswork).
+  if (identity.founderMode && message) {
+    const { wantsTechnicalCommand, handleTechnicalCommand } = await import("./auraTechnicalCommandEngine");
+    if (wantsTechnicalCommand(message)) {
+      const tech = await handleTechnicalCommand({
+        command: message,
+        channel,
+        actorEmail: identity.email || null,
+        founderMode: true,
+      });
+      await logAuraIdentityAction({
+        identity,
+        action: "aura_technical_command",
+        detail: tech.reply.slice(0, 240),
+        metadata: { action: tech.action, ticketId: tech.ticketId, blocked: tech.blocked },
+      });
+      const updated = await appendSessionTurn(session, "assistant", tech.reply);
+      return {
+        reply: tech.reply,
+        action: "none",
+        transferTo: null,
+        session: updated,
+        bookingConfirmed: false,
+        founderMode: true,
+        identityAssurance: identity.assurance,
+      };
+    }
+  }
+
   const knowledge = await retrieveReceptionistKnowledge(message || "IFCDC services overview");
   const identityBlock = buildAuraIdentitySystemBlock(identity);
   const systemPrompt = buildSystemPrompt(knowledge, channel, session, identityBlock);

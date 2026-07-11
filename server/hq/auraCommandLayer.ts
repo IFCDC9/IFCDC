@@ -209,6 +209,43 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
     };
   }
 
+  // Founder Technical Command Mode — live ops intelligence (short-circuit before LLM).
+  {
+    const { wantsTechnicalCommand, handleTechnicalCommand } = await import("./auraTechnicalCommandEngine");
+    if (wantsTechnicalCommand(command)) {
+      const tech = await handleTechnicalCommand({
+        command,
+        channel: "hq_web",
+        actorEmail: identity.email || input.actorEmail,
+        founderMode: Boolean(identity.founderMode || identity.isFounder),
+        founderApproved: Boolean(input.contextRef?.founderApproved),
+      });
+      await logAuraIdentityAction({
+        identity,
+        action: "aura_technical_command",
+        detail: tech.reply.slice(0, 240),
+        metadata: { action: tech.action, ticketId: tech.ticketId, blocked: tech.blocked },
+      });
+      return {
+        reply: tech.reply,
+        actions: [
+          {
+            id: tech.action,
+            label: "Technical Command",
+            status: tech.blocked ? "error" : tech.ticketId ? "prepared" : "done",
+            summary: tech.reply,
+            data: { briefing: tech.briefing, ticketId: tech.ticketId, findings: tech.findings },
+          },
+        ],
+        approvalsCreated: tech.requiresFounderApproval
+          ? [{ path: "/hq/aura", label: "Founder approval required" }]
+          : [],
+        poweredBy: "AURA Technical Command",
+        identity: publicIdentitySummary(identity),
+      };
+    }
+  }
+
   // Role gate: enterprise grant director & confidential workflows require Founder Mode or grants module.
   const isEnterpriseIntent =
     /enterprise mode|executive funding|scan all program|founder approval|populate.*pipeline|whole ifcdc.*grant/i.test(command);

@@ -99,6 +99,7 @@ export const FOUNDER_CONFIDENTIAL_DOMAINS = [
   "Board documents",
   "Software Division",
   "Executive reports",
+  "Technical / Platform Ops",
 ] as const;
 
 let tablesReady = false;
@@ -1112,6 +1113,13 @@ RULES FOR THIS SESSION
 - Still never auto-submit grants, send money, or finalize irreversible actions without explicit confirmation — stage them for Founder approval when required.
 - Address them as Founder / Fahreal when natural.
 - Every material Founder action is audited automatically — do not mention audit machinery unless asked.
+
+═══ TECHNICAL COMMAND MODE (FOUNDER ONLY) ═══
+You are also IFCDC HQ's Technical Operations Wizard — eyes and ears inside the platform.
+When asked about system health, deployments, integrations, APIs, crashes, or what needs attention, give a clear ops briefing: overall score, critical failures, warnings, recent updates, fix-first order, and Founder approvals needed.
+HARD SAFETY RAILS — require explicit Founder approval (never do these yourself): delete production data; change secrets; force-push Git; deploy unreviewed code; restart critical services; irreversible DB/infra changes.
+Allowed: diagnose, collect logs, create repair tickets for Tessa, recommend fixes, run safe health checks, notify when resolved.
+═══ END TECHNICAL COMMAND ═══
 ═══ END IDENTITY ═══`;
   }
 

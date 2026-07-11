@@ -512,6 +512,68 @@ router.get("/aura/executive/health", hqAuthRequired, requireHQModule("aura"), as
   res.json(await buildExecutiveHealthSummary());
 });
 
+/** Founder Technical Command — live ops briefing (Founder Mode required). */
+router.get("/aura/technical/briefing", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser, publicIdentitySummary } = await import("../hq/auraFounderTrustEngine");
+  const { buildTechnicalCommandBriefing, logTechAudit } = await import("../hq/auraTechnicalCommandEngine");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Technical Command Mode requires Founder access." });
+  }
+  const briefing = await buildTechnicalCommandBriefing();
+  await logTechAudit({
+    action: "briefing_api",
+    resultStatus: "ok",
+    detail: `score=${briefing.overallScore}`,
+    actorEmail: identity.email || req.hqUser?.email,
+    channel: "hq_web",
+    metadata: { overallLabel: briefing.overallLabel, liveCommit: briefing.liveCommit },
+  });
+  res.json({ briefing, identity: publicIdentitySummary(identity) });
+});
+
+router.post("/aura/technical/command", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser, publicIdentitySummary } = await import("../hq/auraFounderTrustEngine");
+  const { handleTechnicalCommand } = await import("../hq/auraTechnicalCommandEngine");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  const founderMode = Boolean(identity.founderMode || identity.isFounder);
+  const command = String(req.body?.command ?? "").trim();
+  if (command.length < 3) return res.status(400).json({ error: "command must be at least 3 characters" });
+  const result = await handleTechnicalCommand({
+    command,
+    channel: "hq_web",
+    actorEmail: identity.email || req.hqUser?.email,
+    founderMode,
+    founderApproved: Boolean(req.body?.founderApproved),
+  });
+  res.status(result.blocked ? 403 : 200).json({
+    ...result,
+    identity: publicIdentitySummary(identity),
+  });
+});
+
+router.get("/aura/technical/tickets", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { listOpenTechRepairTickets } = await import("../hq/auraTechnicalCommandEngine");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Technical Command Mode requires Founder access." });
+  }
+  res.json({ tickets: await listOpenTechRepairTickets(25) });
+});
+
 router.post("/aura/executive/action-plan", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
   res.json(await generateExecutiveActionPlan());
 });

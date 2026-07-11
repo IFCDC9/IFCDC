@@ -95,6 +95,9 @@ const BLOCKED_INTENT_PATTERNS: { re: RegExp; verb: string }[] = [
   { re: /\b(delete|remove|purge|erase|wipe)\b/i, verb: "delete" },
   { re: /\b(approve|authorize|sign off)\b/i, verb: "approve" },
   { re: /\b(pay|spend|wire|transfer funds|issue payment|disburse)\b/i, verb: "spend" },
+  { re: /\bforce[- ]?push\b/i, verb: "force-push" },
+  { re: /\b(restart|reboot|kill)\b.*\b(production|render|database|service)\b/i, verb: "restart critical services" },
+  { re: /\b(change|rotate)\b.*\b(secret|api.?key|credential)\b/i, verb: "change secrets" },
 ];
 
 export function detectBlockedIntent(command: string): string | null {
@@ -520,6 +523,81 @@ const fixWorkflow: AuraAction = {
   },
 };
 
+const techBriefing: AuraAction = {
+  id: "tech_system_briefing",
+  label: "Technical System Briefing",
+  module: "executive",
+  kind: "read",
+  description:
+    "Founder-only live Technical Command briefing: health score, critical failures, degraded integrations, GitHub vs Render alignment, and fix-first priorities.",
+  parameters: {
+    focus: {
+      type: "string",
+      enum: ["full", "deploy", "integrations", "apis"],
+      description: "Optional focus area.",
+    },
+  },
+  async run(args, ctx) {
+    if (!ctx.identity?.founderMode) {
+      return { status: "error", summary: "Technical Command Mode requires Founder Mode." };
+    }
+    const { handleTechnicalCommand } = await import("./auraTechnicalCommandEngine");
+    const focus = str(args.focus);
+    const command =
+      focus === "deploy"
+        ? "Compare GitHub main to Render live"
+        : focus === "integrations"
+          ? "Check all integrations"
+          : focus === "apis"
+            ? "Show me failed APIs and run a safe smoke check"
+            : "Check the entire system and give me a technical briefing";
+    const result = await handleTechnicalCommand({
+      command,
+      channel: "hq_web",
+      actorEmail: ctx.actorEmail,
+      founderMode: true,
+    });
+    return {
+      status: result.ok ? "done" : "error",
+      summary: result.reply,
+      data: result.briefing,
+      navigation: { path: "/hq/aura", label: "Open AURA Command" },
+    };
+  },
+};
+
+const techOpenTicket: AuraAction = {
+  id: "tech_open_repair_ticket",
+  label: "Open Technical Repair Ticket",
+  module: "executive",
+  kind: "prepare",
+  description:
+    "Founder-only: open a repair ticket for Tessa from the live Technical Command diagnosis. Does not deploy or change production.",
+  parameters: {
+    title: { type: "string", description: "Optional ticket title." },
+    notes: { type: "string", description: "Optional Founder notes." },
+  },
+  async run(args, ctx) {
+    if (!ctx.identity?.founderMode) {
+      return { status: "error", summary: "Technical Command Mode requires Founder Mode." };
+    }
+    const { handleTechnicalCommand } = await import("./auraTechnicalCommandEngine");
+    const notes = str(args.notes) || str(args.title) || "Create a repair task for Tessa";
+    const result = await handleTechnicalCommand({
+      command: `Create a repair task for Tessa. ${notes}`,
+      channel: "hq_web",
+      actorEmail: ctx.actorEmail,
+      founderMode: true,
+    });
+    return {
+      status: result.ticketId ? "prepared" : result.ok ? "done" : "error",
+      summary: result.reply,
+      data: { ticketId: result.ticketId, briefing: result.briefing },
+      approval: { path: "/hq/aura", label: "Review Technical Command tickets" },
+    };
+  },
+};
+
 export const AURA_ACTIONS: AuraAction[] = [
   findGrants,
   enterpriseFundingScan,
@@ -536,6 +614,8 @@ export const AURA_ACTIONS: AuraAction[] = [
   prepareForApproval,
   fixWorkflow,
   knowledgeLookup,
+  techBriefing,
+  techOpenTicket,
 ];
 
 const ACTION_MAP = new Map(AURA_ACTIONS.map((a) => [a.id, a]));

@@ -9,6 +9,25 @@
 
 ---
 
+## AURA Technical Command Mode (July 2026)
+
+Founder-only Technical Operations Wizard on the HQ phone line and in HQ web AURA Command.
+
+| Capability | Status |
+|------------|--------|
+| Live health briefing (score, critical, warnings, priorities) | ✅ `auraTechnicalCommandEngine` |
+| GitHub vs Render alignment | ✅ |
+| Integrations Hub degradation scan | ✅ |
+| Twilio / Resend / Founder phone readiness | ✅ |
+| Repair tickets + tech audit trail | ✅ |
+| Dangerous actions blocked without Founder approval | ✅ |
+| Voice/SMS short-circuit after Founder Mode OTP | ✅ |
+| HQ APIs `/api/hq/aura/technical/*` | ✅ |
+
+**Try on call (after Founder verification):** “Check the entire system.” · “Compare GitHub main to Render live.” · “Check all integrations.” · “Create a repair task for Tessa.”
+
+---
+
 ## Phase 1 Production Hardening (June 2026)
 
 | Milestone | Status |
