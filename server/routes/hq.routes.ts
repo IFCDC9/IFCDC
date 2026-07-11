@@ -574,6 +574,71 @@ router.get("/aura/technical/tickets", hqAuthRequired, requireHQModule("aura"), a
   res.json({ tickets: await listOpenTechRepairTickets(25) });
 });
 
+/** AURA Intelligence System — metrics, decision support, org memory, proactive scan. */
+router.get("/aura/intelligence/metrics", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { buildAuraIntelligenceMetrics } = await import("../hq/auraIntelligenceMetrics");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "AURA Intelligence metrics require Founder access." });
+  }
+  res.json(await buildAuraIntelligenceMetrics());
+});
+
+router.post("/aura/intelligence/decision-support", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { answerDecisionSupportQuestion } = await import("../hq/auraDecisionSupport");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Decision Support requires Founder Mode." });
+  }
+  const question = String(req.body?.question ?? "").trim();
+  if (question.length < 3) return res.status(400).json({ error: "question must be at least 3 characters" });
+  res.json(await answerDecisionSupportQuestion(question));
+});
+
+router.post("/aura/intelligence/memory", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { retrieveOrganizationalMemory } = await import("../hq/auraOrganizationalMemory");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Organizational Memory requires Founder Mode." });
+  }
+  const query = String(req.body?.query ?? "").trim();
+  if (query.length < 2) return res.status(400).json({ error: "query required" });
+  res.json(await retrieveOrganizationalMemory(query));
+});
+
+router.post("/aura/intelligence/proactive-scan", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { evaluateAndEmitProactiveAlerts } = await import("../hq/auraProactiveIntelligence");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Proactive scan requires Founder access." });
+  }
+  res.json(
+    await evaluateAndEmitProactiveAlerts({
+      notifyFounderChannels: Boolean(req.body?.notifyFounderChannels),
+    })
+  );
+});
+
 router.post("/aura/executive/action-plan", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
   res.json(await generateExecutiveActionPlan());
 });

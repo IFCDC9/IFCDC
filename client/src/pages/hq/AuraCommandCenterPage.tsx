@@ -69,6 +69,12 @@ const AuraCommandCenterPage: React.FC = () => {
     staleTime: 120_000,
   });
   const executiveHealth = useQuery({ queryKey: ["aura-executive-health"], queryFn: hqApi.auraExecutiveHealth, enabled: mode === "monitor" || mode === "intelligence" });
+  const intelligenceMetrics = useQuery({
+    queryKey: ["aura-intelligence-metrics"],
+    queryFn: hqApi.auraIntelligenceMetrics,
+    enabled: mode === "intelligence" || mode === "monitor",
+    staleTime: 60_000,
+  });
   const warehouseForecasts = useQuery({ queryKey: ["warehouse-forecasts"], queryFn: warehouseApi.forecasts, enabled: mode === "intelligence" });
   const morningBriefing = useQuery({ queryKey: ["copilot-morning"], queryFn: intelligenceApi.morningBriefing, enabled: mode === "brief" });
   const correctiveActions = useQuery({ queryKey: ["copilot-corrective"], queryFn: intelligenceApi.correctiveActions, enabled: mode === "monitor" || mode === "intelligence" });
@@ -253,6 +259,49 @@ const AuraCommandCenterPage: React.FC = () => {
       {mode === "intelligence" && (
         <div className="hq-fade-in">
           {intelError && <p style={{ color: "var(--hq-danger)", fontSize: "0.85rem", marginBottom: "0.75rem" }}>{intelError}</p>}
+          {intelligenceMetrics.data && (
+            <div className="hq-panel" style={{ marginBottom: "1rem" }}>
+              <div className="hq-panel-body">
+                <h4 style={{ color: "var(--hq-gold)", marginBottom: "0.75rem" }}>AURA Intelligence Dashboard</h4>
+                <div className="hq-kpi-grid" style={{ marginBottom: "0.75rem" }}>
+                  <KpiCard label="Events 24h" value={(intelligenceMetrics.data.commands as { total24h?: number })?.total24h ?? "—"} icon={Activity} variant="gold" />
+                  <KpiCard label="Tech Score" value={(intelligenceMetrics.data.technical as { healthScore?: number })?.healthScore ?? "—"} icon={Shield} variant="success" />
+                  <KpiCard label="Open Repairs" value={(intelligenceMetrics.data.alerts as { openRepairTickets?: number })?.openRepairTickets ?? "—"} icon={AlertTriangle} variant="warning" />
+                  <KpiCard label="KB Docs" value={(intelligenceMetrics.data.knowledge as { totalDocuments?: number })?.totalDocuments ?? "—"} icon={FileBarChart} />
+                </div>
+                <p style={{ fontSize: "0.82rem", opacity: 0.85, marginBottom: "0.5rem" }}>
+                  {(intelligenceMetrics.data.knowledge as { retrievalQualityHint?: string })?.retrievalQualityHint}
+                  {" · "}
+                  {(intelligenceMetrics.data.averageResponseHint as string) || ""}
+                </p>
+                <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.82rem" }}>
+                  {((intelligenceMetrics.data.outstandingGaps as string[]) || []).slice(0, 5).map((g) => (
+                    <li key={g}>{g}</li>
+                  ))}
+                </ul>
+                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.75rem" }}>
+                  <button
+                    type="button"
+                    className="hq-btn hq-btn-secondary hq-btn-sm"
+                    onClick={() => hqApi.auraProactiveScan(false).then(() => intelligenceMetrics.refetch())}
+                  >
+                    Run Proactive Scan
+                  </button>
+                  <button
+                    type="button"
+                    className="hq-btn hq-btn-ghost hq-btn-sm"
+                    onClick={() =>
+                      hqApi.auraDecisionSupport("What needs my attention today across grants, finance, and systems?")
+                        .then((r) => setRecommendations(String((r as { speechSummary?: string }).speechSummary || JSON.stringify(r))))
+                        .catch((err) => setIntelError(errorMessage(err)))
+                    }
+                  >
+                    Decision Support Brief
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="hq-kpi-grid" style={{ marginBottom: "1rem" }}>
             <KpiCard label="Org Health" value={`${health?.organizationHealth ?? "—"}%`} icon={Activity} variant="gold" />
             <KpiCard label="Risk Score" value={health?.riskScore ?? "—"} icon={AlertTriangle} variant={(health?.riskScore as number) > 60 ? "danger" : "success"} />

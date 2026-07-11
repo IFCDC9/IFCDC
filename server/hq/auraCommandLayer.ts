@@ -246,6 +246,55 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
     }
   }
 
+  // Founder Decision Support / Organizational Memory — live cross-module intelligence.
+  if (identity.founderMode || identity.isFounder) {
+    const { wantsDecisionSupport, answerDecisionSupportQuestion } = await import("./auraDecisionSupport");
+    if (wantsDecisionSupport(command)) {
+      const decision = await answerDecisionSupportQuestion(command);
+      await logAuraIdentityAction({
+        identity,
+        action: "aura_decision_support",
+        detail: decision.recommendedAction.slice(0, 240),
+      });
+      return {
+        reply: decision.speechSummary,
+        actions: [
+          {
+            id: "decision_support_ask",
+            label: "Decision Support",
+            status: "done",
+            summary: decision.speechSummary,
+            data: decision,
+          },
+        ],
+        approvalsCreated: decision.founderApprovalRequired
+          ? [{ path: "/hq/workflows", label: "Founder approval required" }]
+          : [],
+        poweredBy: "AURA Decision Support",
+        identity: publicIdentitySummary(identity),
+      };
+    }
+    if (/\b(organizational memory|knowledge base|what do we know|mission and vision)\b/i.test(command)) {
+      const { retrieveOrganizationalMemory } = await import("./auraOrganizationalMemory");
+      const memory = await retrieveOrganizationalMemory(command);
+      return {
+        reply: memory.speechSummary,
+        actions: [
+          {
+            id: "org_memory_lookup",
+            label: "Organizational Memory",
+            status: "done",
+            summary: memory.speechSummary,
+            data: memory,
+          },
+        ],
+        approvalsCreated: [],
+        poweredBy: "AURA Organizational Memory",
+        identity: publicIdentitySummary(identity),
+      };
+    }
+  }
+
   // Role gate: enterprise grant director & confidential workflows require Founder Mode or grants module.
   const isEnterpriseIntent =
     /enterprise mode|executive funding|scan all program|founder approval|populate.*pipeline|whole ifcdc.*grant/i.test(command);

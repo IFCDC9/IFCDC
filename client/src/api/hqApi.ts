@@ -237,6 +237,26 @@ export const hqApi = {
   auraOperationsBriefing: () => hqFetch<Record<string, unknown>>("/aura/operations/briefing"),
   auraExecutiveHealth: () => hqFetch<Record<string, unknown>>("/aura/executive/health"),
   auraExecutiveActionPlan: () => hqFetch<{ plan: string; summary: Record<string, unknown>; generatedAt: string }>("/aura/executive/action-plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }),
+  auraIntelligenceMetrics: () => hqFetch<Record<string, unknown>>("/aura/intelligence/metrics"),
+  auraDecisionSupport: (question: string) =>
+    hqFetch<Record<string, unknown>>("/aura/intelligence/decision-support", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    }),
+  auraOrgMemory: (query: string) =>
+    hqFetch<Record<string, unknown>>("/aura/intelligence/memory", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+    }),
+  auraProactiveScan: (notifyFounderChannels = false) =>
+    hqFetch<{ evaluated: number; emitted: number; skipped: number; alerts: unknown[] }>("/aura/intelligence/proactive-scan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notifyFounderChannels }),
+    }),
+  auraTechnicalBriefing: () => hqFetch<Record<string, unknown>>("/aura/technical/briefing"),
   auraNavigate: (query: string) => hqFetch<{
     intent: string; path?: string; label?: string; message: string;
     results?: { type: string; id: string; title: string; subtitle: string; path: string }[];

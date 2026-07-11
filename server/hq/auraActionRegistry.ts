@@ -598,6 +598,81 @@ const techOpenTicket: AuraAction = {
   },
 };
 
+const orgMemoryLookup: AuraAction = {
+  id: "org_memory_lookup",
+  label: "Organizational Memory Lookup",
+  module: "executive",
+  kind: "read",
+  description:
+    "Retrieve verified IFCDC organizational facts from the approved Knowledge Base. Separates facts from recommendations and lists gaps.",
+  parameters: {
+    query: { type: "string", description: "What organizational fact to retrieve." },
+  },
+  async run(args, ctx) {
+    if (!ctx.identity?.founderMode && !ctx.identity?.isFounder) {
+      return { status: "error", summary: "Organizational Memory requires Founder Mode for confidential domains." };
+    }
+    const { retrieveOrganizationalMemory } = await import("./auraOrganizationalMemory");
+    const memory = await retrieveOrganizationalMemory(str(args.query) || "IFCDC mission and programs", { topK: 8 });
+    return {
+      status: "done",
+      summary: memory.speechSummary,
+      data: memory,
+      navigation: { path: "/hq/knowledge", label: "Open Knowledge Base" },
+    };
+  },
+};
+
+const decisionSupportAsk: AuraAction = {
+  id: "decision_support_ask",
+  label: "Cross-Module Decision Support",
+  module: "executive",
+  kind: "read",
+  description:
+    "Cross-module Founder decision support with live facts, options, risks, citations, and whether Founder approval is required. Use for hire/affordability and multi-module tradeoffs.",
+  parameters: {
+    question: { type: "string", description: "Decision question." },
+  },
+  async run(args, ctx) {
+    if (!ctx.identity?.founderMode && !ctx.identity?.isFounder) {
+      return { status: "error", summary: "Decision Support requires Founder Mode." };
+    }
+    const { answerDecisionSupportQuestion } = await import("./auraDecisionSupport");
+    const result = await answerDecisionSupportQuestion(str(args.question) || "What needs Founder attention?");
+    return {
+      status: "done",
+      summary: result.speechSummary,
+      data: result,
+      navigation: { path: "/hq/aura", label: "Open AURA Command" },
+      approval: result.founderApprovalRequired
+        ? { path: "/hq/workflows", label: "Founder approval may be required" }
+        : undefined,
+    };
+  },
+};
+
+const intelligenceMetrics: AuraAction = {
+  id: "intelligence_metrics",
+  label: "AURA Intelligence Metrics",
+  module: "executive",
+  kind: "read",
+  description: "Show AURA Intelligence Dashboard metrics: commands, tool success, knowledge quality, gaps, and upgrade recommendations.",
+  parameters: {},
+  async run(_args, ctx) {
+    if (!ctx.identity?.founderMode && !ctx.identity?.isFounder) {
+      return { status: "error", summary: "Intelligence metrics require Founder access." };
+    }
+    const { buildAuraIntelligenceMetrics } = await import("./auraIntelligenceMetrics");
+    const metrics = await buildAuraIntelligenceMetrics();
+    return {
+      status: "done",
+      summary: `AURA Intelligence: ${metrics.commands.total24h} HQ intelligence events in 24h; tech score ${metrics.technical.healthScore ?? "n/a"}; ${metrics.outstandingGaps.length} outstanding gaps.`,
+      data: metrics,
+      navigation: { path: "/hq/aura", label: "Open AURA Intelligence" },
+    };
+  },
+};
+
 export const AURA_ACTIONS: AuraAction[] = [
   findGrants,
   enterpriseFundingScan,
@@ -616,6 +691,9 @@ export const AURA_ACTIONS: AuraAction[] = [
   knowledgeLookup,
   techBriefing,
   techOpenTicket,
+  orgMemoryLookup,
+  decisionSupportAsk,
+  intelligenceMetrics,
 ];
 
 const ACTION_MAP = new Map(AURA_ACTIONS.map((a) => [a.id, a]));

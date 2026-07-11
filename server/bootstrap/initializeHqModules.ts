@@ -26,6 +26,7 @@ import { ensureAuraMemoryTables } from "../hq/auraMemory";
 import { ensureKnowledgeBaseTables } from "../hq/knowledgeBaseEngine";
 import { ensureAuraTrustTables } from "../hq/auraFounderTrustEngine";
 import { ensureTechCommandTables } from "../hq/auraTechnicalCommandEngine";
+import { ensureProactiveIntelligenceTables } from "../hq/auraProactiveIntelligence";
 import { logOpenAiConfigAtBoot } from "../lib/openaiConfig";
 import { ensureMissionControlTables } from "../hq/missionControlSchema";
 import { initGoogleOAuth } from "../monolith/googleOAuth";
@@ -63,6 +64,7 @@ export async function initializeHqModules(founder: FounderSeedConfig): Promise<v
   await ensureKnowledgeBaseTables();
   await ensureAuraTrustTables();
   await ensureTechCommandTables();
+  await ensureProactiveIntelligenceTables();
   // Build AURA's institutional knowledge base from live HQ data. Deferred so
   // dashboard reads are not blocked at boot; embedding controlled by env flag.
   setTimeout(() => {
@@ -75,6 +77,17 @@ export async function initializeHqModules(founder: FounderSeedConfig): Promise<v
       })
       .catch((e) => console.warn("Knowledge base boot sync skipped:", e?.message));
   }, 90_000);
+  // Proactive intelligence — meaningful Founder alerts only (deduped). Deferred.
+  setTimeout(() => {
+    import("../hq/auraProactiveIntelligence")
+      .then(({ evaluateAndEmitProactiveAlerts }) =>
+        evaluateAndEmitProactiveAlerts({ notifyFounderChannels: false })
+      )
+      .then((r) => {
+        if (r) console.log(`AURA proactive scan: evaluated=${r.evaluated} emitted=${r.emitted}`);
+      })
+      .catch((e) => console.warn("AURA proactive scan skipped:", e?.message));
+  }, 120_000);
   getOrGenerateDailyBriefing().catch((e) => console.warn("Morning briefing generation skipped:", e?.message));
   await initGoogleOAuth();
   import("../hq/warehouseScheduler").then(({ startHqScheduler }) => startHqScheduler()).catch(() => undefined);

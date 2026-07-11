@@ -356,6 +356,69 @@ export async function processReceptionistTurn(opts: {
         identityAssurance: identity.assurance,
       };
     }
+
+    const { wantsCallFollowUp, deliverFounderCallFollowUp } = await import("./auraFounderCallReport");
+    if (wantsCallFollowUp(message)) {
+      const follow = await deliverFounderCallFollowUp({
+        session,
+        channel,
+        summary: "Founder requested a detailed follow-up report from this AURA session.",
+        prefer: /\bsms|text\b/i.test(message)
+          ? ["hq", "email", "sms"]
+          : /\bemail\b/i.test(message)
+            ? ["hq", "email"]
+            : ["hq", "email"],
+        smsTo: callerPhone || session.callerPhone,
+      });
+      const updated = await appendSessionTurn(session, "assistant", follow.message);
+      return {
+        reply: follow.message,
+        action: "none",
+        transferTo: null,
+        session: updated,
+        bookingConfirmed: false,
+        founderMode: true,
+        identityAssurance: identity.assurance,
+      };
+    }
+
+    const { wantsDecisionSupport, answerDecisionSupportQuestion } = await import("./auraDecisionSupport");
+    if (wantsDecisionSupport(message)) {
+      const decision = await answerDecisionSupportQuestion(message);
+      const reply = channel === "sms" ? decision.smsSummary : decision.speechSummary;
+      await logAuraIdentityAction({
+        identity,
+        action: "aura_decision_support",
+        detail: reply.slice(0, 240),
+        metadata: { founderApprovalRequired: decision.founderApprovalRequired, gaps: decision.gaps.length },
+      });
+      const updated = await appendSessionTurn(session, "assistant", reply);
+      return {
+        reply,
+        action: "none",
+        transferTo: null,
+        session: updated,
+        bookingConfirmed: false,
+        founderMode: true,
+        identityAssurance: identity.assurance,
+      };
+    }
+
+    if (/\b(mission|vision|organizational memory|what do we know|knowledge base|our programs|our budget)\b/i.test(message)) {
+      const { retrieveOrganizationalMemory } = await import("./auraOrganizationalMemory");
+      const memory = await retrieveOrganizationalMemory(message, { topK: 6 });
+      const reply = channel === "sms" ? memory.smsSummary : memory.speechSummary;
+      const updated = await appendSessionTurn(session, "assistant", reply);
+      return {
+        reply,
+        action: "none",
+        transferTo: null,
+        session: updated,
+        bookingConfirmed: false,
+        founderMode: true,
+        identityAssurance: identity.assurance,
+      };
+    }
   }
 
   const knowledge = await retrieveReceptionistKnowledge(message || "IFCDC services overview");

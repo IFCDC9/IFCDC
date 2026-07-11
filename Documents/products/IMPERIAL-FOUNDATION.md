@@ -9,6 +9,23 @@
 
 ---
 
+## AURA Intelligence System (July 2026)
+
+Next-generation Founder enterprise intelligence layer on live HQ data (no demo answers).
+
+| Capability | Engine / Route |
+|------------|----------------|
+| Organizational Memory (facts vs recommendations) | `auraOrganizationalMemory` · `POST /aura/intelligence/memory` |
+| Cross-module Decision Support | `auraDecisionSupport` · `POST /aura/intelligence/decision-support` |
+| Proactive alerts (deduped) | `auraProactiveIntelligence` · `POST /aura/intelligence/proactive-scan` |
+| Intelligence Dashboard metrics | `auraIntelligenceMetrics` · `GET /aura/intelligence/metrics` · AURA Command Center → Intelligence |
+| Technical Command | `auraTechnicalCommandEngine` |
+| Voice follow-up reports | `auraFounderCallReport` |
+
+**Voice (after Founder OTP):** “Can we afford to hire two case managers if this grant is awarded?” · “Check the entire system.” · “Send me a follow-up report.”
+
+---
+
 ## AURA Technical Command Mode (July 2026)
 
 Founder-only Technical Operations Wizard on the HQ phone line and in HQ web AURA Command.
