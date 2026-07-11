@@ -257,6 +257,13 @@ export const hqApi = {
       body: JSON.stringify({ notifyFounderChannels }),
     }),
   auraTechnicalBriefing: () => hqFetch<Record<string, unknown>>("/aura/technical/briefing"),
+  auraExecutiveAgents: () => hqFetch<{ agents: Array<{ id: string; title: string; role: string }> }>("/aura/agents"),
+  auraOrchestrateAgents: (request: string) =>
+    hqFetch<Record<string, unknown>>("/aura/agents/orchestrate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ request }),
+    }),
   auraNavigate: (query: string) => hqFetch<{
     intent: string; path?: string; label?: string; message: string;
     results?: { type: string; id: string; title: string; subtitle: string; path: string }[];

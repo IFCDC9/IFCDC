@@ -673,6 +673,39 @@ const intelligenceMetrics: AuraAction = {
   },
 };
 
+const executiveAgentTeam: AuraAction = {
+  id: "executive_agent_team",
+  label: "Executive Agent Team",
+  module: "executive",
+  kind: "read",
+  description:
+    "Founder-only multi-agent orchestration. AURA delegates to CFO, Grants, CTO, HR, Operations, Compliance, Communications, Knowledge, and Analyst specialists, then returns one unified executive briefing. Use for board meeting prep or capital/funding strategy.",
+  parameters: {
+    request: { type: "string", description: "Executive request, e.g. prepare board meeting or raise $10 million strategy." },
+  },
+  async run(args, ctx) {
+    if (!ctx.identity?.founderMode && !ctx.identity?.isFounder) {
+      return { status: "error", summary: "Executive Agent Team requires Founder Mode." };
+    }
+    const { orchestrateExecutiveAgentTeam } = await import("./auraExecutiveAgentOrchestrator");
+    const result = await orchestrateExecutiveAgentTeam({
+      request: str(args.request) || "Prepare an executive multi-agent briefing",
+      channel: "hq_web",
+      actorEmail: ctx.actorEmail,
+      founderMode: true,
+    });
+    return {
+      status: "done",
+      summary: result.speechSummary,
+      data: result,
+      navigation: { path: "/hq/aura", label: "Open AURA Command" },
+      approval: result.founderApprovalRequired
+        ? { path: "/hq/workflows", label: "Founder approval required for execution" }
+        : undefined,
+    };
+  },
+};
+
 export const AURA_ACTIONS: AuraAction[] = [
   findGrants,
   enterpriseFundingScan,
@@ -694,6 +727,7 @@ export const AURA_ACTIONS: AuraAction[] = [
   orgMemoryLookup,
   decisionSupportAsk,
   intelligenceMetrics,
+  executiveAgentTeam,
 ];
 
 const ACTION_MAP = new Map(AURA_ACTIONS.map((a) => [a.id, a]));

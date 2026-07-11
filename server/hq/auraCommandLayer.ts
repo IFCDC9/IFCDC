@@ -246,6 +246,42 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
     }
   }
 
+  // Multi-Agent Executive Team — Founder speaks only to AURA; specialists collaborate behind the scenes.
+  {
+    const { wantsMultiAgentOrchestration, orchestrateExecutiveAgentTeam } = await import("./auraExecutiveAgentOrchestrator");
+    if (wantsMultiAgentOrchestration(command)) {
+      const orch = await orchestrateExecutiveAgentTeam({
+        request: command,
+        channel: "hq_web",
+        actorEmail: identity.email || input.actorEmail,
+        founderMode: Boolean(identity.founderMode || identity.isFounder),
+      });
+      await logAuraIdentityAction({
+        identity,
+        action: "aura_multi_agent_orchestrate",
+        detail: orch.speechSummary.slice(0, 240),
+        metadata: { intent: orch.intent, agents: orch.agentsInvoked, orchestrationId: orch.orchestrationId },
+      });
+      return {
+        reply: orch.unifiedBriefing,
+        actions: [
+          {
+            id: "executive_agent_team",
+            label: "Executive Agent Team",
+            status: "done",
+            summary: orch.speechSummary,
+            data: orch,
+          },
+        ],
+        approvalsCreated: orch.founderApprovalRequired
+          ? [{ path: "/hq/workflows", label: "Founder approval required for execution" }]
+          : [],
+        poweredBy: "AURA Executive Agent Team",
+        identity: publicIdentitySummary(identity),
+      };
+    }
+  }
+
   // Founder Decision Support / Organizational Memory — live cross-module intelligence.
   if (identity.founderMode || identity.isFounder) {
     const { wantsDecisionSupport, answerDecisionSupportQuestion } = await import("./auraDecisionSupport");

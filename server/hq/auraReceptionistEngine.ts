@@ -357,6 +357,33 @@ export async function processReceptionistTurn(opts: {
       };
     }
 
+    const { wantsMultiAgentOrchestration, orchestrateExecutiveAgentTeam } = await import("./auraExecutiveAgentOrchestrator");
+    if (wantsMultiAgentOrchestration(message)) {
+      const orch = await orchestrateExecutiveAgentTeam({
+        request: message,
+        channel,
+        actorEmail: identity.email || null,
+        founderMode: true,
+      });
+      const reply = channel === "sms" ? orch.smsSummary : orch.speechSummary;
+      await logAuraIdentityAction({
+        identity,
+        action: "aura_multi_agent_orchestrate",
+        detail: reply.slice(0, 240),
+        metadata: { intent: orch.intent, agents: orch.agentsInvoked, orchestrationId: orch.orchestrationId },
+      });
+      const updated = await appendSessionTurn(session, "assistant", reply);
+      return {
+        reply,
+        action: "none",
+        transferTo: null,
+        session: updated,
+        bookingConfirmed: false,
+        founderMode: true,
+        identityAssurance: identity.assurance,
+      };
+    }
+
     const { wantsCallFollowUp, deliverFounderCallFollowUp } = await import("./auraFounderCallReport");
     if (wantsCallFollowUp(message)) {
       const follow = await deliverFounderCallFollowUp({

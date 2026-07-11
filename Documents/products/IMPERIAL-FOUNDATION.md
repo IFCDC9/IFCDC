@@ -9,6 +9,29 @@
 
 ---
 
+## AURA Multi-Agent Executive Architecture (July 2026)
+
+Founder speaks only to **AURA**. Behind the scenes, AURA convenes a live specialist team and returns one unified briefing.
+
+| Agent | Live engines |
+|-------|----------------|
+| Chief of Staff | Executive briefings + synthesis |
+| Grants Director | Grant Intelligence / funding matches |
+| CFO | Finance briefing + dashboard |
+| CTO | Technical Command health |
+| HR Director | Workforce / staffing forecasts |
+| Operations Director | Operations + Mission Control |
+| Communications Director | Board/capital draft framing (no auto-send) |
+| Compliance Officer | Compliance deadlines |
+| Knowledge Librarian | Organizational Memory / Knowledge Base |
+| Executive Intelligence Analyst | Strategic recommendations + metrics |
+
+**Try:** “AURA, prepare IFCDC for next month's board meeting.” · “AURA, raise $10 million over the next five years.”
+
+APIs: `GET /api/hq/aura/agents` · `POST /api/hq/aura/agents/orchestrate`
+
+---
+
 ## AURA Intelligence System (July 2026)
 
 Next-generation Founder enterprise intelligence layer on live HQ data (no demo answers).

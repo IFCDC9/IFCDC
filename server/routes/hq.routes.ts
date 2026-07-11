@@ -639,6 +639,40 @@ router.post("/aura/intelligence/proactive-scan", hqAuthRequired, requireHQModule
   );
 });
 
+/** Multi-Agent Executive Team — Founder speaks only to AURA; specialists collaborate. */
+router.get("/aura/agents", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { listExecutiveAgents } = await import("../hq/auraExecutiveAgentOrchestrator");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Executive Agent Team requires Founder access." });
+  }
+  res.json({ agents: listExecutiveAgents() });
+});
+
+router.post("/aura/agents/orchestrate", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser, publicIdentitySummary } = await import("../hq/auraFounderTrustEngine");
+  const { orchestrateExecutiveAgentTeam } = await import("../hq/auraExecutiveAgentOrchestrator");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  const request = String(req.body?.request ?? req.body?.command ?? "").trim();
+  if (request.length < 3) return res.status(400).json({ error: "request must be at least 3 characters" });
+  const result = await orchestrateExecutiveAgentTeam({
+    request,
+    channel: "hq_web",
+    actorEmail: identity.email || req.hqUser?.email,
+    founderMode: Boolean(identity.founderMode || identity.isFounder),
+  });
+  res.json({ ...result, identity: publicIdentitySummary(identity) });
+});
+
 router.post("/aura/executive/action-plan", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
   res.json(await generateExecutiveActionPlan());
 });
