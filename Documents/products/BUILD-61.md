@@ -54,4 +54,5 @@ Executive chat retrieves KB chunks (policies, SOPs, board/financial/grant/org do
 3. Verify `/hq/aura-executive` tabs + sample chat: “What is the biggest risk today?”
 
 ## Next
-Continue product work per `Documents/PRODUCT-ROADMAP.md` (Barbers App Store priority remains organization-wide #1).
+Continue product work per `Documents/PRODUCT-ROADMAP.md` (Barbers App Store priority remains organization-wide #1).  
+**Build 62 — Enterprise HR & Workforce Management** ✅ (see `BUILD-62.md`)

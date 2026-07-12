@@ -4,7 +4,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import {
   Users, Search, Building2, Network, Clock, Plus, UserCircle,
   Mail, Phone, MapPin, Briefcase, FileText, GraduationCap, Award, Calendar, Palmtree, ShieldCheck, ClipboardCheck, HandHeart, PenLine,
-  AlertTriangle, Star, CalendarDays, Landmark, UserPlus, Shield,
+  AlertTriangle, Star, CalendarDays, Landmark, UserPlus, Shield, HeartPulse,
 } from "lucide-react";
 import { analyticsApi } from "../../api/analyticsApi";
 import HQLayout from "../../layouts/HQLayout";
@@ -25,12 +25,14 @@ import { PeopleTimesheetsPanel } from "../../components/hq/people/PeopleTimeshee
 import { PeopleTeamAssignmentsPanel } from "../../components/hq/people/PeopleTeamAssignmentsPanel";
 import { PeopleV3WorkforceIntelligenceDashboard, PeopleV3AuraWorkforcePanel } from "../../components/hq/people/PeopleV3WorkforceIntelligenceDashboard";
 import { PeopleHrComplianceDashboard, PeopleHrAuraBriefingPanel } from "../../components/hq/people/PeopleHrComplianceDashboard";
+import { WorkforceFoundation } from "../../components/hq/people/WorkforceFoundation";
 
-type Tab = "overview" | "directory" | "employees" | "volunteers" | "board" | "contractors" | "applicants" | "personnel-files" | "roles" | "org-structure" | "profile" | "departments" | "org-chart" | "scheduling" | "performance" | "incidents" | "time-clock" | "leave" | "onboarding" | "certifications" | "timesheets" | "team-assignments" | "intelligence" | "compliance";
+type Tab = "overview" | "workforce" | "directory" | "employees" | "volunteers" | "board" | "contractors" | "applicants" | "personnel-files" | "roles" | "org-structure" | "profile" | "departments" | "org-chart" | "scheduling" | "performance" | "incidents" | "time-clock" | "leave" | "onboarding" | "certifications" | "timesheets" | "team-assignments" | "intelligence" | "compliance";
 type AddModal = "document" | "training" | "certification" | "schedule" | "performance" | "department" | "background" | "signature" | "leave" | "incident" | null;
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: "overview", label: "Overview", icon: Users },
+  { id: "workforce", label: "Workforce HQ", icon: HeartPulse },
   { id: "employees", label: "Employees", icon: Briefcase },
   { id: "volunteers", label: "Volunteers", icon: HandHeart },
   { id: "board", label: "Board", icon: Landmark },
@@ -333,6 +335,11 @@ const PeopleManagementCenter: React.FC = () => {
           <>
             <PeoplePhase3CommandCenter onNavigateTab={navigateTab} />
             <div style={{ marginTop: "1.25rem" }}>
+              <button type="button" className="hq-btn hq-btn-primary hq-btn-sm" onClick={() => navigateTab("workforce")}>
+                Open Build 62 Workforce HQ →
+              </button>
+            </div>
+            <div style={{ marginTop: "1.25rem" }}>
             {overview.isLoading ? <HqLoading /> : overview.data && (
               <>
                 <div className="hq-kpi-grid">
@@ -409,6 +416,10 @@ const PeopleManagementCenter: React.FC = () => {
             )}
             </div>
           </>
+        )}
+
+        {tab === "workforce" && (
+          <WorkforceFoundation onNavigatePeopleTab={navigateTab} />
         )}
 
         {tab === "employees" && (

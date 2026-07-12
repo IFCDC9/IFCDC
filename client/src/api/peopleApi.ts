@@ -233,6 +233,42 @@ export const peopleApi = {
   staffingOverview: () => api<{ overview: Record<string, unknown>[]; summary: Record<string, unknown> }>("/staffing-overview"),
   preparePayrollBatch: (period_start?: string, period_end?: string) =>
     api("/operations/v3/payroll-prepare", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ period_start, period_end }) }),
+
+  /** Build 62 — Workforce Foundation */
+  foundationDashboard: () => api<{
+    version: string;
+    generatedAt: string;
+    kpis: Record<string, number>;
+    capacity: { score: number; vacancyRate: number; note: string };
+    deepLinks: Record<string, string>;
+  }>("/foundation/dashboard"),
+  foundationRecruitment: () => api<Record<string, unknown>>("/foundation/recruitment"),
+  foundationOnboarding: () => api<Record<string, unknown>>("/foundation/onboarding"),
+  foundationVolunteers: () => api<Record<string, unknown>>("/foundation/volunteers"),
+  foundationPerformance: () => api<Record<string, unknown>>("/foundation/performance"),
+  foundationTraining: () => api<Record<string, unknown>>("/foundation/training"),
+  foundationAnalytics: () => api<Record<string, unknown>>("/foundation/analytics"),
+  foundationReport: () => api<Record<string, unknown>>("/foundation/report"),
+  foundationAsk: (question: string) =>
+    api<Record<string, unknown>>("/foundation/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    }),
+  createRequisition: (data: Record<string, unknown>) =>
+    api("/foundation/requisitions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
+  updateRequisition: (id: string, data: Record<string, unknown>) =>
+    api(`/foundation/requisitions/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
+  updateApplicantRecruitment: (id: string, data: Record<string, unknown>) =>
+    api(`/foundation/applicants/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
+  logVolunteerHours: (data: { person_id: string; hours: number; service_date: string; program_name?: string; notes?: string }) =>
+    api("/foundation/volunteer-hours", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
+  addVolunteerRecognition: (data: { person_id: string; award_title: string; award_date: string; notes?: string }) =>
+    api("/foundation/volunteer-recognition", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
+  createGoal: (data: { person_id: string; title: string; objective?: string; due_date?: string; progress_pct?: number }) =>
+    api("/foundation/goals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
+  updateGoal: (id: string, data: Record<string, unknown>) =>
+    api(`/foundation/goals/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
 };
 
 export interface OrgSchedule {

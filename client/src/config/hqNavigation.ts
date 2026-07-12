@@ -75,6 +75,7 @@ export const HQ_NAV_ITEMS: HQNavItem[] = [
   { label: "Integrations Hub", path: "/hq/integrations", icon: Plug, section: "Operations" },
   { label: "Developer Portal", path: "/hq/developer", icon: Code2, section: "Operations" },
   { label: "People Management", path: "/hq/people", icon: Users, section: "Operations" },
+  { label: "Workforce HQ", path: "/hq/people?tab=workforce", icon: Activity, section: "Operations", badge: "62" },
   { label: "Client & Case Management", path: "/hq/clients", icon: Users, section: "Operations", badge: "M2.2" },
   { label: "My Workspace", path: "/hq/my-workspace", icon: Briefcase, section: "Operations" },
   { label: "Manager Portal", path: "/hq/manager", icon: Users, section: "Operations" },

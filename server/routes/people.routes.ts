@@ -632,6 +632,187 @@ router.patch("/incidents/:incidentId", async (req: Request, res: Response) => {
 
 // ——— People & Operations Phase 3 — HR Command Center ———
 
+/** Build 62 — Enterprise Workforce Foundation */
+router.get("/foundation/dashboard", requireHQModule("hr"), async (_req, res) => {
+  try {
+    const { buildWorkforceDashboard } = await import("../hq/workforceFoundation");
+    res.json(await buildWorkforceDashboard());
+  } catch (error) {
+    console.error("GET /people/foundation/dashboard error:", error);
+    res.status(500).json({ error: "Workforce dashboard unavailable" });
+  }
+});
+
+router.get("/foundation/recruitment", requireHQModule("hr"), async (_req, res) => {
+  try {
+    const { buildWorkforceRecruitmentCenter } = await import("../hq/workforceFoundation");
+    res.json(await buildWorkforceRecruitmentCenter());
+  } catch (error) {
+    console.error("GET /people/foundation/recruitment error:", error);
+    res.status(500).json({ error: "Recruitment center unavailable" });
+  }
+});
+
+router.post("/foundation/requisitions", requireHQModule("hr"), async (req, res) => {
+  try {
+    const { createJobRequisition } = await import("../hq/workforceFoundation");
+    const title = String(req.body?.title ?? "").trim();
+    if (!title) return res.status(400).json({ error: "title is required" });
+    res.status(201).json({ requisition: await createJobRequisition(req.body) });
+  } catch (error) {
+    console.error("POST /people/foundation/requisitions error:", error);
+    res.status(500).json({ error: "Failed to create requisition" });
+  }
+});
+
+router.patch("/foundation/requisitions/:id", requireHQModule("hr"), async (req, res) => {
+  try {
+    const { updateJobRequisition } = await import("../hq/workforceFoundation");
+    const row = await updateJobRequisition(req.params.id, req.body ?? {});
+    if (!row) return res.status(400).json({ error: "No valid fields" });
+    res.json({ requisition: row });
+  } catch (error) {
+    console.error("PATCH /people/foundation/requisitions error:", error);
+    res.status(500).json({ error: "Failed to update requisition" });
+  }
+});
+
+router.patch("/foundation/applicants/:id", requireHQModule("hr"), async (req, res) => {
+  try {
+    const { updateApplicantRecruitment } = await import("../hq/workforceFoundation");
+    const row = await updateApplicantRecruitment(req.params.id, req.body ?? {});
+    if (!row) return res.status(400).json({ error: "No valid fields" });
+    res.json({ applicant: row });
+  } catch (error) {
+    console.error("PATCH /people/foundation/applicants error:", error);
+    res.status(500).json({ error: "Failed to update applicant" });
+  }
+});
+
+router.get("/foundation/onboarding", requireHQModule("hr"), async (_req, res) => {
+  try {
+    const { buildWorkforceOnboardingCenter } = await import("../hq/workforceFoundation");
+    res.json(await buildWorkforceOnboardingCenter());
+  } catch (error) {
+    console.error("GET /people/foundation/onboarding error:", error);
+    res.status(500).json({ error: "Onboarding center unavailable" });
+  }
+});
+
+router.get("/foundation/volunteers", requireHQModule("hr"), async (_req, res) => {
+  try {
+    const { buildVolunteerManagementCenter } = await import("../hq/workforceFoundation");
+    res.json(await buildVolunteerManagementCenter());
+  } catch (error) {
+    console.error("GET /people/foundation/volunteers error:", error);
+    res.status(500).json({ error: "Volunteer management unavailable" });
+  }
+});
+
+router.post("/foundation/volunteer-hours", requireHQModule("hr"), async (req, res) => {
+  try {
+    const { logVolunteerHours } = await import("../hq/workforceFoundation");
+    const { person_id, hours, service_date } = req.body ?? {};
+    if (!person_id || hours == null || !service_date) {
+      return res.status(400).json({ error: "person_id, hours, and service_date required" });
+    }
+    res.status(201).json({ entry: await logVolunteerHours(req.body) });
+  } catch (error) {
+    console.error("POST /people/foundation/volunteer-hours error:", error);
+    res.status(500).json({ error: "Failed to log volunteer hours" });
+  }
+});
+
+router.post("/foundation/volunteer-recognition", requireHQModule("hr"), async (req, res) => {
+  try {
+    const { addVolunteerRecognition } = await import("../hq/workforceFoundation");
+    const { person_id, award_title, award_date } = req.body ?? {};
+    if (!person_id || !award_title || !award_date) {
+      return res.status(400).json({ error: "person_id, award_title, and award_date required" });
+    }
+    res.status(201).json({ award: await addVolunteerRecognition(req.body) });
+  } catch (error) {
+    console.error("POST /people/foundation/volunteer-recognition error:", error);
+    res.status(500).json({ error: "Failed to add recognition" });
+  }
+});
+
+router.get("/foundation/performance", requireHQModule("hr"), async (_req, res) => {
+  try {
+    const { buildPerformanceManagementCenter } = await import("../hq/workforceFoundation");
+    res.json(await buildPerformanceManagementCenter());
+  } catch (error) {
+    console.error("GET /people/foundation/performance error:", error);
+    res.status(500).json({ error: "Performance center unavailable" });
+  }
+});
+
+router.post("/foundation/goals", requireHQModule("hr"), async (req, res) => {
+  try {
+    const { createPeopleGoal } = await import("../hq/workforceFoundation");
+    const { person_id, title } = req.body ?? {};
+    if (!person_id || !title) return res.status(400).json({ error: "person_id and title required" });
+    res.status(201).json({ goal: await createPeopleGoal(req.body) });
+  } catch (error) {
+    console.error("POST /people/foundation/goals error:", error);
+    res.status(500).json({ error: "Failed to create goal" });
+  }
+});
+
+router.patch("/foundation/goals/:id", requireHQModule("hr"), async (req, res) => {
+  try {
+    const { updatePeopleGoal } = await import("../hq/workforceFoundation");
+    const row = await updatePeopleGoal(req.params.id, req.body ?? {});
+    if (!row) return res.status(400).json({ error: "No valid fields" });
+    res.json({ goal: row });
+  } catch (error) {
+    console.error("PATCH /people/foundation/goals error:", error);
+    res.status(500).json({ error: "Failed to update goal" });
+  }
+});
+
+router.get("/foundation/training", requireHQModule("hr"), async (_req, res) => {
+  try {
+    const { buildTrainingCenter } = await import("../hq/workforceFoundation");
+    res.json(await buildTrainingCenter());
+  } catch (error) {
+    console.error("GET /people/foundation/training error:", error);
+    res.status(500).json({ error: "Training center unavailable" });
+  }
+});
+
+router.get("/foundation/analytics", requireHQModule("hr"), async (_req, res) => {
+  try {
+    const { buildWorkforceAnalytics } = await import("../hq/workforceFoundation");
+    res.json(await buildWorkforceAnalytics());
+  } catch (error) {
+    console.error("GET /people/foundation/analytics error:", error);
+    res.status(500).json({ error: "Workforce analytics unavailable" });
+  }
+});
+
+router.get("/foundation/report", requireHQModule("hr"), async (_req, res) => {
+  try {
+    const { buildWorkforceExecutiveReport } = await import("../hq/workforceFoundation");
+    res.json(await buildWorkforceExecutiveReport());
+  } catch (error) {
+    console.error("GET /people/foundation/report error:", error);
+    res.status(500).json({ error: "Workforce report unavailable" });
+  }
+});
+
+router.post("/foundation/ask", requireHQModule("hr"), async (req, res) => {
+  try {
+    const question = String(req.body?.question ?? "").trim();
+    if (question.length < 3) return res.status(400).json({ error: "question must be at least 3 characters" });
+    const { askWorkforceFoundation } = await import("../hq/workforceFoundation");
+    res.json(await askWorkforceFoundation(question));
+  } catch (error) {
+    console.error("POST /people/foundation/ask error:", error);
+    res.status(500).json({ error: "Workforce advisor unavailable" });
+  }
+});
+
 router.get("/operations/v3/platform", async (_req, res) => {
   res.json(await buildHrCommandCenterPlatform());
 });

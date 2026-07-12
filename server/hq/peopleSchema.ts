@@ -10,6 +10,7 @@ export const PERSON_TYPES = [
   "volunteer",
   "board_member",
   "contractor",
+  "intern",
   "mentor",
   "program_participant",
   "barber",
@@ -25,6 +26,7 @@ export const PERSON_TYPE_LABELS: Record<PersonType, string> = {
   volunteer: "Volunteer",
   board_member: "Board Member",
   contractor: "Contractor",
+  intern: "Intern",
   mentor: "Mentor",
   program_participant: "Program Participant",
   barber: "Barber",
@@ -373,6 +375,7 @@ async function ensurePeoplePhase3Tables(db: Awaited<ReturnType<typeof getDb>>): 
   }
 
   await ensurePeoplePhase3bTables(db);
+  await ensureWorkforceBuild62Tables(db);
 }
 
 async function ensurePeoplePhase3bTables(db: Awaited<ReturnType<typeof getDb>>): Promise<void> {
@@ -413,6 +416,119 @@ async function ensurePeoplePhase3bTables(db: Awaited<ReturnType<typeof getDb>>):
     CREATE INDEX IF NOT EXISTS idx_timesheets_status ON payroll_timesheets(status);
     CREATE INDEX IF NOT EXISTS idx_team_assign_person ON people_team_assignments(person_id);
   `);
+}
+
+/** Build 62 — recruitment, volunteer engagement, goals, equipment */
+async function ensureWorkforceBuild62Tables(db: Awaited<ReturnType<typeof getDb>>): Promise<void> {
+  for (const [col, type] of [
+    ["requisition_id", "TEXT"],
+    ["interview_date", "TEXT"],
+    ["interview_notes", "TEXT"],
+    ["offer_status", "TEXT"],
+    ["background_status", "TEXT"],
+    ["hiring_approval", "TEXT"],
+  ] as const) {
+    try { await db.exec(`ALTER TABLE job_applicants ADD COLUMN ${col} ${type}`); } catch { /* exists */ }
+  }
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS job_requisitions (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      department_id TEXT,
+      position_id TEXT,
+      description TEXT,
+      employment_type TEXT DEFAULT 'employee',
+      status TEXT DEFAULT 'open',
+      openings INTEGER DEFAULT 1,
+      hiring_manager TEXT,
+      approval_status TEXT DEFAULT 'pending',
+      posted_at TEXT,
+      closed_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS volunteer_hours (
+      id TEXT PRIMARY KEY,
+      person_id TEXT NOT NULL,
+      program_name TEXT,
+      hours REAL NOT NULL DEFAULT 0,
+      service_date TEXT NOT NULL,
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS volunteer_recognition (
+      id TEXT PRIMARY KEY,
+      person_id TEXT NOT NULL,
+      award_title TEXT NOT NULL,
+      award_date TEXT NOT NULL,
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS people_goals (
+      id TEXT PRIMARY KEY,
+      person_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      objective TEXT,
+      status TEXT DEFAULT 'active',
+      due_date TEXT,
+      progress_pct INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS people_equipment (
+      id TEXT PRIMARY KEY,
+      person_id TEXT NOT NULL,
+      asset_name TEXT NOT NULL,
+      asset_tag TEXT,
+      assigned_date TEXT,
+      returned_date TEXT,
+      status TEXT DEFAULT 'assigned',
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_job_req_status ON job_requisitions(status);
+    CREATE INDEX IF NOT EXISTS idx_vol_hours_person ON volunteer_hours(person_id);
+    CREATE INDEX IF NOT EXISTS idx_vol_recog_person ON volunteer_recognition(person_id);
+    CREATE INDEX IF NOT EXISTS idx_goals_person ON people_goals(person_id);
+    CREATE INDEX IF NOT EXISTS idx_equipment_person ON people_equipment(person_id);
+  `);
+
+  const reqCount = await db.get<{ c: number }>("SELECT COUNT(*) as c FROM job_requisitions");
+  if (reqCount && reqCount.c === 0) {
+    const now = new Date().toISOString();
+    const depts = (await db.all("SELECT id, code FROM departments")) as { id: string; code: string }[];
+    const byCode = Object.fromEntries(depts.map((d) => [d.code, d.id]));
+    const seeds = [
+      { title: "Program Coordinator", code: "PROGRAMS", type: "employee" },
+      { title: "Volunteer Coordinator", code: "OUTREACH", type: "employee" },
+      { title: "Summer Intern — Community Programs", code: "PROGRAMS", type: "intern" },
+      { title: "Grant Writer (Contract)", code: "FINANCE", type: "contractor" },
+    ];
+    for (const s of seeds) {
+      await db.run(
+        `INSERT INTO job_requisitions (id, title, department_id, description, employment_type, status, openings, approval_status, posted_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'open', 1, 'approved', ?, ?, ?)`,
+        peopleId(),
+        s.title,
+        byCode[s.code] ?? null,
+        `Build 62 seed requisition for ${s.title}`,
+        s.type,
+        now,
+        now,
+        now
+      );
+    }
+  }
 }
 
 async function migrateEmployeesToPeople(db: Awaited<ReturnType<typeof getDb>>): Promise<void> {
@@ -488,14 +604,17 @@ function mapRoleToDepartment(role: string): string | null {
 }
 
 export const DEFAULT_ONBOARDING_TASKS = [
-  { key: "welcome", label: "Welcome email & orientation packet", order: 1 },
-  { key: "i9", label: "I-9 & employment eligibility documents", order: 2 },
+  { key: "welcome", label: "Welcome checklist & orientation packet", order: 1 },
+  { key: "required_docs", label: "Required documents (I-9 & eligibility)", order: 2 },
   { key: "direct_deposit", label: "Direct deposit & payroll setup", order: 3 },
-  { key: "handbook", label: "Employee handbook acknowledgment", order: 4 },
-  { key: "background_check", label: "Background check initiated", order: 5 },
-  { key: "equipment", label: "Equipment & access provisioning", order: 6 },
-  { key: "department_intro", label: "Department introduction meeting", order: 7 },
-  { key: "training", label: "Mandatory compliance training", order: 8 },
+  { key: "handbook", label: "Employee handbook review & acknowledgment", order: 4 },
+  { key: "policy_ack", label: "Policy & Governance acknowledgments", order: 5 },
+  { key: "background_check", label: "Background check completed", order: 6 },
+  { key: "equipment", label: "Equipment assignment", order: 7 },
+  { key: "accounts", label: "Account provisioning (email, HQ, apps)", order: 8 },
+  { key: "orientation", label: "Orientation completion", order: 9 },
+  { key: "training", label: "Required training (compliance, safety, cyber)", order: 10 },
+  { key: "manager_approval", label: "Manager onboarding approval", order: 11 },
 ] as const;
 
 export async function seedOnboardingForPerson(personId: string): Promise<void> {

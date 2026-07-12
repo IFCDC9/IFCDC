@@ -717,7 +717,7 @@ const ExecutiveDashboard: React.FC = () => {
           </div>
 
           <div className="hq-grid-2" style={{ marginBottom: "1.25rem" }}>
-            <HqPanel title="Workforce Intelligence" subtitle="Phase 3 — hiring pipeline, HR compliance, staffing forecast" action={{ label: "People & HR", to: "/hq/people?tab=intelligence" }}>
+            <HqPanel title="Workforce Intelligence" subtitle="Build 62 — hiring, onboarding, capacity, HR analytics" action={{ label: "Workforce HQ", to: "/hq/people?tab=workforce" }}>
               {workforceIntel.isLoading && <div className="hq-muted-text">Loading workforce analytics…</div>}
               {workforceIntel.data && (
                 <div className="hq-widget-stat-grid">
