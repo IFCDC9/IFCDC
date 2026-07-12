@@ -51,6 +51,70 @@ router.get("/", async (_req, res) => {
   }
 });
 
+/** Build 56 — Integration Health Dashboard (hub cards + platform systems). */
+router.get("/health", async (req, res) => {
+  try {
+    const { buildIntegrationHealthDashboard } = await import("../hq/integrationHealthDashboard");
+    const bypass = String(req.query.refresh ?? "") === "1";
+    res.json(await buildIntegrationHealthDashboard({ bypassCache: bypass }));
+  } catch (err) {
+    console.error("[integrations-hub] GET /health error:", err);
+    res.json({
+      overallHealthScore: 0,
+      overallLabel: "Unavailable",
+      connectedCount: 0,
+      warningCount: 0,
+      offlineCount: 0,
+      totalServices: 0,
+      lastSuccessfulSync: null,
+      avgLatencyMs: null,
+      failedRequests: 0,
+      uptimeSeconds: Math.floor(process.uptime()),
+      uptimeLabel: "—",
+      services: [],
+      recentFailures: [],
+      startupVerifiedAt: null,
+      monitoredAt: new Date().toISOString(),
+      source: "live",
+      degraded: true,
+    });
+  }
+});
+
+router.get("/diagnostics", async (_req, res) => {
+  try {
+    const { getIntegrationProbeLog, getIntegrationProbeCounters, getIntegrationStartupVerifiedAt } =
+      await import("../hq/integrationHealthDashboard");
+    res.json({
+      startupVerifiedAt: getIntegrationStartupVerifiedAt(),
+      counters: getIntegrationProbeCounters(),
+      recent: getIntegrationProbeLog(40),
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Diagnostics unavailable" });
+  }
+});
+
+router.post("/retry-degraded", async (req, res) => {
+  try {
+    const { retryDegradedIntegrations } = await import("../hq/enterpriseMonitoringEngine");
+    const providerIds = Array.isArray(req.body?.providerIds)
+      ? (req.body.providerIds as unknown[]).map(String)
+      : undefined;
+    res.json(await retryDegradedIntegrations({ providerIds }));
+  } catch (err) {
+    console.error("[integrations-hub] retry-degraded error:", err);
+    res.status(500).json({
+      error: err instanceof Error ? err.message : "Retry failed",
+      attempted: 0,
+      recovered: [],
+      failed: [],
+      testedAt: new Date().toISOString(),
+    });
+  }
+});
+
 router.get("/quickbooks/status", async (_req, res) => {
   res.json(await getQuickBooksSyncSummary());
 });

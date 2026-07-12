@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { AlertTriangle, CheckCircle2, Clock, KeyRound, Activity } from "lucide-react";
 import { StatusBadge } from "../StatusBadge";
 import type { IntegrationHubCard as Card, IntegrationHubAction } from "../../data/integrationsHubDefaults";
+import { displayStatusForCard } from "../../data/integrationsHubDefaults";
 
 const STATUS_VARIANT: Record<string, "success" | "warning" | "muted" | "gold" | "danger"> = {
   connected: "success",
@@ -10,6 +11,9 @@ const STATUS_VARIANT: Record<string, "success" | "warning" | "muted" | "gold" | 
   not_configured: "warning",
   degraded: "warning",
   coming_soon: "muted",
+  Connected: "success",
+  Warning: "warning",
+  Disconnected: "danger",
 };
 
 function formatChecked(iso: string): string {
@@ -107,7 +111,7 @@ export const IntegrationHubCardView: React.FC<{
           <h4 style={{ margin: 0, fontSize: "0.95rem", color: "var(--hq-gold)" }}>{card.name}</h4>
           <div className="hq-muted-text" style={{ fontSize: "0.72rem", marginTop: "0.2rem" }}>{card.category}</div>
         </div>
-        <StatusBadge label={card.status.replace(/_/g, " ")} variant={STATUS_VARIANT[card.status] ?? "muted"} />
+        <StatusBadge label={displayStatusForCard(card)} variant={STATUS_VARIANT[displayStatusForCard(card)] ?? "muted"} />
       </div>
 
       <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--hq-text-muted)", lineHeight: 1.45 }}>{card.description}</p>

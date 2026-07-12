@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plug, RefreshCw, CheckCircle, Settings, AlertTriangle } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Plug, RefreshCw, CheckCircle, AlertTriangle, Activity } from "lucide-react";
 import HQLayout from "../../layouts/HQLayout";
-import { integrationsApi } from "../../api/integrationsApi";
-import { monitoringApi } from "../../api/monitoringApi";
+import { EMPTY_INTEGRATION_HEALTH, integrationsApi } from "../../api/integrationsApi";
 import { HqQueryBoundary } from "../../components/hq/HqQueryBoundary";
 import { StatusBadge } from "../../components/hq/StatusBadge";
 import { KpiCard } from "../../components/hq/KpiCard";
@@ -18,6 +18,7 @@ import {
   IntegrationHubCardView,
   IntegrationsHubEmptyState,
 } from "../../components/hq/integrations/IntegrationHubCard";
+import { IntegrationsHealthPanel } from "../../components/hq/integrations/IntegrationsHealthPanel";
 
 type HubLoadResult = {
   hub: IntegrationsHubPayload;
@@ -77,6 +78,22 @@ const IntegrationsHubPage: React.FC = () => {
     retry: 0,
   });
 
+  const healthQuery = useQuery({
+    queryKey: ["integrations-health"],
+    queryFn: async () => {
+      try {
+        return await integrationsApi.health();
+      } catch (err) {
+        console.warn("[integrations-hub] health dashboard degraded:", err);
+        return EMPTY_INTEGRATION_HEALTH;
+      }
+    },
+    placeholderData: EMPTY_INTEGRATION_HEALTH,
+    staleTime: 45_000,
+    refetchInterval: 60_000,
+    retry: 0,
+  });
+
   const test = useMutation({
     mutationFn: integrationsApi.test,
     onSuccess: (data, provider) => {
@@ -85,15 +102,12 @@ const IntegrationsHubPage: React.FC = () => {
         : "";
       const msg = [data.message, detailLines].filter(Boolean).join(" — ");
       setTestResults((prev) => ({ ...prev, [provider]: msg || data.message }));
-      if (provider === "github" && data.success) {
-        void qc.invalidateQueries({ queryKey: ["integrations-hub"] });
-      }
+      void qc.invalidateQueries({ queryKey: ["integrations-hub"] });
+      void qc.invalidateQueries({ queryKey: ["integrations-health"] });
       if (provider === "grants_gov" && data.success) {
-        void qc.invalidateQueries({ queryKey: ["integrations-hub"] });
         void qc.invalidateQueries({ queryKey: ["grant-opportunity-finder"] });
       }
       if (provider === "paypal" && data.success) {
-        void qc.invalidateQueries({ queryKey: ["integrations-hub"] });
         void qc.invalidateQueries({ queryKey: ["finance-payments"] });
       }
     },
@@ -110,13 +124,14 @@ const IntegrationsHubPage: React.FC = () => {
   });
 
   const retryDegraded = useMutation({
-    mutationFn: () => monitoringApi.retryIntegrations(),
+    mutationFn: () => integrationsApi.retryDegraded(),
     onSuccess: (data) => {
       setTestResults((prev) => ({
         ...prev,
         _bulk: `Retry: ${data.recovered.length} recovered / ${data.attempted} attempted`,
       }));
       void qc.invalidateQueries({ queryKey: ["integrations-hub"] });
+      void qc.invalidateQueries({ queryKey: ["integrations-health"] });
       void qc.invalidateQueries({ queryKey: ["hq-executive-overview"] });
       void qc.invalidateQueries({ queryKey: ["enterprise-monitoring"] });
     },
@@ -147,7 +162,7 @@ const IntegrationsHubPage: React.FC = () => {
   return (
     <HQLayout
       title="Integrations Hub"
-      subtitle="Enterprise connector registry — federal grants, payments, communications, AI, infrastructure, and division apps"
+      subtitle="Build 56 — enterprise connectivity layer with live health, retry, and diagnostics"
       auraModule="integrations"
       auraActions={["ask", "explain", "summarize"]}
     >
@@ -171,15 +186,27 @@ const IntegrationsHubPage: React.FC = () => {
             </div>
           )}
 
+          <HqWidgetErrorBoundary label="Integration health dashboard">
+            <IntegrationsHealthPanel
+              health={healthQuery.data ?? null}
+              loading={healthQuery.isLoading && !healthQuery.isFetched}
+            />
+          </HqWidgetErrorBoundary>
+
           <div className="hq-kpi-grid hq-fade-in" style={{ marginBottom: "1.25rem" }}>
-            <KpiCard label="Total Connectors" value={hub.summary.total || integrations.length} icon={Plug} variant="gold" />
+            <KpiCard
+              label="Health Score"
+              value={`${hub.summary.healthScore ?? healthQuery.data?.overallHealthScore ?? 0}/100`}
+              icon={Activity}
+              variant={(hub.summary.healthScore ?? 0) >= 80 ? "success" : (hub.summary.healthScore ?? 0) >= 60 ? "warning" : "danger"}
+            />
             <KpiCard label="Connected" value={hub.summary.connected || hub.connectedCount} icon={CheckCircle} variant="success" />
-            <KpiCard label="Configured" value={hub.summary.configured} icon={Settings} variant="gold" />
-            <KpiCard label="Categories" value={hub.summary.categories || categories.length - 1} icon={Settings} />
+            <KpiCard label="Warning" value={hub.summary.warning ?? 0} icon={AlertTriangle} variant={(hub.summary.warning ?? 0) > 0 ? "warning" : "muted"} />
+            <KpiCard label="Offline" value={hub.summary.offline ?? hub.summary.notConfigured} icon={Plug} variant={(hub.summary.offline ?? 0) > 0 ? "danger" : "muted"} />
           </div>
 
           <div className="hq-sd-toolbar" style={{ marginBottom: "1rem", flexWrap: "wrap", gap: "0.5rem" }}>
-            <StatusBadge label="Enterprise connector registry" variant="gold" />
+            <StatusBadge label="Live production connectors" variant="gold" />
             <button
               type="button"
               className="hq-btn hq-btn-sm hq-btn-secondary"
@@ -189,6 +216,18 @@ const IntegrationsHubPage: React.FC = () => {
               <RefreshCw size={14} className={retryDegraded.isPending ? "hq-spin" : ""} />
               {retryDegraded.isPending ? "Retrying…" : "Retry degraded"}
             </button>
+            <button
+              type="button"
+              className="hq-btn hq-btn-sm hq-btn-ghost"
+              disabled={hubQuery.isFetching || healthQuery.isFetching}
+              onClick={() => {
+                void hubQuery.refetch();
+                void healthQuery.refetch();
+              }}
+            >
+              <RefreshCw size={14} /> Refresh status
+            </button>
+            <Link to="/hq/monitoring" className="hq-btn hq-btn-sm hq-btn-ghost">Enterprise Monitoring</Link>
             {testResults._bulk && <StatusBadge label={testResults._bulk} variant="muted" />}
             {categories.map((cat) => (
               <button

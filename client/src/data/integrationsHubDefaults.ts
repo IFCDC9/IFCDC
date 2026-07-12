@@ -1,5 +1,5 @@
 /** Allow live connector probes (Twilio/PayPal/Grants.gov need >5s). */
-export const INTEGRATIONS_HUB_FETCH_TIMEOUT_MS = 20_000;
+export const INTEGRATIONS_HUB_FETCH_TIMEOUT_MS = 22_000;
 
 export type IntegrationHubAction = {
   id: string;
@@ -30,16 +30,25 @@ export type IntegrationHubCard = {
   actions: IntegrationHubAction[];
 };
 
+export type IntegrationsHubSummary = {
+  total: number;
+  connected: number;
+  warning?: number;
+  offline?: number;
+  configured: number;
+  notConfigured: number;
+  categories: number;
+  healthScore?: number;
+  avgLatencyMs?: number | null;
+  lastSuccessfulSync?: string | null;
+  failedProbeCount?: number;
+  uptimeSeconds?: number;
+};
+
 export type IntegrationsHubPayload = {
   integrations: IntegrationHubCard[];
   connectedCount: number;
-  summary: {
-    total: number;
-    connected: number;
-    configured: number;
-    notConfigured: number;
-    categories: number;
-  };
+  summary: IntegrationsHubSummary;
   degraded?: boolean;
   warning?: string | null;
   timestamp: string;
@@ -48,7 +57,20 @@ export type IntegrationsHubPayload = {
 export const EMPTY_INTEGRATIONS_HUB: IntegrationsHubPayload = {
   integrations: [],
   connectedCount: 0,
-  summary: { total: 0, connected: 0, configured: 0, notConfigured: 0, categories: 0 },
+  summary: {
+    total: 0,
+    connected: 0,
+    warning: 0,
+    offline: 0,
+    configured: 0,
+    notConfigured: 0,
+    categories: 0,
+    healthScore: 0,
+    avgLatencyMs: null,
+    lastSuccessfulSync: null,
+    failedProbeCount: 0,
+    uptimeSeconds: 0,
+  },
   degraded: true,
   warning: "Integrations Hub could not load — showing empty state.",
   timestamp: new Date().toISOString(),
@@ -63,9 +85,15 @@ export function normalizeIntegrationsHub(
   return {
     integrations: Array.isArray(raw.integrations) ? raw.integrations : [],
     connectedCount: typeof raw.connectedCount === "number" ? raw.connectedCount : 0,
-    summary: raw.summary ?? EMPTY_INTEGRATIONS_HUB.summary,
+    summary: { ...EMPTY_INTEGRATIONS_HUB.summary, ...(raw.summary ?? {}) },
     degraded: Boolean(raw.degraded),
     warning: raw.warning ?? null,
     timestamp: typeof raw.timestamp === "string" ? raw.timestamp : new Date().toISOString(),
   };
+}
+
+export function displayStatusForCard(card: IntegrationHubCard): "Connected" | "Warning" | "Disconnected" {
+  if (card.status === "connected" && (card.health?.healthy ?? true)) return "Connected";
+  if (card.status === "degraded" || card.status === "configured") return "Warning";
+  return "Disconnected";
 }

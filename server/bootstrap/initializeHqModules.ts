@@ -134,5 +134,13 @@ export async function initializeHqModules(founder: FounderSeedConfig): Promise<v
       .then(({ ensureReceptionistSessionTable }) => ensureReceptionistSessionTable())
       .catch((e) => console.warn("AURA receptionist session table skipped:", e?.message));
   }
+
+  // Build 56 — deferred Integration Hub startup verification (never blocks boot).
+  setTimeout(() => {
+    void import("../hq/integrationHealthDashboard")
+      .then(({ verifyIntegrationsOnStartup }) => verifyIntegrationsOnStartup())
+      .catch((e) => console.warn("Integrations startup verification skipped:", e?.message));
+  }, 45_000);
+
   console.log("IFCDC HQ database and modules initialized");
 }

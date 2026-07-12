@@ -48,7 +48,7 @@ export type IntegrationHubCard = {
 };
 
 const HUB_PROBE_TIMEOUT_MS = 12_000;
-const HUB_AGGREGATE_TIMEOUT_MS = 15_000;
+const HUB_AGGREGATE_TIMEOUT_MS = 16_000;
 
 function envSet(key: string): boolean {
   return Boolean((process.env[key] || "").trim());
@@ -71,10 +71,33 @@ async function probe<T>(label: string, fn: () => Promise<T>, fallback: T): Promi
       fn(),
       new Promise<T>((_, reject) => setTimeout(() => reject(new Error("timeout")), HUB_PROBE_TIMEOUT_MS)),
     ]);
-    console.info(`[integrations-hub] ${label} ok (${Date.now() - started}ms)`);
+    const latencyMs = Date.now() - started;
+    console.info(`[integrations-hub] ${label} ok (${latencyMs}ms)`);
+    void import("./integrationHealthDashboard")
+      .then((m) =>
+        m.recordIntegrationProbe({
+          provider: label,
+          ok: true,
+          latencyMs,
+          message: "ok",
+        })
+      )
+      .catch(() => undefined);
     return result;
   } catch (err) {
-    console.warn(`[integrations-hub] ${label} failed:`, err instanceof Error ? err.message : err);
+    const latencyMs = Date.now() - started;
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[integrations-hub] ${label} failed (${latencyMs}ms):`, message);
+    void import("./integrationHealthDashboard")
+      .then((m) =>
+        m.recordIntegrationProbe({
+          provider: label,
+          ok: false,
+          latencyMs,
+          message,
+        })
+      )
+      .catch(() => undefined);
     return fallback;
   }
 }
@@ -854,10 +877,23 @@ function hubTimeout<T>(promise: Promise<T>, fallback: T): Promise<T> {
 export function emptyIntegrationsHub() {
   return {
     integrations: [] as IntegrationHubCard[],
-    catalog: INTEGRATION_CATALOG,
+    catalog: INTEGRATION_CATALOG.filter((c) => c.status !== "coming_soon"),
     connections: [] as unknown[],
     connectedCount: 0,
-    summary: { total: 0, connected: 0, configured: 0, notConfigured: 0, categories: 0 },
+    summary: {
+      total: 0,
+      connected: 0,
+      warning: 0,
+      offline: 0,
+      configured: 0,
+      notConfigured: 0,
+      categories: 0,
+      healthScore: 0,
+      avgLatencyMs: null as number | null,
+      lastSuccessfulSync: null as string | null,
+      failedProbeCount: 0,
+      uptimeSeconds: Math.floor(process.uptime()),
+    },
     degraded: true,
     warning: "Integrations Hub returned safe defaults — live probes were slow or unavailable.",
     timestamp: new Date().toISOString(),
@@ -876,7 +912,8 @@ async function buildIntegrationsHubUncached() {
     corporateGrants: { status: "pending", label: "", note: "" },
   }));
 
-  const integrations = await Promise.all([
+  // Isolate each connector — one failure never rejects the whole hub.
+  const settled = await Promise.allSettled([
     buildGrantsGovCard(feed),
     buildSamGovCard(feed),
     buildPayPalCard(),
@@ -890,26 +927,46 @@ async function buildIntegrationsHubUncached() {
     buildQuickBooksCard(),
   ]);
 
-  const connectedCount = integrations.filter((i) => i.status === "connected").length;
-  const configuredCount = integrations.filter((i) => i.status === "connected" || i.status === "degraded").length;
+  const integrations: IntegrationHubCard[] = [];
+  for (const result of settled) {
+    if (result.status === "fulfilled") {
+      integrations.push(result.value);
+    } else {
+      console.error("[integrations-hub] card builder crashed (isolated):", result.reason);
+    }
+  }
+
+  const { buildHealthSummaryFromCards } = await import("./integrationHealthDashboard");
+  const health = buildHealthSummaryFromCards(integrations);
+  const connectedCount = health.connected;
 
   const payload = {
     integrations,
-    catalog: INTEGRATION_CATALOG,
+    // Roadmap stubs stay in catalog file but are not treated as live connectors.
+    catalog: INTEGRATION_CATALOG.filter((c) => c.status !== "coming_soon"),
     connections,
     connectedCount,
     summary: {
       total: integrations.length,
-      connected: connectedCount,
-      configured: configuredCount,
-      notConfigured: integrations.filter((i) => i.status === "not_configured").length,
+      connected: health.connected,
+      warning: health.warning,
+      offline: health.offline,
+      configured: health.connected + health.warning,
+      notConfigured: health.offline,
       categories: new Set(integrations.map((i) => i.category)).size,
+      healthScore: health.healthScore,
+      avgLatencyMs: health.avgLatencyMs,
+      lastSuccessfulSync: health.lastSuccessfulSync,
+      failedProbeCount: health.failedProbeCount,
+      uptimeSeconds: Math.floor(process.uptime()),
     },
     degraded: false,
     warning: null as string | null,
     timestamp: new Date().toISOString(),
   };
-  console.info(`[integrations-hub] build finished (${integrations.length} integrations, ${connectedCount} connected)`);
+  console.info(
+    `[integrations-hub] build finished (${integrations.length} integrations, score ${health.healthScore}/100, ${connectedCount} connected)`
+  );
   return payload;
 }
 
