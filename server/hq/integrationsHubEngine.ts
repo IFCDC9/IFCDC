@@ -47,8 +47,8 @@ export type IntegrationHubCard = {
   actions: IntegrationHubAction[];
 };
 
-const HUB_PROBE_TIMEOUT_MS = 2_500;
-const HUB_AGGREGATE_TIMEOUT_MS = 4_000;
+const HUB_PROBE_TIMEOUT_MS = 12_000;
+const HUB_AGGREGATE_TIMEOUT_MS = 15_000;
 
 function envSet(key: string): boolean {
   return Boolean((process.env[key] || "").trim());
@@ -306,24 +306,35 @@ async function buildResendCard(): Promise<IntegrationHubCard> {
     || process.env.SMTP_FROM
     || "IFCDC Headquarters <service@ifcdc.org>";
   const health = await probe("resend", async () => {
-    if (!apiKeySet) return { healthy: false, message: "RESEND_API_KEY not set" };
+    if (!apiKeySet) return { healthy: false, message: "RESEND_API_KEY not set", latencyMs: 0 };
+    const started = Date.now();
+    const { probeResendSender } = await import("../lib/notifications");
+    const live = await probeResendSender();
     return {
-      healthy: true,
-      message: fromSet
-        ? `Sender ${from} configured`
-        : "API key present — using default service@ifcdc.org (verify domain in Resend)",
+      healthy: live.ok,
+      latencyMs: Date.now() - started,
+      message: live.ok
+        ? `Resend API OK · sender ${live.from}${live.domains?.length ? ` · ${live.domains.length} domain(s)` : ""}`
+        : live.error || "Resend domains probe failed",
     };
-  }, { healthy: false, message: "Health probe timed out" });
+  }, { healthy: false, message: "Health probe timed out", latencyMs: 0 });
+
+  const rawStatus = health.healthy
+    ? "connected"
+    : apiKeySet
+      ? "degraded"
+      : statusFromEnv(required, optional);
+  const status = normalizeHubStatus(rawStatus, health.healthy);
 
   return {
     id: "resend",
     name: "Email (Resend)",
     category: "Communications",
     description: "Transactional email for AURA Founder OTP, Communications Center, and HQ notifications",
-    status: health.healthy ? "configured" : statusFromEnv(required, optional),
+    status,
     lastChecked: now,
     environmentReadiness: {
-      ready: apiKeySet,
+      ready: apiKeySet && health.healthy,
       missing: [...required, ...optional].filter((k) => !envSet(k)),
       configured: [...required, ...optional].filter((k) => envSet(k)),
     },
@@ -331,7 +342,15 @@ async function buildResendCard(): Promise<IntegrationHubCard> {
       credential("RESEND_API_KEY", "Resend API key"),
       credential("RESEND_FROM_EMAIL", "From email address (or EMAIL_FROM / SMTP_FROM)"),
     ],
-    health,
+    health: {
+      healthy: status === "connected",
+      latencyMs: health.latencyMs,
+      message: health.message,
+    },
+    details: [
+      { label: "From", value: from, status: fromSet ? "success" : "warning" },
+      { label: "API key", value: apiKeySet ? "Configured" : "Missing", status: apiKeySet ? "success" : "danger" },
+    ],
     actions: [
       { id: "comms", label: "Open Communications", kind: "primary", action: "link", href: "/hq/communications" },
       { id: "test", label: "Test Connection", kind: "secondary", action: "test" },
@@ -367,7 +386,10 @@ async function buildOpenAiCard(): Promise<IntegrationHubCard> {
     name: "OpenAI / AURA",
     category: "AI Intelligence",
     description: `Grant Writer, Executive Chat, Voice — ${status.source} (${status.keyPrefix}, ${status.keyLength} chars${status.keyIntegrityOk ? "" : ", ⚠ possible truncation"})`,
-    status: health.healthy ? "configured" : status.configured ? "degraded" : "not_configured",
+    status: normalizeHubStatus(
+      health.healthy ? "connected" : status.configured ? "degraded" : "not_configured",
+      health.healthy
+    ),
     lastChecked: now,
     environmentReadiness: {
       ready: status.configured,
@@ -899,12 +921,21 @@ export async function buildIntegrationsHubSafe() {
   if (hubCache && now - hubCache.at < HUB_CACHE_TTL) return hubCache.data;
   type HubPayload = Awaited<ReturnType<typeof buildIntegrationsHubUncached>>;
   const data = await hubTimeout(buildIntegrationsHubUncached(), emptyIntegrationsHub() as unknown as HubPayload);
-  hubCache = { at: now, data };
+  // Never cache empty/timeout payloads — they poison the hub and executive health scores.
+  if (Array.isArray(data.integrations) && data.integrations.length > 0 && !data.degraded) {
+    hubCache = { at: now, data };
+  }
   return data;
 }
 
 export function invalidateIntegrationsHubCache(): void {
   hubCache = null;
+  void import("./executiveCommandHealth")
+    .then((m) => m.invalidateExecutiveCommandHealthCache())
+    .catch(() => undefined);
+  void import("./executiveOverviewEngine")
+    .then((m) => m.invalidateExecutiveOverviewCache())
+    .catch(() => undefined);
 }
 
 export async function testIntegrationHubProvider(provider: string) {
@@ -926,6 +957,7 @@ export async function testIntegrationHubProvider(provider: string) {
   }
   if (provider === "openai_aura") {
     const live = await verifyOpenAiConnection();
+    invalidateIntegrationsHubCache();
     return {
       success: live.ok,
       message: live.message,
@@ -934,11 +966,43 @@ export async function testIntegrationHubProvider(provider: string) {
       details: [{ label: "Key source", value: live.source }, { label: "Key prefix", value: live.keyPrefix }],
     };
   }
+  if (provider === "resend") {
+    const { probeResendSender } = await import("../lib/notifications");
+    const live = await probeResendSender();
+    invalidateIntegrationsHubCache();
+    return {
+      success: live.ok,
+      message: live.ok
+        ? `Resend API OK · sender ${live.from}`
+        : live.error || "Resend probe failed",
+      provider,
+      testedAt: new Date().toISOString(),
+      details: [
+        { label: "API key", value: live.apiKeySet ? "Set" : "Missing" },
+        { label: "From", value: live.from },
+        ...(live.domains || []).slice(0, 5).map((d) => ({ label: "Domain", value: `${d.name} (${d.status})` })),
+      ],
+    };
+  }
+  if (provider === "postgres") {
+    const card = await buildPostgresCard();
+    invalidateIntegrationsHubCache();
+    return {
+      success: card.health.healthy,
+      message: card.health.message,
+      provider,
+      status: card.status,
+      testedAt: new Date().toISOString(),
+      details: card.details,
+    };
+  }
+  // Bust cache so Test never reports stale "configured" as healthy.
+  invalidateIntegrationsHubCache();
   const hub = await buildIntegrationsHubSafe();
   const card = hub.integrations.find((i) => i.id === provider);
   if (!card) return { success: false, message: "Unknown integration", provider, testedAt: new Date().toISOString() };
   return {
-    success: card.health.healthy || card.status === "configured" || card.status === "connected",
+    success: Boolean(card.health.healthy),
     message: card.health.message,
     provider,
     status: card.status,

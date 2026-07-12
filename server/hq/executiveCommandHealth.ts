@@ -105,7 +105,7 @@ export async function buildExecutiveCommandHealth(opts?: { bypassCache?: boolean
   const platformHealthy = serviceEntries.filter(([, v]) => v).length;
   const platformTotal = serviceEntries.length;
 
-  const cards = (hub as { cards?: Array<{ status?: string; health?: { healthy?: boolean }; id?: string }> } | null)?.cards ?? [];
+  const cards = (hub as { integrations?: Array<{ status?: string; health?: { healthy?: boolean }; id?: string }> } | null)?.integrations ?? [];
   const integrationHealthy = cards.filter((c) => c.health?.healthy || c.status === "connected" || c.status === "configured").length;
   const integrationTotal = cards.length || 1;
   const integrationScore = Math.round((integrationHealthy / integrationTotal) * 100);

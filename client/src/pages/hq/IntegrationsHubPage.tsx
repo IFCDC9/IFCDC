@@ -41,6 +41,7 @@ const REQUIRED_INTEGRATION_IDS = [
   "postgres",
   "twilio",
   "website_apps",
+  "quickbooks",
 ] as const;
 
 const IntegrationsHubPage: React.FC = () => {
@@ -70,7 +71,8 @@ const IntegrationsHubPage: React.FC = () => {
       }
     },
     placeholderData: HUB_PLACEHOLDER,
-    staleTime: 30_000,
+    staleTime: 45_000,
+    refetchInterval: 60_000,
     retry: 0,
   });
 

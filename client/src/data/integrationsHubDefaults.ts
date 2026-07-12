@@ -1,5 +1,5 @@
-/** Integrations Hub must render within 5s — fail fast with safe defaults. */
-export const INTEGRATIONS_HUB_FETCH_TIMEOUT_MS = 5_000;
+/** Allow live connector probes (Twilio/PayPal/Grants.gov need >5s). */
+export const INTEGRATIONS_HUB_FETCH_TIMEOUT_MS = 20_000;
 
 export type IntegrationHubAction = {
   id: string;
