@@ -256,7 +256,7 @@ export const HQ_MODULE_CONFIGS: Record<string, HQModuleConfig> = {
     subtitle: "Enterprise configuration and access control",
     description: "Manage organization profile, roles, permissions, integrations, and platform configuration.",
     features: ["Role management", "Permission policies", "Integration settings", "Branding config"],
-    status: "beta",
+    status: "live",
   },
   payroll: {
     title: "Payroll",

@@ -6,18 +6,10 @@
 import { spawnSync } from "node:child_process";
 import fs from "fs";
 import path from "path";
+import { HQ_NAV_AUDIT_PATHS } from "./hq-nav-paths.mjs";
 
 const BASE = process.env.IFCDC_BASE_URL || "https://ifcdc-hq-wst6.onrender.com";
-const NAV_PATHS = [
-  "/hq", "/hq/founder", "/hq/analytics", "/hq/reports", "/hq/calendar",
-  "/hq/notifications", "/hq/communications", "/hq/phase10", "/hq/phase9",
-  "/hq/intelligence", "/hq/workflows", "/hq/software", "/hq/operations",
-  "/hq/sso", "/hq/aura", "/hq/integrations", "/hq/people", "/hq/clients",
-  "/hq/payroll", "/hq/finance", "/hq/grants", "/hq/donations", "/hq/programs",
-  "/hq/housing", "/hq/scholarships", "/hq/media", "/hq/board", "/hq/compliance",
-  "/hq/assets", "/hq/fleet", "/hq/facilities", "/hq/documents", "/hq/security",
-  "/hq/settings", "/hq/developer",
-];
+const NAV_PATHS = HQ_NAV_AUDIT_PATHS;
 
 const HQ_LAZY_MODULES = [
   "HqShellRoute", "ExecutiveDashboard", "ExecutiveWidgetDashboard",
@@ -29,7 +21,8 @@ const HQ_LAZY_MODULES = [
   "HqPayrollPage", "FinancialCenterPage", "GrantCenterPage", "HqProgramsPage",
   "EnterpriseOperationsPage", "DocumentCenterPage", "SecurityCenterPage",
   "OrganizationSettingsPage", "BoardPortalPage", "SsoGatewayPage", "DeveloperPortalPage",
-  "HQLayout",
+  "EnterpriseMonitoringPage", "KnowledgeBasePage", "EnterpriseOsMissionControlPage",
+  "EnterpriseBrainDashboardPage", "HQLayout",
 ];
 
 let fail = 0;

@@ -1,5 +1,6 @@
 import React from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
+import { AlertTriangle } from "lucide-react";
 import { HqLoading } from "./HqLoading";
 import { HqDataUnavailable } from "./HqDataUnavailable";
 
@@ -39,5 +40,25 @@ export const HqQueryBoundary: React.FC<{
     );
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      {query.isError && hasRenderableData && (
+        <div className="hq-anomaly-alert hq-sev-medium hq-fade-in" style={{ marginBottom: "1rem" }} role="status">
+          <AlertTriangle size={16} />
+          <div>
+            <strong>Degraded mode</strong>
+            <span>
+              {(query.error as Error)?.message
+                ? ` ${(query.error as Error).message}`
+                : " Live data timed out or failed — showing last safe state."}
+            </span>
+            <button type="button" className="hq-btn hq-btn-sm hq-btn-ghost" style={{ marginLeft: "0.5rem" }} onClick={() => void query.refetch()}>
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
+      {children}
+    </>
+  );
 };

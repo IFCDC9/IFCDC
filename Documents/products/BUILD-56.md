@@ -34,4 +34,5 @@ Cards and dashboard use **Connected · Warning · Disconnected**
 
 ## Next
 **Build 57 — Document Management Enterprise Suite** → see `BUILD-57.md` (shipped)  
-**Build 58 — Enterprise Quality Assurance & System Hardening**
+**Build 58 — Enterprise Quality Assurance & System Hardening** → see `BUILD-58.md` (shipped)  
+**Build 59 — Grant Center Foundation**

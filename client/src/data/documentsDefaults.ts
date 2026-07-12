@@ -121,7 +121,7 @@ export type HQDocumentRow = {
   updated_at: string;
 };
 
-export const EMPTY_DOCUMENT_LIST: { documents: HQDocumentRow[]; total?: number; facets?: DocumentsOverview["facets"] } = {
+export const EMPTY_DOCUMENT_LIST: { documents: HQDocumentRow[]; total?: number; facets?: DocumentsOverview["facets"]; degraded?: boolean } = {
   documents: [],
   total: 0,
   facets: {},

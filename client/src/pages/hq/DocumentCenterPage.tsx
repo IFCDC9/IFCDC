@@ -148,7 +148,7 @@ const DocumentCenterPage: React.FC = () => {
       try {
         return await documentsApi.overview();
       } catch {
-        return EMPTY_DOCUMENTS_OVERVIEW;
+        return { ...EMPTY_DOCUMENTS_OVERVIEW, degraded: true };
       }
     },
     placeholderData: EMPTY_DOCUMENTS_OVERVIEW,
@@ -162,7 +162,7 @@ const DocumentCenterPage: React.FC = () => {
       try {
         return await documentsApi.list(listParams);
       } catch {
-        return EMPTY_DOCUMENT_LIST;
+        return { ...EMPTY_DOCUMENT_LIST, degraded: true };
       }
     },
     placeholderData: EMPTY_DOCUMENT_LIST,
@@ -426,6 +426,19 @@ const DocumentCenterPage: React.FC = () => {
                 <span>{actionError}</span>
                 <button type="button" className="hq-btn hq-btn-sm hq-btn-ghost" style={{ marginLeft: "0.5rem" }} onClick={() => setActionError(null)}>
                   Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+
+          {(list.data?.degraded || overview.data?.degraded) && (
+            <div className="hq-anomaly-alert hq-sev-medium hq-fade-in" style={{ marginBottom: "1rem" }} role="status">
+              <AlertTriangle size={16} />
+              <div>
+                <strong>Degraded mode</strong>
+                <span>Document library returned a safe empty state after a timeout or API error — retry to refresh live data.</span>
+                <button type="button" className="hq-btn hq-btn-sm hq-btn-ghost" style={{ marginLeft: "0.5rem" }} onClick={() => { void list.refetch(); void overview.refetch(); }}>
+                  Retry
                 </button>
               </div>
             </div>

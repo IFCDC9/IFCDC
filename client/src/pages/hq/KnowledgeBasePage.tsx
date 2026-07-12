@@ -48,7 +48,7 @@ const KnowledgeBasePage: React.FC = () => {
       try {
         return await knowledgeBaseApi.status();
       } catch {
-        return EMPTY_KNOWLEDGE_STATUS;
+        return { ...EMPTY_KNOWLEDGE_STATUS, degraded: true as const };
       }
     },
     placeholderData: EMPTY_KNOWLEDGE_STATUS,
@@ -62,7 +62,7 @@ const KnowledgeBasePage: React.FC = () => {
       try {
         return await knowledgeBaseApi.list({ source_type: sourceType || undefined });
       } catch {
-        return { documents: [] as KnowledgeDocument[] };
+        return { documents: [] as KnowledgeDocument[], degraded: true as const };
       }
     },
     placeholderData: { documents: [] },
@@ -135,7 +135,7 @@ const KnowledgeBasePage: React.FC = () => {
     <HQLayout
       title="AURA Knowledge Base"
       subtitle="IFCDC institutional memory — grounds every grant narrative in real organizational data"
-      auraModule="grants"
+      auraModule="aura"
       auraActions={["ask", "draft", "summarize", "explain"]}
     >
       {!st.embeddingsConfigured && (
@@ -144,6 +144,19 @@ const KnowledgeBasePage: React.FC = () => {
           <div>
             <strong>Semantic embeddings offline</strong>
             <span>AURA is using keyword retrieval only. Set AURA_OPENAI_API_KEY on Render to enable semantic grounding.</span>
+          </div>
+        </div>
+      )}
+
+      {((status.data as { degraded?: boolean } | undefined)?.degraded || (list.data as { degraded?: boolean } | undefined)?.degraded) && (
+        <div className="hq-anomaly-alert hq-sev-medium hq-fade-in" style={{ marginBottom: "1rem" }} role="status">
+          <AlertTriangle size={16} />
+          <div>
+            <strong>Degraded mode</strong>
+            <span>Knowledge Base API timed out or failed — showing a safe empty state. Retry to refresh.</span>
+            <button type="button" className="hq-btn hq-btn-sm hq-btn-ghost" style={{ marginLeft: "0.5rem" }} onClick={() => { void status.refetch(); void list.refetch(); }}>
+              Retry
+            </button>
           </div>
         </div>
       )}

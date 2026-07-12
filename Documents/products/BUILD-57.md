@@ -62,4 +62,5 @@ Vault deep-links from:
 3. Verify `/hq/documents` upload, search, preview, version restore, and module links
 
 ## Next
-**Build 58 — Enterprise Quality Assurance & System Hardening**
+**Build 58 — Enterprise Quality Assurance & System Hardening** → see `BUILD-58.md` (shipped)  
+**Build 59 — Grant Center Foundation**

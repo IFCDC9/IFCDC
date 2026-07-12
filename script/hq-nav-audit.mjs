@@ -2,45 +2,12 @@
 /**
  * IFCDC Headquarters — HQ navigation route audit.
  * Verifies every sidebar nav path resolves to the SPA shell (HTML).
- * Usage: IFCDC_BASE_URL=https://ifcdc-hq.onrender.com npm run hq:nav-audit
+ * Usage: IFCDC_BASE_URL=https://ifcdc-hq-wst6.onrender.com npm run hq:nav-audit
  */
-const BASE = process.env.IFCDC_BASE_URL || "http://127.0.0.1:5001";
+import { HQ_NAV_AUDIT_PATHS } from "./hq-nav-paths.mjs";
 
-const NAV_PATHS = [
-  "/hq",
-  "/hq/founder",
-  "/hq/analytics",
-  "/hq/reports",
-  "/hq/calendar",
-  "/hq/notifications",
-  "/hq/communications",
-  "/hq/phase10",
-  "/hq/phase9",
-  "/hq/intelligence",
-  "/hq/workflows",
-  "/hq/software",
-  "/hq/operations",
-  "/hq/sso",
-  "/hq/aura",
-  "/hq/integrations",
-  "/hq/people",
-  "/hq/payroll",
-  "/hq/finance",
-  "/hq/grants",
-  "/hq/donations",
-  "/hq/programs",
-  "/hq/housing",
-  "/hq/scholarships",
-  "/hq/media",
-  "/hq/board",
-  "/hq/compliance",
-  "/hq/assets",
-  "/hq/fleet",
-  "/hq/facilities",
-  "/hq/documents",
-  "/hq/security",
-  "/hq/settings",
-];
+const BASE = process.env.IFCDC_BASE_URL || "http://127.0.0.1:5001";
+const NAV_PATHS = HQ_NAV_AUDIT_PATHS;
 
 const results = { pass: 0, fail: 0 };
 
