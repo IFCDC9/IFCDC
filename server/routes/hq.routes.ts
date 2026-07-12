@@ -34,6 +34,7 @@ import intelligenceRouter from "./intelligence.routes";
 import phase9Router from "./phase9.routes";
 import phase10Router from "./phase10.routes";
 import softwareEngineeringRouter from "./softwareEngineering.routes";
+import enterpriseOps5Router from "./enterpriseOps5.routes";
 import {
   detectOperationalAnomalies,
   predictFinancialRisk,
@@ -101,6 +102,7 @@ router.use("/intelligence", intelligenceRouter);
 router.use("/phase9", phase9Router);
 router.use("/phase10", phase10Router);
 router.use("/aura/software-engineering", softwareEngineeringRouter);
+router.use("/aura/os5", enterpriseOps5Router);
 
 router.get("/health", (_req: Request, res: Response) => {
   res.json({

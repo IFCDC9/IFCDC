@@ -817,6 +817,42 @@ const enterpriseOs: AuraAction = {
   },
 };
 
+const enterpriseOperations5: AuraAction = {
+  id: "enterprise_operations_5",
+  label: "Enterprise Operations 5.0",
+  module: "executive",
+  kind: "execute",
+  description:
+    "AURA Enterprise Operations 5.0 — coordinate grants/finance/HR/software/compliance into ops runs, prepare board packets and recurring cadences, show Command Center. Founder approval for high-impact and external distribution.",
+  parameters: {
+    request: {
+      type: "string",
+      description: "e.g. Prepare next month's board meeting, Show Command Center, Prepare weekly executive report",
+    },
+  },
+  async run(args, ctx) {
+    if (!ctx.identity?.founderMode && !ctx.identity?.isFounder) {
+      return { status: "error", summary: "Enterprise Operations 5.0 requires Founder Mode." };
+    }
+    const { runEnterpriseOperations5 } = await import("./auraEnterpriseOs5");
+    const result = await runEnterpriseOperations5({
+      request: str(args.request) || "Show Enterprise Operations Command Center",
+      actorEmail: ctx.actorEmail,
+      founderMode: true,
+      channel: "hq_web",
+    });
+    return {
+      status: result.founderApprovalRequired ? "pending_approval" : "done",
+      summary: result.speechSummary,
+      data: result,
+      navigation: { path: "/hq/enterprise-ops", label: "Open Enterprise Operations 5.0" },
+      approval: result.founderApprovalRequired
+        ? { path: "/hq/enterprise-ops", label: "Founder approval required" }
+        : undefined,
+    };
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Executive Operations (Founder Mode execute)
 // ---------------------------------------------------------------------------
@@ -1363,6 +1399,7 @@ export const AURA_ACTIONS: AuraAction[] = [
   enterpriseBrain,
   executiveDecisionIntelligence,
   enterpriseOs,
+  enterpriseOperations5,
   sendEmail,
   sendSms,
   placeCall,

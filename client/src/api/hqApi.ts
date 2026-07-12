@@ -414,6 +414,74 @@ export const hqApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question }),
     }),
+  auraOs5CommandCenter: () =>
+    hqFetch<{
+      eoVersion: string;
+      osVersion?: string;
+      brainVersion?: string;
+      generatedAt: string;
+      organizationHealth: number | null;
+      enterpriseGrade: string | null;
+      strategicGoals: { total: number; atRisk: number; items: Array<{ title: string; progressPercent: number; status: string }> };
+      activeProjects: { count: number; source: string };
+      fundingPipeline: { pipelineValue: number | null; activeAwards: number | null };
+      financialHealth: { cashFlow: number | null; financialHealthScore: number | null; budgetRemaining: number | null };
+      hrStatus: string;
+      technologyStatus: {
+        score: number | null;
+        label: string | null;
+        deployAligned: boolean | null;
+        seHostMode?: string;
+        unhealthyApps: number;
+      };
+      compliance: { overdue: number; dueNext14Days: number };
+      criticalAlerts: Array<{ id: string; title: string; explanation?: string; severity: string }>;
+      founderApprovalsWaiting: number;
+      opsRuns: Array<{
+        id: string;
+        title: string;
+        status: string;
+        executiveSummary: string;
+        founderApprovalRequired: boolean;
+        steps: Array<{ id: string; department: string; title: string; status: string; path: string }>;
+        createdAt: string;
+      }>;
+      cadences: Array<{ id: string; label: string; schedule: string; description: string }>;
+      continuousImprovement: Array<{
+        id: string;
+        category: string;
+        title: string;
+        evidence: string;
+        recommendation: string;
+        priority: string;
+        path: string;
+      }>;
+      deepLinks: Array<{ label: string; path: string }>;
+      policy: { externalDistributionRequiresFounderApproval: boolean; highImpactRequiresFounderApproval: boolean };
+    }>("/aura/os5/command-center"),
+  auraOs5Run: (request: string) =>
+    hqFetch<{
+      eoVersion: string;
+      speechSummary: string;
+      founderApprovalRequired: boolean;
+      opsRun?: { id: string; title: string; status: string; executiveSummary: string };
+      cadence?: { ok: boolean; prepId?: string; error?: string };
+    }>("/aura/os5/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ request }),
+    }),
+  auraOs5ApproveOpsRun: (id: string, note?: string) =>
+    hqFetch<{ ok: boolean; run?: unknown; error?: string }>(`/aura/os5/ops-runs/${id}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ note }),
+    }),
+  auraOs5PrepareCadence: (id: string) =>
+    hqFetch<{ ok: boolean; prepId?: string; package?: { title: string; speechSummary: string; content: string }; error?: string }>(
+      `/aura/os5/cadences/${id}/prepare`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }
+    ),
   auraNavigate: (query: string) => hqFetch<{
     intent: string; path?: string; label?: string; message: string;
     results?: { type: string; id: string; title: string; subtitle: string; path: string }[];

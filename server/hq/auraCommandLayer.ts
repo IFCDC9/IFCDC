@@ -256,6 +256,46 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
     }
   }
 
+  // AURA Enterprise Operations 5.0 — multi-department orchestration (before SE/LLM).
+  {
+    const { wantsEnterpriseOperations5, runEnterpriseOperations5 } = await import("./auraEnterpriseOs5");
+    if (wantsEnterpriseOperations5(command)) {
+      const eo = await runEnterpriseOperations5({
+        request: command,
+        actorEmail: identity.email || input.actorEmail,
+        founderMode: Boolean(identity.founderMode || identity.isFounder),
+        channel: "hq_web",
+      });
+      await logAuraIdentityAction({
+        identity,
+        action: "aura_enterprise_ops_5",
+        detail: eo.speechSummary.slice(0, 240),
+        metadata: { founderApprovalRequired: eo.founderApprovalRequired, eoVersion: eo.eoVersion },
+      });
+      return {
+        reply: eo.speechSummary,
+        actions: [
+          {
+            id: "enterprise_operations_5",
+            label: "Enterprise Operations 5.0",
+            status: eo.founderApprovalRequired ? "pending_approval" : "done",
+            summary: eo.speechSummary,
+            data: eo,
+            navigation: { path: "/hq/enterprise-ops", label: "Open Enterprise Operations 5.0" },
+            approval: eo.founderApprovalRequired
+              ? { path: "/hq/enterprise-ops", label: "Founder approval required" }
+              : undefined,
+          },
+        ],
+        approvalsCreated: eo.founderApprovalRequired
+          ? [{ path: "/hq/enterprise-ops", label: "Founder approval required" }]
+          : [],
+        poweredBy: "AURA Enterprise Operations 5.0",
+        identity: publicIdentitySummary(identity),
+      };
+    }
+  }
+
   // AURA Software Engineering Engine — diagnose/fix/test/PR (short-circuit before LLM).
   {
     const { wantsSoftwareEngineeringCommand, handleSoftwareEngineeringCommand } = await import(
