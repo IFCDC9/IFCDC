@@ -121,7 +121,8 @@ const ExecutiveDashboard: React.FC = () => {
       }
     },
     placeholderData: EMPTY_EXECUTIVE_OVERVIEW,
-    staleTime: 120_000,
+    staleTime: 45_000,
+    refetchInterval: 60_000,
     retry: 0,
   });
 
@@ -334,7 +335,13 @@ const ExecutiveDashboard: React.FC = () => {
   const metrics = data?.metrics;
   const trendData = financeDetail.data?.monthlyTrend as { month: string; cashFlow: number; donations: number; expenses: number }[] | undefined;
   const greeting = formatWelcomeGreeting(user);
-  const financialHealth = analyticsData?.finance.financialHealthScore ?? 0;
+  const commandHealth = data?.commandHealth ?? null;
+  const pillar = (id: string) => commandHealth?.pillars.find((p) => p.id === id);
+  const financialHealth = pillar("financial")?.score ?? analyticsData?.finance.financialHealthScore ?? 0;
+  const systemHealth = pillar("system");
+  const operationalHealth = pillar("operational");
+  const securityHealth = pillar("security");
+  const integrationHealth = pillar("integration");
   const softwareHealthy =
     data?.softwareDivision?.operational ??
     data?.softwareDivision?.healthy ??
@@ -342,9 +349,14 @@ const ExecutiveDashboard: React.FC = () => {
     0;
   const softwareTotal = data?.softwareDivision?.total ?? opsData?.software?.total ?? 0;
   const softwarePolled = data?.softwareDivision?.polledHealthy;
-  const hrActive = analyticsData?.people.totalPeople ?? metrics?.totalEmployees ?? 0;
   const grantsActive = analyticsData?.grants.activeAwards ?? metrics?.activeGrants ?? 0;
   const complianceOverdue = complianceAlerts.data?.overdue ?? 0;
+
+  const formatPillarScore = (score: number | undefined, loading: boolean) => {
+    if (loading && (score == null || score === 0) && !commandHealth) return "…";
+    if (score == null) return "—";
+    return `${Math.round(score)}`;
+  };
 
   return (
     <>
@@ -396,34 +408,43 @@ const ExecutiveDashboard: React.FC = () => {
 
       <div className="hq-executive-health-strip hq-fade-in" aria-label="Enterprise health at a glance">
         <HqWidgetErrorBoundary label="Health strip">
-        <div className="hq-executive-health-card">
-          <span className="hq-executive-health-label">Organization</span>
-          <span className="hq-executive-health-value">{healthScoreLabel}</span>
-          <span className="hq-executive-health-meta">{health?.grade ?? "Composite"}</span>
+        <div className={`hq-executive-health-card hq-health-${pillar("organization")?.status ?? "unknown"}`}>
+          <span className="hq-executive-health-label">Organization Health</span>
+          <span className="hq-executive-health-value">{formatPillarScore(pillar("organization")?.score ?? healthScore, healthLoading)}/100</span>
+          <span className="hq-executive-health-meta">{pillar("organization")?.grade ?? health?.grade ?? "Composite"}</span>
         </div>
-        <div className="hq-executive-health-card">
-          <span className="hq-executive-health-label">Financial</span>
-          <span className="hq-executive-health-value">{financialHealth}%</span>
-          <span className="hq-executive-health-meta">{formatCurrency(analyticsData?.finance.cashFlow ?? 0)} cash flow</span>
-        </div>
-        <div className="hq-executive-health-card">
-          <span className="hq-executive-health-label">Grants</span>
-          <span className="hq-executive-health-value">{grantsActive}</span>
-          <span className="hq-executive-health-meta">{complianceOverdue > 0 ? `${complianceOverdue} overdue` : "On track"}</span>
-        </div>
-        <div className="hq-executive-health-card">
-          <span className="hq-executive-health-label">People & HR</span>
-          <span className="hq-executive-health-value">{hrActive}</span>
-          <span className="hq-executive-health-meta">{(peopleAnalytics.data as { volunteerCount?: number })?.volunteerCount ?? analyticsData?.people.volunteers ?? 0} volunteers</span>
-        </div>
-        <div className="hq-executive-health-card">
+        <div className={`hq-executive-health-card hq-health-${systemHealth?.status ?? "unknown"}`}>
           <span className="hq-executive-health-label">System Health</span>
-          <span className="hq-executive-health-value">{softwareHealthy}/{softwareTotal || "—"}</span>
+          <span className="hq-executive-health-value">{formatPillarScore(systemHealth?.score, healthLoading)}/100</span>
           <span className="hq-executive-health-meta">
-            {softwarePolled != null && softwarePolled !== softwareHealthy
-              ? `${softwarePolled} polled · operational score`
-              : "Apps operational"}
+            {systemHealth?.meta ??
+              (softwarePolled != null && softwarePolled !== softwareHealthy
+                ? `${softwareHealthy}/${softwareTotal || "—"} apps · ${softwarePolled} polled`
+                : `${softwareHealthy}/${softwareTotal || "—"} apps operational`)}
           </span>
+        </div>
+        <div className={`hq-executive-health-card hq-health-${pillar("financial")?.status ?? "unknown"}`}>
+          <span className="hq-executive-health-label">Financial Health</span>
+          <span className="hq-executive-health-value">{formatPillarScore(financialHealth, healthLoading)}/100</span>
+          <span className="hq-executive-health-meta">{pillar("financial")?.meta ?? `${formatCurrency(analyticsData?.finance.cashFlow ?? 0)} cash flow`}</span>
+        </div>
+        <div className={`hq-executive-health-card hq-health-${operationalHealth?.status ?? "unknown"}`}>
+          <span className="hq-executive-health-label">Operational Health</span>
+          <span className="hq-executive-health-value">{formatPillarScore(operationalHealth?.score, healthLoading)}/100</span>
+          <span className="hq-executive-health-meta">
+            {operationalHealth?.meta ??
+              (complianceOverdue > 0 ? `${complianceOverdue} compliance overdue` : `${grantsActive} active grants`)}
+          </span>
+        </div>
+        <div className={`hq-executive-health-card hq-health-${securityHealth?.status ?? "unknown"}`}>
+          <span className="hq-executive-health-label">Security Status</span>
+          <span className="hq-executive-health-value">{formatPillarScore(securityHealth?.score, healthLoading)}/100</span>
+          <span className="hq-executive-health-meta">{securityHealth?.meta ?? "Platform channels"}</span>
+        </div>
+        <div className={`hq-executive-health-card hq-health-${integrationHealth?.status ?? "unknown"}`}>
+          <span className="hq-executive-health-label">Integration Status</span>
+          <span className="hq-executive-health-value">{formatPillarScore(integrationHealth?.score, healthLoading)}/100</span>
+          <span className="hq-executive-health-meta">{integrationHealth?.meta ?? "Connectors"}</span>
         </div>
         </HqWidgetErrorBoundary>
       </div>
@@ -431,11 +452,11 @@ const ExecutiveDashboard: React.FC = () => {
       <HqWidgetErrorBoundary label="KPI summary">
       <div className="hq-kpi-grid hq-founder-kpi-grid hq-fade-in">
         <KpiCard label="Organization Health" value={healthScoreLabel} icon={Activity} variant={(healthScore ?? 0) >= 80 ? "success" : (healthScore ?? 0) >= 60 ? "warning" : healthScore == null ? "muted" : "danger"} meta={health?.grade ?? "Composite score"} />
-        <KpiCard label="Financial Health" value={`${financialHealth}%`} icon={TrendingUp} variant={financialHealth >= 70 ? "success" : "warning"} meta={formatCurrency(analyticsData?.finance.cashFlow ?? 0)} />
-        <KpiCard label="Active Grants" value={grantsActive} icon={FileText} meta={formatCurrency(analyticsData?.grants.totalAwarded ?? 0)} />
-        <KpiCard label="Total People" value={hrActive} icon={Users} meta={`${analyticsData?.people.employees ?? metrics?.activeEmployees ?? 0} employees`} />
-        <KpiCard label="Donation Revenue" value={formatCurrency(analyticsData?.donations.total ?? metrics?.donationRevenue ?? 0)} icon={Heart} variant="success" />
-        <KpiCard label="System Status" value={`${softwareHealthy}/${softwareTotal || 0}`} icon={Monitor} variant={softwareHealthy === softwareTotal && softwareTotal > 0 ? "success" : "warning"} meta="Software Division" />
+        <KpiCard label="System Health" value={`${formatPillarScore(systemHealth?.score, healthLoading)}/100`} icon={Monitor} variant={(systemHealth?.score ?? 0) >= 80 ? "success" : (systemHealth?.score ?? 0) >= 60 ? "warning" : "danger"} meta={systemHealth?.meta ?? "Tech + apps"} />
+        <KpiCard label="Financial Health" value={`${formatPillarScore(financialHealth, healthLoading)}/100`} icon={TrendingUp} variant={financialHealth >= 70 ? "success" : "warning"} meta={pillar("financial")?.meta ?? formatCurrency(analyticsData?.finance.cashFlow ?? 0)} />
+        <KpiCard label="Operational Health" value={`${formatPillarScore(operationalHealth?.score, healthLoading)}/100`} icon={FileText} variant={(operationalHealth?.score ?? 0) >= 80 ? "success" : "warning"} meta={operationalHealth?.meta ?? `${grantsActive} active grants`} />
+        <KpiCard label="Security Status" value={`${formatPillarScore(securityHealth?.score, healthLoading)}/100`} icon={Shield} variant={(securityHealth?.score ?? 0) >= 80 ? "success" : "warning"} meta={securityHealth?.meta ?? "Channels"} />
+        <KpiCard label="Integration Status" value={`${formatPillarScore(integrationHealth?.score, healthLoading)}/100`} icon={Building2} variant={(integrationHealth?.score ?? 0) >= 80 ? "success" : "warning"} meta={integrationHealth?.meta ?? "Connectors"} />
       </div>
       </HqWidgetErrorBoundary>
 

@@ -74,12 +74,24 @@ function gradeFromScore(score: number): string {
   return "Critical";
 }
 
+export { gradeFromScore };
+
+let orgHealthCache: { at: number; data: OrganizationHealthScore } | null = null;
+const ORG_HEALTH_CACHE_TTL_MS = 45_000;
+
 export async function buildOrganizationHealthScore(): Promise<OrganizationHealthScore> {
-  const finance = await buildExecutiveDashboard();
-  const grants = await buildGrantExecutiveDashboard();
-  const apps = await pollAllApps();
+  const now = Date.now();
+  if (orgHealthCache && now - orgHealthCache.at < ORG_HEALTH_CACHE_TTL_MS) {
+    return orgHealthCache.data;
+  }
+
+  const [finance, grants, apps, ops] = await Promise.all([
+    buildExecutiveDashboard(),
+    buildGrantExecutiveDashboard(),
+    pollAllApps(),
+    import("./operationsSchema").then((m) => m.buildOperationsOverview()).catch(() => null),
+  ]);
   const software = await buildSoftwareDivisionHealthScore(apps);
-  const ops = await import("./operationsSchema").then((m) => m.buildOperationsOverview()).catch(() => null);
 
   const factors = [
     { label: "Financial Health", score: finance.financialHealthScore, max: 100, weight: "25%" },
@@ -100,7 +112,9 @@ export async function buildOrganizationHealthScore(): Promise<OrganizationHealth
     factors[3].score * 0.15 + factors[4].score * 0.15 + factors[5].score * 0.1
   );
 
-  return { overall, factors, grade: gradeFromScore(overall) };
+  const data = { overall, factors, grade: gradeFromScore(overall) };
+  orgHealthCache = { at: now, data };
+  return data;
 }
 
 export async function buildAnalyticsOverview(): Promise<AnalyticsOverview> {

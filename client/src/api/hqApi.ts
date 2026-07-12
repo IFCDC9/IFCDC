@@ -18,6 +18,23 @@ export interface ActivityItem {
   amount?: number;
 }
 
+export interface CommandHealthPillar {
+  id: "organization" | "system" | "financial" | "operational" | "security" | "integration";
+  label: string;
+  score: number;
+  grade: string;
+  meta: string;
+  status: "good" | "watch" | "critical" | "unknown";
+}
+
+export interface ExecutiveCommandHealth {
+  overall: number;
+  grade: string;
+  pillars: CommandHealthPillar[];
+  monitoredAt: string;
+  source: "live";
+}
+
 export interface ExecutiveOverview {
   organizationHealthScore: number;
   organizationHealth?: {
@@ -25,6 +42,8 @@ export interface ExecutiveOverview {
     grade: string;
     factors: { label: string; score: number; max: number; weight: string }[];
   };
+  /** Six live command pillars (org / system / financial / operational / security / integration). */
+  commandHealth?: ExecutiveCommandHealth | null;
   metrics: OrganizationMetrics;
   monthlyTrend: { month: string; donations: number; expenses: number }[];
   recentActivity: ActivityItem[];

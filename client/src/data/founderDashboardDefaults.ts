@@ -3,13 +3,14 @@ import type { AnalyticsOverview } from "../api/analyticsApi";
 import type { OperationsOverview } from "../api/operationsApi";
 import type { ActivityItem } from "../api/hqApi";
 
-/** Executive Dashboard must render within 5s — fail fast with safe empty state. */
-export const EXECUTIVE_OVERVIEW_FETCH_TIMEOUT_MS = 5_000;
+/** Allow live pillar aggregation (org + system + finance + ops + security + integrations). */
+export const EXECUTIVE_OVERVIEW_FETCH_TIMEOUT_MS = 22_000;
 
 /** Production-safe empty executive snapshot — zeros only, never demo seed numbers. */
 export const EMPTY_EXECUTIVE_OVERVIEW: ExecutiveOverview = {
   organizationHealthScore: 0,
   organizationHealth: { overall: 0, grade: "—", factors: [] },
+  commandHealth: null,
   metrics: {
     totalEmployees: 0,
     activeEmployees: 0,
@@ -41,6 +42,7 @@ export const DEFAULT_EXECUTIVE_OVERVIEW: ExecutiveOverview = {
       { label: "Software", score: 79, max: 100, weight: "15%" },
     ],
   },
+  commandHealth: null,
   metrics: {
     totalEmployees: 24,
     activeEmployees: 22,
@@ -190,6 +192,7 @@ export function normalizeExecutiveOverview(data?: Partial<ExecutiveOverview> | n
     return {
       organizationHealthScore: data.organizationHealthScore ?? data.organizationHealth?.overall ?? base.organizationHealthScore,
       organizationHealth: data.organizationHealth ?? base.organizationHealth,
+      commandHealth: data.commandHealth ?? null,
       metrics: { ...base.metrics, ...data.metrics },
       monthlyTrend: data.monthlyTrend ?? base.monthlyTrend,
       recentActivity: data.recentActivity ?? base.recentActivity,

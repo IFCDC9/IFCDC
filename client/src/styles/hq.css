@@ -870,7 +870,7 @@ body:has(.hq-login-shell) {
 
 .hq-executive-health-strip {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 0.65rem;
   margin-bottom: 1rem;
 }
@@ -883,6 +883,9 @@ body:has(.hq-login-shell) {
   border-top: 2px solid var(--hq-gold-border);
   transition: border-color var(--hq-transition), box-shadow var(--hq-transition);
 }
+.hq-executive-health-card.hq-health-good { border-top-color: var(--hq-success); }
+.hq-executive-health-card.hq-health-watch { border-top-color: var(--hq-warning); }
+.hq-executive-health-card.hq-health-critical { border-top-color: var(--hq-danger); }
 .hq-executive-health-card:hover {
   border-color: var(--hq-gold-border);
   box-shadow: 0 0 24px rgba(245, 200, 66, 0.06);

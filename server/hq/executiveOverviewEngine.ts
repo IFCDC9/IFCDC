@@ -7,9 +7,13 @@ import { toHQRole, HQ_MODULE_PERMISSIONS } from "./enterpriseRoles";
 import { checkIfcdcServices } from "../lib/ifcdc";
 import { getOrganizationMetrics, getMonthlyTrend } from "./metrics";
 import { buildOrganizationHealthScore, buildHeadquartersActivityFeed } from "./analyticsReporting";
+import {
+  buildExecutiveCommandHealth,
+  type ExecutiveCommandHealth,
+} from "./executiveCommandHealth";
 
-const EXEC_AGGREGATE_TIMEOUT_MS = 4_000;
-const EXEC_SECTION_TIMEOUT_MS = 3_000;
+const EXEC_AGGREGATE_TIMEOUT_MS = 18_000;
+const EXEC_SECTION_TIMEOUT_MS = 12_000;
 
 function execTimeout<T>(promise: Promise<T>, fallback: T, label: string): Promise<T> {
   const started = Date.now();
@@ -36,6 +40,7 @@ export function emptyExecutiveOverview(user?: { role?: string; hqRole?: string |
   return {
     organizationHealthScore: 0,
     organizationHealth: { overall: 0, grade: "—", factors: [] as { label: string; score: number; max: number; weight: string }[] },
+    commandHealth: null as ExecutiveCommandHealth | null,
     metrics: {
       totalEmployees: 0,
       activeEmployees: 0,
@@ -68,16 +73,16 @@ export function emptyExecutiveOverview(user?: { role?: string; hqRole?: string |
 async function buildExecutiveOverviewBounded(user?: { role?: string; hqRole?: string | null }) {
   console.info("[executive-overview] build start");
 
-  const apps = await execTimeout(pollAllApps(), [] as Awaited<ReturnType<typeof pollAllApps>>, "poll-apps");
-  const services = await execTimeout(checkIfcdcServices(), {} as Record<string, boolean>, "platform-services");
-  const metrics = await execTimeout(getOrganizationMetrics(), emptyExecutiveOverview().metrics, "org-metrics");
-  const recentActivity = await execTimeout(buildHeadquartersActivityFeed(12), [], "activity-feed");
-  const monthlyTrend = await execTimeout(getMonthlyTrend(), [], "monthly-trend");
-  const orgHealth = await execTimeout(
-    buildOrganizationHealthScore(),
-    { overall: 0, grade: "—", factors: [] },
-    "org-health"
-  );
+  const [apps, services, metrics, recentActivity, monthlyTrend, orgHealth, commandHealth] = await Promise.all([
+    execTimeout(pollAllApps(), [] as Awaited<ReturnType<typeof pollAllApps>>, "poll-apps"),
+    execTimeout(checkIfcdcServices(), {} as Record<string, boolean>, "platform-services"),
+    execTimeout(getOrganizationMetrics(), emptyExecutiveOverview().metrics, "org-metrics"),
+    execTimeout(buildHeadquartersActivityFeed(12), [], "activity-feed"),
+    execTimeout(getMonthlyTrend(), [], "monthly-trend"),
+    execTimeout(buildOrganizationHealthScore(), { overall: 0, grade: "—", factors: [] }, "org-health"),
+    execTimeout(buildExecutiveCommandHealth(), null as ExecutiveCommandHealth | null, "command-health"),
+  ]);
+
   const softwareHealth = await execTimeout(
     buildSoftwareDivisionHealthScore(apps),
     { score: 0, total: apps.length, operational: apps.filter((a) => a.healthy).length },
@@ -86,17 +91,30 @@ async function buildExecutiveOverviewBounded(user?: { role?: string; hqRole?: st
 
   const healthyApps = softwareHealth.operational ?? apps.filter((a) => a.healthy).length;
   const healthyServices = Object.values(services).filter(Boolean).length;
-  const orgHealthScore = orgHealth.overall ?? 0;
+  const orgFromCommand = commandHealth?.pillars.find((p) => p.id === "organization")?.score;
+  const orgHealthScore = orgFromCommand ?? orgHealth.overall ?? 0;
+  const organizationHealth =
+    orgFromCommand != null && commandHealth
+      ? {
+          overall: orgFromCommand,
+          grade: commandHealth.pillars.find((p) => p.id === "organization")?.grade ?? orgHealth.grade,
+          factors: orgHealth.factors?.length ? orgHealth.factors : [],
+        }
+      : orgHealth;
 
-  const degraded =
-    orgHealthScore === 0 &&
-    metrics.totalEmployees === 0 &&
-    recentActivity.length === 0 &&
-    apps.length === 0;
+  const hasLiveSignal =
+    orgHealthScore > 0 ||
+    metrics.totalEmployees > 0 ||
+    recentActivity.length > 0 ||
+    apps.length > 0 ||
+    Boolean(commandHealth?.pillars.some((p) => p.score > 0));
+
+  const degraded = !hasLiveSignal;
 
   return {
     organizationHealthScore: orgHealthScore,
-    organizationHealth: orgHealth,
+    organizationHealth,
+    commandHealth,
     metrics,
     monthlyTrend,
     recentActivity,
@@ -124,7 +142,7 @@ async function buildExecutiveOverviewBounded(user?: { role?: string; hqRole?: st
 }
 
 let overviewCache: { at: number; key: string; data: Awaited<ReturnType<typeof buildExecutiveOverviewBounded>> } | null = null;
-const OVERVIEW_CACHE_TTL = 30_000;
+const OVERVIEW_CACHE_TTL = 45_000;
 
 export async function buildExecutiveOverviewSafe(hqUser?: { role?: string; id?: string }) {
   const user = {
@@ -154,6 +172,12 @@ export async function buildExecutiveOverviewSafe(hqUser?: { role?: string; id?: 
   ]);
 
   console.info(`[executive-overview] build finished (${Date.now() - started}ms, degraded=${Boolean(payload.degraded)})`);
-  overviewCache = { at: now, key: cacheKey, data: payload };
+  if (!payload.degraded) {
+    overviewCache = { at: now, key: cacheKey, data: payload };
+  }
   return payload;
+}
+
+export function invalidateExecutiveOverviewCache(): void {
+  overviewCache = null;
 }
