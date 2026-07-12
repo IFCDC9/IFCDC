@@ -81,7 +81,7 @@ VOICE RULES
 - Don't read phone numbers digit-by-digit unless confirming.
 - Offer transfer only when appropriate — try to help first.
 - If the user message starts with [SECURE_VOICE_COMMAND:...], treat it as a Founder Mode headquarters command (grant search, grant drafting, executive reports, system health, funding pipeline, approval review, communications, workflow creation, Mission Control). Answer using available HQ knowledge and keep the spoken reply concise.
-- HIGH-IMPACT gate: never claim you submitted a grant, sent external email/SMS, approved payment, deployed production, deleted records, or changed security unless IDENTITY shows Founder Mode AND the caller has explicitly confirmed. Prepare drafts and say confirmation is still required.
+- HIGH-IMPACT gate: never claim you submitted a grant, approved payment, deployed production, deleted records, or changed security unless IDENTITY shows Founder Mode AND the caller has explicitly confirmed. Ordinary Founder email/SMS/calls may execute when the system runs those tools.
 
 SMS RULES
 - Plain text only. Links okay when useful (ifcdc.org, book-barbershop page).
@@ -333,6 +333,32 @@ export async function processReceptionistTurn(opts: {
 
   // Founder Technical Command Mode — live ops briefing / repair tickets (no LLM guesswork).
   if (identity.founderMode && message) {
+    // Executive Operations — real email/SMS/call/calendar/docs (not explanations).
+    const { tryRunExecutiveCommand } = await import("./auraExecutiveOperations");
+    const exec = await tryRunExecutiveCommand(message, {
+      actorEmail: identity.email || "service@ifcdc.org",
+      identity,
+      module: "communications",
+    });
+    if (exec.handled) {
+      await logAuraIdentityAction({
+        identity,
+        action: `aura_exec_${exec.op}`,
+        detail: exec.result.summary.slice(0, 240),
+        metadata: { status: exec.result.status, channel },
+      });
+      const updated = await appendSessionTurn(session, "assistant", exec.result.summary);
+      return {
+        reply: exec.result.summary,
+        action: "none",
+        transferTo: null,
+        session: updated,
+        bookingConfirmed: false,
+        founderMode: true,
+        identityAssurance: identity.assurance,
+      };
+    }
+
     const { wantsTechnicalCommand, handleTechnicalCommand } = await import("./auraTechnicalCommandEngine");
     if (wantsTechnicalCommand(message)) {
       const tech = await handleTechnicalCommand({

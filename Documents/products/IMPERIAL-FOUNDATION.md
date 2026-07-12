@@ -9,6 +9,27 @@
 
 ---
 
+## AURA Executive Operations Mode (July 2026)
+
+Founder Mode unlocks **real HQ execution** — AURA is the operating system, not a chatbot that only explains.
+
+| Capability | Action IDs / engine |
+|------------|---------------------|
+| Send email (Resend) | `send_email` |
+| Send SMS (Twilio) | `send_sms` |
+| Place call (Twilio) | `place_call` |
+| HQ notifications / announcements | `send_notification`, `broadcast_announcement` |
+| Calendar create / cancel | `create_calendar_event`, `cancel_calendar_event` |
+| Save reports / documents | `create_document`, `generate_executive_report` |
+| Diagnostics / payroll prep / compliance | `enterprise_diagnostics`, `prepare_payroll_summary`, `generate_compliance_report` |
+| Queue grant submission (no auto-submit) | `queue_grant_submission` |
+
+**Engine:** `server/hq/auraExecutiveOperations.ts` · registry `auraActionRegistry.ts` · dispatcher `runAuraCommand`  
+**Security:** Execute actions require Founder Mode. High-impact (grant submit, payments, production delete/deploy, org-wide blast) still stages for confirmation.  
+**Try:** “Send an email to service@ifcdc.org” · “Text my phone” · “Call me” · “Schedule a meeting” · “Create today's executive report”
+
+---
+
 ## AURA Voice Reliability & Intelligence (July 2026)
 
 Keeps the HQ phone line connected during long Founder requests and recovers cleanly from disconnects.

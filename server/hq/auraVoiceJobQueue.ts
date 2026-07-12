@@ -183,7 +183,7 @@ export function classifyVoiceCommand(speech: string): {
 } {
   const s = speech.toLowerCase();
   const highImpact =
-    /\b(submit (the )?grant|send (the )?(email|sms|text)|approve payment|deploy|delete (production|record)|change security|terminate|hire and onboard)\b/i.test(
+    /\b(submit (the )?grant|approve payment|deploy|delete (production|record)|change security|terminate|hire and onboard|broadcast.{0,40}(all staff|entire organization|everyone))\b/i.test(
       s
     );
   let commandType = "general";

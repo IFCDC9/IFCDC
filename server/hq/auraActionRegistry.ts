@@ -4,13 +4,10 @@
  * Every action wraps an existing production engine (no duplicated logic) and is
  * classified by `kind`:
  *   - "read":     safe, non-mutating (queries, summaries, navigation)
- *   - "prepare":  creates drafts / staged items that ALWAYS land in the founder
- *                 approval queue before anything is submitted, sent, or spent
- *   - "mutating": submit / send / delete / approve / spend — NEVER auto-executed.
- *                 The dispatcher refuses to run these and stages an approval item.
- *
- * This structural rule is the approval-protection guarantee: no action that
- * finalizes money, messages, deletions, or approvals is executable by AURA.
+ *   - "prepare":  creates drafts / staged items for review
+ *   - "execute":  Founder Mode (or authorized role) runs real HQ operations
+ *                 (email, SMS, calendar, documents, diagnostics). High-impact
+ *                 irreversible ops still stage for Founder confirmation.
  */
 
 import {
@@ -31,8 +28,26 @@ import { parseNavigationIntent } from "./auraNlNavigation";
 import { createWorkflowInstance } from "./workflowEngine";
 import { buildAuraExecutiveContext } from "./auraExecutiveContext";
 import { auraExecutiveChat } from "../lib/ifcdc";
+import {
+  detectHighImpactBlockedIntent,
+  executeSendEmail,
+  executeSendSms,
+  executePlaceCall,
+  executeSendNotification,
+  executeBroadcastAnnouncement,
+  executeScheduleReminder,
+  executeCreateCalendarEvent,
+  executeCancelCalendarEvent,
+  executeSaveReport,
+  executeGenerateExecutiveReport,
+  executeEnterpriseDiagnostics,
+  executePreparePayrollSummary,
+  executeComplianceReport,
+  executeQueueGrantSubmission,
+  executeNotifyWhenFinished,
+} from "./auraExecutiveOperations";
 
-export type AuraActionKind = "read" | "prepare" | "mutating";
+export type AuraActionKind = "read" | "prepare" | "execute";
 
 export type AuraModule =
   | "grants"
@@ -88,23 +103,9 @@ function ctxRef(ctx: AuraActionContext, key: string): string | undefined {
   return str(ctx.contextRef?.[key]);
 }
 
-/** Verbs that finalize state — AURA may never execute these autonomously. */
-const BLOCKED_INTENT_PATTERNS: { re: RegExp; verb: string }[] = [
-  { re: /\b(submit|file|send in)\b.*\b(grant|application|proposal|federal)\b/i, verb: "submit" },
-  { re: /\b(send|blast|broadcast|email|text|sms)\b/i, verb: "send" },
-  { re: /\b(delete|remove|purge|erase|wipe)\b/i, verb: "delete" },
-  { re: /\b(approve|authorize|sign off)\b/i, verb: "approve" },
-  { re: /\b(pay|spend|wire|transfer funds|issue payment|disburse)\b/i, verb: "spend" },
-  { re: /\bforce[- ]?push\b/i, verb: "force-push" },
-  { re: /\b(restart|reboot|kill)\b.*\b(production|render|database|service)\b/i, verb: "restart critical services" },
-  { re: /\b(change|rotate)\b.*\b(secret|api.?key|credential)\b/i, verb: "change secrets" },
-];
-
+/** High-impact irreversible verbs — stage for Founder confirmation (not casual email/SMS). */
 export function detectBlockedIntent(command: string): string | null {
-  for (const { re, verb } of BLOCKED_INTENT_PATTERNS) {
-    if (re.test(command)) return verb;
-  }
-  return null;
+  return detectHighImpactBlockedIntent(command);
 }
 
 // ---------------------------------------------------------------------------
@@ -813,6 +814,236 @@ const enterpriseOs: AuraAction = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// Executive Operations (Founder Mode execute)
+// ---------------------------------------------------------------------------
+
+const sendEmail: AuraAction = {
+  id: "send_email",
+  label: "Send Email",
+  module: "communications",
+  kind: "execute",
+  description:
+    "Founder Mode: actually send an email via Resend. Use for 'email service@…', 'email the Board', or reply-style messages. Requires to, subject, body.",
+  parameters: {
+    to: { type: "string", description: "Recipient email, comma-separated list, or 'board'." },
+    subject: { type: "string", description: "Email subject." },
+    body: { type: "string", description: "Email body (plain text)." },
+  },
+  async run(args, ctx) {
+    return executeSendEmail(args, ctx);
+  },
+};
+
+const sendSms: AuraAction = {
+  id: "send_sms",
+  label: "Send SMS",
+  module: "communications",
+  kind: "execute",
+  description: "Founder Mode: send SMS via Twilio. Use to='founder' or E.164 number.",
+  parameters: {
+    to: { type: "string", description: "Phone E.164 or 'founder'." },
+    body: { type: "string", description: "SMS body (max ~320 chars)." },
+  },
+  async run(args, ctx) {
+    return executeSendSms(args, ctx);
+  },
+};
+
+const placeCall: AuraAction = {
+  id: "place_call",
+  label: "Place Phone Call",
+  module: "communications",
+  kind: "execute",
+  description: "Founder Mode: place an outbound Twilio call (e.g. 'Call me').",
+  parameters: {
+    to: { type: "string", description: "Phone E.164 or 'founder'." },
+    message: { type: "string", description: "Spoken message." },
+  },
+  async run(args, ctx) {
+    return executePlaceCall(args, ctx);
+  },
+};
+
+const sendNotification: AuraAction = {
+  id: "send_notification",
+  label: "Send HQ Notification",
+  module: "communications",
+  kind: "execute",
+  description: "Founder Mode: post a Headquarters leadership notification and email the Founder.",
+  parameters: {
+    title: { type: "string" },
+    message: { type: "string" },
+  },
+  async run(args, ctx) {
+    return executeSendNotification(args, ctx);
+  },
+};
+
+const broadcastAnnouncement: AuraAction = {
+  id: "broadcast_announcement",
+  label: "Broadcast Announcement",
+  module: "communications",
+  kind: "execute",
+  description:
+    "Founder Mode: publish an org announcement. High-impact — stages for confirmation unless confirmed=true.",
+  parameters: {
+    title: { type: "string" },
+    body: { type: "string" },
+    priority: { type: "string", enum: ["normal", "high"] },
+    confirmed: { type: "boolean", description: "Set true only after Founder confirms publish." },
+  },
+  async run(args, ctx) {
+    return executeBroadcastAnnouncement(args, ctx);
+  },
+};
+
+const scheduleReminder: AuraAction = {
+  id: "schedule_reminder",
+  label: "Schedule Reminder",
+  module: "workflow",
+  kind: "execute",
+  description: "Founder Mode: schedule a follow-up reminder in Workflows + HQ alert.",
+  parameters: {
+    title: { type: "string" },
+    message: { type: "string" },
+  },
+  async run(args, ctx) {
+    return executeScheduleReminder(args, ctx);
+  },
+};
+
+const createCalendarEvent: AuraAction = {
+  id: "create_calendar_event",
+  label: "Create Calendar Event",
+  module: "executive",
+  kind: "execute",
+  description: "Founder Mode: create a real HQ calendar meeting/event.",
+  parameters: {
+    title: { type: "string" },
+    description: { type: "string" },
+    startAt: { type: "string", description: "ISO start time. Optional — defaults to +1 hour." },
+    endAt: { type: "string" },
+    location: { type: "string" },
+  },
+  async run(args, ctx) {
+    return executeCreateCalendarEvent(args, ctx);
+  },
+};
+
+const cancelCalendarEvent: AuraAction = {
+  id: "cancel_calendar_event",
+  label: "Cancel Calendar Event",
+  module: "executive",
+  kind: "execute",
+  description: "Founder Mode: cancel a matching HQ calendar event.",
+  parameters: {
+    query: { type: "string", description: "Title/keywords to match." },
+    title: { type: "string" },
+  },
+  async run(args, ctx) {
+    return executeCancelCalendarEvent(args, ctx);
+  },
+};
+
+const createDocument: AuraAction = {
+  id: "create_document",
+  label: "Create / Save Document",
+  module: "documents",
+  kind: "execute",
+  description: "Founder Mode: save a report/document into Document Center.",
+  parameters: {
+    title: { type: "string" },
+    body: { type: "string" },
+  },
+  async run(args, ctx) {
+    return executeSaveReport(args, ctx);
+  },
+};
+
+const generateExecutiveReport: AuraAction = {
+  id: "generate_executive_report",
+  label: "Generate Executive Report",
+  module: "executive",
+  kind: "execute",
+  description: "Founder Mode: generate today's executive report from live HQ data and save it.",
+  parameters: {
+    request: { type: "string" },
+  },
+  async run(args, ctx) {
+    return executeGenerateExecutiveReport(args, ctx);
+  },
+};
+
+const enterpriseDiagnostics: AuraAction = {
+  id: "enterprise_diagnostics",
+  label: "Enterprise Diagnostics",
+  module: "executive",
+  kind: "execute",
+  description: "Founder Mode: run live Technical Command / enterprise diagnostics across HQ modules.",
+  parameters: {
+    request: { type: "string" },
+  },
+  async run(args, ctx) {
+    return executeEnterpriseDiagnostics(args, ctx);
+  },
+};
+
+const preparePayroll: AuraAction = {
+  id: "prepare_payroll_summary",
+  label: "Prepare Payroll",
+  module: "hr",
+  kind: "execute",
+  description:
+    "Founder Mode: prepare a payroll summary from live data. Does NOT run payroll or issue payments — stages for approval.",
+  parameters: {},
+  async run(args, ctx) {
+    return executePreparePayrollSummary(args, ctx);
+  },
+};
+
+const complianceReport: AuraAction = {
+  id: "generate_compliance_report",
+  label: "Generate Compliance Report",
+  module: "executive",
+  kind: "execute",
+  description: "Founder Mode: generate and save a compliance report from Mission Control.",
+  parameters: {},
+  async run(args, ctx) {
+    return executeComplianceReport(args, ctx);
+  },
+};
+
+const queueGrantSubmission: AuraAction = {
+  id: "queue_grant_submission",
+  label: "Queue Grant Submission",
+  module: "grants",
+  kind: "execute",
+  description:
+    "Founder Mode: queue a grant application for submission. NEVER submits externally — always waits for Founder approval.",
+  parameters: {
+    applicationId: { type: "string" },
+    note: { type: "string" },
+  },
+  async run(args, ctx) {
+    return executeQueueGrantSubmission(args, ctx);
+  },
+};
+
+const notifyWhenFinished: AuraAction = {
+  id: "notify_when_finished",
+  label: "Notify When Finished",
+  module: "communications",
+  kind: "execute",
+  description: "Founder Mode: register a completion notification (HQ + SMS).",
+  parameters: {
+    message: { type: "string" },
+  },
+  async run(args, ctx) {
+    return executeNotifyWhenFinished(args, ctx);
+  },
+};
+
 export const AURA_ACTIONS: AuraAction[] = [
   findGrants,
   enterpriseFundingScan,
@@ -838,6 +1069,21 @@ export const AURA_ACTIONS: AuraAction[] = [
   enterpriseBrain,
   executiveDecisionIntelligence,
   enterpriseOs,
+  sendEmail,
+  sendSms,
+  placeCall,
+  sendNotification,
+  broadcastAnnouncement,
+  scheduleReminder,
+  createCalendarEvent,
+  cancelCalendarEvent,
+  createDocument,
+  generateExecutiveReport,
+  enterpriseDiagnostics,
+  preparePayroll,
+  complianceReport,
+  queueGrantSubmission,
+  notifyWhenFinished,
 ];
 
 const ACTION_MAP = new Map(AURA_ACTIONS.map((a) => [a.id, a]));

@@ -3,13 +3,12 @@
  *
  * Accepts a free-form command from anywhere in HQ and routes it to a real
  * action via a hybrid strategy:
- *   1. Deterministic keyword fast-paths (navigation) for latency.
+ *   1. Deterministic keyword fast-paths (navigation + Founder executive ops).
  *   2. LLM function-calling over the AURA action registry for everything else.
  *
- * Approval protection is structural: the registry exposes only read/prepare
- * actions, so AURA can never submit, send, delete, approve, or spend. When a
- * command implies a finalizing action, AURA stages it in the founder approval
- * queue and says so.
+ * Founder Mode unlocks execute actions (email, SMS, calls, calendar, documents).
+ * High-impact irreversible actions (grant submit, payments, production delete)
+ * still stage for Founder confirmation.
  */
 
 import { buildAuraExecutiveContext } from "./auraExecutiveContext";
@@ -70,16 +69,16 @@ export interface AuraCommandResponse {
   identity?: ReturnType<typeof import("./auraFounderTrustEngine").publicIdentitySummary>;
 }
 
-const AURA_COMMAND_SYSTEM = `You are AURA, the native operating intelligence for IFCDC Headquarters.
-You help authenticated IFCDC users run the organization by turning commands into actions.
+const AURA_COMMAND_SYSTEM = `You are AURA, the executive operating system for IFCDC Headquarters.
+You help authenticated users run the organization by turning commands into real actions.
 
 RULES:
-- Use the provided tools to perform real work with live IFCDC data within the caller's authorized role.
-- You may READ, DRAFT, PREPARE, and RECOMMEND freely when authorized.
-- You must NEVER submit, send, delete, approve, or spend. There are no tools for those. If the user asks to finalize such an action, call prepare_for_approval to stage it and explain that it awaits Founder approval.
-- Prefer taking a concrete action over just describing one. If a tool fits, call it.
-- Be concise and executive in tone. Never invent data.
-- When Founder Mode is active, persistently recognize Fahreal Allah as Founder / Super Admin without re-asking identity.`;
+- Prefer EXECUTING a tool over describing what you would do. If a tool fits, call it.
+- Founder Mode may use execute tools: send_email, send_sms, place_call, create_calendar_event, create_document, send_notification, generate_executive_report, enterprise_diagnostics, etc.
+- For high-impact irreversible work (submit grant, payments, production delete/deploy, org-wide blast), stage with prepare_for_approval or queue_grant_submission — do not claim it was submitted.
+- Casual Founder requests like "email service@ifcdc.org", "text my phone", "call me", "schedule a meeting" MUST call the matching execute tool immediately.
+- Be concise and executive. Never invent data.
+- When Founder Mode is active, recognize Fahreal Allah as Founder / Super Admin without re-asking identity.`;
 
 const MODEL = process.env.AURA_MODEL || "gpt-4o-mini";
 
@@ -150,6 +149,17 @@ export async function runAuraAction(
     };
   }
 
+  if (action.kind === "execute" && !identity.founderMode && !identity.isFounder) {
+    const denied = `Execute action "${action.label}" requires Founder Mode.`;
+    return {
+      reply: denied,
+      actions: [],
+      approvalsCreated: [],
+      poweredBy: "AURA Trust Layer",
+      identity: publicIdentitySummary(identity),
+    };
+  }
+
   let result: AuraActionResult;
   try {
     result = await action.run(args, enrichedCtx);
@@ -207,6 +217,41 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
       poweredBy: "AURA",
       identity: publicIdentitySummary(identity),
     };
+  }
+
+  // Founder Executive Operations — execute email/SMS/call/calendar/docs immediately.
+  {
+    const { tryRunExecutiveCommand } = await import("./auraExecutiveOperations");
+    const exec = await tryRunExecutiveCommand(command, ctx);
+    if (exec.handled) {
+      const executed = toExecuted(exec.op, exec.op.replace(/_/g, " "), {
+        ...exec.result,
+        summary: redactConfidentialForIdentity(identity, exec.result.summary),
+      });
+      const approvalsCreated = executed.approval ? [executed.approval] : [];
+      await recordAuraTurn({ actorEmail: ctx.actorEmail, module: ctx.module, role: "user", content: command });
+      await recordAuraTurn({
+        actorEmail: ctx.actorEmail,
+        module: ctx.module,
+        role: "assistant",
+        content: executed.summary,
+        action: executed,
+      });
+      await logAuraIdentityAction({
+        identity,
+        action: `aura_exec_${exec.op}`,
+        detail: executed.summary.slice(0, 400),
+        metadata: { status: executed.status },
+      });
+      return {
+        reply: executed.summary,
+        actions: [executed],
+        navigation: executed.navigation,
+        approvalsCreated,
+        poweredBy: "AURA Executive Operations",
+        identity: publicIdentitySummary(identity),
+      };
+    }
   }
 
   // Founder Technical Command Mode — live ops intelligence (short-circuit before LLM).
@@ -446,14 +491,23 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
 
   const blockedVerb = detectBlockedIntent(command);
   const guidance = blockedVerb
-    ? `\nNOTE: The command may ask to ${blockedVerb} something. You cannot do that. Use prepare_for_approval to stage it for the founder and explain that it awaits their approval.`
-    : "";
+    ? `\nNOTE: The command may ask to ${blockedVerb}. That is high-impact. Use prepare_for_approval or queue_grant_submission to stage it — do not claim it was finalized.`
+    : identity.founderMode || identity.isFounder
+      ? `\nFounder Mode is ACTIVE. Execute matching tools immediately for email, SMS, calls, calendar, documents, notifications, and diagnostics.`
+      : "";
   const moduleHint = ctx.module
     ? `\nThe user is currently in the "${ctx.module}" module.`
     : "";
   const contextRefHint = ctx.contextRef && Object.keys(ctx.contextRef).length
     ? `\nContext references available: ${JSON.stringify(ctx.contextRef)}`
     : "";
+
+  const tools = auraToolDefinitions().filter((t) => {
+    const action = getAuraAction(t.function.name);
+    if (!action) return false;
+    if (action.kind === "execute" && !identity.founderMode && !identity.isFounder) return false;
+    return true;
+  });
 
   const systemContent = [
     AURA_COMMAND_SYSTEM,
@@ -477,7 +531,7 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
           { role: "system", content: systemContent },
           { role: "user", content: command },
         ],
-        tools: auraToolDefinitions(),
+        tools,
         tool_choice: "auto",
       });
     });
@@ -498,6 +552,15 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
           label: action.label,
           status: "error",
           summary: `Denied: ${identity.enterpriseRoleLabel} cannot run ${action.label}.`,
+        });
+        continue;
+      }
+      if (action.kind === "execute" && !identity.founderMode && !identity.isFounder) {
+        executed.push({
+          id: action.id,
+          label: action.label,
+          status: "error",
+          summary: `Denied: ${action.label} requires Founder Mode.`,
         });
         continue;
       }
