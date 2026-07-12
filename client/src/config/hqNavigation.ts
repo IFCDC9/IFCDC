@@ -31,6 +31,7 @@ import {
   Plug,
   Brain,
   Activity,
+  BookOpen,
 } from "lucide-react";
 
 export interface HQNavItem {
@@ -90,6 +91,7 @@ export const HQ_NAV_ITEMS: HQNavItem[] = [
   { label: "Media Division", path: "/hq/media", icon: Radio, section: "Programs" },
 
   { label: "Board of Directors Portal", path: "/hq/board", icon: Gavel, section: "Governance" },
+  { label: "Policy & Governance", path: "/hq/policies", icon: BookOpen, section: "Governance", badge: "New" },
   { label: "Compliance & Risk", path: "/hq/compliance", icon: Shield, section: "Governance" },
 
   { label: "Asset & Inventory", path: "/hq/assets", icon: Package, section: "Enterprise" },
@@ -111,6 +113,20 @@ export interface HQModuleConfig {
 }
 
 export const HQ_MODULE_CONFIGS: Record<string, HQModuleConfig> = {
+  policies: {
+    title: "Policy & Governance Center",
+    subtitle: "Official source for policies, SOPs, and governance documents",
+    description: "Enterprise policy lifecycle with What This Means plain language, acknowledgments, approvals, version history, review reminders, and compliance reporting.",
+    features: [
+      "Full policy metadata & What This Means",
+      "30 built-in categories",
+      "Approval workflows & e-signatures",
+      "Acknowledgment tracking",
+      "Version history & audit logs",
+      "Compliance reporting",
+    ],
+    status: "live",
+  },
   operations: {
     title: "Executive Operations Center",
     subtitle: "Unified command for departments, workforce, compliance, projects, and automation",

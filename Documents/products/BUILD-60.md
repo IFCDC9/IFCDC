@@ -78,4 +78,5 @@ Each card links to dashboard, documents, and reports. Extra department codes see
 3. Verify `/hq/operations` tabs: Overview, Departments, Tasks & Projects, Compliance, Automation, Reports
 
 ## Next
+**Policy & Governance Center** ✅ (see `POLICY-GOVERNANCE-CENTER.md`)  
 **Build 61 — AI Executive Intelligence (AURA Command Center)**

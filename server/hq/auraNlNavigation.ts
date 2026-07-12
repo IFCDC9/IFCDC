@@ -16,6 +16,7 @@ const MODULE_ROUTES: { keywords: string[]; path: string; label: string }[] = [
   { keywords: ["program", "community program"], path: "/hq/programs", label: "Community Programs" },
   { keywords: ["donation", "donations", "fundraising"], path: "/hq/donations", label: "Donations" },
   { keywords: ["board", "governance"], path: "/hq/board", label: "Board Portal" },
+  { keywords: ["policy", "policies", "handbook", "sop", "procedures"], path: "/hq/policies", label: "Policy & Governance" },
   { keywords: ["compliance", "risk", "policy"], path: "/hq/compliance", label: "Compliance & Risk" },
   { keywords: ["software", "barbers", "application", "app division"], path: "/hq/software", label: "Software Division" },
   { keywords: ["calendar", "event", "schedule meeting"], path: "/hq/calendar", label: "Organization Calendar" },

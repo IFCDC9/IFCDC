@@ -158,7 +158,7 @@ export const ROLE_PERMISSIONS: Record<EnterpriseRole, Permission[]> = {
     "hq.hr.self", "hq.programs", "hq.clients", "hq.aura", "hq.notifications", "hq.documents", "app.barbers", "app.music", "app.radio",
   ],
   volunteer: [
-    "hq.hr.self", "hq.programs", "hq.aura", "hq.notifications",
+    "hq.hr.self", "hq.programs", "hq.aura", "hq.notifications", "hq.documents",
   ],
   barber: [
     "hq.hr.self", "hq.aura", "app.barbers",
@@ -186,6 +186,10 @@ export const HQ_MODULE_PERMISSIONS: Record<string, EnterpriseRole[]> = {
   documents: [
     "founder", "executive", "administrator", "hr", "finance", "program_director",
     "manager", "board_member", "grant_manager", "employee",
+  ],
+  policies: [
+    "founder", "executive", "administrator", "hr", "finance", "program_director",
+    "manager", "board_member", "grant_manager", "employee", "volunteer",
   ],
   analytics: ["founder", "executive", "administrator", "board_member", "grant_manager"],
   notifications: ["founder", "executive", "administrator", "board_member", "grant_manager", "employee", "volunteer"],
@@ -224,6 +228,7 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   "/hq/scholarships": "hq.programs",
   "/hq/media": "hq.programs",
   "/hq/documents": "hq.documents",
+  "/hq/policies": "hq.documents",
   "/hq/knowledge": "hq.aura",
   "/hq/intelligence": "hq.analytics",
   "/hq/phase9": "hq.executive",

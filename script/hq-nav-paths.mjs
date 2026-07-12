@@ -36,6 +36,7 @@ export const HQ_NAV_AUDIT_PATHS = [
   "/hq/scholarships",
   "/hq/media",
   "/hq/board",
+  "/hq/policies",
   "/hq/compliance",
   "/hq/assets",
   "/hq/fleet",
