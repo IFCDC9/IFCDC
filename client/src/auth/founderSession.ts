@@ -5,7 +5,7 @@ const FOUNDER_PERMISSIONS: Permission[] = [
   "hq.executive", "hq.hr", "hq.hr.manage", "hq.payroll",
   "hq.grants", "hq.grants.manage", "hq.finance", "hq.finance.manage",
   "hq.donations", "hq.programs", "hq.software", "hq.aura",
-  "hq.analytics", "hq.notifications", "hq.settings", "hq.settings.manage",
+  "hq.analytics", "hq.notifications", "hq.settings", "hq.settings.manage", "hq.documents",
   "app.barbers", "app.music", "app.radio", "app.tapis",
   "app.inclusive", "app.swiftware", "app.cryptocoin",
 ];
@@ -27,7 +27,7 @@ export function buildFounderSessionFromLogin(data: LoginPayload): UserInfo {
     enterpriseRole: "founder",
     enterpriseRoleLabel: "Founder",
     permissions: FOUNDER_PERMISSIONS,
-    modules: ["executive", "hr", "payroll", "finance", "grants", "programs", "software_division", "aura", "settings", "analytics", "notifications", "operations", "board", "compliance"],
+    modules: ["executive", "hr", "payroll", "finance", "grants", "programs", "software_division", "aura", "settings", "documents", "analytics", "notifications", "operations", "board", "compliance"],
     defaultRoute: "/hq",
     employee: null,
   };

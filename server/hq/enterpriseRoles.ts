@@ -107,6 +107,7 @@ export type Permission =
   | "hq.notifications"
   | "hq.settings"
   | "hq.settings.manage"
+  | "hq.documents"
   | "app.barbers"
   | "app.music"
   | "app.radio"
@@ -119,42 +120,42 @@ export const ROLE_PERMISSIONS: Record<EnterpriseRole, Permission[]> = {
   founder: [
     "hq.executive", "hq.hr", "hq.hr.manage", "hq.hr.approve", "hq.hr.self", "hq.payroll", "hq.grants", "hq.grants.manage",
     "hq.finance", "hq.finance.manage", "hq.donations", "hq.programs", "hq.clients", "hq.clients.manage", "hq.software", "hq.aura",
-    "hq.analytics", "hq.notifications", "hq.settings", "hq.settings.manage",
+    "hq.analytics", "hq.notifications", "hq.settings", "hq.settings.manage", "hq.documents",
     "app.barbers", "app.music", "app.radio", "app.tapis", "app.inclusive", "app.swiftware", "app.cryptocoin",
   ],
   executive: [
     "hq.executive", "hq.hr", "hq.hr.manage", "hq.hr.approve", "hq.payroll", "hq.grants", "hq.grants.manage",
     "hq.finance", "hq.donations", "hq.programs", "hq.clients", "hq.clients.manage", "hq.software", "hq.aura",
-    "hq.analytics", "hq.notifications", "hq.settings",
+    "hq.analytics", "hq.notifications", "hq.settings", "hq.documents",
     "app.barbers", "app.music", "app.radio", "app.tapis", "app.inclusive", "app.swiftware", "app.cryptocoin",
   ],
   administrator: [
     "hq.executive", "hq.hr", "hq.hr.manage", "hq.hr.approve", "hq.payroll", "hq.grants", "hq.grants.manage",
     "hq.finance", "hq.finance.manage", "hq.donations", "hq.programs", "hq.clients", "hq.clients.manage", "hq.software", "hq.aura",
-    "hq.analytics", "hq.notifications", "hq.settings", "hq.settings.manage",
+    "hq.analytics", "hq.notifications", "hq.settings", "hq.settings.manage", "hq.documents",
     "app.barbers", "app.music", "app.radio", "app.tapis", "app.inclusive", "app.swiftware", "app.cryptocoin",
   ],
   hr: [
-    "hq.hr", "hq.hr.manage", "hq.hr.approve", "hq.payroll", "hq.programs", "hq.aura", "hq.notifications", "hq.analytics",
+    "hq.hr", "hq.hr.manage", "hq.hr.approve", "hq.payroll", "hq.programs", "hq.aura", "hq.notifications", "hq.analytics", "hq.documents",
   ],
   finance: [
-    "hq.finance", "hq.finance.manage", "hq.payroll", "hq.hr", "hq.donations", "hq.aura", "hq.notifications", "hq.analytics",
+    "hq.finance", "hq.finance.manage", "hq.payroll", "hq.hr", "hq.donations", "hq.aura", "hq.notifications", "hq.analytics", "hq.documents",
   ],
   program_director: [
-    "hq.programs", "hq.grants", "hq.hr", "hq.clients", "hq.clients.manage", "hq.analytics", "hq.aura", "hq.notifications",
+    "hq.programs", "hq.grants", "hq.hr", "hq.clients", "hq.clients.manage", "hq.analytics", "hq.aura", "hq.notifications", "hq.documents",
   ],
   manager: [
-    "hq.programs", "hq.hr", "hq.hr.approve", "hq.clients", "hq.aura", "hq.notifications",
+    "hq.programs", "hq.hr", "hq.hr.approve", "hq.clients", "hq.aura", "hq.notifications", "hq.documents",
   ],
   board_member: [
-    "hq.executive", "hq.grants", "hq.finance", "hq.donations", "hq.aura", "hq.analytics", "hq.notifications",
+    "hq.executive", "hq.grants", "hq.finance", "hq.donations", "hq.aura", "hq.analytics", "hq.notifications", "hq.documents",
   ],
   grant_manager: [
     "hq.executive", "hq.grants", "hq.grants.manage", "hq.finance", "hq.donations", "hq.aura",
-    "hq.analytics", "hq.notifications",
+    "hq.analytics", "hq.notifications", "hq.documents",
   ],
   employee: [
-    "hq.hr.self", "hq.programs", "hq.clients", "hq.aura", "hq.notifications", "app.barbers", "app.music", "app.radio",
+    "hq.hr.self", "hq.programs", "hq.clients", "hq.aura", "hq.notifications", "hq.documents", "app.barbers", "app.music", "app.radio",
   ],
   volunteer: [
     "hq.hr.self", "hq.programs", "hq.aura", "hq.notifications",
@@ -182,6 +183,10 @@ export const HQ_MODULE_PERMISSIONS: Record<string, EnterpriseRole[]> = {
   software_division: ["founder", "executive", "administrator"],
   aura: ["founder", "executive", "administrator", "board_member", "grant_manager", "employee", "volunteer", "barber", "client", "donor"],
   settings: ["founder", "executive", "administrator"],
+  documents: [
+    "founder", "executive", "administrator", "hr", "finance", "program_director",
+    "manager", "board_member", "grant_manager", "employee",
+  ],
   analytics: ["founder", "executive", "administrator", "board_member", "grant_manager"],
   notifications: ["founder", "executive", "administrator", "board_member", "grant_manager", "employee", "volunteer"],
   operations: ["founder", "executive", "administrator"],
@@ -218,7 +223,7 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   "/hq/housing": "hq.programs",
   "/hq/scholarships": "hq.programs",
   "/hq/media": "hq.programs",
-  "/hq/documents": "hq.settings",
+  "/hq/documents": "hq.documents",
   "/hq/intelligence": "hq.analytics",
   "/hq/phase9": "hq.executive",
   "/hq/phase10": "hq.executive",

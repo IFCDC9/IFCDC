@@ -11,7 +11,7 @@ export type Permission =
   | "hq.executive" | "hq.hr" | "hq.hr.manage" | "hq.hr.approve" | "hq.hr.self" | "hq.payroll"
   | "hq.grants" | "hq.grants.manage" | "hq.finance" | "hq.finance.manage"
   | "hq.donations" | "hq.programs" | "hq.software" | "hq.aura"
-  | "hq.analytics" | "hq.notifications" | "hq.settings" | "hq.settings.manage"
+  | "hq.analytics" | "hq.notifications" | "hq.settings" | "hq.settings.manage" | "hq.documents"
   | "app.barbers" | "app.music" | "app.radio" | "app.tapis"
   | "app.inclusive" | "app.swiftware" | "app.cryptocoin";
 
@@ -49,7 +49,7 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   "/hq/housing": "hq.programs",
   "/hq/scholarships": "hq.programs",
   "/hq/media": "hq.programs",
-  "/hq/documents": "hq.settings",
+  "/hq/documents": "hq.documents",
   "/hq/knowledge": "hq.grants",
   "/hq/assets": "hq.settings",
   "/hq/fleet": "hq.settings",
