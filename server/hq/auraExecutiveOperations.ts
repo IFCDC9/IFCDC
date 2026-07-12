@@ -47,6 +47,9 @@ export type ExecutiveOpId =
   | "save_report"
   | "generate_executive_report"
   | "queue_grant_submission"
+  | "run_live_grant_workflow"
+  | "confirm_grant_portal_submission"
+  | "monitor_grant_application"
   | "enterprise_diagnostics"
   | "prepare_payroll_summary"
   | "generate_compliance_report"
@@ -292,6 +295,51 @@ export function parseExecutiveIntent(command: string): ParsedExecutiveIntent | n
       args: { message: c },
       highImpact: false,
       confidence: "high",
+    };
+  }
+
+  // Live grant executive workflow (search → match → draft → Founder gate)
+  if (
+    /\b(find|search|locate)\b.*\b(best|live)\b.*\bgrant\b/i.test(c)
+    || /\b(prepare|build|run)\b.*\b(complete|full)\b.*\b(grant )?(application|proposal|workflow)\b/i.test(c)
+    || /\blive grant workflow\b/i.test(c)
+    || /\bgrant workflow\b.*\b(live|production|end.?to.?end)\b/i.test(c)
+    || /\bfind the best live grant\b/i.test(c)
+  ) {
+    return {
+      op: "run_live_grant_workflow",
+      args: { query: c, note: c },
+      highImpact: false,
+      confidence: "high",
+    };
+  }
+
+  // Confirm portal submission (after Founder approval + external Grants.gov submit)
+  if (
+    /\b(confirm|record)\b.*\b(portal|grants\.gov)\b.*\b(submission|confirmation)\b/i.test(c)
+    || /\bportal confirmation (id|number)\b/i.test(c)
+  ) {
+    const idMatch = c.match(/\b(GA[A-Z0-9-]+|GRANT-[A-Z0-9-]+|[A-Z0-9]{8,})\b/i);
+    const appMatch = c.match(/\b(?:application|app)[:\s]+([a-z0-9-]{8,})\b/i);
+    return {
+      op: "confirm_grant_portal_submission",
+      args: {
+        portalConfirmationId: idMatch?.[1] ?? "",
+        applicationId: appMatch?.[1] ?? "",
+        note: c,
+      },
+      highImpact: true,
+      confidence: "medium",
+    };
+  }
+
+  if (/\b(monitor|track|status of)\b.*\b(grant|application)\b/i.test(c)) {
+    const appMatch = c.match(/\b(?:application|app)[:\s]+([a-z0-9-]{8,})\b/i);
+    return {
+      op: "monitor_grant_application",
+      args: { applicationId: appMatch?.[1] ?? "", note: c },
+      highImpact: false,
+      confidence: "medium",
     };
   }
 
@@ -847,12 +895,46 @@ export async function executeQueueGrantSubmission(
 ): Promise<ExecutiveActionResult> {
   const denied = requireFounder(ctx);
   if (denied) return denied;
+
+  const applicationId =
+    typeof args.applicationId === "string" && args.applicationId.trim()
+      ? args.applicationId.trim()
+      : null;
+
+  if (applicationId) {
+    const { buildGrantSubmissionPackage } = await import("./executiveGrantWorkflowEngine");
+    // Stage only — do not approve on queue. Surface the portal checklist.
+    const pkg = await buildGrantSubmissionPackage(applicationId);
+    const { createWorkflowInstance } = await import("./workflowEngine");
+    const instance = await createWorkflowInstance({
+      workflowKey: "board_approval",
+      title: "Grant submission queue — awaiting Founder approval",
+      entityType: "grant_submission",
+      entityId: applicationId,
+      assignedTo: getFounderEmail(),
+      priority: "high",
+      payload: { note: args.note, stagedBy: "aura", actor: ctx.actorEmail },
+    });
+    return {
+      status: "pending_approval",
+      summary: pkg.founderGate.ready
+        ? "Founder approval is already on file. Complete Grants.gov in the portal, then confirm the confirmation ID in HQ. AURA will not auto-submit."
+        : "Grant submission is staged for your explicit Founder approval. After you approve, complete Grants.gov portal submission and confirm the ID — AURA never submits externally.",
+      data: { workflow: instance, package: pkg },
+      approval: {
+        path: `/hq/grants?application=${applicationId}`,
+        label: "Review & approve grant package",
+      },
+      navigation: { path: "/hq/grants", label: "Open Grant Center" },
+    };
+  }
+
   const { createWorkflowInstance } = await import("./workflowEngine");
   const instance = await createWorkflowInstance({
     workflowKey: "board_approval",
     title: "Grant submission queue — awaiting Founder approval",
     entityType: "grant_submission",
-    entityId: typeof args.applicationId === "string" ? args.applicationId : undefined,
+    entityId: undefined,
     assignedTo: getFounderEmail(),
     priority: "high",
     payload: { note: args.note, stagedBy: "aura", actor: ctx.actorEmail },
@@ -864,6 +946,127 @@ export async function executeQueueGrantSubmission(
     data: instance,
     approval: { path: "/hq/workflows", label: "Approve grant submission" },
     navigation: { path: "/hq/grants", label: "Open Grant Center" },
+  };
+}
+
+export async function executeRunLiveGrantWorkflow(
+  args: Record<string, unknown>,
+  ctx: ExecutiveActionContext
+): Promise<ExecutiveActionResult> {
+  const denied = requireFounder(ctx);
+  if (denied) return denied;
+
+  const { runLiveGrantExecutiveWorkflow } = await import("./executiveGrantWorkflowEngine");
+  const result = await runLiveGrantExecutiveWorkflow({
+    actorEmail: ctx.actorEmail,
+    programSlug: typeof args.program === "string" ? args.program : undefined,
+    query: typeof args.query === "string" ? args.query : undefined,
+    opportunityId: typeof args.opportunityId === "string" ? args.opportunityId : undefined,
+    syncFeeds: args.syncFeeds !== false,
+    autoDraft: args.autoDraft !== false,
+  });
+
+  if (!result.ok) {
+    return {
+      status: "error",
+      summary: result.error ?? "Live grant workflow could not complete.",
+      data: result,
+      navigation: { path: "/hq/grants", label: "Open Grant Center" },
+    };
+  }
+
+  return {
+    status: "pending_approval",
+    summary: result.summary ?? "Live grant package staged for Founder approval.",
+    data: result,
+    approval: {
+      path: result.founderActions?.openWorkspace ?? `/hq/grants?application=${result.applicationId}`,
+      label: "Approve grant package (Founder)",
+    },
+    navigation: {
+      path: result.founderActions?.openWorkspace ?? "/hq/grants",
+      label: "Open application workspace",
+    },
+  };
+}
+
+export async function executeConfirmGrantPortalSubmission(
+  args: Record<string, unknown>,
+  ctx: ExecutiveActionContext
+): Promise<ExecutiveActionResult> {
+  const denied = requireFounder(ctx);
+  if (denied) return denied;
+
+  const applicationId =
+    (typeof args.applicationId === "string" && args.applicationId.trim())
+    || (typeof ctx.contextRef?.applicationId === "string" ? ctx.contextRef.applicationId : "");
+  const portalConfirmationId =
+    (typeof args.portalConfirmationId === "string" && args.portalConfirmationId.trim())
+    || (typeof args.portal_confirmation_id === "string" && args.portal_confirmation_id.trim())
+    || "";
+
+  if (!applicationId || !portalConfirmationId) {
+    return {
+      status: "error",
+      summary:
+        "I need the application ID and Grants.gov portal confirmation ID. After you submit in the portal, say: confirm portal submission for application <id> confirmation <id>.",
+    };
+  }
+
+  const { confirmPortalSubmission } = await import("./executiveGrantWorkflowEngine");
+  const result = await confirmPortalSubmission(applicationId, {
+    actorEmail: ctx.actorEmail,
+    portalConfirmationId,
+    portalUrl: typeof args.portalUrl === "string" ? args.portalUrl : undefined,
+    notes: typeof args.note === "string" ? args.note : undefined,
+  });
+
+  if (!result.ok) {
+    return {
+      status: "error",
+      summary: "error" in result ? result.error : "Could not confirm portal submission",
+      data: result,
+    };
+  }
+
+  return {
+    status: "done",
+    summary:
+      "Portal submission confirmed and tracked. I will monitor this application and notify you of status changes until a final award decision.",
+    data: result,
+    navigation: { path: `/hq/grants?application=${applicationId}`, label: "Track application" },
+  };
+}
+
+export async function executeMonitorGrantApplication(
+  args: Record<string, unknown>,
+  ctx: ExecutiveActionContext
+): Promise<ExecutiveActionResult> {
+  const denied = requireFounder(ctx);
+  if (denied) return denied;
+
+  const applicationId =
+    (typeof args.applicationId === "string" && args.applicationId.trim())
+    || (typeof ctx.contextRef?.applicationId === "string" ? ctx.contextRef.applicationId : "");
+
+  if (!applicationId) {
+    return {
+      status: "error",
+      summary: "Specify which grant application to monitor (application ID).",
+    };
+  }
+
+  const { monitorGrantApplication } = await import("./executiveGrantWorkflowEngine");
+  const result = await monitorGrantApplication(applicationId);
+  if (!result.ok) {
+    return { status: "error", summary: result.error ?? "Monitor failed", data: result };
+  }
+
+  return {
+    status: "done",
+    summary: `${result.opportunityTitle ?? result.title}: ${result.nextAction}`,
+    data: result,
+    navigation: { path: `/hq/grants?application=${applicationId}`, label: "Open Grant Center" },
   };
 }
 
@@ -912,6 +1115,9 @@ const EXECUTORS: Record<
   save_report: executeSaveReport,
   generate_executive_report: executeGenerateExecutiveReport,
   queue_grant_submission: executeQueueGrantSubmission,
+  run_live_grant_workflow: executeRunLiveGrantWorkflow,
+  confirm_grant_portal_submission: executeConfirmGrantPortalSubmission,
+  monitor_grant_application: executeMonitorGrantApplication,
   enterprise_diagnostics: executeEnterpriseDiagnostics,
   prepare_payroll_summary: executePreparePayrollSummary,
   generate_compliance_report: executeComplianceReport,

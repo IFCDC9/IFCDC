@@ -144,6 +144,7 @@ import {
   buildEnrichedOpportunityList,
   buildFullApplicationWorkspace,
   setFounderApproval,
+  confirmPortalSubmission,
   listEnrichedApplications,
   GRANT_DISPLAY_WORKFLOW,
 } from "../hq/grantIntelligenceEngine";
@@ -442,6 +443,50 @@ router.post("/applications/:id/founder-approval", async (req: Request, res: Resp
   res.json(result);
 });
 
+/** Record Grants.gov (or funder) portal confirmation after Founder approval — HQ never auto-submits. */
+router.post("/applications/:id/confirm-portal-submission", async (req: Request, res: Response) => {
+  const portalConfirmationId = String(req.body?.portal_confirmation_id ?? req.body?.confirmationId ?? "").trim();
+  if (!portalConfirmationId) {
+    return res.status(400).json({ error: "portal_confirmation_id is required" });
+  }
+  const result = await confirmPortalSubmission(req.params.id, {
+    actorEmail: req.hqUser?.email,
+    portalConfirmationId,
+    portalUrl: typeof req.body?.portal_url === "string" ? req.body.portal_url : undefined,
+    evidenceDocumentId: typeof req.body?.evidence_document_id === "string" ? req.body.evidence_document_id : undefined,
+    notes: typeof req.body?.notes === "string" ? req.body.notes : undefined,
+  });
+  if (!result.ok) return res.status(403).json(result);
+  res.json(result);
+});
+
+/** End-to-end live grant workflow: sync → match → draft → Founder gate (no auto-submit). */
+router.post("/executive/live-workflow", async (req: Request, res: Response) => {
+  const { runLiveGrantExecutiveWorkflow } = await import("../hq/executiveGrantWorkflowEngine");
+  const result = await runLiveGrantExecutiveWorkflow({
+    actorEmail: req.hqUser?.email,
+    programSlug: typeof req.body?.program === "string" ? req.body.program : undefined,
+    query: typeof req.body?.query === "string" ? req.body.query : undefined,
+    opportunityId: typeof req.body?.opportunityId === "string" ? req.body.opportunityId : undefined,
+    syncFeeds: req.body?.syncFeeds !== false,
+    autoDraft: req.body?.autoDraft !== false,
+  });
+  if (!result.ok) return res.status(400).json(result);
+  res.json(result);
+});
+
+router.get("/applications/:id/submission-package", async (req: Request, res: Response) => {
+  const { buildGrantSubmissionPackage } = await import("../hq/executiveGrantWorkflowEngine");
+  res.json(await buildGrantSubmissionPackage(req.params.id));
+});
+
+router.get("/applications/:id/monitor", async (req: Request, res: Response) => {
+  const { monitorGrantApplication } = await import("../hq/executiveGrantWorkflowEngine");
+  const result = await monitorGrantApplication(req.params.id);
+  if (!result.ok) return res.status(404).json(result);
+  res.json(result);
+});
+
 router.get("/applications/:id/full-workspace", async (req, res) => {
   const workspace = await buildFullApplicationWorkspace(req.params.id, { actorEmail: req.hqUser?.email });
   if (!workspace) return res.status(404).json({ error: "Application not found" });
@@ -722,6 +767,35 @@ router.patch("/applications/:id", async (req, res) => {
   const { status, amount_requested, amount_awarded, notes, assigned_to } = req.body;
   const db = await getDb();
   const now = new Date().toISOString();
+
+  if (status === "submitted") {
+    const confirmation =
+      typeof req.body?.portal_confirmation_id === "string" ? req.body.portal_confirmation_id.trim() : "";
+    const { confirmPortalSubmission } = await import("../hq/grantIntelligenceEngine");
+    if (!confirmation) {
+      const { assertFounderApprovedForSubmit } = await import("../hq/grantIntelligenceEngine");
+      const gate = await assertFounderApprovedForSubmit(req.params.id);
+      if (!gate.ok) return res.status(403).json({ error: gate.error, code: gate.code });
+      if (!(gate.application as { portal_confirmation_id?: string }).portal_confirmation_id) {
+        return res.status(400).json({
+          error:
+            "portal_confirmation_id required. After Founder approval, complete Grants.gov portal submission and confirm the ID via POST /applications/:id/confirm-portal-submission.",
+          code: "portal_confirmation_required",
+        });
+      }
+    } else {
+      const confirmed = await confirmPortalSubmission(req.params.id, {
+        actorEmail: req.hqUser?.email,
+        portalConfirmationId: confirmation,
+        portalUrl: typeof req.body?.portal_url === "string" ? req.body.portal_url : undefined,
+        notes: typeof notes === "string" ? notes : undefined,
+      });
+      if (!confirmed.ok) return res.status(403).json(confirmed);
+      const row = await db.get("SELECT * FROM grant_applications WHERE id = ?", req.params.id);
+      return res.json({ application: row });
+    }
+  }
+
   const submitted_at = status === "submitted" ? now : undefined;
   await db.run(
     `UPDATE grant_applications SET

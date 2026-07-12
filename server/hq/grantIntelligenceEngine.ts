@@ -361,7 +361,169 @@ export async function setFounderApproval(
   } catch {
     /* optional realtime */
   }
+
+  // Notify that approval state changed
+  if (action === "approve") {
+    try {
+      const { createLeadershipAlert } = await import("./criticalAlerts");
+      await createLeadershipAlert({
+        alertType: "grant_founder_approved",
+        title: "Founder approved — ready for portal submission",
+        message: `Application ${applicationId} is approved and ready_to_submit. Complete Grants.gov portal submission, then confirm the confirmation ID in HQ.`,
+        priority: "high",
+        sourceModule: "grants",
+        path: `/hq/grants?application=${applicationId}`,
+      });
+    } catch {
+      /* optional */
+    }
+  }
+
   return { ok: true, workspace: await buildFullApplicationWorkspace(applicationId, opts) };
+}
+
+/**
+ * Hard gate: HQ may mark an application submitted only after Founder approval
+ * and ready_to_submit. Grants.gov portal submission remains human-executed;
+ * HQ records the confirmation evidence.
+ */
+export async function assertFounderApprovedForSubmit(applicationId: string): Promise<{
+  ok: true;
+  application: Record<string, unknown>;
+} | { ok: false; error: string; code: string }> {
+  const db = await getDb();
+  const app = (await db.get(
+    `SELECT id, title, status, founder_approval_status, ready_to_submit, pipeline_stage,
+            portal_confirmation_id, portal_submitted_at
+     FROM grant_applications WHERE id = ?`,
+    applicationId
+  )) as Record<string, unknown> | undefined;
+  if (!app) return { ok: false, error: "Application not found", code: "not_found" };
+  if (String(app.founder_approval_status) !== "approved") {
+    return {
+      ok: false,
+      error: "Founder approval required before marking this application submitted.",
+      code: "founder_approval_required",
+    };
+  }
+  if (!Number(app.ready_to_submit)) {
+    return {
+      ok: false,
+      error: "Application is not marked ready_to_submit. Founder must approve and mark ready first.",
+      code: "not_ready",
+    };
+  }
+  return { ok: true, application: app };
+}
+
+/**
+ * Record that the Founder (or designee) completed portal submission externally.
+ * Requires Founder approval gate. Stores confirmation evidence — does not call Grants.gov API.
+ */
+export async function confirmPortalSubmission(
+  applicationId: string,
+  opts: {
+    actorEmail?: string;
+    portalConfirmationId: string;
+    portalUrl?: string;
+    evidenceDocumentId?: string;
+    notes?: string;
+  }
+) {
+  const gate = await assertFounderApprovedForSubmit(applicationId);
+  if (!gate.ok) return gate;
+
+  const db = await getDb();
+  const now = new Date().toISOString();
+
+  // Ensure evidence columns exist (idempotent)
+  for (const [col, type] of [
+    ["portal_confirmation_id", "TEXT"],
+    ["portal_url", "TEXT"],
+    ["portal_submitted_at", "TEXT"],
+    ["portal_evidence_document_id", "TEXT"],
+  ] as const) {
+    try {
+      await db.exec(`ALTER TABLE grant_applications ADD COLUMN ${col} ${type}`);
+    } catch {
+      /* exists */
+    }
+  }
+
+  await db.run(
+    `UPDATE grant_applications SET
+      status = 'submitted',
+      submitted_at = ?,
+      pipeline_stage = 'submitted',
+      lifecycle_stage = 'submitted',
+      portal_confirmation_id = ?,
+      portal_url = COALESCE(?, portal_url),
+      portal_submitted_at = ?,
+      portal_evidence_document_id = COALESCE(?, portal_evidence_document_id),
+      notes = CASE WHEN ? IS NOT NULL AND length(?) > 0 THEN trim(COALESCE(notes,'') || char(10) || ?) ELSE notes END,
+      updated_at = ?
+     WHERE id = ?`,
+    now,
+    opts.portalConfirmationId,
+    opts.portalUrl ?? null,
+    now,
+    opts.evidenceDocumentId ?? null,
+    opts.notes ?? null,
+    opts.notes ?? null,
+    opts.notes ? `Portal submit confirmed: ${opts.notes}` : null,
+    now,
+    applicationId
+  );
+
+  await logGrantActivity(
+    "application",
+    applicationId,
+    "portal_submission_confirmed",
+    `Confirmation ${opts.portalConfirmationId}`,
+    opts.actorEmail
+  );
+
+  try {
+    const { logHqAudit } = await import("./hqAuditLog");
+    await logHqAudit({
+      action: "grant_portal_submission_confirmed",
+      entityType: "grant_application",
+      entityId: applicationId,
+      actorEmail: opts.actorEmail,
+      detail: opts.portalConfirmationId,
+      metadata: { portalUrl: opts.portalUrl, evidenceDocumentId: opts.evidenceDocumentId },
+    });
+  } catch {
+    /* optional */
+  }
+
+  try {
+    const { createLeadershipAlert } = await import("./criticalAlerts");
+    await createLeadershipAlert({
+      alertType: "grant_submitted",
+      title: `Grant submitted: ${String(gate.application.title ?? applicationId)}`,
+      message: `Portal confirmation ${opts.portalConfirmationId}. AURA will continue monitoring this application.`,
+      priority: "high",
+      sourceModule: "grants",
+      path: `/hq/grants?application=${applicationId}`,
+    });
+  } catch {
+    /* optional */
+  }
+
+  try {
+    const { notifyHqDataChange } = await import("./hqRealtimeEvents");
+    notifyHqDataChange("grants");
+  } catch {
+    /* optional */
+  }
+
+  return {
+    ok: true,
+    application: await db.get("SELECT * FROM grant_applications WHERE id = ?", applicationId),
+    message:
+      "Portal submission recorded. HQ never auto-submits to Grants.gov — confirmation evidence is now tracked for monitoring and notifications.",
+  };
 }
 
 export async function listEnrichedApplications(opts?: { status?: string; limit?: number }) {

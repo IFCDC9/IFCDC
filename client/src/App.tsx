@@ -19,6 +19,10 @@ const GrantReportPage = lazy(() => import("./pages/GrantReportPage"));
 const LogicModelPage = lazy(() => import("./pages/LogicModelPage"));
 const AIAssistantPage = lazy(() => import("./pages/AIAssistantPage"));
 const SoftwareDivisionPage = lazyWithRetry(() => import("./pages/hq/SoftwareDivisionPage"), "SoftwareDivisionPage");
+const AuraSoftwareEngineeringPage = lazyWithRetry(
+  () => import("./pages/hq/AuraSoftwareEngineeringPage"),
+  "AuraSoftwareEngineeringPage"
+);
 const HqShellRoute = lazyWithRetry(
   () => import("./components/hq/HqShellRoute").then((m) => ({ default: m.HqShellRoute })),
   "HqShellRoute"
@@ -154,6 +158,7 @@ const App: React.FC = () => (
           <Route path="/hq/reports" element={<HqRoute path="/hq/reports"><EnterpriseReportingPage /></HqRoute>} />
           <Route path="/hq/operations" element={<HqRoute path="/hq/operations"><OperationsCenterPage /></HqRoute>} />
           <Route path="/hq/software" element={<HqRoute path="/hq/software"><SoftwareDivisionPage /></HqRoute>} />
+          <Route path="/hq/software-engineering" element={<HqRoute path="/hq/software-engineering"><AuraSoftwareEngineeringPage /></HqRoute>} />
           <Route path="/hq/sso" element={<HqRoute path="/hq/sso"><SsoGatewayPage /></HqRoute>} />
           <Route path="/hq/developer" element={<HqRoute path="/hq/developer"><DeveloperPortalPage /></HqRoute>} />
           <Route path="/hq/aura" element={<HqRoute path="/hq/aura"><AuraCommandCenterPage /></HqRoute>} />

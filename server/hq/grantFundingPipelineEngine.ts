@@ -615,7 +615,24 @@ export async function transitionFundingPipelineStage(opts: {
   await db.run(`UPDATE ${table} SET pipeline_stage = ?, updated_at = ? WHERE id = ?`, opts.toStage, new Date().toISOString(), opts.entityId);
 
   if (opts.entityType === "application") {
-    if (opts.toStage === "submitted") await db.run("UPDATE grant_applications SET status = 'submitted', submitted_at = ? WHERE id = ?", new Date().toISOString(), opts.entityId);
+    if (opts.toStage === "submitted") {
+      const { assertFounderApprovedForSubmit } = await import("./grantIntelligenceEngine");
+      const gate = await assertFounderApprovedForSubmit(opts.entityId);
+      if (!gate.ok) return { ok: false, error: gate.error, code: gate.code };
+      if (!opts.note && !(gate.application as { portal_confirmation_id?: string }).portal_confirmation_id) {
+        return {
+          ok: false,
+          error:
+            "Portal confirmation required. Use confirmPortalSubmission with Grants.gov confirmation ID, or pass note containing the confirmation reference.",
+          code: "portal_confirmation_required",
+        };
+      }
+      await db.run(
+        "UPDATE grant_applications SET status = 'submitted', submitted_at = ?, pipeline_stage = 'submitted' WHERE id = ?",
+        new Date().toISOString(),
+        opts.entityId
+      );
+    }
     if (opts.toStage === "declined") await db.run("UPDATE grant_applications SET status = 'denied' WHERE id = ?", opts.entityId);
     if (opts.toStage === "awarded") await db.run("UPDATE grant_applications SET status = 'awarded' WHERE id = ?", opts.entityId);
   }
@@ -705,6 +722,49 @@ export async function runPipelineNotificationScan(): Promise<number> {
 
   for (const a of recentAwards) {
     if (await ensureNotification("application", a.id, "award_received", `Award received: ${a.title}`, "Activate finance and compliance workflows")) created++;
+  }
+
+  const submitted = (await db.all(`
+    SELECT id, title, portal_confirmation_id, submitted_at FROM grant_applications
+    WHERE status IN ('submitted', 'under_review') AND submitted_at >= datetime('now', '-14 days')
+  `)) as { id: string; title: string; portal_confirmation_id: string | null; submitted_at: string }[];
+
+  for (const a of submitted) {
+    if (
+      await ensureNotification(
+        "application",
+        a.id,
+        "submission_tracking",
+        `Monitoring submission: ${a.title}`,
+        a.portal_confirmation_id
+          ? `Portal confirmation ${a.portal_confirmation_id} — tracking until award decision.`
+          : `Submitted ${a.submitted_at?.slice(0, 10) ?? ""} — add portal confirmation ID if missing.`
+      )
+    ) {
+      created++;
+    }
+  }
+
+  const aging = (await db.all(`
+    SELECT id, title, submitted_at FROM grant_applications
+    WHERE status = 'submitted'
+      AND submitted_at IS NOT NULL
+      AND submitted_at <= datetime('now', '-30 days')
+      AND submitted_at >= datetime('now', '-90 days')
+  `)) as { id: string; title: string; submitted_at: string }[];
+
+  for (const a of aging) {
+    if (
+      await ensureNotification(
+        "application",
+        a.id,
+        "submission_aging",
+        `Follow up recommended: ${a.title}`,
+        `Submitted ${a.submitted_at?.slice(0, 10)} — check funder status and update HQ.`
+      )
+    ) {
+      created++;
+    }
   }
 
   return created;

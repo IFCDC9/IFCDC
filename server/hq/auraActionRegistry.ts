@@ -45,6 +45,9 @@ import {
   executeComplianceReport,
   executeQueueGrantSubmission,
   executeNotifyWhenFinished,
+  executeRunLiveGrantWorkflow,
+  executeConfirmGrantPortalSubmission,
+  executeMonitorGrantApplication,
 } from "./auraExecutiveOperations";
 
 export type AuraActionKind = "read" | "prepare" | "execute";
@@ -1030,6 +1033,81 @@ const queueGrantSubmission: AuraAction = {
   },
 };
 
+const runLiveGrantWorkflow: AuraAction = {
+  id: "run_live_grant_workflow",
+  label: "Run Live Grant Workflow",
+  module: "grants",
+  kind: "execute",
+  description:
+    "Founder Mode: find the best live grant for IFCDC, match programs, draft the full proposal from real org data, identify gaps, and stage for Founder approval. Does NOT submit to Grants.gov.",
+  parameters: {
+    program: { type: "string", description: "Optional program slug filter" },
+    query: { type: "string", description: "Optional focus query" },
+    opportunityId: { type: "string", description: "Optional specific opportunity id" },
+  },
+  async run(args, ctx) {
+    if (!ctx.identity?.founderMode && !ctx.identity?.isFounder) {
+      return {
+        status: "error",
+        summary: "Founder Mode required to run the live grant executive workflow.",
+      };
+    }
+    return executeRunLiveGrantWorkflow(args, {
+      ...ctx,
+      identity: { ...ctx.identity!, founderMode: true },
+    });
+  },
+};
+
+const confirmGrantPortalSubmission: AuraAction = {
+  id: "confirm_grant_portal_submission",
+  label: "Confirm Portal Submission",
+  module: "grants",
+  kind: "execute",
+  description:
+    "Founder Mode: after you submit in Grants.gov, record the portal confirmation ID so HQ can track and notify until award decision. Requires prior Founder approval.",
+  parameters: {
+    applicationId: { type: "string" },
+    portalConfirmationId: { type: "string" },
+    portalUrl: { type: "string" },
+  },
+  async run(args, ctx) {
+    if (!ctx.identity?.founderMode && !ctx.identity?.isFounder) {
+      return {
+        status: "error",
+        summary: "Founder Mode required to confirm portal submission.",
+      };
+    }
+    return executeConfirmGrantPortalSubmission(args, {
+      ...ctx,
+      identity: { ...ctx.identity!, founderMode: true },
+    });
+  },
+};
+
+const monitorGrantApplication: AuraAction = {
+  id: "monitor_grant_application",
+  label: "Monitor Grant Application",
+  module: "grants",
+  kind: "execute",
+  description: "Founder Mode: status, aging, and next actions for a tracked grant application.",
+  parameters: {
+    applicationId: { type: "string" },
+  },
+  async run(args, ctx) {
+    if (!ctx.identity?.founderMode && !ctx.identity?.isFounder) {
+      return {
+        status: "error",
+        summary: "Founder Mode required to monitor grant applications via AURA.",
+      };
+    }
+    return executeMonitorGrantApplication(args, {
+      ...ctx,
+      identity: { ...ctx.identity!, founderMode: true },
+    });
+  },
+};
+
 const notifyWhenFinished: AuraAction = {
   id: "notify_when_finished",
   label: "Notify When Finished",
@@ -1041,6 +1119,222 @@ const notifyWhenFinished: AuraAction = {
   },
   async run(args, ctx) {
     return executeNotifyWhenFinished(args, ctx);
+  },
+};
+
+function requireSeFounder(ctx: AuraActionContext): AuraActionResult | null {
+  if (ctx.identity?.founderMode || ctx.identity?.isFounder) return null;
+  return { status: "error", summary: "Founder Mode required for this software engineering action." };
+}
+
+const sePortfolioStatus: AuraAction = {
+  id: "se_portfolio_status",
+  label: "Software Portfolio Status",
+  module: "software",
+  kind: "read",
+  description: "IFCDC Software Division portfolio: app health, GitHub vs Render alignment, open diagnoses, pending Founder approvals.",
+  parameters: {},
+  async run(_args, _ctx) {
+    const { buildSoftwareEngineeringDashboard } = await import("./auraSoftwareEngineeringEngine");
+    const data = await buildSoftwareEngineeringDashboard();
+    return {
+      status: "done",
+      summary: `Portfolio: ${data.apps.length} apps, deploy ${data.github?.deploymentStatus ?? "unknown"}, ${data.pendingApprovals.length} approvals waiting.`,
+      data,
+      navigation: { path: "/hq/software-engineering", label: "Open Software Engineering" },
+    };
+  },
+};
+
+const seDiagnose: AuraAction = {
+  id: "se_diagnose",
+  label: "Diagnose Software Issue",
+  module: "software",
+  kind: "prepare",
+  description: "Diagnose a bug/crash/API failure with root cause, affected files, severity, risk, required tests, and Founder approval flag.",
+  parameters: {
+    symptom: { type: "string", description: "What is broken or the error observed." },
+    repoId: { type: "string" },
+  },
+  async run(args, ctx) {
+    const symptom = str(args.symptom) || str(args.query) || "Investigate reported software issue";
+    const { diagnoseIssue } = await import("./auraSoftwareEngineeringEngine");
+    const data = await diagnoseIssue({
+      symptom,
+      repoId: str(args.repoId),
+      actorEmail: ctx.actorEmail,
+      founderMode: Boolean(ctx.identity?.founderMode || ctx.identity?.isFounder),
+    });
+    return {
+      status: "prepared",
+      summary: `${data.severity}: ${data.rootCause}`,
+      data,
+      navigation: { path: "/hq/software-engineering", label: "Review diagnosis" },
+      approval: { path: "/hq/software-engineering", label: "Founder gate before production change" },
+    };
+  },
+};
+
+const sePrepareFix: AuraAction = {
+  id: "se_prepare_fix",
+  label: "Prepare Fix Package",
+  module: "software",
+  kind: "execute",
+  description: "Founder Mode: create an isolated aura/se-* change package (branch when workspace configured). Never edits production main directly.",
+  parameters: {
+    title: { type: "string" },
+    diagnosisId: { type: "string" },
+    repoId: { type: "string" },
+  },
+  async run(args, ctx) {
+    const denied = requireSeFounder(ctx);
+    if (denied) return denied;
+    const title = str(args.title) || "AURA software fix";
+    const { prepareFixPackage } = await import("./auraSoftwareEngineeringEngine");
+    const data = await prepareFixPackage({
+      title,
+      diagnosisId: str(args.diagnosisId),
+      repoId: str(args.repoId),
+      actorEmail: ctx.actorEmail,
+      founderMode: true,
+    });
+    return {
+      status: "prepared",
+      summary: `Change package ${data.id} on branch ${data.branch}. Tests and Founder approval required before push.`,
+      data,
+      navigation: { path: "/hq/software-engineering", label: "Open change package" },
+      approval: { path: "/hq/software-engineering", label: "Request Founder approval" },
+    };
+  },
+};
+
+const seRunTests: AuraAction = {
+  id: "se_run_tests",
+  label: "Run Engineering Tests",
+  module: "software",
+  kind: "execute",
+  description: "Founder Mode: run real npm check/build/test when AURA_SE_WORKSPACE_ROOT is set. Never fakes a pass.",
+  parameters: {
+    changePackageId: { type: "string" },
+    relativeCwd: { type: "string" },
+  },
+  async run(args, ctx) {
+    const denied = requireSeFounder(ctx);
+    if (denied) return denied;
+    const { runSoftwareEngineeringTests } = await import("./auraSoftwareTestRunner");
+    const data = await runSoftwareEngineeringTests({
+      changePackageId: str(args.changePackageId),
+      relativeCwd: str(args.relativeCwd),
+      actorEmail: ctx.actorEmail,
+    });
+    return {
+      status: data.status === "passed" ? "done" : data.status === "blocked_no_workspace" ? "prepared" : "error",
+      summary: data.message,
+      data,
+    };
+  },
+};
+
+const sePreparePr: AuraAction = {
+  id: "se_prepare_pr",
+  label: "Prepare Pull Request",
+  module: "software",
+  kind: "execute",
+  description: "Founder Mode: prepare PR instructions (gh pr create). Push/merge still need Founder approval.",
+  parameters: {
+    branch: { type: "string" },
+    title: { type: "string" },
+    body: { type: "string" },
+  },
+  async run(args, ctx) {
+    const denied = requireSeFounder(ctx);
+    if (denied) return denied;
+    const { buildPrInstructions, getLocalGitStatus } = await import("./auraSoftwareGitEngine");
+    const status = await getLocalGitStatus();
+    const branch = str(args.branch) || (typeof status.branch === "string" ? status.branch : "aura/se-fix");
+    const data = await buildPrInstructions({
+      branch,
+      title: str(args.title) || "AURA Software Engineering change",
+      body: str(args.body) || "Founder-reviewed change package.",
+    });
+    return {
+      status: "pending_approval",
+      summary: "PR instructions ready. Do not merge to main without Founder approval.",
+      data: { ...data, gitStatus: status },
+      approval: { path: "/hq/software-engineering", label: "Approve push/PR" },
+    };
+  },
+};
+
+const seCompareDeploy: AuraAction = {
+  id: "se_compare_deploy",
+  label: "Compare GitHub vs Render",
+  module: "software",
+  kind: "read",
+  description: "Compare GitHub main commit with RENDER_GIT_COMMIT / live deploy alignment.",
+  parameters: {},
+  async run(_args, _ctx) {
+    const { compareDeployAlignment } = await import("./auraSoftwareEngineeringEngine");
+    const data = await compareDeployAlignment();
+    return {
+      status: "done",
+      summary: data.recommendation,
+      data,
+      navigation: { path: "/hq/software-engineering", label: "Open Software Engineering" },
+    };
+  },
+};
+
+const seRequestFounderApproval: AuraAction = {
+  id: "se_request_founder_approval",
+  label: "Request SE Founder Approval",
+  module: "software",
+  kind: "execute",
+  description:
+    "Founder Mode: create an approval record with exact repository, branch, commit, service, action, and risk summary before push/deploy/migrate.",
+  parameters: {
+    changePackageId: { type: "string" },
+    repository: { type: "string" },
+    branch: { type: "string" },
+    commitSha: { type: "string" },
+    service: { type: "string" },
+    action: {
+      type: "string",
+      enum: ["push", "push_and_pr", "merge_main", "deploy_production", "rollback_production", "migrate_production"],
+    },
+    riskSummary: { type: "string" },
+  },
+  async run(args, ctx) {
+    const denied = requireSeFounder(ctx);
+    if (denied) return denied;
+    const repository = str(args.repository);
+    const branch = str(args.branch);
+    const service = str(args.service);
+    const action = str(args.action);
+    const riskSummary = str(args.riskSummary);
+    if (!repository || !branch || !service || !action || !riskSummary) {
+      return {
+        status: "error",
+        summary: "Need repository, branch, service, action, and riskSummary for a valid Founder approval record.",
+      };
+    }
+    const { requestFounderApproval } = await import("./auraSoftwareEngineeringEngine");
+    const data = await requestFounderApproval({
+      changePackageId: str(args.changePackageId),
+      repository,
+      branch,
+      commitSha: str(args.commitSha),
+      service,
+      action: action as "push" | "push_and_pr" | "merge_main" | "deploy_production" | "rollback_production" | "migrate_production",
+      riskSummary,
+      actorEmail: ctx.actorEmail,
+    });
+    return {
+      status: "pending_approval",
+      summary: data.message as string,
+      data,
+      approval: { path: "/hq/software-engineering", label: "Approve in Software Engineering" },
+    };
   },
 };
 
@@ -1083,7 +1377,17 @@ export const AURA_ACTIONS: AuraAction[] = [
   preparePayroll,
   complianceReport,
   queueGrantSubmission,
+  runLiveGrantWorkflow,
+  confirmGrantPortalSubmission,
+  monitorGrantApplication,
   notifyWhenFinished,
+  sePortfolioStatus,
+  seDiagnose,
+  sePrepareFix,
+  seRunTests,
+  sePreparePr,
+  seCompareDeploy,
+  seRequestFounderApproval,
 ];
 
 const ACTION_MAP = new Map(AURA_ACTIONS.map((a) => [a.id, a]));

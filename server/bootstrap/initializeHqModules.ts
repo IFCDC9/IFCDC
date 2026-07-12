@@ -71,6 +71,17 @@ export async function initializeHqModules(founder: FounderSeedConfig): Promise<v
   await ensureExecutiveDecisionIntelligenceTables();
   const { ensureEnterpriseOsTables } = await import("../hq/auraEnterpriseOs4");
   await ensureEnterpriseOsTables();
+  const { ensureAuraSoftwareEngineeringTables } = await import("../hq/auraSoftwareEngineeringSchema");
+  await ensureAuraSoftwareEngineeringTables();
+  // Deferred code index refresh (never blocks boot).
+  setTimeout(() => {
+    void import("../hq/auraCodeIndexEngine")
+      .then(({ refreshCodeIndex }) => refreshCodeIndex({ preferLocal: true }))
+      .then((r) => {
+        if (r) console.log(`AURA SE code index: ${r.message}`);
+      })
+      .catch((e) => console.warn("AURA SE code index skipped:", e?.message));
+  }, 150_000);
   // Build AURA's institutional knowledge base from live HQ data. Deferred so
   // dashboard reads are not blocked at boot; embedding controlled by env flag.
   setTimeout(() => {
@@ -141,6 +152,11 @@ export async function initializeHqModules(founder: FounderSeedConfig): Promise<v
       .then(({ verifyIntegrationsOnStartup }) => verifyIntegrationsOnStartup())
       .catch((e) => console.warn("Integrations startup verification skipped:", e?.message));
   }, 45_000);
+
+  // Executive Action Engine — continuous integration recovery + Founder alerts.
+  import("../hq/enterpriseMonitoringEngine")
+    .then(({ scheduleEnterpriseMonitoringWatchdog }) => scheduleEnterpriseMonitoringWatchdog())
+    .catch((e) => console.warn("Enterprise monitoring watchdog skipped:", e?.message));
 
   console.log("IFCDC HQ database and modules initialized");
 }

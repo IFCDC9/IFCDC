@@ -75,7 +75,9 @@ You help authenticated users run the organization by turning commands into real 
 RULES:
 - Prefer EXECUTING a tool over describing what you would do. If a tool fits, call it.
 - Founder Mode may use execute tools: send_email, send_sms, place_call, create_calendar_event, create_document, send_notification, generate_executive_report, enterprise_diagnostics, etc.
+- Software engineering (diagnose bugs, prepare fixes, run tests, prepare PRs, compare GitHub vs Render) must use se_* tools. Never invent test results. Never push/deploy without Founder approval.
 - For high-impact irreversible work (submit grant, payments, production delete/deploy, org-wide blast), stage with prepare_for_approval or queue_grant_submission — do not claim it was submitted.
+- For "find the best live grant / prepare complete application", call run_live_grant_workflow. After Founder approval and portal submit, call confirm_grant_portal_submission with the confirmation ID. Use monitor_grant_application to track status.
 - Casual Founder requests like "email service@ifcdc.org", "text my phone", "call me", "schedule a meeting" MUST call the matching execute tool immediately.
 - Be concise and executive. Never invent data.
 - When Founder Mode is active, recognize Fahreal Allah as Founder / Super Admin without re-asking identity.`;
@@ -249,6 +251,48 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
         navigation: executed.navigation,
         approvalsCreated,
         poweredBy: "AURA Executive Operations",
+        identity: publicIdentitySummary(identity),
+      };
+    }
+  }
+
+  // AURA Software Engineering Engine — diagnose/fix/test/PR (short-circuit before LLM).
+  {
+    const { wantsSoftwareEngineeringCommand, handleSoftwareEngineeringCommand } = await import(
+      "./auraSoftwareEngineeringEngine"
+    );
+    if (wantsSoftwareEngineeringCommand(command)) {
+      const se = await handleSoftwareEngineeringCommand({
+        command,
+        actorEmail: identity.email || input.actorEmail,
+        founderMode: Boolean(identity.founderMode || identity.isFounder),
+        isFounder: Boolean(identity.isFounder || identity.founderMode),
+      });
+      await logAuraIdentityAction({
+        identity,
+        action: "aura_software_engineering",
+        detail: se.reply.slice(0, 240),
+        metadata: { action: se.action, approvalRequired: se.approvalRequired },
+      });
+      return {
+        reply: se.reply,
+        actions: [
+          {
+            id: se.action,
+            label: "Software Engineering",
+            status: se.action === "blocked" || se.action === "denied" ? "error" : se.approvalRequired ? "pending_approval" : "done",
+            summary: se.reply,
+            data: se.data,
+            navigation: { path: "/hq/software-engineering", label: "Open Software Engineering" },
+            approval: se.approvalRequired
+              ? { path: "/hq/software-engineering", label: "Founder approval required" }
+              : undefined,
+          },
+        ],
+        approvalsCreated: se.approvalRequired
+          ? [{ path: "/hq/software-engineering", label: "Founder approval required" }]
+          : [],
+        poweredBy: "AURA Software Engineering",
         identity: publicIdentitySummary(identity),
       };
     }

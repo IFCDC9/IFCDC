@@ -455,3 +455,54 @@ export async function retryDegradedIntegrations(opts?: {
     testedAt: new Date().toISOString(),
   };
 }
+
+/** Continuous recovery + Founder alerts for sustained integration failures. */
+let monitoringWatchdogTimer: ReturnType<typeof setInterval> | null = null;
+const failureStreak = new Map<string, number>();
+
+export function scheduleEnterpriseMonitoringWatchdog(): void {
+  if (monitoringWatchdogTimer) return;
+  const intervalMs = Number(process.env.ENTERPRISE_MONITOR_INTERVAL_MS || 15 * 60_000);
+  const run = async () => {
+    try {
+      const overview = await buildEnterpriseMonitoringOverview({ bypassCache: true });
+      const retry = await retryDegradedIntegrations({ maxProviders: 8 });
+      for (const id of retry.recovered) failureStreak.delete(id);
+      for (const f of retry.failed) {
+        const n = (failureStreak.get(f.id) ?? 0) + 1;
+        failureStreak.set(f.id, n);
+        if (n >= 2) {
+          try {
+            const { createLeadershipAlert } = await import("./criticalAlerts");
+            await createLeadershipAlert({
+              alertType: "enterprise_monitor_failure",
+              title: `Integration still degraded: ${f.id}`,
+              message: `${f.message}. AURA attempted automatic recovery ${n} times. Recommend checking credentials and provider status.`,
+              priority: "high",
+              sourceModule: "technical",
+              path: "/hq/integrations",
+            });
+          } catch {
+            /* optional */
+          }
+        }
+      }
+      if (overview.degraded || (overview.alerts?.length ?? 0) > 0) {
+        console.log(
+          `Enterprise monitoring: score=${overview.overallScore ?? "n/a"} recovered=${retry.recovered.length} failed=${retry.failed.length}`
+        );
+      }
+    } catch (err) {
+      console.warn(
+        "Enterprise monitoring watchdog tick failed:",
+        err instanceof Error ? err.message : err
+      );
+    }
+  };
+  monitoringWatchdogTimer = setInterval(() => {
+    void run();
+  }, intervalMs);
+  // First pass after boot settle
+  setTimeout(() => void run(), 180_000);
+  console.log(`Enterprise monitoring watchdog: every ${Math.round(intervalMs / 60_000)}m`);
+}
