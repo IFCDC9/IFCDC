@@ -33,15 +33,15 @@ export const FUNDING_PIPELINE_STAGES = [
 export type FundingPipelineStage = (typeof FUNDING_PIPELINE_STAGES)[number];
 
 export const FUNDING_PIPELINE_LABELS: Record<FundingPipelineStage, string> = {
-  discovered: "Discovered",
-  matched: "Matched",
-  qualified: "Qualified",
-  drafting: "Drafting",
+  discovered: "Opportunity Identified",
+  matched: "Under Review",
+  qualified: "Eligibility Verified",
+  drafting: "Application In Progress",
   internal_review: "Internal Review",
   founder_approval: "Founder Approval",
   ready_for_submission: "Ready for Submission",
   submitted: "Submitted",
-  under_review: "Under Review",
+  under_review: "Under Evaluation",
   awarded: "Awarded",
   declined: "Declined",
   closed: "Closed",

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, Suspense } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Shield, Plus, CheckCircle, Users, Calendar, Award, Bell, Handshake } from "lucide-react";
 import HQLayout from "../../layouts/HQLayout";
@@ -14,6 +14,11 @@ import { GrantLibraryPanel, GrantWriterStudioPanel, GrantIntelligencePanel } fro
 import { GrantDiscoverHub, GrantApplicationsHub } from "../../components/hq/grants/GrantLifecycleHub";
 import { GrantFullApplicationWorkspace } from "../../components/hq/grants/GrantFullApplicationWorkspace";
 import { GrantEnterprisePipelineHub } from "../../components/hq/grants/GrantEnterprisePipelineHub";
+import {
+  GrantFoundationDashboardPanel,
+  GrantFoundationPipelineBoard,
+  GrantFoundationCalendarPanel,
+} from "../../components/hq/grants/GrantFoundationDashboard";
 import { fmtGrantDeadline } from "../../utils/grantFormat";
 import { GrantReadOnlyBanner } from "../../components/hq/grants/GrantReadOnlyBanner";
 import { GrantQueryBoundary } from "../../components/hq/grants/GrantQueryBoundary";
@@ -129,7 +134,7 @@ const GrantCenterPage: React.FC = () => {
   const [newApp, setNewApp] = useState({ title: "", opportunity_id: "", amount_requested: "" });
   const [newOpp, setNewOpp] = useState({
     title: "", funder: "", description: "", amount_min: "", amount_max: "", deadline: "", url: "",
-    division_slugs: [] as string[], eligibility: "", geography: "local",
+    division_slugs: [] as string[], eligibility: "", geography: "local", funder_type: "foundation",
   });
   const [selectedAward, setSelectedAward] = useState("");
   const [docForm, setDocForm] = useState({ name: "", file_url: "", application_id: "" });
@@ -335,7 +340,13 @@ const GrantCenterPage: React.FC = () => {
       <div className="hq-tab-content hq-fade-in">
         {tab === "overview" && (
           <>
-            <GrantIntelligencePanel onStartApplication={handleStartApplication} />
+            <GrantFoundationDashboardPanel
+              onOpenPipeline={() => selectTab("pipeline")}
+              onOpenCalendar={() => { selectTab("calendar"); setCalendarSection("calendar"); }}
+            />
+            <div style={{ marginTop: "1.25rem" }}>
+              <GrantIntelligencePanel onStartApplication={handleStartApplication} />
+            </div>
             <div style={{ marginTop: "1.25rem" }}>
               <GrantV5FundingIntelligenceDashboard />
             </div>
@@ -442,13 +453,22 @@ const GrantCenterPage: React.FC = () => {
 
         {tab === "pipeline" && (
           <Suspense fallback={<TabFallback />}>
-            <GrantEnterprisePipelineHub
+            <GrantFoundationPipelineBoard
               onOpenApplication={(id) => {
                 setSelectedApplicationId(id);
                 selectTab("applications");
                 setAppsSection("studio");
               }}
             />
+            <div style={{ marginTop: "1.25rem" }}>
+              <GrantEnterprisePipelineHub
+                onOpenApplication={(id) => {
+                  setSelectedApplicationId(id);
+                  selectTab("applications");
+                  setAppsSection("studio");
+                }}
+              />
+            </div>
             <div style={{ marginTop: "1.25rem" }}>
               <GrantV5PipelineKanban />
             </div>
@@ -594,6 +614,17 @@ const GrantCenterPage: React.FC = () => {
                   <label>Funder<input className="hq-aura-input" value={newOpp.funder} onChange={(e) => setNewOpp({ ...newOpp, funder: e.target.value })} /></label>
                   <label>Min Amount<input className="hq-aura-input" type="number" value={newOpp.amount_min} onChange={(e) => setNewOpp({ ...newOpp, amount_min: e.target.value })} /></label>
                   <label>Max Amount<input className="hq-aura-input" type="number" value={newOpp.amount_max} onChange={(e) => setNewOpp({ ...newOpp, amount_max: e.target.value })} /></label>
+                  <label>Funder Type
+                    <select className="hq-aura-input" value={newOpp.funder_type} onChange={(e) => setNewOpp({ ...newOpp, funder_type: e.target.value })}>
+                      <option value="federal">Federal</option>
+                      <option value="state">State</option>
+                      <option value="county">County</option>
+                      <option value="municipal">Municipal</option>
+                      <option value="foundation">Foundation</option>
+                      <option value="corporate">Corporate</option>
+                      <option value="private">Private</option>
+                    </select>
+                  </label>
                   <label>Deadline<input className="hq-aura-input" type="date" value={newOpp.deadline} onChange={(e) => setNewOpp({ ...newOpp, deadline: e.target.value })} /></label>
                   <label>Funder URL<input className="hq-aura-input" value={newOpp.url} onChange={(e) => setNewOpp({ ...newOpp, url: e.target.value })} placeholder="https://…" /></label>
                   <label style={{ gridColumn: "1 / -1" }}>Description<textarea className="hq-aura-input" rows={2} value={newOpp.description} onChange={(e) => setNewOpp({ ...newOpp, description: e.target.value })} /></label>
@@ -637,6 +668,7 @@ const GrantCenterPage: React.FC = () => {
                       division_slugs: newOpp.division_slugs,
                       eligibility: newOpp.eligibility || undefined,
                       geography: newOpp.geography || undefined,
+                      funder_type: newOpp.funder_type || "foundation",
                     } as Partial<GrantOpportunity>)}
                   >
                     {createOpp.isPending ? "Saving…" : "Create Opportunity"}
@@ -742,7 +774,10 @@ const GrantCenterPage: React.FC = () => {
             />
             {calendarSection === "calendar" && (
           <>
-            <Suspense fallback={<TabFallback />}><GrantV4FundingCalendar /></Suspense>
+            <GrantFoundationCalendarPanel />
+            <div style={{ marginTop: "1.25rem" }}>
+              <Suspense fallback={<TabFallback />}><GrantV4FundingCalendar /></Suspense>
+            </div>
             <div style={{ marginTop: "1.25rem" }}>
           <HqPanel title="Grant Calendar" subtitle={calendar.data?.month ?? new Date().toISOString().slice(0, 7)}>
             {calendar.isLoading ? <HqLoading /> : (
@@ -840,6 +875,11 @@ const GrantCenterPage: React.FC = () => {
 
         {tab === "documents" && (
           <Suspense fallback={<TabFallback />}>
+          <div style={{ marginBottom: "0.75rem" }}>
+            <Link to="/hq/documents?category=grants" className="hq-btn hq-btn-sm hq-btn-ghost">
+              Open Enterprise Document Vault (Grants) →
+            </Link>
+          </div>
           <GrantV3DocumentCenter applications={(applications.data?.applications ?? []).map((a) => ({ id: a.id, title: a.title }))}>
             <GrantDocumentManagementPanel
               applications={(applications.data?.applications ?? []).map((a) => ({ id: a.id, title: a.title }))}

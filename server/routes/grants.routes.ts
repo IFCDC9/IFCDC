@@ -149,6 +149,20 @@ import {
 } from "../hq/grantIntelligenceEngine";
 import { getGrantCenterQaReport, grantCenterQaEnvReady } from "../hq/grantCenterQaCache";
 import { runGrantCenterProductionQa } from "../hq/grantCenterProductionQaRunner";
+import {
+  buildGrantFoundationDashboard,
+  buildGrantFoundationPipelineBoard,
+  buildGrantFoundationWorkspace,
+  buildGrantFoundationCalendar,
+  buildGrantFoundationExecutiveReport,
+  linkGrantEntityDocument,
+  listOpportunitiesByFunderType,
+  GRANT_PRODUCT_STAGES,
+  GRANT_FUNDER_TYPES,
+  GRANT_FUNDER_TYPE_LABELS,
+  GRANT_PIPELINE_PRODUCT_LABELS,
+  normalizeFunderType,
+} from "../hq/grantFoundationEngine";
 
 const router = Router();
 
@@ -202,6 +216,103 @@ router.post("/qa/run", async (req: Request, res: Response) => {
 router.get("/dashboard", async (_req, res) => {
   await generateGrantNotifications();
   res.json(await buildGrantExecutiveDashboard());
+});
+
+/** Build 59 — Enterprise Grant Center Foundation */
+router.get("/foundation/dashboard", async (_req, res) => {
+  try {
+    await generateGrantNotifications();
+    res.json(await buildGrantFoundationDashboard());
+  } catch (err) {
+    console.error("[grants] foundation dashboard:", err);
+    res.status(500).json({ error: "Failed to build foundation dashboard" });
+  }
+});
+
+router.get("/foundation/pipeline", async (_req, res) => {
+  try {
+    res.json(await buildGrantFoundationPipelineBoard());
+  } catch (err) {
+    console.error("[grants] foundation pipeline:", err);
+    res.status(500).json({ error: "Failed to build foundation pipeline" });
+  }
+});
+
+router.get("/foundation/workspace/:applicationId", async (req, res) => {
+  try {
+    const workspace = await buildGrantFoundationWorkspace(String(req.params.applicationId));
+    if (!workspace) return res.status(404).json({ error: "Application not found" });
+    res.json(workspace);
+  } catch (err) {
+    console.error("[grants] foundation workspace:", err);
+    res.status(500).json({ error: "Failed to load grant workspace" });
+  }
+});
+
+router.get("/foundation/calendar", async (req, res) => {
+  try {
+    const days = req.query.days ? Number(req.query.days) : 90;
+    res.json(await buildGrantFoundationCalendar(days));
+  } catch (err) {
+    console.error("[grants] foundation calendar:", err);
+    res.status(500).json({ error: "Failed to load grant calendar" });
+  }
+});
+
+router.get("/foundation/report", async (_req, res) => {
+  try {
+    res.json(await buildGrantFoundationExecutiveReport());
+  } catch (err) {
+    console.error("[grants] foundation report:", err);
+    res.status(500).json({ error: "Failed to build executive funding report" });
+  }
+});
+
+router.get("/foundation/taxonomy", (_req, res) => {
+  res.json({
+    funderTypes: GRANT_FUNDER_TYPES.map((t) => ({ id: t, label: GRANT_FUNDER_TYPE_LABELS[t] })),
+    productStages: GRANT_PRODUCT_STAGES,
+    pipelineLabels: GRANT_PIPELINE_PRODUCT_LABELS,
+  });
+});
+
+router.get("/foundation/opportunities", async (req, res) => {
+  try {
+    const funderType = String(req.query.funder_type ?? "").trim() || undefined;
+    const q = String(req.query.q ?? "").trim() || undefined;
+    const opportunities = await listOpportunitiesByFunderType(funderType, q);
+    res.json({ opportunities, funderType: funderType ? normalizeFunderType(funderType) : null });
+  } catch (err) {
+    console.error("[grants] foundation opportunities:", err);
+    res.json({ opportunities: [], degraded: true });
+  }
+});
+
+router.post("/foundation/links", async (req: Request, res: Response) => {
+  const { entityType, entityId, linkType, linkId, linkLabel } = req.body ?? {};
+  if (!entityType || !entityId || !linkType || !linkId) {
+    return res.status(400).json({ error: "entityType, entityId, linkType, and linkId are required" });
+  }
+  try {
+    const link = await linkGrantEntityDocument({
+      entityType,
+      entityId: String(entityId),
+      linkType: String(linkType),
+      linkId: String(linkId),
+      linkLabel: linkLabel ? String(linkLabel) : undefined,
+    });
+    await logGrantActivity(
+      String(entityType),
+      String(entityId),
+      "document_linked",
+      `Linked ${linkType} → ${linkId}`,
+      req.hqUser?.email
+    );
+    res.status(201).json({ link });
+  } catch (err) {
+    console.error("[grants] foundation link:", err);
+    res.status(500).json({ error: "Failed to link document" });
+  }
 });
 
 router.get("/analytics", async (_req, res) => {
@@ -552,7 +663,7 @@ router.post("/opportunities", async (req, res) => {
     oppId, title, funder, description ?? "", amount_min ?? null, amount_max ?? null,
     deadline ?? null, url ?? "", requirements ? JSON.stringify(requirements) : "[]",
     divisionsJson, programsJson, eligibility ?? null, geography ?? null,
-    funder_type ?? "foundation", source_type ?? "manual", now, now, now
+    normalizeFunderType(funder_type) ?? funder_type ?? "foundation", source_type ?? "manual", now, now, now
   );
   if (deadline) {
     await db.run(
@@ -1662,7 +1773,12 @@ router.post("/pipeline/enterprise/transition", async (req: Request, res: Respons
 });
 
 router.get("/pipeline/enterprise/stages", async (_req, res) => {
-  res.json({ stages: FUNDING_PIPELINE_STAGES, labels: FUNDING_PIPELINE_LABELS });
+  res.json({
+    stages: FUNDING_PIPELINE_STAGES,
+    labels: FUNDING_PIPELINE_LABELS,
+    productStages: GRANT_PRODUCT_STAGES,
+    productLabels: GRANT_PIPELINE_PRODUCT_LABELS,
+  });
 });
 
 router.post("/pipeline/enterprise/notifications/scan", async (_req, res) => {

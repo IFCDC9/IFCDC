@@ -107,9 +107,91 @@ export interface GrantAward {
   finance_budget_id?: string;
 }
 
+export type GrantFoundationDashboard = {
+  totalActiveGrants: number;
+  grantsAwarded: number;
+  pendingApplications: number;
+  totalFundingRequested: number;
+  totalFundingAwarded: number;
+  upcomingDeadlines: number;
+  submissionStatus: {
+    drafting: number;
+    internalReview: number;
+    submitted: number;
+    underEvaluation: number;
+  };
+  successRate: number;
+  complianceStatus: {
+    dueSoon: number;
+    overdue: number;
+    status: "healthy" | "watch" | "critical";
+  };
+  openOpportunities: number;
+  pipelineByProductStage: { id: string; label: string; count: number; value: number }[];
+  funderTypeBreakdown: { type: string; label: string; count: number }[];
+  fundingForecast: { month: string; requested: number; awarded: number }[];
+  monitoredAt: string;
+  source: "live";
+};
+
 export const grantsApi = {
   overview: () => apiFetch<GrantOverview>("/overview"),
   dashboard: () => apiFetch<GrantOverview>("/dashboard"),
+  foundationDashboard: () => apiFetch<GrantFoundationDashboard>("/foundation/dashboard"),
+  foundationPipeline: () =>
+    apiFetch<{
+      stages: { id: string; label: string; cards: Record<string, unknown>[] }[];
+      labels: Record<string, string>;
+      monitoredAt: string;
+    }>("/foundation/pipeline"),
+  foundationWorkspace: (applicationId: string) =>
+    apiFetch<Record<string, unknown>>(`/foundation/workspace/${applicationId}`),
+  foundationCalendar: (days = 90) =>
+    apiFetch<{
+      days: number;
+      events: Record<string, unknown>[];
+      counts: { submission: number; reporting: number; renewal: number; internal: number; total: number };
+      monitoredAt: string;
+    }>(`/foundation/calendar?days=${days}`),
+  foundationReport: () =>
+    apiFetch<{
+      title: string;
+      generatedAt: string;
+      dashboard: GrantFoundationDashboard;
+      activeOpportunities: number;
+      upcomingDeadlines: Record<string, unknown>[];
+      awardPipeline: { id: string; label: string; count: number; value: number }[];
+      fundingByProgram: Record<string, unknown>[];
+      fundingByDepartment: Record<string, unknown>[];
+      performance: Record<string, unknown>;
+      forecast: { month: string; requested: number; awarded: number }[];
+    }>("/foundation/report"),
+  foundationTaxonomy: () =>
+    apiFetch<{
+      funderTypes: { id: string; label: string }[];
+      productStages: { id: string; label: string }[];
+    }>("/foundation/taxonomy"),
+  foundationOpportunities: (params?: { funder_type?: string; q?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.funder_type) qs.set("funder_type", params.funder_type);
+    if (params?.q) qs.set("q", params.q);
+    const q = qs.toString();
+    return apiFetch<{ opportunities: GrantOpportunity[]; funderType: string | null }>(
+      `/foundation/opportunities${q ? `?${q}` : ""}`
+    );
+  },
+  foundationLinkDocument: (data: {
+    entityType: "opportunity" | "application" | "award";
+    entityId: string;
+    linkType: string;
+    linkId: string;
+    linkLabel?: string;
+  }) =>
+    apiFetch("/foundation/links", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }),
   analytics: () => apiFetch<{ byFunder: { funder: string; awards: number; total: number }[]; byProgram: { program: string; awards: number; total: number }[]; monthlyAwards: { month: string; count: number; total: number }[] }>("/analytics"),
   pipeline: () => apiFetch<{ pipeline: { stage: string; count: number; value: number }[]; pipelineValue: number; winRate: number }>("/pipeline"),
 

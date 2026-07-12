@@ -71,4 +71,5 @@ IFCDC_BASE_URL=… FOUNDER_SEED_PASSWORD=… npm run enterprise:verify
 4. Spot-check Executive Dashboard System Health (should not collapse to false zeros after warm-up)
 
 ## Next
-**Build 59 — Grant Center Foundation** (enterprise grant management, funding pipeline, compliance tracking, executive funding dashboard, grant lifecycle)
+**Build 59 — Grant Center Foundation** → see `BUILD-59.md` (shipped)  
+**Build 60 — Executive Operations Center**

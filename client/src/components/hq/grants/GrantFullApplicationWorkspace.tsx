@@ -46,6 +46,13 @@ export const GrantFullApplicationWorkspace: React.FC<{
     refetchInterval: draftProgress ? 3000 : false,
   });
 
+  const foundation = useQuery({
+    queryKey: ["grant-foundation-workspace", applicationId],
+    queryFn: () => grantsApi.foundationWorkspace(String(applicationId)),
+    enabled: !!applicationId,
+    staleTime: 20_000,
+  });
+
   const invalidateWorkspace = () => {
     qc.invalidateQueries({ queryKey: ["grant-full-workspace", applicationId] });
     qc.invalidateQueries({ queryKey: ["grant-writer-studio", applicationId] });
@@ -154,16 +161,40 @@ export const GrantFullApplicationWorkspace: React.FC<{
   const deadlines = (ws.deadlineTracker ?? []) as { title: string; due_date: string; completed: number }[];
   const budget = ws.budgetDraft as Record<string, unknown>;
   const checklist = ws.documentChecklist as { byCategory?: { category: string; documents: unknown[] }[]; totalDocuments?: number };
+  const foundationWs = foundation.data as {
+    pipeline?: { productLabel?: string };
+    progress?: { percent?: number; checklistComplete?: number; checklistTotal?: number };
+    documents?: { checklist?: { id: string; label: string; linked: boolean }[]; vaultPath?: string };
+    activity?: { action: string; detail?: string; created_at: string }[];
+  } | undefined;
 
   return (
     <div className="hq-grant-workspace" style={{ display: "grid", gap: "1.25rem" }}>
-      <HqPanel title="Application Workspace" subtitle={`${String(ws.application?.title ?? "")} · ${workflow?.label ?? "Drafting"}`}>
+      <HqPanel title="Application Workspace" subtitle={`${String(ws.application?.title ?? "")} · ${foundationWs?.pipeline?.productLabel ?? workflow?.label ?? "Drafting"}`}>
         <div className="hq-kpi-grid" style={{ marginBottom: "1rem" }}>
           <div><div className="hq-muted-text" style={{ fontSize: "0.72rem" }}>Match Score</div><strong>{(ws.intelligence as { composite?: number })?.composite ?? "—"}%</strong></div>
           <div><div className="hq-muted-text" style={{ fontSize: "0.72rem" }}>Completion</div><strong>{ws.completionPct ?? 0}%</strong></div>
           <div><div className="hq-muted-text" style={{ fontSize: "0.72rem" }}>Founder Approval</div><StatusBadge label={founder?.status ?? "pending"} variant={founder?.status === "approved" ? "success" : "warning"} /></div>
           <div><div className="hq-muted-text" style={{ fontSize: "0.72rem" }}>Ready to Submit</div><strong>{founder?.readyToSubmit ? "Yes" : "No"}</strong></div>
+          <div><div className="hq-muted-text" style={{ fontSize: "0.72rem" }}>Lifecycle Stage</div><StatusBadge label={foundationWs?.pipeline?.productLabel ?? "—"} variant="gold" /></div>
+          <div><div className="hq-muted-text" style={{ fontSize: "0.72rem" }}>Required Docs</div><strong>{foundationWs?.progress?.checklistComplete ?? 0}/{foundationWs?.progress?.checklistTotal ?? 12}</strong></div>
         </div>
+
+        {foundationWs?.documents?.checklist && (
+          <div style={{ marginBottom: "1rem" }}>
+            <h4 style={{ fontSize: "0.85rem", color: "var(--hq-gold)", marginBottom: "0.5rem" }}>Submission Checklist</h4>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+              {foundationWs.documents.checklist.map((item) => (
+                <StatusBadge key={item.id} label={item.label} variant={item.linked ? "success" : "muted"} />
+              ))}
+            </div>
+            {foundationWs.documents.vaultPath && (
+              <a href={foundationWs.documents.vaultPath} className="hq-btn hq-btn-sm hq-btn-ghost" style={{ marginTop: "0.5rem" }}>
+                Open Document Vault
+              </a>
+            )}
+          </div>
+        )}
 
         <div className="hq-grid-2" style={{ marginBottom: "1rem" }}>
           <div>
