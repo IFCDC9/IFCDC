@@ -35,10 +35,11 @@ export async function createOpsTask(data: Record<string, unknown>, actor?: { ema
   const now = new Date().toISOString();
   const id = opsId();
   await db.run(
-    `INSERT INTO ops_tasks (id, title, description, assigned_person_id, department_id, due_date, status, priority, created_by_email, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO ops_tasks (id, title, description, assigned_person_id, department_id, project_id, due_date, status, priority, progress_pct, created_by_email, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id, data.title, data.description ?? "", data.assigned_person_id ?? null, data.department_id ?? null,
-    data.due_date ?? null, data.status ?? "open", data.priority ?? "normal", actor?.email ?? null, now, now
+    data.project_id ?? null, data.due_date ?? null, data.status ?? "open", data.priority ?? "normal",
+    data.progress_pct ?? 0, actor?.email ?? null, now, now
   );
   return db.get("SELECT * FROM ops_tasks WHERE id = ?", id);
 }
@@ -46,7 +47,7 @@ export async function createOpsTask(data: Record<string, unknown>, actor?: { ema
 export async function updateOpsTask(id: string, data: Record<string, unknown>) {
   const db = await getDb();
   const now = new Date().toISOString();
-  const fields = ["title", "description", "assigned_person_id", "department_id", "due_date", "status", "priority"];
+  const fields = ["title", "description", "assigned_person_id", "department_id", "project_id", "due_date", "status", "priority", "progress_pct", "milestone_note"];
   const sets: string[] = [];
   const vals: unknown[] = [];
   for (const f of fields) {

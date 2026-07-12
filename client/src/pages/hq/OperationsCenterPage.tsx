@@ -9,6 +9,7 @@ import { HqPanel } from "../../components/hq/HqPanel";
 import { StatusBadge } from "../../components/hq/StatusBadge";
 import { HqLoading } from "../../components/hq/HqLoading";
 import { OperationsPhase3CommandCenter } from "../../components/hq/people/OperationsPhase3CommandCenter";
+import { ExecutiveOperationsFoundation } from "../../components/hq/operations/ExecutiveOperationsFoundation";
 
 const MODULE_LINKS = [
   { label: "Asset & Inventory", path: "/hq/assets", icon: Package, key: "assets" as const },
@@ -29,7 +30,7 @@ const OperationsCenterPage: React.FC = () => {
 
   if (overview.isLoading && !overview.data) {
     return (
-      <HQLayout title="Operations Center" subtitle="Unified fleet, assets, facilities, maintenance, and risk management">
+      <HQLayout title="Executive Operations Center" subtitle="Build 60 — unified command for IFCDC departments, workforce, compliance, and automation">
         <HqLoading message="Loading operations overview…" />
       </HQLayout>
     );
@@ -39,7 +40,7 @@ const OperationsCenterPage: React.FC = () => {
   const riskLevel = (ops?.compliance.highRisks ?? 0) > 0 ? "danger" : (ops?.compliance.openRisks ?? 0) > 0 ? "warning" : "success";
 
   return (
-    <HQLayout title="Operations Center" subtitle="Unified fleet, assets, facilities, maintenance, incidents, and risk management">
+    <HQLayout title="Executive Operations Center" subtitle="Build 60 — unified command for IFCDC departments, workforce, compliance, projects, and automation">
       {overview.isError && !ops && (
         <div className="hq-anomaly-alert hq-sev-medium" style={{ marginBottom: "1rem" }} role="status">
           <AlertTriangle size={16} />
@@ -52,6 +53,11 @@ const OperationsCenterPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      <div style={{ marginBottom: "1.25rem" }}>
+        <ExecutiveOperationsFoundation />
+      </div>
+
       <div style={{ marginBottom: "1.25rem" }}>
         <OperationsPhase3CommandCenter />
       </div>

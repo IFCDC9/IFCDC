@@ -8,6 +8,21 @@ import {
   createOpsTask,
   updateOpsTask,
 } from "../hq/operationsCommandEngine";
+import {
+  ensureExecutiveOperationsFoundation,
+  buildExecutiveOperationsDashboard,
+  buildDepartmentMatrix,
+  buildExecutiveOperationsReport,
+  buildAutomationStatus,
+  listOpsProjects,
+  createOpsProject,
+  updateOpsProject,
+  createOpsMilestone,
+  listComplianceFilings,
+  createComplianceFiling,
+  updateComplianceFiling,
+  EXECUTIVE_DEPARTMENTS,
+} from "../hq/executiveOperationsFoundation";
 
 const router = Router();
 
@@ -30,6 +45,87 @@ router.get("/overview", async (_req, res) => {
   }
 });
 
+/** Build 60 — Executive Operations Center foundation */
+router.get("/foundation/dashboard", requireHQModule("operations"), async (_req, res) => {
+  try {
+    res.json(await buildExecutiveOperationsDashboard());
+  } catch (error) {
+    console.error("GET /operations/foundation/dashboard error:", error);
+    res.status(500).json({ error: "Failed to build executive operations dashboard" });
+  }
+});
+
+router.get("/foundation/departments", requireHQModule("operations"), async (_req, res) => {
+  try {
+    res.json(await buildDepartmentMatrix());
+  } catch (error) {
+    console.error("GET /operations/foundation/departments error:", error);
+    res.status(500).json({ error: "Failed to build department matrix" });
+  }
+});
+
+router.get("/foundation/catalog", requireHQModule("operations"), async (_req, res) => {
+  res.json({ departments: EXECUTIVE_DEPARTMENTS });
+});
+
+router.get("/foundation/report", requireHQModule("operations"), async (_req, res) => {
+  try {
+    res.json(await buildExecutiveOperationsReport());
+  } catch (error) {
+    console.error("GET /operations/foundation/report error:", error);
+    res.status(500).json({ error: "Failed to build executive operations report" });
+  }
+});
+
+router.get("/foundation/automation", requireHQModule("operations"), async (_req, res) => {
+  try {
+    res.json(await buildAutomationStatus());
+  } catch (error) {
+    console.error("GET /operations/foundation/automation error:", error);
+    res.status(500).json({ error: "Failed to load automation status" });
+  }
+});
+
+router.get("/foundation/compliance", requireHQModule("operations"), async (req, res) => {
+  res.json({ filings: await listComplianceFilings(req.query.status as string | undefined) });
+});
+
+router.post("/foundation/compliance", requireHQModule("operations"), async (req, res) => {
+  if (!req.body?.title) return res.status(400).json({ error: "title is required" });
+  const filing = await createComplianceFiling(req.body);
+  res.status(201).json({ filing });
+});
+
+router.patch("/foundation/compliance/:id", requireHQModule("operations"), async (req, res) => {
+  const filing = await updateComplianceFiling(req.params.id, req.body);
+  if (!filing) return res.status(404).json({ error: "Filing not found" });
+  res.json({ filing });
+});
+
+router.get("/projects", requireHQModule("operations"), async (req, res) => {
+  res.json({ projects: await listOpsProjects(req.query.status as string | undefined) });
+});
+
+router.post("/projects", requireHQModule("operations"), async (req, res) => {
+  if (!req.body?.title) return res.status(400).json({ error: "title is required" });
+  const project = await createOpsProject(req.body, {
+    email: (req as { hqUser?: { email?: string } }).hqUser?.email,
+  });
+  res.status(201).json({ project });
+});
+
+router.patch("/projects/:id", requireHQModule("operations"), async (req, res) => {
+  const project = await updateOpsProject(req.params.id, req.body);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  res.json({ project });
+});
+
+router.post("/projects/:id/milestones", requireHQModule("operations"), async (req, res) => {
+  if (!req.body?.title) return res.status(400).json({ error: "title is required" });
+  const milestone = await createOpsMilestone(req.params.id, req.body);
+  res.status(201).json({ milestone });
+});
+
 router.get("/command-center/v3/platform", requireHQModule("operations"), async (_req, res) => {
   res.json(await buildOperationsCommandCenter());
 });
@@ -41,11 +137,13 @@ router.get("/tasks", requireHQModule("operations"), async (req, res) => {
 router.post("/tasks", requireHQModule("operations"), async (req, res) => {
   const { title } = req.body;
   if (!title) return res.status(400).json({ error: "title is required" });
+  await ensureExecutiveOperationsFoundation();
   const task = await createOpsTask(req.body, { email: (req as { hqUser?: { email?: string } }).hqUser?.email });
   res.status(201).json({ task });
 });
 
 router.patch("/tasks/:id", requireHQModule("operations"), async (req, res) => {
+  await ensureExecutiveOperationsFoundation();
   const task = await updateOpsTask(req.params.id, req.body);
   if (!task) return res.status(404).json({ error: "Task not found" });
   res.json({ task });

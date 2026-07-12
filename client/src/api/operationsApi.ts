@@ -20,6 +20,49 @@ export interface OperationsOverview {
   calendar: { upcomingEvents: number };
 }
 
+export interface ExecutiveOpsDashboard {
+  version: string;
+  generatedAt: string;
+  organizationHealth: number;
+  operationalHealth: number;
+  financialHealth: number;
+  grantActivity: { active: number; deadlinesSoon: number };
+  employeeActivity: { active: number; openLeave: number };
+  volunteerActivity: { active: number };
+  activePrograms: number;
+  clientServices: { clients: number; housingPlacements: number; scholarshipAwards: number };
+  openTasks: { total: number; overdue: number };
+  activeProjects: number;
+  complianceStatus: {
+    status: string;
+    openFilings: number;
+    overdue: number;
+    dueSoon: number;
+    highRisk: number;
+    openRisks: number;
+    policies: number;
+  };
+  systemAlerts: { id: string; severity: string; title: string; detail: string; path: string }[];
+  upcomingDeadlines: { id: string; title: string; dueDate: string; kind: string; meta: string }[];
+  automation: { pendingApprovals: number; scheduledJobs: number };
+  operationsSnapshot: OperationsOverview;
+  softwareApps: number;
+  media: OperationsOverview["media"];
+}
+
+export interface ExecutiveDepartment {
+  id: string;
+  label: string;
+  code: string;
+  path: string;
+  docsPath: string;
+  reportsPath: string;
+  linkedDepartmentId: string | null;
+  linkedDepartmentName: string;
+  kpis: { key: string; value: number }[];
+  health: string;
+}
+
 export const operationsApi = {
   overview: () => apiFetch<OperationsOverview>("/overview"),
   commandCenterV3: () => apiFetch<Record<string, unknown>>("/command-center/v3/platform"),
@@ -28,6 +71,49 @@ export const operationsApi = {
     apiFetch("/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
   updateTask: (id: string, body: Record<string, unknown>) =>
     apiFetch(`/tasks/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+  foundationDashboard: () => apiFetch<ExecutiveOpsDashboard>("/foundation/dashboard"),
+  foundationDepartments: () => apiFetch<{ departments: ExecutiveDepartment[]; generatedAt: string }>("/foundation/departments"),
+  foundationReport: () => apiFetch<Record<string, unknown>>("/foundation/report"),
+  foundationAutomation: () =>
+    apiFetch<{
+      definitions: Record<string, unknown>[];
+      scheduledJobs: Record<string, unknown>[];
+      pendingApprovals: Record<string, unknown>[];
+    }>("/foundation/automation"),
+  complianceFilings: (status?: string) =>
+    apiFetch<{ filings: Record<string, unknown>[] }>(`/foundation/compliance${status ? `?status=${status}` : ""}`),
+  createComplianceFiling: (body: Record<string, unknown>) =>
+    apiFetch("/foundation/compliance", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  updateComplianceFiling: (id: string, body: Record<string, unknown>) =>
+    apiFetch(`/foundation/compliance/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  projects: (status?: string) =>
+    apiFetch<{ projects: Record<string, unknown>[] }>(`/projects${status ? `?status=${status}` : ""}`),
+  createProject: (body: Record<string, unknown>) =>
+    apiFetch("/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  updateProject: (id: string, body: Record<string, unknown>) =>
+    apiFetch(`/projects/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  createMilestone: (projectId: string, body: Record<string, unknown>) =>
+    apiFetch(`/projects/${projectId}/milestones`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
   list: (resource: string) => apiFetch<{ items: Record<string, unknown>[] }>(resource),
   create: (resource: string, body: Record<string, unknown>) =>
     apiFetch<Record<string, unknown>>(resource, {

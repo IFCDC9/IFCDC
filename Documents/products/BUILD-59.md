@@ -68,4 +68,5 @@ Funder types: **Federal · State · County · Municipal · Foundation · Corpora
 3. Verify `/hq/grants` overview foundation KPIs, pipeline board, calendar milestones, documents vault link
 
 ## Next
-**Build 60 — Executive Operations Center**
+**Build 60 — Executive Operations Center** ✅ (see BUILD-60.md)
+**Build 61 — AI Executive Intelligence (AURA Command Center)**

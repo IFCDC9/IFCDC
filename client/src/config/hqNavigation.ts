@@ -67,7 +67,7 @@ export const HQ_NAV_ITEMS: HQNavItem[] = [
   { label: "Workflow Automation", path: "/hq/workflows", icon: GitBranch, section: "Command" },
 
   { label: "Software Division", path: "/hq/software", icon: Monitor, section: "Operations" },
-  { label: "Operations Center", path: "/hq/operations", icon: Package, section: "Operations" },
+  { label: "Executive Operations", path: "/hq/operations", icon: Package, section: "Operations" },
   { label: "SSO Gateway", path: "/hq/sso", icon: Shield, section: "Operations" },
   { label: "AURA AI Command Center", path: "/hq/aura", icon: Sparkles, section: "Command" },
   { label: "Integrations Hub", path: "/hq/integrations", icon: Plug, section: "Operations" },
@@ -112,10 +112,17 @@ export interface HQModuleConfig {
 
 export const HQ_MODULE_CONFIGS: Record<string, HQModuleConfig> = {
   operations: {
-    title: "Operations Center",
-    subtitle: "Unified fleet, assets, facilities, maintenance, and risk management",
-    description: "Central command for organizational operations — fleet, inventory, assets, facilities, maintenance, incidents, and compliance risk.",
-    features: ["Fleet management", "Asset registry", "Facilities & work orders", "Incident reporting", "Risk register", "Maintenance tracking"],
+    title: "Executive Operations Center",
+    subtitle: "Unified command for departments, workforce, compliance, projects, and automation",
+    description: "Build 60 executive operations hub — organization health, department management, enterprise projects, compliance filings, workflow automation, and executive reporting.",
+    features: [
+      "Executive operations dashboard",
+      "13 department command surfaces",
+      "Projects & task management",
+      "Compliance center",
+      "Workflow automation",
+      "Executive reporting",
+    ],
     status: "live",
   },
   analytics: {
