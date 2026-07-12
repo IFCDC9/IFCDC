@@ -30,6 +30,7 @@ import {
   LineChart,
   Plug,
   Brain,
+  Activity,
 } from "lucide-react";
 
 export interface HQNavItem {
@@ -96,6 +97,7 @@ export const HQ_NAV_ITEMS: HQNavItem[] = [
   { label: "Facilities & Property", path: "/hq/facilities", icon: Building, section: "Enterprise" },
 
   { label: "Document Management", path: "/hq/documents", icon: FolderOpen, section: "System" },
+  { label: "Enterprise Monitoring", path: "/hq/monitoring", icon: Activity, section: "System" },
   { label: "Security Center", path: "/hq/security", icon: Shield, section: "System" },
   { label: "Organization Settings", path: "/hq/settings", icon: Settings, section: "System" },
 ];

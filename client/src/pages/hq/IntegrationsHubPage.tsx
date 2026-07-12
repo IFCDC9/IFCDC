@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plug, RefreshCw, CheckCircle, Settings, AlertTriangle } from "lucide-react";
 import HQLayout from "../../layouts/HQLayout";
 import { integrationsApi } from "../../api/integrationsApi";
+import { monitoringApi } from "../../api/monitoringApi";
 import { HqQueryBoundary } from "../../components/hq/HqQueryBoundary";
 import { StatusBadge } from "../../components/hq/StatusBadge";
 import { KpiCard } from "../../components/hq/KpiCard";
@@ -108,6 +109,22 @@ const IntegrationsHubPage: React.FC = () => {
     },
   });
 
+  const retryDegraded = useMutation({
+    mutationFn: () => monitoringApi.retryIntegrations(),
+    onSuccess: (data) => {
+      setTestResults((prev) => ({
+        ...prev,
+        _bulk: `Retry: ${data.recovered.length} recovered / ${data.attempted} attempted`,
+      }));
+      void qc.invalidateQueries({ queryKey: ["integrations-hub"] });
+      void qc.invalidateQueries({ queryKey: ["hq-executive-overview"] });
+      void qc.invalidateQueries({ queryKey: ["enterprise-monitoring"] });
+    },
+    onError: (err: Error) => {
+      setTestResults((prev) => ({ ...prev, _bulk: err.message }));
+    },
+  });
+
   const hub = hubQuery.data?.hub ?? EMPTY_INTEGRATIONS_HUB;
   const integrations = hub.integrations;
   const degraded = hubQuery.data?.degraded ?? false;
@@ -163,6 +180,16 @@ const IntegrationsHubPage: React.FC = () => {
 
           <div className="hq-sd-toolbar" style={{ marginBottom: "1rem", flexWrap: "wrap", gap: "0.5rem" }}>
             <StatusBadge label="Enterprise connector registry" variant="gold" />
+            <button
+              type="button"
+              className="hq-btn hq-btn-sm hq-btn-secondary"
+              disabled={retryDegraded.isPending || hubQuery.isFetching}
+              onClick={() => retryDegraded.mutate()}
+            >
+              <RefreshCw size={14} className={retryDegraded.isPending ? "hq-spin" : ""} />
+              {retryDegraded.isPending ? "Retrying…" : "Retry degraded"}
+            </button>
+            {testResults._bulk && <StatusBadge label={testResults._bulk} variant="muted" />}
             {categories.map((cat) => (
               <button
                 key={cat}

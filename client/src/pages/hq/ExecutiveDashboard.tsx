@@ -401,6 +401,7 @@ const ExecutiveDashboard: React.FC = () => {
             <div key={a.id} className={`hq-anomaly-alert hq-sev-${a.severity}`}>
               <strong>{a.title}</strong>
               <span>{a.detail}</span>
+              <Link to="/hq/monitoring" className="hq-entity-link">Monitor</Link>
             </div>
           ))}
         </div>
@@ -422,6 +423,9 @@ const ExecutiveDashboard: React.FC = () => {
                 ? `${softwareHealthy}/${softwareTotal || "—"} apps · ${softwarePolled} polled`
                 : `${softwareHealthy}/${softwareTotal || "—"} apps operational`)}
           </span>
+          <Link to="/hq/monitoring" className="hq-entity-link" style={{ fontSize: "0.72rem", marginTop: "0.25rem" }}>
+            Open monitoring →
+          </Link>
         </div>
         <div className={`hq-executive-health-card hq-health-${pillar("financial")?.status ?? "unknown"}`}>
           <span className="hq-executive-health-label">Financial Health</span>
@@ -445,6 +449,9 @@ const ExecutiveDashboard: React.FC = () => {
           <span className="hq-executive-health-label">Integration Status</span>
           <span className="hq-executive-health-value">{formatPillarScore(integrationHealth?.score, healthLoading)}/100</span>
           <span className="hq-executive-health-meta">{integrationHealth?.meta ?? "Connectors"}</span>
+          <Link to="/hq/integrations" className="hq-entity-link" style={{ fontSize: "0.72rem", marginTop: "0.25rem" }}>
+            Open integrations →
+          </Link>
         </div>
         </HqWidgetErrorBoundary>
       </div>
