@@ -12,9 +12,10 @@ import { HqPanel } from "../../components/hq/HqPanel";
 import { HqLoading } from "../../components/hq/HqLoading";
 import { StatusBadge } from "../../components/hq/StatusBadge";
 
-type TabId = "library" | "detail" | "categories" | "acknowledgments" | "reviews" | "audit" | "report";
+type TabId = "progress" | "library" | "detail" | "categories" | "acknowledgments" | "reviews" | "audit" | "report";
 
 const TABS: { id: TabId; label: string }[] = [
+  { id: "progress", label: "Governance Progress" },
   { id: "library", label: "Policy Library" },
   { id: "categories", label: "Categories" },
   { id: "acknowledgments", label: "Acknowledgments" },
@@ -56,9 +57,9 @@ const EMPTY_FORM = {
 
 const PolicyGovernancePage: React.FC = () => {
   const [params, setParams] = useSearchParams();
-  const tabParam = (params.get("tab") as TabId | null) ?? "library";
+  const tabParam = (params.get("tab") as TabId | null) ?? "progress";
   const selectedId = params.get("id");
-  const tab: TabId = selectedId ? "detail" : (TABS.some((t) => t.id === tabParam) ? tabParam : "library");
+  const tab: TabId = selectedId ? "detail" : (TABS.some((t) => t.id === tabParam) ? tabParam : "progress");
   const qc = useQueryClient();
 
   const [q, setQ] = useState(params.get("q") ?? "");
@@ -104,7 +105,7 @@ const PolicyGovernancePage: React.FC = () => {
   const setTab = (id: TabId) => {
     const next = new URLSearchParams(params);
     next.delete("id");
-    if (id === "library") next.delete("tab");
+    if (id === "progress") next.delete("tab");
     else next.set("tab", id);
     setParams(next, { replace: true });
   };
@@ -162,12 +163,12 @@ const PolicyGovernancePage: React.FC = () => {
       ) : (
         <>
           <div className="hq-kpi-grid hq-fade-in" style={{ marginBottom: "1rem" }}>
-            <KpiCard label="Active Policies" value={dashboard.data?.total ?? 0} icon={BookOpen} variant="gold" />
-            <KpiCard label="Published" value={dashboard.data?.published ?? 0} icon={CheckCircle} variant="success" />
-            <KpiCard label="Pending Approval" value={dashboard.data?.pending ?? 0} icon={ClipboardList} variant="warning" />
-            <KpiCard label="Reviews Due" value={dashboard.data?.reviewsDueSoon ?? 0} icon={AlertTriangle} variant={(dashboard.data?.reviewsOverdue ?? 0) > 0 ? "danger" : "warning"} meta={`${dashboard.data?.reviewsOverdue ?? 0} overdue`} />
-            <KpiCard label="Acknowledgments" value={dashboard.data?.acknowledgments ?? 0} icon={Signature} />
-            <KpiCard label="Categories" value={dashboard.data?.categories ?? 0} icon={FileText} />
+            <KpiCard label="Governance Completion" value={`${dashboard.data?.governanceCompletionPct ?? dashboard.data?.progress?.overallGovernanceCompletionPct ?? 0}%`} icon={Shield} variant="gold" />
+            <KpiCard label="Total Categories" value={dashboard.data?.progress?.totalCategories ?? dashboard.data?.categories ?? 0} icon={FileText} />
+            <KpiCard label="Total Policies" value={dashboard.data?.progress?.totalPolicies ?? dashboard.data?.total ?? 0} icon={BookOpen} />
+            <KpiCard label="Completed Policies" value={dashboard.data?.progress?.completedPolicies ?? dashboard.data?.published ?? 0} icon={CheckCircle} variant="success" />
+            <KpiCard label="Awaiting Approval" value={dashboard.data?.progress?.policiesAwaitingApproval ?? dashboard.data?.pending ?? 0} icon={ClipboardList} variant="warning" />
+            <KpiCard label="Due for Review" value={dashboard.data?.progress?.policiesDueForReview ?? ((dashboard.data?.reviewsDueSoon ?? 0) + (dashboard.data?.reviewsOverdue ?? 0))} icon={AlertTriangle} variant={(dashboard.data?.reviewsOverdue ?? 0) > 0 ? "danger" : "warning"} />
           </div>
 
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginBottom: "1rem" }}>
@@ -176,10 +177,44 @@ const PolicyGovernancePage: React.FC = () => {
                 {t.label}
               </button>
             ))}
+            <Link to="/hq/learning" className="hq-btn hq-btn-sm hq-btn-secondary">Learning & Development</Link>
             <Link to="/hq/documents?category=policies" className="hq-btn hq-btn-sm hq-btn-ghost"><FolderOpen size={12} /> Document Vault</Link>
             <Link to="/hq/compliance" className="hq-btn hq-btn-sm hq-btn-ghost"><Shield size={12} /> Compliance</Link>
             <Link to="/hq/operations?tab=compliance" className="hq-btn hq-btn-sm hq-btn-ghost">Ops Filings</Link>
           </div>
+
+          {tab === "progress" && (
+            <div className="hq-fade-in" style={{ display: "grid", gap: "1rem" }}>
+              <HqPanel title="Governance Progress Dashboard" subtitle="Category coverage and policy lifecycle health">
+                <p className="hq-muted-text">
+                  Foundational library seeding fills every category with professionally structured policy templates (Purpose, Scope, Procedures, What This Means, and more) ready for review and customization.
+                </p>
+                <div className="hq-kpi-grid" style={{ marginTop: "0.75rem" }}>
+                  <KpiCard label="Categories with policies" value={dashboard.data?.categoriesWithPolicies ?? 0} meta={`of ${dashboard.data?.categories ?? 30}`} />
+                  <KpiCard label="Categories complete (≥3)" value={dashboard.data?.categoriesComplete ?? 0} variant="success" />
+                  <KpiCard label="Published" value={dashboard.data?.published ?? 0} variant="success" />
+                  <KpiCard label="Drafts" value={dashboard.data?.drafts ?? 0} variant="gold" />
+                  <KpiCard label="Acknowledgments" value={dashboard.data?.acknowledgments ?? 0} icon={Signature} />
+                </div>
+              </HqPanel>
+              <HqPanel title="Category coverage" subtitle="Every category should show a full foundational set">
+                <ul className="hq-activity-list" style={{ margin: 0, padding: 0, listStyle: "none" }}>
+                  {(dashboard.data?.categoryCoverage ?? dashboard.data?.categoriesUsed ?? []).map((c) => (
+                    <li key={c.id} className="hq-activity-item hq-clickable" onClick={() => { setCategory(c.id); setTab("library"); }}>
+                      <div className="hq-activity-content">
+                        <div className="hq-activity-title">{c.label}</div>
+                        <div className="hq-activity-detail">{c.count} policies</div>
+                      </div>
+                      <StatusBadge
+                        label={"complete" in c && c.complete ? "ready" : c.count === 0 ? "empty" : "building"}
+                        variant={"complete" in c && c.complete ? "success" : c.count === 0 ? "danger" : "warning"}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </HqPanel>
+            </div>
+          )}
 
           {tab === "library" && (
             <div className="hq-fade-in" style={{ display: "grid", gap: "1rem" }}>

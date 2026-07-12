@@ -58,6 +58,7 @@ const DeveloperPortalPage = lazyWithRetry(() => import("./pages/hq/DeveloperPort
 const CommunicationsCenterPage = lazyWithRetry(() => import("./pages/hq/CommunicationsCenterPage"), "CommunicationsCenterPage");
 const DocumentCenterPage = lazyWithRetry(() => import("./pages/hq/DocumentCenterPage"), "DocumentCenterPage");
 const PolicyGovernancePage = lazyWithRetry(() => import("./pages/hq/PolicyGovernancePage"), "PolicyGovernancePage");
+const LearningDevelopmentPage = lazyWithRetry(() => import("./pages/hq/LearningDevelopmentPage"), "LearningDevelopmentPage");
 const KnowledgeBasePage = lazyWithRetry(() => import("./pages/hq/KnowledgeBasePage"), "KnowledgeBasePage");
 const EnterpriseIntelligencePage = lazyWithRetry(() => import("./pages/hq/EnterpriseIntelligencePage"), "EnterpriseIntelligencePage");
 const Phase10ExecutivePlatformPage = lazyWithRetry(() => import("./pages/hq/Phase10ExecutivePlatformPage"), "Phase10ExecutivePlatformPage");
@@ -187,6 +188,7 @@ const App: React.FC = () => (
           <Route path="/hq/monitoring" element={<HqRoute path="/hq/monitoring"><EnterpriseMonitoringPage /></HqRoute>} />
           <Route path="/hq/documents" element={<HqRoute path="/hq/documents"><DocumentCenterPage /></HqRoute>} />
           <Route path="/hq/policies" element={<HqRoute path="/hq/policies"><PolicyGovernancePage /></HqRoute>} />
+          <Route path="/hq/learning" element={<HqRoute path="/hq/learning"><LearningDevelopmentPage /></HqRoute>} />
           <Route path="/hq/knowledge" element={<HqRoute path="/hq/knowledge"><KnowledgeBasePage /></HqRoute>} />
           <Route path="/hq/assets" element={<HqRoute path="/hq/assets"><EnterpriseOperationsPage moduleKey="assets" /></HqRoute>} />
           <Route path="/hq/fleet" element={<HqRoute path="/hq/fleet"><EnterpriseOperationsPage moduleKey="fleet" /></HqRoute>} />

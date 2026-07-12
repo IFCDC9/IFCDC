@@ -10,17 +10,35 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 export interface PolicyDashboard {
   total: number;
   published: number;
+  approved?: number;
   pending: number;
   drafts: number;
+  completedPolicies?: number;
+  awaitingReview?: number;
+  awaitingApproval?: number;
   reviewsDueSoon: number;
   reviewsOverdue: number;
   acknowledgmentRequired: number;
   acknowledgments: number;
   categories: number;
+  categoriesWithPolicies?: number;
+  categoriesComplete?: number;
+  governanceCompletionPct?: number;
+  progress?: {
+    totalCategories: number;
+    totalPolicies: number;
+    completedPolicies: number;
+    policiesAwaitingReview: number;
+    policiesAwaitingApproval: number;
+    policiesDueForReview: number;
+    overallGovernanceCompletionPct: number;
+  };
+  categoryCoverage?: { id: string; label: string; count: number; complete: boolean }[];
   categoriesUsed: { id: string; label: string; count: number }[];
   vaultPath: string;
   compliancePath: string;
   operationsCompliancePath: string;
+  learningPath?: string;
   generatedAt: string;
 }
 

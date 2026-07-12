@@ -94,6 +94,7 @@ export const HQ_NAV_ITEMS: HQNavItem[] = [
 
   { label: "Board of Directors Portal", path: "/hq/board", icon: Gavel, section: "Governance" },
   { label: "Policy & Governance", path: "/hq/policies", icon: BookOpen, section: "Governance", badge: "New" },
+  { label: "Learning & Development", path: "/hq/learning", icon: GraduationCap, section: "Governance", badge: "New" },
   { label: "Compliance & Risk", path: "/hq/compliance", icon: Shield, section: "Governance" },
 
   { label: "Asset & Inventory", path: "/hq/assets", icon: Package, section: "Enterprise" },

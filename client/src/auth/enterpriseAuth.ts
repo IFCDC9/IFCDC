@@ -53,6 +53,7 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   "/hq/media": "hq.programs",
   "/hq/documents": "hq.documents",
   "/hq/policies": "hq.documents",
+  "/hq/learning": "hq.documents",
   "/hq/knowledge": "hq.aura",
   "/hq/assets": "hq.settings",
   "/hq/fleet": "hq.settings",

@@ -8,12 +8,13 @@ import { getDb } from "../db";
 import { ensureWorkflowTables } from "./workflowEngineSchema";
 import {
   POLICY_CATEGORIES,
-  type PolicyCategoryId,
   policyCategoryLabel,
 } from "./policyGovernanceCategories";
+import { buildFoundationalPolicyLibrary } from "./policyGovernanceLibrary";
 
 export { POLICY_CATEGORIES, POLICY_APPROVAL_STATUSES, policyCategoryLabel } from "./policyGovernanceCategories";
 export type { PolicyCategoryId, PolicyApprovalStatus } from "./policyGovernanceCategories";
+export { libraryCoverageSummary } from "./policyGovernanceLibrary";
 
 export function policyId() {
   return crypto.randomUUID();
@@ -149,7 +150,7 @@ export async function ensurePolicyGovernanceTables(): Promise<void> {
 
   await ensureWorkflowTables();
   await ensurePolicyAutomationJobs();
-  await seedPoliciesIfEmpty();
+  await seedPolicyLibraryGapFill();
 }
 
 async function ensurePolicyAutomationJobs(): Promise<void> {
@@ -193,27 +194,6 @@ async function logActivity(policyIdValue: string | null, action: string, detail:
   );
 }
 
-type SeedPolicy = {
-  title: string;
-  number: string;
-  department: string;
-  category: PolicyCategoryId;
-  purpose: string;
-  why: string;
-  scope: string;
-  responsibilities: string;
-  procedures: string;
-  compliance: string;
-  legal?: string;
-  meansWhy: string;
-  meansExpect: string;
-  meansConsequences: string;
-  meansDepts: string;
-  meansMission: string;
-  related?: string;
-  forms?: string;
-};
-
 async function snapshotVersion(policyIdValue: string, version: string, summary: string, actor?: string): Promise<void> {
   const db = await getDb();
   const row = await db.get("SELECT * FROM hq_policies WHERE id = ?", policyIdValue);
@@ -225,214 +205,22 @@ async function snapshotVersion(policyIdValue: string, version: string, summary: 
   );
 }
 
-async function seedPoliciesIfEmpty(): Promise<void> {
+async function seedPolicyLibraryGapFill(): Promise<void> {
   const db = await getDb();
-  const count = (await db.get<{ c: number }>("SELECT COUNT(*) as c FROM hq_policies"))?.c ?? 0;
-  if (count > 0) return;
-
   const now = new Date().toISOString();
   const effective = "2026-01-01";
   const nextReview = "2027-01-01";
   const lastReview = "2026-01-01";
-
-  const seeds: SeedPolicy[] = [
-    {
-      title: "Code of Ethics", number: "IFCDC-GOV-001", department: "Executive Administration", category: "code_of_ethics",
-      purpose: "Establish ethical standards for all IFCDC personnel and affiliates.",
-      why: "Public trust and nonprofit integrity require clear ethical expectations.",
-      scope: "Employees, volunteers, board members, contractors, and consultants.",
-      responsibilities: "Leadership models ethics; supervisors escalate concerns; all personnel report violations.",
-      procedures: "1) Review annually. 2) Disclose conflicts. 3) Report concerns via whistleblower channels. 4) Document investigations.",
-      compliance: "Required acknowledgment at onboarding and annually thereafter.",
-      legal: "IRS nonprofit governance expectations; state charity fiduciary duties.",
-      meansWhy: "This policy exists so everyone representing IFCDC acts with honesty and integrity.",
-      meansExpect: "Tell the truth, protect clients, avoid conflicts, and speak up when something is wrong.",
-      meansConsequences: "Violations may lead to coaching, removal from duties, or termination and board review.",
-      meansDepts: "All departments — especially Executive, HR, Programs, Finance, and Board.",
-      meansMission: "Ethical conduct protects our community, funding eligibility, and mission credibility.",
-      forms: "Annual Ethics Acknowledgment Form",
-    },
-    {
-      title: "Conflict of Interest Policy", number: "IFCDC-GOV-002", department: "Board of Directors", category: "conflict_of_interest",
-      purpose: "Identify, disclose, and manage conflicts of interest.",
-      why: "Conflicts can compromise decisions and jeopardize nonprofit status.",
-      scope: "Board members, officers, key employees, and grant decision-makers.",
-      responsibilities: "Individuals disclose; Board reviews; Chair documents recusals.",
-      procedures: "1) Complete annual disclosure. 2) Recuse from related votes. 3) Record in minutes. 4) Update when circumstances change.",
-      compliance: "Annual board disclosure certificates required.",
-      legal: "IRS Form 990 governance; state nonprofit corporation law.",
-      meansWhy: "So no one makes IFCDC decisions that personally benefit them unfairly.",
-      meansExpect: "Disclose relationships and step back from related decisions.",
-      meansConsequences: "Undisclosed conflicts may void decisions and trigger board discipline.",
-      meansDepts: "Board, Executive, Finance, Grants.",
-      meansMission: "Transparent decisions keep grants and community trust intact.",
-      forms: "Conflict of Interest Disclosure Form",
-    },
-    {
-      title: "Whistleblower Protection Policy", number: "IFCDC-GOV-003", department: "Human Resources", category: "whistleblower",
-      purpose: "Protect good-faith reporters of misconduct from retaliation.",
-      why: "People must feel safe reporting fraud, abuse, or safety risks.",
-      scope: "All employees, volunteers, contractors, and board members.",
-      responsibilities: "HR investigates; leadership prohibits retaliation; reporters cooperate in good faith.",
-      procedures: "1) Report via HR/Executive/Board channel. 2) Acknowledge receipt. 3) Investigate. 4) Protect anonymity where lawful.",
-      compliance: "Document all reports and outcomes; retain per records policy.",
-      legal: "Federal/state whistleblower protections for nonprofits.",
-      meansWhy: "So staff can report problems without fear of payback.",
-      meansExpect: "Report concerns in good faith; never retaliate against reporters.",
-      meansConsequences: "Retaliation is grounds for discipline up to termination.",
-      meansDepts: "HR, Executive, Board, all program departments.",
-      meansMission: "Protecting people who speak up strengthens accountability and client safety.",
-    },
-    {
-      title: "Employee Handbook Acknowledgment Policy", number: "IFCDC-HR-010", department: "Human Resources", category: "employee_handbook",
-      purpose: "Require acknowledgment of the Employee Handbook and updates.",
-      why: "Personnel must understand workplace rules, benefits, and expectations.",
-      scope: "All employees and long-term contractors as designated by HR.",
-      responsibilities: "HR issues handbook; supervisors ensure acknowledgment; employees read and sign.",
-      procedures: "1) Issue handbook at hire. 2) Collect signature within 14 days. 3) Re-acknowledge on major revisions.",
-      compliance: "100% acknowledgment tracking in Policy Center.",
-      meansWhy: "So everyone knows the workplace rules that protect staff and clients.",
-      meansExpect: "Read the handbook, ask questions, and acknowledge in writing.",
-      meansConsequences: "Failure to acknowledge may delay access to systems or paid duties.",
-      meansDepts: "HR and every hiring department.",
-      meansMission: "Clear workplace standards support fair treatment and program quality.",
-      related: "Employee Handbook PDF in Document Center",
-      forms: "Handbook Acknowledgment Form",
-    },
-    {
-      title: "Finance & Accounting Controls Policy", number: "IFCDC-FIN-001", department: "Finance", category: "finance_accounting",
-      purpose: "Define internal controls for funds, expenses, and financial reporting.",
-      why: "Accurate books and segregation of duties protect donors and grantors.",
-      scope: "Finance staff, executives with spending authority, program managers.",
-      responsibilities: "Finance maintains ledgers; approvers authorize; auditors review.",
-      procedures: "1) Dual approval thresholds. 2) Monthly reconciliations. 3) Restricted fund tracking. 4) Board financial packets.",
-      compliance: "Align with GAAP for nonprofits and grantor fiscal conditions.",
-      legal: "IRS Form 990; grant agreements; state charity reporting.",
-      meansWhy: "So IFCDC money is tracked carefully and spent as promised.",
-      meansExpect: "Follow approval limits, keep receipts, and never mix personal and org funds.",
-      meansConsequences: "Control violations may pause purchasing authority and trigger audit.",
-      meansDepts: "Finance, Executive, Grants, all program budget owners.",
-      meansMission: "Strong financial stewardship keeps programs funded and compliant.",
-    },
-    {
-      title: "Grants Management Policy", number: "IFCDC-GRT-001", department: "Grants", category: "grants_management",
-      purpose: "Govern grant pursuit, award management, reporting, and closeout.",
-      why: "Grantors require disciplined lifecycle management and documentation.",
-      scope: "Grant staff, program leads, finance partners, and executive approvers.",
-      responsibilities: "Grant Center owns pipeline; Finance tracks awards; Programs deliver outcomes.",
-      procedures: "1) Opportunity review. 2) Founder approval gates. 3) Award setup. 4) Compliance calendar. 5) Closeout.",
-      compliance: "Uniform Guidance where applicable; funder-specific terms.",
-      legal: "2 CFR 200 (as applicable); individual award agreements.",
-      meansWhy: "So every grant is pursued and managed the right way from start to finish.",
-      meansExpect: "Use Grant Center workflows, meet deadlines, and keep evidence ready.",
-      meansConsequences: "Missed reports can jeopardize funding and future eligibility.",
-      meansDepts: "Grants, Finance, Programs, Executive.",
-      meansMission: "Disciplined grants practice expands community services sustainably.",
-      related: "Grant Center Foundation; Document vault category=grants",
-    },
-    {
-      title: "Transitional Housing Program SOP", number: "IFCDC-HOU-SOP-001", department: "Transitional Housing", category: "transitional_housing",
-      purpose: "Standardize intake, placement, and exit procedures for housing clients.",
-      why: "Consistent procedures protect residents and program integrity.",
-      scope: "Housing staff, case managers, and approved volunteers.",
-      responsibilities: "Case managers document; supervisors review placements; facilities maintain units.",
-      procedures: "1) Application. 2) Eligibility. 3) Placement. 4) Case notes. 5) Exit checklist.",
-      compliance: "Client confidentiality; housing unit safety checks.",
-      meansWhy: "So housing help is fair, safe, and documented for every family.",
-      meansExpect: "Follow intake checklists and protect resident privacy at all times.",
-      meansConsequences: "Skipping steps can put residents at risk and pause placements.",
-      meansDepts: "Housing, Programs, Facilities, Compliance.",
-      meansMission: "Stable housing is core to IFCDC’s community restoration mission.",
-    },
-    {
-      title: "Artificial Intelligence Governance Policy", number: "IFCDC-AI-001", department: "Technology / AURA", category: "ai_governance",
-      purpose: "Govern responsible use of AURA and other AI systems in IFCDC operations.",
-      why: "AI affects privacy, decisions, and public trust; guardrails are required.",
-      scope: "All staff using AURA or third-party AI for IFCDC work.",
-      responsibilities: "Software Division maintains controls; users verify AI outputs; leadership sets boundaries.",
-      procedures: "1) Use approved AI tools only. 2) Never paste sensitive PII into unapproved tools. 3) Human review for decisions. 4) Log material AI-assisted actions.",
-      compliance: "Privacy policy; data minimization; executive oversight of automated recommendations.",
-      meansWhy: "So AI helps leadership without replacing accountability or exposing private data.",
-      meansExpect: "Use AURA for insight, verify facts, and keep humans responsible for decisions.",
-      meansConsequences: "Misuse of AI with confidential data may revoke access and trigger investigation.",
-      meansDepts: "Technology, Executive, HR, Grants, Programs.",
-      meansMission: "Responsible AI amplifies mission impact while protecting people we serve.",
-    },
-    {
-      title: "Privacy & Confidentiality Policy", number: "IFCDC-PRI-001", department: "Compliance", category: "privacy_confidentiality",
-      purpose: "Protect client, employee, donor, and organizational confidential information.",
-      why: "Trust and legal duties require careful handling of personal data.",
-      scope: "Anyone with access to IFCDC systems, files, or client information.",
-      responsibilities: "All personnel safeguard data; IT enforces access controls; Compliance investigates breaches.",
-      procedures: "1) Need-to-know access. 2) Secure storage. 3) Report incidents immediately. 4) Dispose of data per retention schedule.",
-      compliance: "Applicable privacy laws; grantor confidentiality clauses.",
-      meansWhy: "So people’s private information stays private.",
-      meansExpect: "Only access what you need for your job and never share without authorization.",
-      meansConsequences: "Breaches can lead to discipline, notification duties, and lost funding.",
-      meansDepts: "All departments handling people data.",
-      meansMission: "Protecting dignity and privacy is part of serving our community well.",
-    },
-    {
-      title: "Document Retention & Records Management Policy", number: "IFCDC-REC-001", department: "Executive Administration", category: "document_retention",
-      purpose: "Define how long records are kept, archived, or destroyed.",
-      why: "Retention supports audits, grants, and legal readiness without clutter.",
-      scope: "All record creators and custodians across IFCDC.",
-      responsibilities: "Department owners classify records; Document Center stores; Compliance audits retention.",
-      procedures: "1) Classify. 2) Store in Document Center when official. 3) Apply retention schedule. 4) Document destruction.",
-      compliance: "IRS, grant, and employment record retention minimums.",
-      legal: "Federal/state retention requirements for nonprofits and employers.",
-      meansWhy: "So we keep important records long enough — and dispose of them safely when done.",
-      meansExpect: "Use Document Center for official files and follow retention timelines.",
-      meansConsequences: "Early destruction or lost records can fail audits and grant reviews.",
-      meansDepts: "All departments; especially Finance, HR, Grants, Board.",
-      meansMission: "Good records prove impact and protect the organization.",
-      related: "Document Management Suite; category=policies",
-    },
-    {
-      title: "Cybersecurity Acceptable Use Policy", number: "IFCDC-IT-001", department: "Technology", category: "cybersecurity",
-      purpose: "Set rules for systems, passwords, devices, and incident reporting.",
-      why: "Cyber threats can halt services and expose confidential data.",
-      scope: "All users of IFCDC devices, email, HQ, and Software Division apps.",
-      responsibilities: "Users protect credentials; IT monitors; leadership funds controls.",
-      procedures: "1) Unique passwords/MFA. 2) Report phishing. 3) No unauthorized software. 4) Immediate incident notice.",
-      compliance: "Security Center controls; SSO gateway standards.",
-      meansWhy: "So hackers and mistakes do not take down IFCDC systems or steal data.",
-      meansExpect: "Use strong authentication, be cautious with links, and report issues fast.",
-      meansConsequences: "Risky behavior may lock accounts and require security retraining.",
-      meansDepts: "Technology and every department using HQ systems.",
-      meansMission: "Secure systems keep programs running for the people who need them.",
-    },
-    {
-      title: "Volunteer Management Policy", number: "IFCDC-VOL-001", department: "Human Resources", category: "volunteer_management",
-      purpose: "Define recruitment, screening, supervision, and acknowledgment for volunteers.",
-      why: "Volunteers extend capacity and must meet the same safety standards.",
-      scope: "Volunteers and staff who supervise them.",
-      responsibilities: "HR/People Center onboard; supervisors train; volunteers acknowledge policies.",
-      procedures: "1) Application. 2) Screening as required. 3) Orientation. 4) Policy acknowledgment. 5) Time tracking.",
-      compliance: "Background checks where role requires; youth-safety rules for youth programs.",
-      meansWhy: "So volunteers help safely and understand IFCDC expectations.",
-      meansExpect: "Complete onboarding, follow program rules, and protect clients.",
-      meansConsequences: "Noncompliance may end volunteer placement.",
-      meansDepts: "HR, Programs, Youth, Housing, Community Outreach.",
-      meansMission: "Well-supported volunteers multiply community impact.",
-    },
-    {
-      title: "Software Development Standards", number: "IFCDC-SW-001", department: "IFCDC Software Division", category: "software_standards",
-      purpose: "Standardize how IFCDC builds, reviews, and deploys software.",
-      why: "Consistent engineering protects production apps and shared services.",
-      scope: "Software Division engineers and contractors contributing to IFCDC codebases.",
-      responsibilities: "Engineers follow review gates; leads approve releases; HQ freeze rules are respected.",
-      procedures: "1) Use centralized @ifcdc services. 2) PR review. 3) QA. 4) Manual production deploy when required.",
-      compliance: "Architecture freeze; App Store and security requirements.",
-      meansWhy: "So IFCDC apps stay stable, secure, and aligned with headquarters architecture.",
-      meansExpect: "No one-off auth/payments; ship through review and verified builds.",
-      meansConsequences: "Out-of-process releases may be rolled back and blocked.",
-      meansDepts: "Software Division, Technology, Executive.",
-      meansMission: "Reliable software products extend IFCDC’s reach across communities.",
-    },
-  ];
+  const seeds = buildFoundationalPolicyLibrary();
+  let inserted = 0;
 
   for (const s of seeds) {
+    const existing = await db.get<{ id: string }>(
+      "SELECT id FROM hq_policies WHERE policy_number = ? LIMIT 1",
+      s.number
+    );
+    if (existing) continue;
+
     const id = policyId();
     await db.run(
       `INSERT INTO hq_policies (
@@ -448,8 +236,13 @@ async function seedPoliciesIfEmpty(): Promise<void> {
       s.meansWhy, s.meansExpect, s.meansConsequences, s.meansDepts, s.meansMission,
       effective, lastReview, nextReview, now, now, now
     );
-    await snapshotVersion(id, "1.0", "Initial published seed", "system");
-    await logActivity(id, "seed", `Seeded policy ${s.number}`, "system");
+    await snapshotVersion(id, "1.0", "Foundational library seed", "system");
+    await logActivity(id, "seed", `Seeded foundational policy ${s.number}`, "system");
+    inserted += 1;
+  }
+
+  if (inserted > 0) {
+    console.info(`[policy-governance] gap-filled ${inserted} foundational policies`);
   }
 }
 
@@ -458,23 +251,60 @@ export async function buildPolicyDashboard() {
   const db = await getDb();
   const total = (await db.get<{ c: number }>("SELECT COUNT(*) as c FROM hq_policies WHERE status = 'active'"))?.c ?? 0;
   const published = (await db.get<{ c: number }>("SELECT COUNT(*) as c FROM hq_policies WHERE approval_status = 'published' AND status = 'active'"))?.c ?? 0;
+  const approved = (await db.get<{ c: number }>("SELECT COUNT(*) as c FROM hq_policies WHERE approval_status = 'approved' AND status = 'active'"))?.c ?? 0;
   const pending = (await db.get<{ c: number }>("SELECT COUNT(*) as c FROM hq_policies WHERE approval_status = 'pending_approval'"))?.c ?? 0;
   const drafts = (await db.get<{ c: number }>("SELECT COUNT(*) as c FROM hq_policies WHERE approval_status = 'draft'"))?.c ?? 0;
-  const dueSoon = (await db.get<{ c: number }>(`SELECT COUNT(*) as c FROM hq_policies WHERE status = 'active' AND next_review_date IS NOT NULL AND next_review_date <= date('now', '+60 days')`))?.c ?? 0;
+  const dueSoon = (await db.get<{ c: number }>(`SELECT COUNT(*) as c FROM hq_policies WHERE status = 'active' AND next_review_date IS NOT NULL AND next_review_date <= date('now', '+60 days') AND next_review_date >= date('now')`))?.c ?? 0;
   const overdue = (await db.get<{ c: number }>(`SELECT COUNT(*) as c FROM hq_policies WHERE status = 'active' AND next_review_date IS NOT NULL AND next_review_date < date('now')`))?.c ?? 0;
   const ackRequired = (await db.get<{ c: number }>("SELECT COUNT(*) as c FROM hq_policies WHERE requires_acknowledgment = 1 AND approval_status = 'published'"))?.c ?? 0;
   const acknowledgments = (await db.get<{ c: number }>("SELECT COUNT(*) as c FROM hq_policy_acknowledgments"))?.c ?? 0;
   const categoriesUsed = await db.all(`SELECT category, COUNT(*) as count FROM hq_policies WHERE status = 'active' GROUP BY category ORDER BY count DESC`);
+  const countMap = new Map(categoriesUsed.map((r: { category: string; count: number }) => [r.category, r.count]));
+  const categoryCoverage = POLICY_CATEGORIES.map((c) => ({
+    id: c.id,
+    label: c.label,
+    count: countMap.get(c.id) ?? 0,
+    complete: (countMap.get(c.id) ?? 0) >= 3,
+  }));
+  const categoriesWithPolicies = categoryCoverage.filter((c) => c.count > 0).length;
+  const categoriesComplete = categoryCoverage.filter((c) => c.complete).length;
+  const completedPolicies = published + approved;
+  const awaitingReview = dueSoon + overdue;
+  const awaitingApproval = pending;
+  // Governance completion: category coverage (50%) + published ratio (50%)
+  const categoryPct = POLICY_CATEGORIES.length ? Math.round((categoriesComplete / POLICY_CATEGORIES.length) * 100) : 0;
+  const publishPct = total ? Math.round((published / total) * 100) : 0;
+  const governanceCompletionPct = Math.round(categoryPct * 0.5 + publishPct * 0.5);
 
   return {
-    version: "policy-governance-v1",
+    version: "policy-governance-v2",
     generatedAt: new Date().toISOString(),
-    total, published, pending, drafts,
+    total,
+    published,
+    approved,
+    pending,
+    drafts,
+    completedPolicies,
+    awaitingReview,
+    awaitingApproval,
     reviewsDueSoon: dueSoon,
     reviewsOverdue: overdue,
     acknowledgmentRequired: ackRequired,
     acknowledgments,
     categories: POLICY_CATEGORIES.length,
+    categoriesWithPolicies,
+    categoriesComplete,
+    governanceCompletionPct,
+    progress: {
+      totalCategories: POLICY_CATEGORIES.length,
+      totalPolicies: total,
+      completedPolicies,
+      policiesAwaitingReview: awaitingReview,
+      policiesAwaitingApproval: awaitingApproval,
+      policiesDueForReview: dueSoon + overdue,
+      overallGovernanceCompletionPct: governanceCompletionPct,
+    },
+    categoryCoverage,
     categoriesUsed: categoriesUsed.map((r: { category: string; count: number }) => ({
       id: r.category,
       label: policyCategoryLabel(r.category),
@@ -483,6 +313,7 @@ export async function buildPolicyDashboard() {
     vaultPath: "/hq/documents?category=policies",
     compliancePath: "/hq/compliance",
     operationsCompliancePath: "/hq/operations?tab=compliance",
+    learningPath: "/hq/learning",
   };
 }
 
