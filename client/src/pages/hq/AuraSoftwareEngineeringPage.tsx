@@ -111,13 +111,15 @@ const AuraSoftwareEngineeringPage: React.FC = () => {
       </div>
 
       {(data.securityWarnings?.length ?? 0) > 0 && (
-        <HqPanel title="Security / host notices" style={{ marginBottom: "1rem" }}>
-          <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
-            {data.securityWarnings!.map((w) => (
-              <li key={w}>{w}</li>
-            ))}
-          </ul>
-        </HqPanel>
+        <div style={{ marginBottom: "1rem" }}>
+          <HqPanel title="Security / host notices">
+            <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
+              {data.securityWarnings!.map((w) => (
+                <li key={w}>{w}</li>
+              ))}
+            </ul>
+          </HqPanel>
+        </div>
       )}
 
       <div className="hq-grid-2" style={{ gap: "1rem", marginBottom: "1rem" }}>
@@ -128,12 +130,12 @@ const AuraSoftwareEngineeringPage: React.FC = () => {
                 <div key={app.id} style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", alignItems: "center" }}>
                   <div>
                     <strong>{app.name}</strong>
-                    <div className="hq-muted" style={{ fontSize: "0.85rem" }}>{app.path}</div>
+                    <div className="hq-muted-text" style={{ fontSize: "0.85rem" }}>{app.path}</div>
                   </div>
                   <StatusBadge label={app.healthy === true ? "healthy" : app.healthy === false ? "down" : "unknown"} variant={healthVariant(app.healthy)} />
                 </div>
               ))}
-              {!data.apps.length && <p className="hq-muted">No portfolio data yet.</p>}
+              {!data.apps.length && <p className="hq-muted-text">No portfolio data yet.</p>}
             </div>
           </HqPanel>
         </HqWidgetErrorBoundary>
@@ -143,11 +145,11 @@ const AuraSoftwareEngineeringPage: React.FC = () => {
             <p style={{ marginTop: 0 }}>
               <strong>{data.github?.repository ?? "—"}</strong> @ {data.github?.branch ?? "main"}
             </p>
-            <p className="hq-muted" style={{ fontSize: "0.9rem" }}>
+            <p className="hq-muted-text" style={{ fontSize: "0.9rem" }}>
               GitHub: {data.github?.latestCommit ?? "—"} · Live: {data.github?.liveCommit ?? "—"}
             </p>
             <p>{data.github?.message}</p>
-            <p className="hq-muted" style={{ fontSize: "0.85rem" }}>
+            <p className="hq-muted-text" style={{ fontSize: "0.85rem" }}>
               Production deploy/restart/rollback always require Founder approval — AURA never auto-deploys.
             </p>
           </HqPanel>
@@ -157,7 +159,7 @@ const AuraSoftwareEngineeringPage: React.FC = () => {
       <div className="hq-grid-2" style={{ gap: "1rem", marginBottom: "1rem" }}>
         <HqPanel title="Recommended priorities">
           {(data.recommendedPriorities || []).length === 0 ? (
-            <p className="hq-muted">No urgent engineering priorities detected.</p>
+            <p className="hq-muted-text">No urgent engineering priorities detected.</p>
           ) : (
             <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
               {data.recommendedPriorities.map((p) => (
@@ -172,7 +174,7 @@ const AuraSoftwareEngineeringPage: React.FC = () => {
 
         <HqPanel title="Founder approvals">
           {data.pendingApprovals.length === 0 ? (
-            <p className="hq-muted">No pending approvals.</p>
+            <p className="hq-muted-text">No pending approvals.</p>
           ) : (
             <div style={{ display: "grid", gap: "0.75rem" }}>
               {data.pendingApprovals.map((a) => {
@@ -182,7 +184,7 @@ const AuraSoftwareEngineeringPage: React.FC = () => {
                     <div>
                       <strong>{String(a.action)}</strong> · {String(a.repository)}@{String(a.branch)}
                     </div>
-                    <div className="hq-muted" style={{ fontSize: "0.85rem" }}>{String(a.risk_summary || "")}</div>
+                    <div className="hq-muted-text" style={{ fontSize: "0.85rem" }}>{String(a.risk_summary || "")}</div>
                     <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.4rem" }}>
                       <button
                         type="button"
@@ -209,20 +211,22 @@ const AuraSoftwareEngineeringPage: React.FC = () => {
         </HqPanel>
       </div>
 
-      <HqPanel title="Open diagnoses" style={{ marginBottom: "1rem" }}>
-        {data.openDiagnoses.length === 0 ? (
-          <p className="hq-muted">No open diagnoses. Ask AURA to check a module or paste an error below.</p>
-        ) : (
-          <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
-            {data.openDiagnoses.map((d) => (
-              <li key={String(d.id)} style={{ marginBottom: "0.35rem" }}>
-                <StatusBadge label={String(d.severity || "medium")} variant="warning" />{" "}
-                <strong>{String(d.title)}</strong> — {String(d.root_cause || "").slice(0, 160)}
-              </li>
-            ))}
-          </ul>
-        )}
-      </HqPanel>
+      <div style={{ marginBottom: "1rem" }}>
+        <HqPanel title="Open diagnoses">
+          {data.openDiagnoses.length === 0 ? (
+            <p className="hq-muted-text">No open diagnoses. Ask AURA to check a module or paste an error below.</p>
+          ) : (
+            <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
+              {data.openDiagnoses.map((d) => (
+                <li key={String(d.id)} style={{ marginBottom: "0.35rem" }}>
+                  <StatusBadge label={String(d.severity || "medium")} variant="warning" />{" "}
+                  <strong>{String(d.title)}</strong> — {String(d.root_cause || "").slice(0, 160)}
+                </li>
+              ))}
+            </ul>
+          )}
+        </HqPanel>
+      </div>
 
       <HqPanel title="Founder command">
         <form

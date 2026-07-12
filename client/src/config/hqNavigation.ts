@@ -68,7 +68,7 @@ export const HQ_NAV_ITEMS: HQNavItem[] = [
   { label: "Workflow Automation", path: "/hq/workflows", icon: GitBranch, section: "Command" },
 
   { label: "Software Division", path: "/hq/software", icon: Monitor, section: "Operations" },
-  { label: "Software Engineering", path: "/hq/software-engineering", icon: Code2, section: "Operations", badge: "SE" },
+  { label: "Software Engineering", path: "/hq/software-engineering", icon: Code2, section: "Operations", badge: "1" },
   { label: "Executive Operations", path: "/hq/operations", icon: Package, section: "Operations" },
   { label: "SSO Gateway", path: "/hq/sso", icon: Shield, section: "Operations" },
   { label: "AURA Executive Intelligence", path: "/hq/aura-executive", icon: Brain, section: "Command", badge: "61" },
