@@ -74,9 +74,12 @@ const OperationsCenterPage: React.FC = () => {
       <div className="hq-grid-2 hq-fade-in">
         <HqPanel title="Operations Modules" subtitle="Navigate to specialized operations centers">
           <div className="hq-app-grid">
-            {MODULE_LINKS.map((m) => (
+            {MODULE_LINKS.map((m) => {
+              if (!m?.path || !m.icon) return null;
+              const Icon = m.icon;
+              return (
               <Link key={m.path} to={m.path} className="hq-app-card hq-entity-link">
-                <m.icon size={20} style={{ color: "var(--hq-gold)", marginBottom: "0.5rem" }} />
+                <Icon size={20} style={{ color: "var(--hq-gold)", marginBottom: "0.5rem" }} />
                 <div className="hq-app-name">{m.label}</div>
                 {ops && m.key === "fleet" && (ops.fleet.maintenanceDue > 0) && (
                   <StatusBadge label={`${ops.fleet.maintenanceDue} service due`} variant="warning" />
@@ -85,7 +88,8 @@ const OperationsCenterPage: React.FC = () => {
                   <StatusBadge label={`${ops.compliance.highRisks} high risk`} variant="danger" />
                 )}
               </Link>
-            ))}
+              );
+            })}
           </div>
         </HqPanel>
 

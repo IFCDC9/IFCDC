@@ -47,16 +47,25 @@ export interface StoredWidgetLayout {
 }
 
 export function defaultWidgetLayout(): StoredWidgetLayout[] {
-  return DEFAULT_EXECUTIVE_WIDGETS.map((id) => {
-    const def = EXECUTIVE_WIDGET_CATALOG.find((w) => w.id === id)!;
-    return { id, layout: { x: def.defaultLayout.x, y: def.defaultLayout.y, w: def.defaultLayout.w, h: def.defaultLayout.h } };
+  return DEFAULT_EXECUTIVE_WIDGETS.flatMap((id) => {
+    const def = EXECUTIVE_WIDGET_CATALOG.find((w) => w.id === id);
+    if (!def) return [];
+    return [{ id, layout: { x: def.defaultLayout.x, y: def.defaultLayout.y, w: def.defaultLayout.w, h: def.defaultLayout.h } }];
   });
 }
 
 export function loadExecutiveWidgetsLocal(): StoredWidgetLayout[] {
   try {
     const raw = localStorage.getItem(EXECUTIVE_WIDGETS_STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as StoredWidgetLayout[];
+    if (raw) {
+      const parsed = JSON.parse(raw) as StoredWidgetLayout[];
+      if (Array.isArray(parsed)) {
+        const known = parsed.filter(
+          (w) => w?.id && EXECUTIVE_WIDGET_CATALOG.some((c) => c.id === w.id) && w.layout
+        );
+        if (known.length) return known;
+      }
+    }
   } catch { /* ignore */ }
   return defaultWidgetLayout();
 }

@@ -89,14 +89,33 @@ export function AuraActionButtons({
     openAura({ module, contextRef, prefill: spec.prefill, autoRun: spec.autoRun });
   };
 
+  const resolved = (actions ?? [])
+    .map((id) => BUTTONS[id as AuraButtonId])
+    .filter((spec): spec is ButtonSpec => Boolean(spec?.icon));
+
+  if (!resolved.length) {
+    return (
+      <div className={`hq-aura-actions ${className ?? ""}`}>
+        <button
+          type="button"
+          className={`hq-aura-action-btn ${size === "sm" ? "sm" : ""}`}
+          onClick={() => openAura({ module, contextRef })}
+          title="Ask AURA"
+        >
+          <Sparkles size={14} />
+          <span>Ask AURA</span>
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className={`hq-aura-actions ${className ?? ""}`}>
-      {actions.map((id) => {
-        const spec = BUTTONS[id];
+      {resolved.map((spec) => {
         const Icon = spec.icon;
         return (
           <button
-            key={id}
+            key={spec.id}
             type="button"
             className={`hq-aura-action-btn ${size === "sm" ? "sm" : ""}`}
             onClick={() => trigger(spec)}

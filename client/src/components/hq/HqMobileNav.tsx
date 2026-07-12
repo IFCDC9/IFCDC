@@ -29,7 +29,7 @@ export const HqMobileNav: React.FC<{ onSearch?: () => void }> = ({ onSearch }) =
   return (
     <nav className="hq-mobile-nav" aria-label="Mobile navigation">
       {visible.map((item) => {
-        const Icon = item.icon;
+        const Icon = item.icon ?? LayoutDashboard;
         if (item.path === "__search__") {
           return (
             <button

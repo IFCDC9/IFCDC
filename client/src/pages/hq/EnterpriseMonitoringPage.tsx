@@ -58,7 +58,7 @@ const EnterpriseMonitoringPage: React.FC = () => {
       title="Enterprise Monitoring"
       subtitle="Live service, API, database, storage, auth, jobs, and uptime — Build 55"
       auraModule="software"
-      auraActions={["ask", "diagnose", "summarize"]}
+      auraActions={["ask", "explain", "summarize"]}
     >
       <div className="hq-people-toolbar" style={{ marginBottom: "1rem", flexWrap: "wrap", gap: "0.5rem" }}>
         <StatusBadge

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Menu, X, Bell, Search, Sparkles } from "lucide-react";
+import { Menu, X, Bell, Search, Sparkles, LayoutDashboard } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "../auth/AuthContext";
 import { HQ_NAV_ITEMS, HQ_NAV_SECTIONS } from "../config/hqNavigation";
@@ -14,6 +14,7 @@ import { HqMobileNav } from "../components/hq/HqMobileNav";
 import { useHqRealtime } from "../hooks/useHqRealtime";
 import { enterpriseApi } from "../api/enterpriseApi";
 import { ExecutiveLoginBriefing } from "../components/hq/ExecutiveLoginBriefing";
+import { HqWidgetErrorBoundary } from "../components/hq/HqErrorBoundary";
 
 interface HQLayoutProps {
   children: React.ReactNode;
@@ -117,7 +118,8 @@ const HQLayout: React.FC<HQLayoutProps> = ({
               <div key={section} className="hq-nav-section">
                 <div className="hq-nav-section-label">{section}</div>
                 {sectionItems.map((item) => {
-                  const Icon = item.icon;
+                  if (!item?.path) return null;
+                  const Icon = item.icon ?? LayoutDashboard;
                   const showBadge = item.path === "/hq/notifications" && unreadCount > 0;
                   return (
                     <Link
@@ -129,6 +131,9 @@ const HQLayout: React.FC<HQLayoutProps> = ({
                       <Icon size={18} />
                       <span>{item.label}</span>
                       {showBadge && <span className="hq-nav-badge">{unreadCount > 9 ? "9+" : unreadCount}</span>}
+                      {item.badge && item.path !== "/hq/notifications" && (
+                        <span className="hq-nav-badge">{item.badge}</span>
+                      )}
                     </Link>
                   );
                 })}
@@ -199,7 +204,9 @@ const HQLayout: React.FC<HQLayoutProps> = ({
               <span className="hq-aura-pagebar-label">
                 <Sparkles size={13} /> AURA
               </span>
-              <AuraActionButtons module={auraModule} actions={auraActions} contextRef={auraContextRef} />
+              <HqWidgetErrorBoundary label="AURA actions">
+                <AuraActionButtons module={auraModule} actions={auraActions} contextRef={auraContextRef} />
+              </HqWidgetErrorBoundary>
             </div>
           )}
           {children}

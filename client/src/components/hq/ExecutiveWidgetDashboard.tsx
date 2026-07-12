@@ -22,6 +22,7 @@ function normalizeWidgets(raw: unknown): StoredWidgetLayout[] {
       !!w &&
       typeof w === "object" &&
       typeof (w as StoredWidgetLayout).id === "string" &&
+      EXECUTIVE_WIDGET_CATALOG.some((c) => c.id === (w as StoredWidgetLayout).id) &&
       !!(w as StoredWidgetLayout).layout &&
       typeof (w as StoredWidgetLayout).layout.x === "number" &&
       typeof (w as StoredWidgetLayout).layout.y === "number" &&
@@ -115,7 +116,8 @@ export const ExecutiveWidgetDashboard: React.FC<ExecutiveWidgetDashboardProps> =
 
   const addWidget = (id: string) => {
     if (widgets.some((w) => w.id === id)) return;
-    const def = EXECUTIVE_WIDGET_CATALOG.find((w) => w.id === id)!;
+    const def = EXECUTIVE_WIDGET_CATALOG.find((w) => w.id === id);
+    if (!def) return;
     const maxY = widgets.reduce((m, w) => Math.max(m, w.layout.y + w.layout.h), 0);
     const next = [...widgets, { id, layout: { x: 0, y: maxY, w: def.defaultLayout.w, h: def.defaultLayout.h } }];
     setWidgets(next);

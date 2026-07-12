@@ -72,10 +72,11 @@ const EnterpriseReportingPage: React.FC = () => {
             <div>
               <div className="hq-app-grid">
                 {reports.map((r) => {
-                  const meta = CATEGORY_META[r.category];
+                  const meta = CATEGORY_META[r.category] ?? CATEGORY_META.internal;
+                  const Icon = meta.icon;
                   return (
                     <div key={r.id} className="hq-app-card">
-                      <meta.icon size={20} style={{ color: "var(--hq-gold)", marginBottom: "0.5rem" }} />
+                      <Icon size={20} style={{ color: "var(--hq-gold)", marginBottom: "0.5rem" }} />
                       <div className="hq-app-name">{r.title}</div>
                       <div className="hq-muted-text" style={{ fontSize: "0.78rem", margin: "0.35rem 0" }}>{r.description}</div>
                       <StatusBadge label={r.frequency} variant="muted" />

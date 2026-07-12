@@ -10,11 +10,11 @@ export interface QuickAction {
 
 export const QuickActions: React.FC<{ actions: QuickAction[] }> = ({ actions }) => (
   <div className="hq-quick-actions">
-    {actions.map((a) => {
+    {(actions ?? []).filter((a) => a?.to && a?.label).map((a) => {
       const Icon = a.icon;
       return (
       <Link key={a.to} to={a.to} className="hq-quick-action">
-        <Icon size={16} />
+        {Icon ? <Icon size={16} /> : null}
         {a.label}
       </Link>
       );

@@ -6,7 +6,7 @@ interface KpiCardProps {
   value: string | number;
   meta?: string;
   icon?: LucideIcon;
-  variant?: "gold" | "success" | "warning" | "danger";
+  variant?: "gold" | "success" | "warning" | "danger" | "muted";
 }
 
 export const KpiCard: React.FC<KpiCardProps> = ({ label, value, meta, icon: Icon, variant = "gold" }) => (

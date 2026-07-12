@@ -746,7 +746,7 @@ export async function buildPolicyComplianceReport() {
     publishedCount: published.length,
     reviewsDue: reviews,
     acknowledgmentTotals: acks.length,
-    acknowledgmentsByPolicy: [...byPolicyAck.entries()].map(([policy_id, count]) => ({ policy_id, count })),
+    acknowledgmentsByPolicy: Array.from(byPolicyAck.entries()).map(([policy_id, count]) => ({ policy_id, count })),
     recentAcknowledgments: (acks as unknown[]).slice(0, 25),
   };
 }
