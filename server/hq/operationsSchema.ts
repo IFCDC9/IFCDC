@@ -166,7 +166,7 @@ export async function ensureOperationsTables(): Promise<void> {
   if (docCount === 0) {
     await db.run(
       `INSERT INTO hq_documents (id, title, category, access_level, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      opsId(), "IFCDC Employee Handbook 2026", "policy", "internal", 1, now, now
+      opsId(), "IFCDC Employee Handbook 2026", "policies", "internal", 1, now, now
     );
   }
 

@@ -1,5 +1,5 @@
-/** Document Management must render within 5s — fail fast with safe defaults. */
-export const DOCUMENTS_FETCH_TIMEOUT_MS = 5_000;
+/** Document Management — allow upload + overview without false timeouts. */
+export const DOCUMENTS_FETCH_TIMEOUT_MS = 20_000;
 
 export const DOCUMENT_CATEGORIES = [
   { id: "grants", label: "Grants" },

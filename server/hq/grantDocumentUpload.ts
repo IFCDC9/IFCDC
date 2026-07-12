@@ -59,3 +59,7 @@ export function validateGrantDocumentUpload(
   }
   return { ok: true, mime, sizeBytes };
 }
+
+/** Shared vault upload rules — same limits as grant attachments. */
+export const validateHqDocumentUpload = validateGrantDocumentUpload;
+export const HQ_DOCUMENT_UPLOAD_MAX_BYTES = GRANT_UPLOAD_MAX_BYTES;

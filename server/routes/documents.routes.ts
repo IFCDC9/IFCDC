@@ -7,6 +7,7 @@ import { saveHqFileBase64 } from "../hq/hqFileStorage";
 import { grantId } from "../hq/grantsSchema";
 import { toHQRole } from "../hq/enterpriseRoles";
 import { indexUploadedDocument } from "../hq/knowledgeBaseEngine";
+import { validateHqDocumentUpload } from "../hq/grantDocumentUpload";
 
 const router = Router();
 
@@ -23,15 +24,23 @@ router.use(async (_req, _res, next) => {
 
 function canViewAccessLevel(role: string, accessLevel: string): boolean {
   const hqRole = toHQRole(role);
+  const level = (accessLevel || "internal").toLowerCase();
   if (["founder", "executive", "administrator"].includes(hqRole)) return true;
-  if (accessLevel === "internal") return true;
-  if (accessLevel === "confidential") {
+  if (level === "internal") return true;
+  // Personnel vault used "hr" historically — treat as confidential HR-scoped.
+  if (level === "confidential" || level === "hr") {
     return ["hr", "finance", "grant_manager", "board_member"].includes(hqRole);
   }
-  if (accessLevel === "board") {
+  if (level === "board") {
     return hqRole === "board_member";
   }
   return false;
+}
+
+function normalizeDocumentCategory(category: string | undefined | null): string {
+  const raw = (category || "general").trim().toLowerCase();
+  if (raw === "policy") return "policies";
+  return raw || "general";
 }
 
 async function linkGrantDocument(
@@ -109,8 +118,14 @@ router.get("/", async (req, res) => {
       sql += " AND COALESCE(d.lifecycle_status, 'active') != 'archived'";
     }
     if (category) {
-      sql += " AND d.category = ?";
-      params.push(category);
+      const normalized = normalizeDocumentCategory(category);
+      if (normalized === "policies") {
+        sql += " AND (d.category = ? OR d.category = 'policy')";
+        params.push(normalized);
+      } else {
+        sql += " AND d.category = ?";
+        params.push(normalized);
+      }
     }
     if (grant_id) {
       sql += " AND d.grant_id = ?";
@@ -143,18 +158,29 @@ router.post("/upload", async (req: Request, res: Response) => {
   if (!fileName || !base64 || !title) {
     return res.status(400).json({ error: "fileName, base64, and title are required" });
   }
+  const validated = validateHqDocumentUpload(String(fileName), String(base64), mimeType ? String(mimeType) : undefined);
+  if (!validated.ok) {
+    return res.status(400).json({ error: validated.error });
+  }
   try {
-    const saved = await saveHqFileBase64(String(fileName), String(base64), mimeType ? String(mimeType) : undefined, req.hqUser?.email ?? "", access_level ?? "internal");
+    const saved = await saveHqFileBase64(
+      String(fileName),
+      String(base64),
+      validated.mime,
+      req.hqUser?.email ?? "",
+      access_level ?? "internal"
+    );
     const db = await getDb();
     const now = new Date().toISOString();
     const id = docId();
     const approvalStatus = requires_approval === false ? "approved" : "pending";
+    const folder = normalizeDocumentCategory(category);
     await db.run(
       `INSERT INTO hq_documents (id, title, category, file_url, version, person_id, grant_id, department_id, access_level, approval_status, submitted_by, created_at, updated_at)
        VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       title,
-      category ?? "general",
+      folder,
       saved.url,
       person_id ?? null,
       grant_id ?? null,
@@ -216,7 +242,7 @@ router.post("/", async (req: Request, res: Response) => {
      VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     title,
-    category ?? "general",
+    normalizeDocumentCategory(category),
     file_url ?? null,
     person_id ?? null,
     grant_id ?? null,
@@ -296,7 +322,7 @@ router.patch("/:id", async (req: Request, res: Response) => {
   }
   if (category) {
     sets.push("category = ?");
-    vals.push(category);
+    vals.push(normalizeDocumentCategory(category));
   }
   if (access_level) {
     sets.push("access_level = ?");
@@ -327,6 +353,12 @@ router.post("/:id/ocr-index", async (req: Request, res: Response) => {
 router.post("/:id/sign", async (req: Request, res: Response) => {
   const { signatureData, signerName } = req.body;
   if (!signatureData) return res.status(400).json({ error: "signatureData is required" });
+  // Block stub signatures — e-sign workflow is not production-ready yet.
+  if (String(signatureData).startsWith("signed:")) {
+    return res.status(501).json({
+      error: "Enterprise e-signature is not enabled yet. Use approvals or attach a signed PDF as a new version.",
+    });
+  }
   const db = await getDb();
   const doc = await db.get("SELECT id, approval_status FROM hq_documents WHERE id = ?", req.params.id);
   if (!doc) return res.status(404).json({ error: "Document not found" });
@@ -341,6 +373,53 @@ router.post("/:id/sign", async (req: Request, res: Response) => {
     req.params.id
   );
   res.json({ document: await db.get("SELECT * FROM hq_documents WHERE id = ?", req.params.id) });
+});
+
+router.post("/:id/versions/:versionId/restore", async (req: Request, res: Response) => {
+  const db = await getDb();
+  const doc = await db.get<{ id: string; version: number; title: string; access_level?: string }>(
+    "SELECT id, version, title, access_level FROM hq_documents WHERE id = ?",
+    req.params.id
+  );
+  if (!doc) return res.status(404).json({ error: "Document not found" });
+  if (!canViewAccessLevel(req.hqUser?.role ?? "", doc.access_level ?? "internal")) {
+    return res.status(403).json({ error: "Access denied" });
+  }
+  const prior = await db.get<{ id: string; version: number; title: string; file_url: string | null }>(
+    "SELECT id, version, title, file_url FROM hq_document_versions WHERE id = ? AND document_id = ?",
+    req.params.versionId,
+    req.params.id
+  );
+  if (!prior) return res.status(404).json({ error: "Version not found" });
+  if (!prior.file_url) return res.status(400).json({ error: "Version has no file to restore" });
+
+  const nextVersion = (doc.version ?? 1) + 1;
+  const now = new Date().toISOString();
+  await db.run(
+    `UPDATE hq_documents SET title = ?, file_url = ?, version = ?, updated_at = ? WHERE id = ?`,
+    prior.title || doc.title,
+    prior.file_url,
+    nextVersion,
+    now,
+    req.params.id
+  );
+  await db.run(
+    `INSERT INTO hq_document_versions (id, document_id, version, title, file_url, change_notes, uploaded_by, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    docId(),
+    req.params.id,
+    nextVersion,
+    prior.title || doc.title,
+    prior.file_url,
+    `Restored from v${prior.version}`,
+    req.hqUser?.email ?? "",
+    now
+  );
+  void indexUploadedDocument(req.params.id, req.hqUser?.email).catch(() => undefined);
+  res.status(201).json({
+    document: await db.get("SELECT * FROM hq_documents WHERE id = ?", req.params.id),
+    version: nextVersion,
+  });
 });
 
 router.patch("/:id/approval", requireHQPermission("hq.settings", "hq.executive"), async (req: Request, res: Response) => {

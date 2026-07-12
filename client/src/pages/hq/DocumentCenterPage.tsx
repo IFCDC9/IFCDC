@@ -1,8 +1,8 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  FolderOpen, Search, Plus, History, FileText, Check, X, PenLine, ScanText,
-  Archive, AlertTriangle, RefreshCw,
+  FolderOpen, Search, Plus, History, FileText, Check, X, ScanText,
+  Archive, AlertTriangle, RefreshCw, Eye,
 } from "lucide-react";
 import HQLayout from "../../layouts/HQLayout";
 import { documentsApi, type HQDocument } from "../../api/documentsApi";
@@ -43,17 +43,33 @@ function approvalVariant(status?: string): "success" | "warning" | "danger" | "m
   return "muted";
 }
 
+function isPreviewableUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  const lower = url.toLowerCase().split("?")[0] ?? "";
+  return /\.(pdf|png|jpe?g|gif|webp|txt)$/.test(lower) || lower.includes("/api/hq/files/");
+}
+
+function mutationErrorMessage(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  return "Request failed";
+}
+
 const DocumentCenterPage: React.FC = () => {
   const { user } = useAuth();
   const role = String(user?.role ?? "").toLowerCase();
   const canApprove = ["owner", "founder", "admin", "administrator", "executive"].includes(role);
 
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [category, setCategory] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [selected, setSelected] = useState<HQDocument | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [showVersion, setShowVersion] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewKind, setPreviewKind] = useState<"pdf" | "image" | "text" | "other">("other");
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [newDoc, setNewDoc] = useState({
     title: "",
     category: "grants",
@@ -70,6 +86,11 @@ const DocumentCenterPage: React.FC = () => {
   const [showOcr, setShowOcr] = useState(false);
   const qc = useQueryClient();
 
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
   const overview = useQuery({
     queryKey: ["docs-overview"],
     queryFn: async (): Promise<DocumentsOverview> => {
@@ -85,11 +106,11 @@ const DocumentCenterPage: React.FC = () => {
   });
 
   const list = useQuery({
-    queryKey: ["docs-list", search, category, showArchived],
+    queryKey: ["docs-list", debouncedSearch, category, showArchived],
     queryFn: async () => {
       try {
         return await documentsApi.list({
-          q: search || undefined,
+          q: debouncedSearch || undefined,
           category: category || undefined,
           archived: showArchived,
         });
@@ -108,6 +129,56 @@ const DocumentCenterPage: React.FC = () => {
     enabled: !!selected,
     retry: 0,
   });
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    const fileUrl = detail.data?.document.file_url ?? selected?.file_url ?? null;
+
+    async function loadPreview() {
+      setPreviewUrl((prev) => {
+        if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+        return null;
+      });
+      if (!fileUrl || !isPreviewableUrl(fileUrl)) {
+        setPreviewKind("other");
+        setPreviewLoading(false);
+        return;
+      }
+      setPreviewLoading(true);
+      try {
+        const res = await fetch(fileUrl, { credentials: "include" });
+        if (!res.ok) throw new Error(`Preview failed (${res.status})`);
+        const blob = await res.blob();
+        if (cancelled) return;
+        const type = (blob.type || "").toLowerCase();
+        const kind: "pdf" | "image" | "text" | "other" =
+          type.includes("pdf") || fileUrl.toLowerCase().endsWith(".pdf")
+            ? "pdf"
+            : type.startsWith("image/") || /\.(png|jpe?g|gif|webp)$/i.test(fileUrl)
+              ? "image"
+              : type.startsWith("text/") || fileUrl.toLowerCase().endsWith(".txt")
+                ? "text"
+                : "other";
+        objectUrl = URL.createObjectURL(blob);
+        setPreviewKind(kind);
+        setPreviewUrl(objectUrl);
+      } catch {
+        if (!cancelled) {
+          setPreviewKind("other");
+          setPreviewUrl(null);
+        }
+      } finally {
+        if (!cancelled) setPreviewLoading(false);
+      }
+    }
+
+    void loadPreview();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [selected?.id, selected?.file_url, detail.data?.document.file_url]);
 
   const grantOptions = useQuery({
     queryKey: ["docs-grant-options"],
@@ -133,14 +204,16 @@ const DocumentCenterPage: React.FC = () => {
   const documents = list.data?.documents ?? [];
   const folderCounts = useMemo(() => {
     const counts = Object.fromEntries(DOCUMENT_CATEGORIES.map((c) => [c.id, 0]));
-    for (const d of documents) {
-      if (counts[d.category] !== undefined) counts[d.category] += 1;
+    for (const row of overview.data?.byCategory ?? []) {
+      const key = row.category === "policy" ? "policies" : row.category;
+      if (counts[key] !== undefined) counts[key] += Number(row.count) || 0;
     }
     return counts;
-  }, [documents]);
+  }, [overview.data?.byCategory]);
 
   const createDoc = useMutation({
     mutationFn: async () => {
+      setActionError(null);
       if (uploadFile) {
         const base64 = await fileToBase64(uploadFile);
         return documentsApi.upload({
@@ -180,10 +253,12 @@ const DocumentCenterPage: React.FC = () => {
         department_id: "",
       });
     },
+    onError: (err) => setActionError(mutationErrorMessage(err)),
   });
 
   const addVersion = useMutation({
     mutationFn: async () => {
+      setActionError(null);
       if (versionFile) {
         const base64 = await fileToBase64(versionFile);
         const uploaded = await filesApi.upload({
@@ -205,6 +280,19 @@ const DocumentCenterPage: React.FC = () => {
       setVersionForm({ file_url: "", change_notes: "" });
       setVersionFile(null);
     },
+    onError: (err) => setActionError(mutationErrorMessage(err)),
+  });
+
+  const restoreVersion = useMutation({
+    mutationFn: (versionId: string) => {
+      setActionError(null);
+      return documentsApi.restoreVersion(selected!.id, versionId);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["docs-detail", selected?.id] });
+      qc.invalidateQueries({ queryKey: ["docs-list"] });
+    },
+    onError: (err) => setActionError(mutationErrorMessage(err)),
   });
 
   const reviewDoc = useMutation({
@@ -233,11 +321,7 @@ const DocumentCenterPage: React.FC = () => {
       setShowOcr(false);
       setOcrText("");
     },
-  });
-
-  const signDoc = useMutation({
-    mutationFn: () => documentsApi.sign(selected!.id, `signed:${selected!.id}:${Date.now()}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["docs-detail", selected?.id] }),
+    onError: (err) => setActionError(mutationErrorMessage(err)),
   });
 
   const overviewData = overview.data ?? EMPTY_DOCUMENTS_OVERVIEW;
@@ -258,6 +342,19 @@ const DocumentCenterPage: React.FC = () => {
               <div>
                 <strong>Degraded mode</strong>
                 <span>Document data may be partial — refresh to retry.</span>
+              </div>
+            </div>
+          )}
+
+          {actionError && (
+            <div className="hq-anomaly-alert hq-sev-medium hq-fade-in" style={{ marginBottom: "1rem" }} role="alert">
+              <AlertTriangle size={16} />
+              <div>
+                <strong>Action failed</strong>
+                <span>{actionError}</span>
+                <button type="button" className="hq-btn hq-btn-sm hq-btn-ghost" style={{ marginLeft: "0.5rem" }} onClick={() => setActionError(null)}>
+                  Dismiss
+                </button>
               </div>
             </div>
           )}
@@ -429,22 +526,49 @@ const DocumentCenterPage: React.FC = () => {
                         <button type="button" className="hq-btn hq-btn-sm hq-btn-ghost" onClick={() => { setOcrText(detail.data.document.ocr_text ?? ""); setShowOcr(true); }}>
                           <ScanText size={14} /> OCR Index
                         </button>
-                        {detail.data.document.signature_status !== "signed" ? (
-                          <button type="button" className="hq-btn hq-btn-sm hq-btn-ghost" disabled={signDoc.isPending} onClick={() => signDoc.mutate()}>
-                            <PenLine size={14} /> Sign
-                          </button>
+                        {detail.data.document.signature_status === "signed" ? (
+                          <StatusBadge label={`Signed by ${detail.data.document.signed_by ?? "unknown"}`} variant="success" />
                         ) : (
-                          <button type="button" className="hq-btn hq-btn-sm hq-btn-ghost" disabled title="Coming soon — advanced e-signature workflow">
-                            E-Sign (Coming soon)
-                          </button>
+                          <span className="hq-muted-text" style={{ fontSize: "0.72rem" }} title="Upload a signed PDF as a new version">
+                            E-sign: upload signed PDF as new version
+                          </span>
                         )}
                       </div>
                     }
                   >
                     {detail.data.document.file_url && (
-                      <a href={detail.data.document.file_url} target="_blank" rel="noopener noreferrer" className="hq-btn hq-btn-primary hq-btn-sm" style={{ marginBottom: "1rem" }}>
-                        Open File
-                      </a>
+                      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
+                        <a href={detail.data.document.file_url} target="_blank" rel="noopener noreferrer" className="hq-btn hq-btn-primary hq-btn-sm">
+                          Open File
+                        </a>
+                        {isPreviewableUrl(detail.data.document.file_url) && (
+                          <span className="hq-btn hq-btn-sm hq-btn-ghost" style={{ pointerEvents: "none" }}>
+                            <Eye size={14} /> In-app preview
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {previewLoading && <HqLoading message="Loading preview…" />}
+                    {!previewLoading && previewUrl && previewKind === "pdf" && (
+                      <iframe
+                        title="Document preview"
+                        src={previewUrl}
+                        style={{ width: "100%", height: "360px", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, marginBottom: "1rem", background: "#111" }}
+                      />
+                    )}
+                    {!previewLoading && previewUrl && previewKind === "image" && (
+                      <img
+                        src={previewUrl}
+                        alt={detail.data.document.title}
+                        style={{ maxWidth: "100%", maxHeight: 360, borderRadius: 8, marginBottom: "1rem", objectFit: "contain" }}
+                      />
+                    )}
+                    {!previewLoading && previewUrl && previewKind === "text" && (
+                      <iframe
+                        title="Text preview"
+                        src={previewUrl}
+                        style={{ width: "100%", height: "240px", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, marginBottom: "1rem", background: "#111" }}
+                      />
                     )}
                     <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", flexWrap: "wrap" }}>
                       <StatusBadge label={`Access: ${detail.data.document.access_level}`} variant="muted" />
@@ -452,6 +576,12 @@ const DocumentCenterPage: React.FC = () => {
                         variant={detail.data.document.signature_status === "signed" ? "success" : "muted"} />
                       {detail.data.document.department_name && (
                         <StatusBadge label={detail.data.document.department_name} variant="gold" />
+                      )}
+                      {detail.data.document.grant_id && (
+                        <StatusBadge label="Linked to grant" variant="gold" />
+                      )}
+                      {detail.data.document.person_id && (
+                        <StatusBadge label="Linked to person" variant="gold" />
                       )}
                     </div>
                     {detail.data.document.ocr_text && (
@@ -467,6 +597,23 @@ const DocumentCenterPage: React.FC = () => {
                           <div className="hq-activity-content">
                             <div className="hq-activity-title">v{v.version} — {v.title}</div>
                             <div className="hq-activity-detail">{v.change_notes} · {v.uploaded_by}</div>
+                            <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.35rem", flexWrap: "wrap" }}>
+                              {v.file_url && (
+                                <a href={v.file_url} target="_blank" rel="noopener noreferrer" className="hq-btn hq-btn-sm hq-btn-ghost">
+                                  Open
+                                </a>
+                              )}
+                              {v.file_url && v.version !== detail.data.document.version && (
+                                <button
+                                  type="button"
+                                  className="hq-btn hq-btn-sm hq-btn-secondary"
+                                  disabled={restoreVersion.isPending}
+                                  onClick={() => restoreVersion.mutate(v.id)}
+                                >
+                                  Restore
+                                </button>
+                              )}
+                            </div>
                           </div>
                           <div className="hq-activity-time">{new Date(v.created_at).toLocaleDateString()}</div>
                         </li>

@@ -4,6 +4,7 @@ import fs from "fs/promises";
 import path from "path";
 import { hqAuthRequired, requireHQPermission } from "../middleware/hqAuth";
 import { resolveHqFilePath, saveHqFileBase64, verifyHqFileAccess } from "../hq/hqFileStorage";
+import { validateHqDocumentUpload } from "../hq/grantDocumentUpload";
 
 const router = Router();
 
@@ -14,11 +15,15 @@ router.post("/upload", async (req: Request, res: Response) => {
   if (!fileName || !base64) {
     return res.status(400).json({ error: "fileName and base64 are required" });
   }
+  const validated = validateHqDocumentUpload(String(fileName), String(base64), mimeType ? String(mimeType) : undefined);
+  if (!validated.ok) {
+    return res.status(400).json({ error: validated.error });
+  }
   try {
     const saved = await saveHqFileBase64(
       String(fileName),
       String(base64),
-      mimeType ? String(mimeType) : undefined,
+      validated.mime,
       req.hqUser?.email ?? "unknown",
       access_level ?? "internal"
     );

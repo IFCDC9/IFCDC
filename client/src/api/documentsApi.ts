@@ -65,6 +65,8 @@ export const documentsApi = {
     }),
   addVersion: (id: string, data: { title?: string; file_url?: string; change_notes?: string }) =>
     api(`/${id}/versions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
+  restoreVersion: (id: string, versionId: string) =>
+    api(`/${id}/versions/${versionId}/restore`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }),
   update: (id: string, data: Partial<HQDocument>) =>
     api(`/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
   review: (id: string, action: "approve" | "reject") =>

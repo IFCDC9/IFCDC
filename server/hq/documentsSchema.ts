@@ -36,4 +36,7 @@ export async function ensureDocumentTables(): Promise<void> {
   await addCol("signed_at", "TEXT");
   await addCol("signature_data", "TEXT");
   await addCol("lifecycle_status", "TEXT DEFAULT 'active'");
+  // Align legacy seed/category drift with Document Center folders.
+  await db.run(`UPDATE hq_documents SET category = 'policies' WHERE category = 'policy'`).catch(() => undefined);
+  await db.run(`UPDATE hq_documents SET access_level = 'confidential' WHERE access_level = 'hr'`).catch(() => undefined);
 }
