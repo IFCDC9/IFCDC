@@ -8,7 +8,7 @@ import { validateHqDocumentUpload } from "../hq/grantDocumentUpload";
 
 const router = Router();
 
-router.use(hqAuthRequired, requireHQPermission("hq.settings", "hq.grants.manage", "hq.hr.manage", "hq.executive"));
+router.use(hqAuthRequired, requireHQPermission("hq.documents", "hq.settings", "hq.grants.manage", "hq.hr.manage", "hq.executive", "hq.finance", "hq.programs"));
 
 router.post("/upload", async (req: Request, res: Response) => {
   const { fileName, base64, mimeType, access_level } = req.body ?? {};

@@ -353,11 +353,11 @@ export async function searchEnterpriseDocuments(
   const facetCount = (key: string) => {
     const map = new Map<string, number>();
     for (const d of documents) {
-      const raw = d[key];
+      const raw = (d as Record<string, unknown>)[key];
       const value = String(raw ?? "—");
       map.set(value, (map.get(value) ?? 0) + 1);
     }
-    return [...map.entries()]
+    return Array.from(map.entries())
       .map(([value, count]) => ({ value, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 20);
@@ -379,7 +379,7 @@ export async function searchEnterpriseDocuments(
       access_level: facetCount("access_level"),
       status: facetCount("approval_status"),
       department_id: facetCount("department_id"),
-      tags: [...tagFacets.entries()]
+      tags: Array.from(tagFacets.entries())
         .map(([value, count]) => ({ value, count }))
         .sort((a, b) => b.count - a.count)
         .slice(0, 30),
@@ -456,7 +456,7 @@ export async function buildModuleDocumentSnapshot(sourceModule: string, role: st
     module: sourceModule,
     label: link?.label ?? sourceModule,
     path: link?.path ?? "/hq/documents",
-    documents: [...merged.values()].slice(0, 50),
+    documents: Array.from(merged.values()).slice(0, 50),
     total: merged.size,
   };
 }

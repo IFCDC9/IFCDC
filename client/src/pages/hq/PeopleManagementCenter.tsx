@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Users, Search, Building2, Network, Clock, Plus, UserCircle,
   Mail, Phone, MapPin, Briefcase, FileText, GraduationCap, Award, Calendar, Palmtree, ShieldCheck, ClipboardCheck, HandHeart, PenLine,
@@ -294,6 +294,9 @@ const PeopleManagementCenter: React.FC = () => {
       auraModule="hr"
       auraActions={["ask", "summarize", "explain"]}
     >
+      <div style={{ marginBottom: "0.75rem" }}>
+        <Link to="/hq/documents?category=personnel" className="hq-btn hq-btn-sm hq-btn-ghost">HR Personnel Documents →</Link>
+      </div>
       <div className="hq-people-toolbar">
         <div className="hq-search-bar">
           <Search size={18} />

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Gavel, Calendar, FileText, Vote, Shield, Wallet, Plus, CheckCircle, Download,
@@ -233,7 +234,7 @@ const BoardPortalPage: React.FC = () => {
 
         {tab === "documents" && (
           documents.isLoading ? <HqLoading /> : (
-            <HqPanel title="Board-Secure Documents" subtitle="Access level: board only">
+            <HqPanel title="Board-Secure Documents" subtitle="Access level: board only" action={{ label: "Enterprise Vault", to: "/hq/documents?category=board_records" }}>
               <table className="hq-table">
                 <thead><tr><th>Document</th><th>Category</th><th>Updated</th></tr></thead>
                 <tbody>
@@ -245,7 +246,7 @@ const BoardPortalPage: React.FC = () => {
                     </tr>
                   ))}
                   {!(documents.data?.documents ?? []).length && (
-                    <tr><td colSpan={3} className="hq-empty-cell">Upload documents with board access level in Document Management</td></tr>
+                    <tr><td colSpan={3} className="hq-empty-cell">Upload documents with board access level in Document Management — <Link to="/hq/documents?category=board_records">open vault</Link></td></tr>
                   )}
                 </tbody>
               </table>

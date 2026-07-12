@@ -204,9 +204,9 @@ export const HQ_MODULE_CONFIGS: Record<string, HQModuleConfig> = {
   },
   documents: {
     title: "Document Management",
-    subtitle: "Organizational document vault",
-    description: "Central repository for policies, contracts, grant documents, and personnel files — linked to Grants, HR, and Compliance.",
-    features: ["Document library", "Version control", "Access permissions", "Category tagging"],
+    subtitle: "Enterprise document suite",
+    description: "Enterprise repository for every HQ document — drag-and-drop uploads, search, preview, version history, RBAC, and module integrations.",
+    features: ["Enterprise library", "Search & filters", "In-app preview", "Version control", "Activity audit", "Module links"],
     status: "live",
   },
   assets: {

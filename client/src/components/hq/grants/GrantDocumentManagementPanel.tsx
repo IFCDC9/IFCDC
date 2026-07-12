@@ -32,7 +32,7 @@ export const GrantDocumentManagementPanel: React.FC<{
 
   return (
     <div className="hq-fade-in">
-      <HqPanel title="Grant Document Management" subtitle="Required attachments, budgets, narratives, and supporting files">
+      <HqPanel title="Grant Document Management" subtitle="Required attachments, budgets, narratives, and supporting files" action={{ label: "Enterprise Vault", to: "/hq/documents?category=grants" }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", marginBottom: "1rem", alignItems: "end" }}>
           <div>
             <label style={{ fontSize: "0.72rem", color: "var(--hq-text-muted)" }}>Application</label>

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { FileBarChart, Download, Building2, Landmark, FileText, Globe, Briefcase } from "lucide-react";
 import HQLayout from "../../layouts/HQLayout";
@@ -53,6 +54,9 @@ const EnterpriseReportingPage: React.FC = () => {
 
   return (
     <HQLayout title="Enterprise Reporting Center" subtitle="Automated reports for IRS, funders, state agencies, board, and internal management">
+      <div style={{ marginBottom: "0.75rem" }}>
+        <Link to="/hq/documents?category=reports" className="hq-btn hq-btn-sm hq-btn-ghost">Reports Document Vault →</Link>
+      </div>
       <div className="hq-tabs">
         <button type="button" className={`hq-tab ${category === "all" ? "active" : ""}`} onClick={() => setCategory("all")}>All Reports</button>
         {Object.entries(CATEGORY_META).map(([key, meta]) => (

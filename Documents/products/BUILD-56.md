@@ -33,4 +33,5 @@ Cards and dashboard use **Connected · Warning · Disconnected**
 3. Verify `/hq/integrations` health score + retry
 
 ## Next
-**Build 57 — Document Management Enterprise Suite**
+**Build 57 — Document Management Enterprise Suite** → see `BUILD-57.md` (shipped)  
+**Build 58 — Enterprise Quality Assurance & System Hardening**

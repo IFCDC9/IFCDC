@@ -189,7 +189,7 @@ router.get("/", async (req, res) => {
 router.post("/reindex", requireHQPermission("hq.documents", "hq.settings", "hq.executive"), async (req, res) => {
   try {
     const db = await getDb();
-    const rows = await db.all<{ id: string }>("SELECT id FROM hq_documents");
+    const rows = (await db.all("SELECT id FROM hq_documents")) as { id: string }[];
     for (const row of rows) {
       await upsertSearchIndex(row.id);
     }

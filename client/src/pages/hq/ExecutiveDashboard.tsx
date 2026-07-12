@@ -484,6 +484,7 @@ const ExecutiveDashboard: React.FC = () => {
       <nav className="hq-founder-command-strip hq-fade-in" aria-label="Quick module access">
         <Link to="/hq/people" className="primary"><Users size={14} /> People & HR</Link>
         <Link to="/hq/grants"><FileText size={14} /> Grant Center</Link>
+        <Link to="/hq/documents"><FileText size={14} /> Documents</Link>
         <Link to="/hq/finance"><TrendingUp size={14} /> Financial Center</Link>
         <Link to="/hq/analytics"><FileBarChart size={14} /> Analytics</Link>
         <Link to="/hq/payroll"><Monitor size={14} /> Payroll</Link>

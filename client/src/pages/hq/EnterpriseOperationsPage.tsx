@@ -69,6 +69,12 @@ const EnterpriseOperationsPage: React.FC<Props> = ({ moduleKey }) => {
           {def.relatedModules.map((m) => (
             <Link key={m.path} to={m.path} className="hq-module-chip"><Link2 size={12} />{m.label}</Link>
           ))}
+          {moduleKey === "compliance" && (
+            <Link to="/hq/documents?category=policies" className="hq-module-chip"><Link2 size={12} />Policy Documents</Link>
+          )}
+          {(moduleKey === "assets" || moduleKey === "facilities") && (
+            <Link to="/hq/documents" className="hq-module-chip"><Link2 size={12} />Document Vault</Link>
+          )}
         </div>
       </HqPanel>
 

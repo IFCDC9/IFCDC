@@ -19,6 +19,9 @@ const HqProgramsPage: React.FC = () => {
 
   return (
     <HQLayout title="Program Management" subtitle="Unified command center for all IFCDC community impact programs">
+      <div style={{ marginBottom: "0.75rem" }}>
+        <Link to="/hq/documents?category=program_files" className="hq-btn hq-btn-sm hq-btn-ghost">Program Documents Vault →</Link>
+      </div>
       {programs.isLoading ? <HqLoading /> : (
         <>
           <div className="hq-kpi-grid hq-fade-in" style={{ marginBottom: "1.25rem" }}>

@@ -16,7 +16,15 @@ const GRANT_ALLOWED_MIME = new Set([
 ]);
 
 const ENTERPRISE_ALLOWED_MIME = new Set([
-  ...GRANT_ALLOWED_MIME,
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/plain",
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
   "application/vnd.ms-powerpoint",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   "application/zip",
