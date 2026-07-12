@@ -677,7 +677,7 @@ const DIVISION_MODULES = [
   { key: "integrations", label: "Integrations Hub", path: "/hq/integrations" },
 ];
 
-const MC_AGGREGATE_TIMEOUT_MS = 4_000;
+const MC_AGGREGATE_TIMEOUT_MS = 15_000;
 
 function mcTimeout<T>(promise: Promise<T>, fallback: T, label: string): Promise<T> {
   return Promise.race([

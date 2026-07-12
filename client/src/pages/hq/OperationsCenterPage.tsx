@@ -20,12 +20,17 @@ const MODULE_LINKS = [
 ];
 
 const OperationsCenterPage: React.FC = () => {
-  const overview = useQuery({ queryKey: ["ops-overview"], queryFn: operationsApi.overview });
+  const overview = useQuery({
+    queryKey: ["ops-overview"],
+    queryFn: operationsApi.overview,
+    staleTime: 45_000,
+    retry: 1,
+  });
 
-  if (overview.isLoading) {
+  if (overview.isLoading && !overview.data) {
     return (
       <HQLayout title="Operations Center" subtitle="Unified fleet, assets, facilities, maintenance, and risk management">
-        <HqLoading />
+        <HqLoading message="Loading operations overview…" />
       </HQLayout>
     );
   }
@@ -35,6 +40,18 @@ const OperationsCenterPage: React.FC = () => {
 
   return (
     <HQLayout title="Operations Center" subtitle="Unified fleet, assets, facilities, maintenance, incidents, and risk management">
+      {overview.isError && !ops && (
+        <div className="hq-anomaly-alert hq-sev-medium" style={{ marginBottom: "1rem" }} role="status">
+          <AlertTriangle size={16} />
+          <div>
+            <strong>Operations overview unavailable</strong>
+            <span>Live operations metrics did not load.</span>
+            <button type="button" className="hq-btn hq-btn-sm hq-btn-ghost" style={{ marginLeft: "0.5rem" }} onClick={() => void overview.refetch()}>
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
       <div style={{ marginBottom: "1.25rem" }}>
         <OperationsPhase3CommandCenter />
       </div>

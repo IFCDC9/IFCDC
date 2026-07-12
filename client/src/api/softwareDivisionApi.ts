@@ -1,7 +1,7 @@
 import { hqApiFetch } from "./hqApiFetch";
 import type { AppDiagnostics, SoftwareAppEntry } from "./hqApi";
 
-export const SOFTWARE_DIVISION_TIMEOUT_MS = 8_000;
+export const SOFTWARE_DIVISION_TIMEOUT_MS = 20_000;
 
 export interface SoftwareDivisionPayload {
   apps: SoftwareAppEntry[];

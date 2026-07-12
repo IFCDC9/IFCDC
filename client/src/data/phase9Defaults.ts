@@ -1,5 +1,5 @@
-/** Phase 9 must render within 5s — fail fast and show empty-state UI. */
-export const PHASE9_FETCH_TIMEOUT_MS = 5_000;
+/** Allow live Phase 9 OS package aggregation. */
+export const PHASE9_FETCH_TIMEOUT_MS = 22_000;
 
 export type Phase9Package = {
   phase: number;

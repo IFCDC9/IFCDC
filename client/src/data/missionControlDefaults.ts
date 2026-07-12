@@ -1,7 +1,7 @@
 import type { MissionControlCommandCenter } from "../api/missionControlTypes";
 
-/** Mission Control must render within 5s — fail fast and show empty-state UI. */
-export const MISSION_CONTROL_FETCH_TIMEOUT_MS = 5_000;
+/** Allow live Mission Control aggregation across divisions. */
+export const MISSION_CONTROL_FETCH_TIMEOUT_MS = 22_000;
 
 const DIVISION_MODULE_LINKS = [
   { key: "grants", label: "Grant Center", path: "/hq/grants" },

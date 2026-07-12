@@ -278,8 +278,8 @@ export async function buildPhase9OperatingSystemPackage() {
 
 // ─── Timeout-safe Phase 9 package (production) ───────────────────────────────
 
-const PHASE9_SECTION_TIMEOUT_MS = 3_000;
-const PHASE9_AGGREGATE_TIMEOUT_MS = 4_000;
+const PHASE9_SECTION_TIMEOUT_MS = 12_000;
+const PHASE9_AGGREGATE_TIMEOUT_MS = 18_000;
 
 function p9Timeout<T>(promise: Promise<T>, fallback: T, label: string): Promise<T> {
   const started = Date.now();

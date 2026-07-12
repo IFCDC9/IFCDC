@@ -39,16 +39,28 @@ const FounderCommandCenterPage: React.FC = () => {
   const grants = cc?.grantPipeline as { activeAwards: number; pipelineValue: number; complianceDue: number } | undefined;
   const series = (trends.data?.series ?? []) as { domain: string; metric: string; changePct: number; direction: string; status: string }[];
 
-  if (commandCenter.isLoading) {
+  if (commandCenter.isLoading && !cc) {
     return (
       <HQLayout title="Founder Command Center" subtitle="Organization-wide executive visibility">
-        <HqLoading />
+        <HqLoading message="Loading founder command data…" />
       </HQLayout>
     );
   }
 
   return (
     <HQLayout title="Founder Command Center" subtitle="Complete organization-wide visibility — intelligence, risk, and priorities">
+      {commandCenter.isError && !cc && (
+        <div className="hq-anomaly-alert hq-sev-medium" style={{ marginBottom: "1rem" }} role="status">
+          <AlertTriangle size={16} />
+          <div>
+            <strong>Command center unavailable</strong>
+            <span>Live founder metrics did not load. Retry or open the Executive Dashboard.</span>
+            <button type="button" className="hq-btn hq-btn-sm hq-btn-ghost" style={{ marginLeft: "0.5rem" }} onClick={() => void commandCenter.refetch()}>
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
       <div className="hq-analytics-toolbar">
         <HqLiveIndicator intervalSec={30} />
         <Link to="/hq/aura" className="hq-btn hq-btn-secondary hq-btn-sm"><Sparkles size={14} /> Ask AURA</Link>
