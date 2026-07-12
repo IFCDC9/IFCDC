@@ -70,6 +70,7 @@ export const HQ_NAV_ITEMS: HQNavItem[] = [
   { label: "Software Division", path: "/hq/software", icon: Monitor, section: "Operations" },
   { label: "Executive Operations", path: "/hq/operations", icon: Package, section: "Operations" },
   { label: "SSO Gateway", path: "/hq/sso", icon: Shield, section: "Operations" },
+  { label: "AURA Executive Intelligence", path: "/hq/aura-executive", icon: Brain, section: "Command", badge: "61" },
   { label: "AURA AI Command Center", path: "/hq/aura", icon: Sparkles, section: "Command" },
   { label: "Integrations Hub", path: "/hq/integrations", icon: Plug, section: "Operations" },
   { label: "Developer Portal", path: "/hq/developer", icon: Code2, section: "Operations" },

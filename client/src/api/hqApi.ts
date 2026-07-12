@@ -255,6 +255,26 @@ export const hqApi = {
     }),
   auraOperationsBriefing: () => hqFetch<Record<string, unknown>>("/aura/operations/briefing"),
   auraExecutiveHealth: () => hqFetch<Record<string, unknown>>("/aura/executive/health"),
+  /** Build 61 — Executive Intelligence Command Center */
+  auraEiDashboard: () => hqFetch<Record<string, unknown>>("/aura/ei/dashboard"),
+  auraEiRecommendations: () => hqFetch<{ recommendations: Record<string, unknown>[]; generatedAt: string }>("/aura/ei/recommendations"),
+  auraEiHealthPillar: (pillar: string) => hqFetch<Record<string, unknown>>(`/aura/ei/health/${encodeURIComponent(pillar)}`),
+  auraEiBriefing: (type: string) => hqFetch<Record<string, unknown>>(`/aura/ei/briefings/${encodeURIComponent(type)}`),
+  auraEiPredictions: () => hqFetch<Record<string, unknown>>("/aura/ei/predictions"),
+  auraEiAsk: (question: string) =>
+    hqFetch<{
+      question: string;
+      answer: string;
+      source: string;
+      knowledgeUsed: number;
+      knowledge: Record<string, unknown>[];
+      healthSnapshot: Record<string, unknown> | null;
+      generatedAt: string;
+    }>("/aura/ei/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    }),
   auraExecutiveActionPlan: () => hqFetch<{ plan: string; summary: Record<string, unknown>; generatedAt: string }>("/aura/executive/action-plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }),
   auraIntelligenceMetrics: () => hqFetch<Record<string, unknown>>("/aura/intelligence/metrics"),
   auraDecisionSupport: (question: string) =>

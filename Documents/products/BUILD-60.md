@@ -79,4 +79,4 @@ Each card links to dashboard, documents, and reports. Extra department codes see
 
 ## Next
 **Policy & Governance Center** ✅ (see `POLICY-GOVERNANCE-CENTER.md`)  
-**Build 61 — AI Executive Intelligence (AURA Command Center)**
+**Build 61 — AURA Executive Intelligence** ✅ (see `BUILD-61.md`)

@@ -173,6 +173,7 @@ const AuraCommandCenterPage: React.FC = () => {
             label={moduleCount != null ? `${moduleCount} Modules Monitored` : "Scanning modules…"}
             variant="muted"
           />
+          <Link to="/hq/aura-executive" className="hq-btn hq-btn-secondary hq-btn-sm"><Sparkles size={12} /> Executive Intelligence</Link>
           <Link to="/hq/intelligence" className="hq-btn hq-btn-ghost hq-btn-sm">Full Intelligence Center <ExternalLink size={12} /></Link>
         </div>
       )}

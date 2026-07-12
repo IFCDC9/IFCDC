@@ -28,6 +28,10 @@ const ExecutiveDashboard = lazyWithRetry(
   "ExecutiveDashboard"
 );
 const AuraCommandCenterPage = lazyWithRetry(() => import("./pages/hq/AuraCommandCenterPage"), "AuraCommandCenterPage");
+const AuraExecutiveIntelligencePage = lazyWithRetry(
+  () => import("./pages/hq/AuraExecutiveIntelligencePage"),
+  "AuraExecutiveIntelligencePage"
+);
 const EnterpriseBrainDashboardPage = lazyWithRetry(
   () => import("./pages/hq/EnterpriseBrainDashboardPage"),
   "EnterpriseBrainDashboardPage"
@@ -152,6 +156,7 @@ const App: React.FC = () => (
           <Route path="/hq/sso" element={<HqRoute path="/hq/sso"><SsoGatewayPage /></HqRoute>} />
           <Route path="/hq/developer" element={<HqRoute path="/hq/developer"><DeveloperPortalPage /></HqRoute>} />
           <Route path="/hq/aura" element={<HqRoute path="/hq/aura"><AuraCommandCenterPage /></HqRoute>} />
+          <Route path="/hq/aura-executive" element={<HqRoute path="/hq/aura-executive"><AuraExecutiveIntelligencePage /></HqRoute>} />
           <Route path="/hq/executive-brain" element={<HqRoute path="/hq/executive-brain"><EnterpriseBrainDashboardPage /></HqRoute>} />
           <Route path="/hq/enterprise-os" element={<HqRoute path="/hq/enterprise-os"><EnterpriseOsMissionControlPage /></HqRoute>} />
           <Route path="/hq/people" element={<HqRoute path="/hq/people"><PeopleManagementCenter /></HqRoute>} />

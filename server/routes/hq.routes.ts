@@ -516,6 +516,73 @@ router.get("/aura/executive/health", hqAuthRequired, requireHQModule("aura"), as
   res.json(await buildExecutiveHealthSummary());
 });
 
+/** Build 61 — AURA Executive Intelligence Command Center */
+router.get("/aura/ei/dashboard", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
+  try {
+    const { buildEiDashboard } = await import("../hq/auraExecutiveIntelligenceFoundation");
+    res.json(await buildEiDashboard());
+  } catch (error) {
+    console.error("GET /aura/ei/dashboard error:", error);
+    res.status(500).json({ error: "Executive Intelligence dashboard unavailable" });
+  }
+});
+
+router.get("/aura/ei/recommendations", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
+  try {
+    const { buildEiRecommendations } = await import("../hq/auraExecutiveIntelligenceFoundation");
+    res.json({ recommendations: await buildEiRecommendations(), generatedAt: new Date().toISOString() });
+  } catch (error) {
+    console.error("GET /aura/ei/recommendations error:", error);
+    res.status(500).json({ error: "Executive recommendations unavailable" });
+  }
+});
+
+router.get("/aura/ei/health/:pillar", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  try {
+    const { explainHealthPillar } = await import("../hq/auraExecutiveIntelligenceFoundation");
+    res.json(await explainHealthPillar(String(req.params.pillar ?? "organization")));
+  } catch (error) {
+    console.error("GET /aura/ei/health/:pillar error:", error);
+    res.status(500).json({ error: "Health pillar explainer unavailable" });
+  }
+});
+
+router.get("/aura/ei/briefings/:type", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  try {
+    const { BRIEFING_TYPES, buildEiBriefing } = await import("../hq/auraExecutiveIntelligenceFoundation");
+    const type = String(req.params.type ?? "morning");
+    if (!(BRIEFING_TYPES as readonly string[]).includes(type)) {
+      return res.status(400).json({ error: `Invalid briefing type. Use: ${BRIEFING_TYPES.join(", ")}` });
+    }
+    res.json(await buildEiBriefing(type as (typeof BRIEFING_TYPES)[number]));
+  } catch (error) {
+    console.error("GET /aura/ei/briefings error:", error);
+    res.status(500).json({ error: "Executive briefing unavailable" });
+  }
+});
+
+router.get("/aura/ei/predictions", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
+  try {
+    const { buildEiPredictions } = await import("../hq/auraExecutiveIntelligenceFoundation");
+    res.json(await buildEiPredictions());
+  } catch (error) {
+    console.error("GET /aura/ei/predictions error:", error);
+    res.status(500).json({ error: "Predictive analytics unavailable" });
+  }
+});
+
+router.post("/aura/ei/ask", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  try {
+    const question = String(req.body?.question ?? "").trim();
+    if (question.length < 3) return res.status(400).json({ error: "question must be at least 3 characters" });
+    const { askExecutiveIntelligence } = await import("../hq/auraExecutiveIntelligenceFoundation");
+    res.json(await askExecutiveIntelligence(question));
+  } catch (error) {
+    console.error("POST /aura/ei/ask error:", error);
+    res.status(500).json({ error: "Executive Intelligence chat unavailable" });
+  }
+});
+
 /** Founder Technical Command — live ops briefing (Founder Mode required). */
 router.get("/aura/technical/briefing", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
   const { resolveIdentityFromHqUser, publicIdentitySummary } = await import("../hq/auraFounderTrustEngine");
