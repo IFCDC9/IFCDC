@@ -4,7 +4,7 @@ import { Activity, AlertTriangle, Plug, ServerCrash, Timer, Wifi } from "lucide-
 import { KpiCard } from "../KpiCard";
 import { HqPanel } from "../HqPanel";
 import { StatusBadge } from "../StatusBadge";
-import type { IntegrationHealthDashboard } from "../../api/integrationsApi";
+import type { IntegrationHealthDashboard } from "../../../api/integrationsApi";
 
 function scoreVariant(score: number): "success" | "warning" | "danger" | "muted" {
   if (score >= 80) return "success";
@@ -17,14 +17,20 @@ export const IntegrationsHealthPanel: React.FC<{
   health: IntegrationHealthDashboard | null;
   loading?: boolean;
 }> = ({ health, loading }) => {
-  if (!health && loading) {
+  if (loading && (!health || health.totalServices === 0)) {
     return (
       <HqPanel title="Integration Health Dashboard" subtitle="Loading live connectivity…">
         <p className="hq-muted-text">Probing connectors and platform systems…</p>
       </HqPanel>
     );
   }
-  if (!health) return null;
+  if (!health || health.totalServices === 0) {
+    return (
+      <HqPanel title="Integration Health Dashboard" subtitle="Awaiting live probe results">
+        <p className="hq-muted-text">No connectivity data yet — refresh status or retry degraded connectors.</p>
+      </HqPanel>
+    );
+  }
 
   return (
     <div className="hq-fade-in" style={{ marginBottom: "1.25rem" }}>

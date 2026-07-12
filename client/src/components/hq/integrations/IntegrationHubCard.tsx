@@ -2,8 +2,8 @@ import React from "react";
 import { Link } from "react-router-dom";
 import { AlertTriangle, CheckCircle2, Clock, KeyRound, Activity } from "lucide-react";
 import { StatusBadge } from "../StatusBadge";
-import type { IntegrationHubCard as Card, IntegrationHubAction } from "../../data/integrationsHubDefaults";
-import { displayStatusForCard } from "../../data/integrationsHubDefaults";
+import type { IntegrationHubCard as Card, IntegrationHubAction } from "../../../data/integrationsHubDefaults";
+import { displayStatusForCard } from "../../../data/integrationsHubDefaults";
 
 const STATUS_VARIANT: Record<string, "success" | "warning" | "muted" | "gold" | "danger"> = {
   connected: "success",

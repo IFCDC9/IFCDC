@@ -144,6 +144,12 @@ const IntegrationsHubPage: React.FC = () => {
   const integrations = hub.integrations;
   const degraded = hubQuery.data?.degraded ?? false;
   const loadWarning = hubQuery.data?.warning;
+  const healthScore =
+    hub.summary.healthScore ?? healthQuery.data?.overallHealthScore ?? 0;
+  const connectedCount = hub.summary.connected ?? hub.connectedCount ?? 0;
+  const warningCount = hub.summary.warning ?? healthQuery.data?.warningCount ?? 0;
+  const offlineCount =
+    hub.summary.offline ?? hub.summary.notConfigured ?? healthQuery.data?.offlineCount ?? 0;
 
   const categories = useMemo(
     () => ["all", ...Array.from(new Set(integrations.map((i) => i.category))).sort()],
@@ -163,7 +169,7 @@ const IntegrationsHubPage: React.FC = () => {
     <HQLayout
       title="Integrations Hub"
       subtitle="Build 56 — enterprise connectivity layer with live health, retry, and diagnostics"
-      auraModule="integrations"
+      auraModule="software"
       auraActions={["ask", "explain", "summarize"]}
     >
       <HqQueryBoundary
@@ -196,13 +202,13 @@ const IntegrationsHubPage: React.FC = () => {
           <div className="hq-kpi-grid hq-fade-in" style={{ marginBottom: "1.25rem" }}>
             <KpiCard
               label="Health Score"
-              value={`${hub.summary.healthScore ?? healthQuery.data?.overallHealthScore ?? 0}/100`}
+              value={`${healthScore}/100`}
               icon={Activity}
-              variant={(hub.summary.healthScore ?? 0) >= 80 ? "success" : (hub.summary.healthScore ?? 0) >= 60 ? "warning" : "danger"}
+              variant={healthScore >= 80 ? "success" : healthScore >= 60 ? "warning" : "danger"}
             />
-            <KpiCard label="Connected" value={hub.summary.connected || hub.connectedCount} icon={CheckCircle} variant="success" />
-            <KpiCard label="Warning" value={hub.summary.warning ?? 0} icon={AlertTriangle} variant={(hub.summary.warning ?? 0) > 0 ? "warning" : "muted"} />
-            <KpiCard label="Offline" value={hub.summary.offline ?? hub.summary.notConfigured} icon={Plug} variant={(hub.summary.offline ?? 0) > 0 ? "danger" : "muted"} />
+            <KpiCard label="Connected" value={connectedCount} icon={CheckCircle} variant="success" />
+            <KpiCard label="Warning" value={warningCount} icon={AlertTriangle} variant={warningCount > 0 ? "warning" : "muted"} />
+            <KpiCard label="Offline" value={offlineCount} icon={Plug} variant={offlineCount > 0 ? "danger" : "muted"} />
           </div>
 
           <div className="hq-sd-toolbar" style={{ marginBottom: "1rem", flexWrap: "wrap", gap: "0.5rem" }}>
@@ -225,7 +231,7 @@ const IntegrationsHubPage: React.FC = () => {
                 void healthQuery.refetch();
               }}
             >
-              <RefreshCw size={14} /> Refresh status
+              <RefreshCw size={14} className={hubQuery.isFetching || healthQuery.isFetching ? "hq-spin" : ""} /> Refresh
             </button>
             <Link to="/hq/monitoring" className="hq-btn hq-btn-sm hq-btn-ghost">Enterprise Monitoring</Link>
             {testResults._bulk && <StatusBadge label={testResults._bulk} variant="muted" />}
@@ -239,14 +245,6 @@ const IntegrationsHubPage: React.FC = () => {
                 {cat === "all" ? "All" : cat}
               </button>
             ))}
-            <button
-              type="button"
-              className="hq-btn hq-btn-ghost hq-btn-sm"
-              onClick={() => hubQuery.refetch()}
-              disabled={hubQuery.isFetching}
-            >
-              <RefreshCw size={14} className={hubQuery.isFetching ? "hq-spin" : ""} /> Refresh
-            </button>
           </div>
 
           {missingRequired.length > 0 && integrations.length > 0 && (
