@@ -16,11 +16,16 @@ const EMPTY: SeDashboard = {
   github: null,
   index: { totalFiles: 0, workspaceConfigured: false, githubConfigured: false, repos: [] },
   workspaceConfigured: false,
+  hostMode: "control_plane",
+  hostLabel: "Production control plane",
+  hostHealthy: true,
+  hostDetail: "",
   apps: [],
   openDiagnoses: [],
   pendingApprovals: [],
   recommendedPriorities: [],
   securityWarnings: [],
+  hostNotices: [],
 };
 
 function healthVariant(healthy: boolean | null): "success" | "warning" | "danger" | "muted" {
@@ -85,8 +90,8 @@ const AuraSoftwareEngineeringPage: React.FC = () => {
           variant={data.github?.deploymentStatus === "aligned" ? "success" : "warning"}
         />
         <StatusBadge
-          label={data.workspaceConfigured ? "Workspace ready" : "Workspace off-host"}
-          variant={data.workspaceConfigured ? "success" : "muted"}
+          label={data.hostLabel || (data.workspaceConfigured ? "Engineering workspace" : "Production control plane")}
+          variant={data.hostHealthy === false ? "danger" : "success"}
         />
         <button type="button" className="hq-btn hq-btn-sm hq-btn-ghost" disabled={dash.isFetching} onClick={() => void dash.refetch()}>
           <RefreshCw size={14} className={dash.isFetching ? "hq-spin" : ""} /> Refresh
@@ -101,6 +106,12 @@ const AuraSoftwareEngineeringPage: React.FC = () => {
         </button>
       </div>
 
+      {data.hostDetail ? (
+        <p className="hq-muted-text" style={{ marginTop: 0, marginBottom: "1rem", maxWidth: 720 }}>
+          {data.hostDetail}
+        </p>
+      ) : null}
+
       {dash.isLoading ? <HqLoading label="Loading software engineering…" /> : null}
 
       <div className="hq-kpi-grid" style={{ marginBottom: "1.25rem" }}>
@@ -112,7 +123,7 @@ const AuraSoftwareEngineeringPage: React.FC = () => {
 
       {(data.securityWarnings?.length ?? 0) > 0 && (
         <div style={{ marginBottom: "1rem" }}>
-          <HqPanel title="Security / host notices">
+          <HqPanel title="Configuration alerts">
             <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
               {data.securityWarnings!.map((w) => (
                 <li key={w}>{w}</li>

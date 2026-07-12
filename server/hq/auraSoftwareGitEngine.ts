@@ -8,6 +8,7 @@ import { getDb } from "../db";
 import { ensureAuraSoftwareEngineeringTables } from "./auraSoftwareEngineeringSchema";
 import {
   getSeWorkspaceRoot,
+  isSeProductionControlPlane,
   isSeWorkspaceConfigured,
 } from "./auraSoftwareEngineeringPolicy";
 
@@ -36,7 +37,10 @@ function runGit(args: string[], cwd: string, timeoutMs = 60_000): Promise<{ code
 
 function resolveRepoCwd(relativeCwd?: string): { ok: true; cwd: string; root: string } | { ok: false; error: string } {
   if (!isSeWorkspaceConfigured()) {
-    return { ok: false, error: "AURA_SE_WORKSPACE_ROOT is not configured. Git writes are disabled on this host." };
+    const hint = isSeProductionControlPlane()
+      ? "This host is the production control plane (Render). Git writes stay on the Founder workstation — set AURA_SE_WORKSPACE_ROOT there, or run HQ from the IFCDC monorepo."
+      : "AURA_SE_WORKSPACE_ROOT is not configured and no IFCDC monorepo was auto-detected. Set AURA_SE_WORKSPACE_ROOT to your IFCDC root.";
+    return { ok: false, error: hint };
   }
   const root = getSeWorkspaceRoot()!;
   const cwd = path.resolve(root, relativeCwd || "Apps/IMPERIAL-FOUNDATION-CDC");

@@ -13,8 +13,8 @@ AURA is IFCDC’s controlled AI Chief Software Engineer: inspect, diagnose, prep
 
 | Host | Allowed |
 |---|---|
-| **Render (production HQ)** | Code index via GitHub API, portfolio health, diagnoses, change packages, Founder approval records, PR/deploy *instructions* |
-| **`AURA_SE_WORKSPACE_ROOT` (Founder Mac / agent)** | Branch create, real `npm run check\|build\|test`, local commit, push *after* Founder approval |
+| **Render (production HQ)** | **Production control plane** (healthy). Diagnose, portfolio, approvals, deploy inspection. No local git/npm on the web process — this is intentional, not an error. |
+| **Founder workstation** | Auto-detects the IFCDC monorepo, or set `AURA_SE_WORKSPACE_ROOT`. Branch/test/commit enabled. Push still needs Founder approval. |
 | **Never without Founder approval** | Push, merge to main, force-push, production deploy/restart/rollback, destructive DB |
 
 ## Security

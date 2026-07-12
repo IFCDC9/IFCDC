@@ -3,6 +3,10 @@ import { hqApiFetch } from "./hqApiFetch";
 export type SeDashboard = {
   generatedAt: string;
   hqBase?: string;
+  hostMode?: "control_plane" | "engineering_workspace";
+  hostLabel?: string;
+  hostHealthy?: boolean;
+  hostDetail?: string;
   github: {
     repository: string;
     branch: string;
@@ -37,6 +41,7 @@ export type SeDashboard = {
   recentTestRuns?: Record<string, unknown>[];
   failedBuildsOrTests?: Record<string, unknown>[];
   securityWarnings?: string[];
+  hostNotices?: string[];
   recommendedPriorities: Array<{ priority: string; title: string; detail: string; path?: string }>;
   founderApprovalsWaiting?: Record<string, unknown>[];
   allowlistedRepos?: Array<{ id: string; label: string; repository: string; branch: string }>;

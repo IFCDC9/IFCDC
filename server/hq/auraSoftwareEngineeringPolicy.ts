@@ -3,6 +3,8 @@
  * Repo allowlist, secret redaction, destructive blocks, change-size limits.
  * Never indexes or returns secret values.
  */
+import fs from "fs";
+import path from "path";
 
 export type AllowedRepo = {
   id: string;
@@ -181,13 +183,98 @@ export function detectDestructiveSeCommand(command: string): string | null {
   return null;
 }
 
+/**
+ * Production HQ on Render is the SE *control plane*: diagnose, approve, monitor.
+ * Git writes / npm test belong on the Founder workstation (or dedicated agent),
+ * not inside the public web process.
+ */
+export function isSeProductionControlPlane(): boolean {
+  if (process.env.AURA_SE_FORCE_WORKSPACE === "true") return false;
+  return (
+    process.env.RENDER === "true"
+    || Boolean(process.env.RENDER_SERVICE_ID?.trim())
+    || process.env.AURA_SE_HOST_MODE === "control_plane"
+  );
+}
+
+function looksLikeIfcdcMonorepoRoot(dir: string): boolean {
+  try {
+    const hq = path.join(dir, "Apps", "IMPERIAL-FOUNDATION-CDC");
+    const libs = path.join(dir, "Libraries", "ifcdc-packages");
+    return fs.existsSync(hq) && (fs.existsSync(libs) || fs.existsSync(path.join(dir, "Documents")));
+  } catch {
+    return false;
+  }
+}
+
+function detectLocalMonorepoRoot(): string | null {
+  const fromEnv = (process.env.IFCDC_ROOT || "").trim();
+  if (fromEnv && looksLikeIfcdcMonorepoRoot(fromEnv)) return path.resolve(fromEnv);
+
+  let dir = path.resolve(process.cwd());
+  for (let i = 0; i < 8; i++) {
+    if (looksLikeIfcdcMonorepoRoot(dir)) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+
+  // When cwd is Apps/IMPERIAL-FOUNDATION-CDC, parent.parent is the monorepo
+  const nested = path.resolve(process.cwd(), "../..");
+  if (looksLikeIfcdcMonorepoRoot(nested)) return nested;
+  return null;
+}
+
+/**
+ * Engineering workspace root for branch/test/commit.
+ * Never auto-enables on Render control plane (unless AURA_SE_FORCE_WORKSPACE=true).
+ */
 export function getSeWorkspaceRoot(): string | null {
-  const root = (process.env.AURA_SE_WORKSPACE_ROOT || "").trim();
-  return root || null;
+  const explicit = (process.env.AURA_SE_WORKSPACE_ROOT || "").trim();
+  if (explicit) {
+    try {
+      if (fs.existsSync(explicit)) return path.resolve(explicit);
+    } catch {
+      return null;
+    }
+    return path.resolve(explicit);
+  }
+  if (isSeProductionControlPlane()) return null;
+  return detectLocalMonorepoRoot();
 }
 
 export function isSeWorkspaceConfigured(): boolean {
   return Boolean(getSeWorkspaceRoot());
+}
+
+export type SeHostMode = "control_plane" | "engineering_workspace";
+
+export function getSeHostMode(): SeHostMode {
+  return isSeWorkspaceConfigured() ? "engineering_workspace" : "control_plane";
+}
+
+export function describeSeHostMode(): {
+  mode: SeHostMode;
+  label: string;
+  healthy: boolean;
+  detail: string;
+} {
+  const mode = getSeHostMode();
+  if (mode === "engineering_workspace") {
+    return {
+      mode,
+      label: "Engineering workspace",
+      healthy: true,
+      detail: `Local branch/test/commit enabled at ${getSeWorkspaceRoot()}`,
+    };
+  }
+  return {
+    mode,
+    label: "Production control plane",
+    healthy: true,
+    detail:
+      "Render HQ safely runs diagnose, portfolio, approvals, and deploy inspection. Branch/test/commit run on the Founder workstation (set AURA_SE_WORKSPACE_ROOT or run HQ from the IFCDC monorepo).",
+  };
 }
 
 /** Wrap untrusted repo text for LLM context. */

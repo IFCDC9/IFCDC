@@ -7,7 +7,7 @@ import { spawn } from "child_process";
 import path from "path";
 import { getDb } from "../db";
 import { ensureAuraSoftwareEngineeringTables } from "./auraSoftwareEngineeringSchema";
-import { getSeWorkspaceRoot, isSeWorkspaceConfigured } from "./auraSoftwareEngineeringPolicy";
+import { getSeWorkspaceRoot, isSeProductionControlPlane, isSeWorkspaceConfigured } from "./auraSoftwareEngineeringPolicy";
 
 export type TestCommandResult = {
   command: string;
@@ -90,14 +90,17 @@ export async function runSoftwareEngineeringTests(opts: {
   const commands = (opts.commands?.length ? opts.commands : DEFAULT_COMMANDS).map((c) => c.trim()).filter(Boolean);
 
   if (!isSeWorkspaceConfigured()) {
+    const message = isSeProductionControlPlane()
+      ? "Production control plane: tests are not run inside Render (by design). On the Founder workstation set AURA_SE_WORKSPACE_ROOT (or run HQ from the IFCDC monorepo), then re-run: "
+        + commands.join(" && ")
+      : "No engineering workspace detected. Set AURA_SE_WORKSPACE_ROOT to your IFCDC monorepo root, then re-run: "
+        + commands.join(" && ");
     return {
       status: "blocked_no_workspace",
       results: [],
       commandsPlanned: commands,
       workspaceRoot: null,
-      message:
-        "AURA_SE_WORKSPACE_ROOT is not configured. Tests were not run (no fake pass). On the engineering host, set the workspace and re-run, or execute: "
-        + commands.join(" && "),
+      message,
     };
   }
 

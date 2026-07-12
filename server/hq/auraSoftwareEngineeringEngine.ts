@@ -18,6 +18,7 @@ import {
 import {
   SE_MAX_FILES_PER_CHANGE,
   detectDestructiveSeCommand,
+  describeSeHostMode,
   getAllowedRepos,
   isSeWorkspaceConfigured,
   resolveAllowedRepo,
@@ -97,10 +98,15 @@ export async function buildSoftwarePortfolioMap() {
   });
 
   const unhealthy = apps.filter((a) => a.healthy === false);
+  const host = describeSeHostMode();
 
   return {
     generatedAt: new Date().toISOString(),
     hqBase: getHqPublicBase(),
+    hostMode: host.mode,
+    hostLabel: host.label,
+    hostHealthy: host.healthy,
+    hostDetail: host.detail,
     github: github
       ? {
           repository: github.repository,
@@ -169,14 +175,13 @@ export async function buildSoftwareEngineeringDashboard() {
     changePackages: packages,
     recentTestRuns: recentTests,
     failedBuildsOrTests: failedTests,
+    // Real security/config problems only — control-plane (no local workspace) is healthy on Render.
     securityWarnings: [
       !portfolio.index.githubConfigured
-        ? "GITHUB_TOKEN not set — GitHub indexing and live commit compare limited."
+        ? "GITHUB_TOKEN not set — GitHub indexing and live commit compare are limited. Add a read-only repo token on Render."
         : null,
-      !portfolio.workspaceConfigured
-        ? "AURA_SE_WORKSPACE_ROOT not set — local branch/test/commit disabled on this host (expected on Render)."
-        : null,
-    ].filter(Boolean),
+    ].filter(Boolean) as string[],
+    hostNotices: [] as string[],
     technicalDebt: [],
     founderApprovalsWaiting: portfolio.pendingApprovals,
   };
@@ -315,7 +320,9 @@ export async function prepareFixPackage(opts: {
 
   let branchResult: { ok: boolean; branch?: string; message: string } = {
     ok: false,
-    message: "Workspace not configured — branch will be created when AURA_SE_WORKSPACE_ROOT is set.",
+    message: isSeWorkspaceConfigured()
+      ? "Preparing branch…"
+      : "Control plane host — branch will be created on the Founder workstation (AURA_SE_WORKSPACE_ROOT / monorepo). Package is still staged for approval.",
   };
   if (isSeWorkspaceConfigured()) {
     branchResult = await createSeFeatureBranch({ branchName, baseBranch: repo.defaultBranch });
