@@ -3,6 +3,8 @@
  * Single source of truth for Headquarters and all connected applications.
  */
 
+import { getGrantsOperatorEmail, getSuperAdminEmail } from "../config/credentials";
+
 export type EnterpriseRole =
   | "founder"
   | "executive"
@@ -45,7 +47,7 @@ export const ENTERPRISE_ROLE_LABELS: Record<EnterpriseRole, string> = {
   program_director: "Program Director",
   manager: "Manager",
   board_member: "Board Member",
-  grant_manager: "Grant Manager",
+  grant_manager: "Grants Operator",
   employee: "Staff",
   volunteer: "Volunteer",
   barber: "Barber",
@@ -151,8 +153,9 @@ export const ROLE_PERMISSIONS: Record<EnterpriseRole, Permission[]> = {
     "hq.executive", "hq.grants", "hq.finance", "hq.donations", "hq.aura", "hq.analytics", "hq.notifications", "hq.documents",
   ],
   grant_manager: [
-    "hq.executive", "hq.grants", "hq.grants.manage", "hq.finance", "hq.donations", "hq.aura",
-    "hq.analytics", "hq.notifications", "hq.documents",
+    // Grant operations only — never Founder / Super Admin / enterprise admin surface
+    "hq.grants", "hq.grants.manage", "hq.documents", "hq.notifications", "hq.aura",
+    "hq.finance", "hq.analytics",
   ],
   employee: [
     "hq.hr.self", "hq.programs", "hq.clients", "hq.aura", "hq.notifications", "hq.documents", "app.barbers", "app.music", "app.radio",
@@ -173,7 +176,7 @@ export const ROLE_PERMISSIONS: Record<EnterpriseRole, Permission[]> = {
 
 /** HQ module keys used by middleware */
 export const HQ_MODULE_PERMISSIONS: Record<string, EnterpriseRole[]> = {
-  executive: ["founder", "executive", "administrator", "board_member", "grant_manager"],
+  executive: ["founder", "executive", "administrator", "board_member"],
   hr: ["founder", "executive", "administrator", "hr", "finance", "program_director", "manager"],
   payroll: ["founder", "executive", "administrator", "hr", "finance"],
   finance: ["founder", "executive", "administrator", "board_member", "grant_manager", "finance"],
@@ -290,12 +293,19 @@ export function canAccessModule(userRole: string, module: string): boolean {
 
 export function canAccessRoute(userRole: string, path: string): boolean {
   if (userRole === "owner") return true;
-  const permission = ROUTE_PERMISSIONS[path];
-  if (!permission) {
-    if (path.startsWith("/hq")) return hasPermission(userRole, "hq.executive");
-    return true;
+  const exact = ROUTE_PERMISSIONS[path];
+  if (exact) return hasPermission(userRole, exact);
+
+  // Nested HQ routes (e.g. /hq/grants?… or /hq/grants/…) inherit the longest matching prefix
+  const prefixes = Object.keys(ROUTE_PERMISSIONS)
+    .filter((p) => path === p || path.startsWith(`${p}/`))
+    .sort((a, b) => b.length - a.length);
+  if (prefixes.length) {
+    return hasPermission(userRole, ROUTE_PERMISSIONS[prefixes[0]]);
   }
-  return hasPermission(userRole, permission);
+
+  if (path.startsWith("/hq")) return hasPermission(userRole, "hq.executive");
+  return true;
 }
 
 export function getDefaultRoute(role: string): string {
@@ -313,15 +323,27 @@ export function buildEnterpriseSession(user: {
   role: string;
   name?: string;
 }) {
-  const enterpriseRole = toEnterpriseRole(user.role === "owner" ? "owner" : user.role);
-  const permissions = getPermissions(user.role);
+  // Enforce credential separation by email (Founder vs Grants Operator)
+  let effectiveRole = user.role;
+  const email = (user.email || "").toLowerCase().trim();
+  const founderEmail = getSuperAdminEmail();
+  const grantsEmail = getGrantsOperatorEmail();
+  if (founderEmail && email === founderEmail) effectiveRole = "owner";
+  else if (grantsEmail && email === grantsEmail) effectiveRole = "grant_manager";
+
+  const enterpriseRole = toEnterpriseRole(effectiveRole === "owner" ? "owner" : effectiveRole);
+  const permissions = getPermissions(effectiveRole);
+  const isFounder = effectiveRole === "owner" || enterpriseRole === "founder";
   return {
     ...user,
+    role: effectiveRole,
     enterpriseRole,
     enterpriseRoleLabel: ENTERPRISE_ROLE_LABELS[enterpriseRole],
     permissions,
-    modules: getAccessibleModules(user.role),
-    defaultRoute: getDefaultRoute(user.role),
+    modules: getAccessibleModules(effectiveRole),
+    defaultRoute: getDefaultRoute(effectiveRole),
+    isFounder,
+    founderMode: isFounder,
   };
 }
 

@@ -78,7 +78,7 @@ export const ENTERPRISE_ROLE_LABELS: Record<EnterpriseRole, string> = {
   program_director: "Program Director",
   manager: "Manager",
   board_member: "Board Member",
-  grant_manager: "Grant Manager",
+  grant_manager: "Grants Operator",
   employee: "Staff",
   volunteer: "Volunteer",
   barber: "Barber",
@@ -90,7 +90,17 @@ export function canAccessRoute(permissions: Permission[], path: string): boolean
   const exact = ROUTE_PERMISSIONS[path];
   if (exact) return permissions.includes(exact);
 
-  if (path.startsWith("/hq/programs/")) return permissions.includes("hq.programs") || permissions.includes("hq.executive");
+  if (path.startsWith("/hq/programs/")) {
+    return permissions.includes("hq.programs") || permissions.includes("hq.executive");
+  }
+
+  const prefixes = Object.keys(ROUTE_PERMISSIONS)
+    .filter((p) => path === p || path.startsWith(`${p}/`))
+    .sort((a, b) => b.length - a.length);
+  if (prefixes.length) {
+    return permissions.includes(ROUTE_PERMISSIONS[prefixes[0]]);
+  }
+
   if (path.startsWith("/hq/")) return permissions.includes("hq.executive");
 
   return true;

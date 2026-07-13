@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { buildFounderSessionFromLogin, isFounderRole } from "../auth/founderSession";
+import { buildFounderSessionFromLogin, buildGrantsOperatorSessionFromLogin, isFounderRole, isGrantsOperatorRole } from "../auth/founderSession";
 import { saveDashboardModeLocal } from "../config/executiveWidgets";
 import { fetchWithTimeout } from "../api/safeFetch";
 
@@ -77,6 +77,9 @@ const LoginPage = () => {
       if (!sessionUser && isFounderRole(role)) {
         sessionUser = buildFounderSessionFromLogin(data);
       }
+      if (!sessionUser && isGrantsOperatorRole(role)) {
+        sessionUser = buildGrantsOperatorSessionFromLogin(data);
+      }
 
       if (sessionUser) {
         applySessionUser(sessionUser);
@@ -91,8 +94,6 @@ const LoginPage = () => {
         navigate("/radio", { replace: true });
       } else if (role === "program_staff") {
         navigate("/hq/programs", { replace: true });
-      } else if (role === "grant_manager") {
-        navigate("/hq/grants", { replace: true });
       } else {
         setMessage({ type: "error", text: "Logged in but Headquarters session unavailable. Try again." });
       }

@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import { getDb } from "../db";
 import { hqAuthRequired, requireHQModule } from "../middleware/hqAuth";
 import { hasPermission } from "../hq/enterpriseRoles";
+import { getSuperAdminEmail } from "../config/credentials";
 import { grantId, logGrantActivity } from "../hq/grantsSchema";
 import { ensureGrantModulesReady } from "../hq/grantModuleBootstrap";
 import { validateGrantDocumentUpload } from "../hq/grantDocumentUpload";
@@ -117,6 +118,7 @@ import {
 } from "../hq/pipelineAutomation";
 import {
   buildGrantCenterPlatform,
+
   buildGrantCenterExecutiveSummary,
   listGrantTemplates,
   getGrantTemplate,
@@ -174,8 +176,7 @@ function isFounderMode(req: Request): boolean {
   const role = String(u.role || "").toLowerCase();
   if (role === "owner" || role === "founder") return true;
   const email = (u.email || "").toLowerCase();
-  const master = (process.env.MASTER_OWNER_EMAIL || "service@ifcdc.org").toLowerCase();
-  return email === master;
+  return Boolean(email && email === getSuperAdminEmail());
 }
 
 function requireFounderMode(req: Request, res: Response): boolean {
@@ -210,13 +211,13 @@ router.use(async (_req, _res, next) => {
   }
 });
 
-/** Grant mutations require hq.grants.manage (board members are read-only). */
+/** Grant mutations require hq.grants.manage (board members are read-only). Founder never needs operator password. */
 router.use((req, res, next) => {
   if (!["POST", "PATCH", "PUT", "DELETE"].includes(req.method)) return next();
   const role = String(req.hqUser?.role ?? "").toLowerCase();
   const email = String(req.hqUser?.email ?? "").toLowerCase();
   if (role === "founder" || role === "owner" || role === "exec" || role === "admin") return next();
-  if (email === "service@ifcdc.org") return next();
+  if (email && email === getSuperAdminEmail()) return next();
   if (hasPermission(req.hqUser?.role as string, "hq.grants.manage")) return next();
   return res.status(403).json({ error: "Grant manage permission required for this action" });
 });

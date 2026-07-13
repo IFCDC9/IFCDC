@@ -89,8 +89,10 @@ async function main() {
       log(body?.role === "owner", "Super Admin login → owner role", body?.role ?? "?");
       const session = await jsonFetch(`${BASE}/api/hq/auth/session`, { headers: { Cookie: cookie } });
       log(session.body?.user?.enterpriseRole === "founder", "Super Admin enterprise role", session.body?.user?.enterpriseRole ?? "?");
+      log(session.body?.user?.founderMode === true, "Super Admin founderMode unlocked");
       const perms = session.body?.user?.permissions ?? [];
       log(perms.includes("hq.settings.manage"), "Super Admin has hq.settings.manage");
+      log(perms.includes("hq.grants.manage"), "Super Admin has hq.grants.manage (Grant Workspace without operator password)");
       const logout = await jsonFetch(`${BASE}/api/auth/logout`, { method: "POST", headers: { Cookie: cookie } });
       log(logout.ok, "Super Admin logout");
     } catch (e) {
@@ -107,13 +109,25 @@ async function main() {
       log(role === "grant_manager", "Grants operator login → grant_manager (not owner)", role);
       const session = await jsonFetch(`${BASE}/api/hq/auth/session`, { headers: { Cookie: cookie } });
       const perms = session.body?.user?.permissions ?? [];
+      log(session.body?.user?.founderMode !== true, "Grants operator founderMode is false");
       log(!perms.includes("hq.settings.manage"), "Grants operator lacks hq.settings.manage");
+      log(!perms.includes("hq.executive"), "Grants operator lacks hq.executive (no Super Admin surface)");
       log(perms.includes("hq.grants.manage"), "Grants operator has hq.grants.manage");
       const settingsTry = await jsonFetch(`${BASE}/api/hq/settings/organization`, { headers: { Cookie: cookie } });
       log(
         settingsTry.res.status === 403 || settingsTry.res.status === 401,
         "Grants operator restricted from org settings",
         String(settingsTry.res.status),
+      );
+      const founderApprove = await jsonFetch(`${BASE}/api/hq/grants/applications/test/founder-approval`, {
+        method: "POST",
+        headers: { Cookie: cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "approve" }),
+      });
+      log(
+        founderApprove.res.status === 403 || founderApprove.res.status === 404,
+        "Grants operator blocked from Founder grant approval",
+        String(founderApprove.res.status),
       );
     } catch (e) {
       log(false, "Grants operator login", e.message);
