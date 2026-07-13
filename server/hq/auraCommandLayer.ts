@@ -256,6 +256,50 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
     }
   }
 
+  // Enterprise Readiness Certification — live production validation (before SE/LLM).
+  {
+    const { wantsEnterpriseReadinessCertification, runEnterpriseReadinessCommand } = await import(
+      "./enterpriseReadinessCertificationEngine"
+    );
+    if (wantsEnterpriseReadinessCertification(command)) {
+      const erc = await runEnterpriseReadinessCommand({
+        request: command,
+        actorEmail: identity.email || input.actorEmail,
+        founderMode: Boolean(identity.founderMode || identity.isFounder),
+      });
+      await logAuraIdentityAction({
+        identity,
+        action: "aura_enterprise_readiness",
+        detail: erc.speechSummary.slice(0, 240),
+        metadata: {
+          certified: erc.run?.certified ?? erc.dashboard?.certified,
+          overallReadiness: erc.run?.overallReadiness ?? erc.dashboard?.overallReadiness,
+        },
+      });
+      return {
+        reply: erc.speechSummary,
+        actions: [
+          {
+            id: "enterprise_readiness_certification",
+            label: "Enterprise Readiness Certification",
+            status: erc.founderApprovalRequired ? "pending_approval" : "done",
+            summary: erc.speechSummary,
+            data: erc,
+            navigation: { path: "/hq/enterprise-readiness", label: "Open Enterprise Readiness" },
+            approval: erc.founderApprovalRequired
+              ? { path: "/hq/enterprise-readiness", label: "Founder Mode required" }
+              : undefined,
+          },
+        ],
+        approvalsCreated: erc.founderApprovalRequired
+          ? [{ path: "/hq/enterprise-readiness", label: "Founder Mode required" }]
+          : [],
+        poweredBy: "Enterprise Readiness Certification",
+        identity: publicIdentitySummary(identity),
+      };
+    }
+  }
+
   // AURA Enterprise Operations 5.0 — multi-department orchestration (before SE/LLM).
   {
     const { wantsEnterpriseOperations5, runEnterpriseOperations5 } = await import("./auraEnterpriseOs5");

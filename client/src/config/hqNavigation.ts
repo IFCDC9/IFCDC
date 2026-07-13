@@ -105,6 +105,7 @@ export const HQ_NAV_ITEMS: HQNavItem[] = [
 
   { label: "Document Management", path: "/hq/documents", icon: FolderOpen, section: "System" },
   { label: "Enterprise Monitoring", path: "/hq/monitoring", icon: Activity, section: "System" },
+  { label: "Enterprise Readiness", path: "/hq/enterprise-readiness", icon: Shield, section: "System", badge: "Cert" },
   { label: "Security Center", path: "/hq/security", icon: Shield, section: "System" },
   { label: "Organization Settings", path: "/hq/settings", icon: Settings, section: "System" },
 ];

@@ -853,6 +853,38 @@ const enterpriseOperations5: AuraAction = {
   },
 };
 
+const enterpriseReadinessCertification: AuraAction = {
+  id: "enterprise_readiness_certification",
+  label: "Enterprise Readiness Certification",
+  module: "executive",
+  kind: "execute",
+  description:
+    "Run or show Enterprise Readiness Certification — live module/integration/security/quality validation toward 100% production certification. No demo data.",
+  parameters: {
+    request: {
+      type: "string",
+      description: "e.g. Run enterprise readiness certification, Show readiness dashboard, Run deep quality certification",
+    },
+  },
+  async run(args, ctx) {
+    const { runEnterpriseReadinessCommand } = await import("./enterpriseReadinessCertificationEngine");
+    const result = await runEnterpriseReadinessCommand({
+      request: str(args.request) || "Show readiness dashboard",
+      actorEmail: ctx.actorEmail,
+      founderMode: Boolean(ctx.identity?.founderMode || ctx.identity?.isFounder),
+    });
+    return {
+      status: result.founderApprovalRequired ? "pending_approval" : "done",
+      summary: result.speechSummary,
+      data: result,
+      navigation: { path: "/hq/enterprise-readiness", label: "Open Enterprise Readiness Certification" },
+      approval: result.founderApprovalRequired
+        ? { path: "/hq/enterprise-readiness", label: "Founder Mode required to run certification" }
+        : undefined,
+    };
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Executive Operations (Founder Mode execute)
 // ---------------------------------------------------------------------------
@@ -1400,6 +1432,7 @@ export const AURA_ACTIONS: AuraAction[] = [
   executiveDecisionIntelligence,
   enterpriseOs,
   enterpriseOperations5,
+  enterpriseReadinessCertification,
   sendEmail,
   sendSms,
   placeCall,
