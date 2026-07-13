@@ -460,6 +460,9 @@ export async function buildFounderWorkspace() {
     prepared,
     memory,
     latestCycle,
+    workforce,
+    docCount,
+    commCount,
   ] = await Promise.all([
     soft("briefing", () => import("./executiveBriefings").then((m) => m.getOrGenerateDailyBriefing(false)), null),
     soft("mc", () => import("./auraEnterpriseOs4").then((m) => m.buildEnterpriseOsMissionControl()), null),
@@ -491,6 +494,33 @@ export async function buildFounderWorkspace() {
          FROM aura_ao_cycles ORDER BY created_at DESC LIMIT 1`
       );
     }, null),
+    soft("workforce", () => import("./workforceFoundation").then((m) => m.buildWorkforceDashboard()), null),
+    soft("documents", async () => {
+      const db = await getDb();
+      const row = await db.get<{ c: number }>(
+        `SELECT COUNT(*) as c FROM sqlite_master WHERE type='table' AND name LIKE '%document%'`
+      ).catch(() => ({ c: 0 }));
+      if (!(row?.c)) return { count: 0, ready: false };
+      const countRow = await db.get<{ c: number }>(
+        `SELECT COUNT(*) as c FROM hq_documents`
+      ).catch(() => null);
+      if (countRow) return { count: Number(countRow.c || 0), ready: true };
+      const alt = await db.get<{ c: number }>(
+        `SELECT COUNT(*) as c FROM documents`
+      ).catch(() => ({ c: 0 }));
+      return { count: Number(alt?.c || 0), ready: true };
+    }, { count: 0, ready: false }),
+    soft("comms", async () => {
+      const db = await getDb();
+      const row = await db.get<{ c: number }>(
+        `SELECT COUNT(*) as c FROM hq_communications_messages`
+      ).catch(() => null);
+      if (row) return { count: Number(row.c || 0), ready: true };
+      const alt = await db.get<{ c: number }>(
+        `SELECT COUNT(*) as c FROM sqlite_master WHERE type='table' AND name LIKE 'comm%'`
+      ).catch(() => ({ c: 0 }));
+      return { count: 0, ready: (alt?.c || 0) > 0 };
+    }, { count: 0, ready: false }),
   ]);
 
   const goalList = (goals as { goals?: Array<Record<string, unknown>> })?.goals || [];
@@ -519,19 +549,193 @@ export async function buildFounderWorkspace() {
     pendingLabel(Number(mc?.pendingApprovals ?? 0)),
   ].filter(Boolean) as string[];
 
+  const orgHealth = mc?.organizationHealth ?? mc?.enterpriseHealthScore ?? null;
+  const enterpriseHealth = mc?.enterpriseHealthScore ?? mon?.overallScore ?? null;
+  const pipelineValue = mc?.fundingPipeline?.pipelineValue ?? null;
+  const activeAwards = mc?.fundingPipeline?.activeAwards ?? null;
+  const pendingApprovals = Number(mc?.pendingApprovals ?? 0);
+  const projectCount = eo5?.activeProjects?.count ?? 0;
+  const financeScore = mc?.financialHealth?.financialHealthScore ?? null;
+  const cashFlow = mc?.financialHealth?.cashFlow ?? null;
+  const hrHeadcount = workforce?.kpis?.totalWorkforce ?? workforce?.kpis?.totalEmployees ?? null;
+  const hrStatus = mc?.hrStatus ?? (hrHeadcount != null ? `${hrHeadcount} people` : null);
+  const monitoringScore = mon?.overallScore ?? null;
+  const softwareScore = mc?.softwareHealth?.score ?? null;
+  const briefingObj = briefing as { title?: string; content?: string; highlights?: string[]; generatedAt?: string; date?: string } | null;
+  const briefingReady = Boolean(briefingObj?.content || briefingObj?.title);
+
+  type CommandCard = {
+    id: string;
+    label: string;
+    value: string;
+    meta: string;
+    path: string;
+    status: "live" | "empty";
+    variant?: "gold" | "success" | "warning" | "danger" | "muted";
+  };
+
+  const fmtMoney = (n: number | null | undefined) =>
+    n == null ? "—" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
+
+  const commandCards: CommandCard[] = [
+    {
+      id: "executive-briefing",
+      label: "Executive Briefing",
+      value: briefingReady ? "Today" : "No data",
+      meta: briefingReady ? (briefingObj?.title || "Open live briefing") : "No data available — run autonomous cycle",
+      path: "/hq/founder",
+      status: briefingReady ? "live" : "empty",
+      variant: briefingReady ? "gold" : "muted",
+    },
+    {
+      id: "pending-approvals",
+      label: "Pending Approvals",
+      value: String(pendingApprovals),
+      meta: pendingApprovals ? "Open live approval queue" : "Queue clear",
+      path: "/hq/workflows",
+      status: "live",
+      variant: pendingApprovals >= 3 ? "warning" : "success",
+    },
+    {
+      id: "organization-health",
+      label: "Organization Health",
+      value: orgHealth != null ? `${orgHealth}%` : "—",
+      meta: "Enterprise health dashboard",
+      path: "/hq/enterprise-os",
+      status: orgHealth != null ? "live" : "empty",
+      variant: "gold",
+    },
+    {
+      id: "enterprise-health",
+      label: "Enterprise Health",
+      value: enterpriseHealth != null ? String(enterpriseHealth) : "—",
+      meta: "Mission Control / OS 4.0",
+      path: "/hq/enterprise-os",
+      status: enterpriseHealth != null ? "live" : "empty",
+    },
+    {
+      id: "active-grants",
+      label: "Active Grants",
+      value: activeAwards != null ? String(activeAwards) : "—",
+      meta: "Open Grant Center",
+      path: "/hq/grants",
+      status: activeAwards != null ? "live" : "empty",
+    },
+    {
+      id: "funding-pipeline",
+      label: "Funding Pipeline",
+      value: fmtMoney(pipelineValue),
+      meta: "Enterprise funding pipeline",
+      path: "/hq/grants",
+      status: pipelineValue != null ? "live" : "empty",
+      variant: "gold",
+    },
+    {
+      id: "financial-summary",
+      label: "Financial Summary",
+      value: financeScore != null ? String(financeScore) : "—",
+      meta: cashFlow != null ? `Cash ${fmtMoney(cashFlow)} · Financial Center` : "Open Financial Center",
+      path: "/hq/finance",
+      status: financeScore != null || cashFlow != null ? "live" : "empty",
+    },
+    {
+      id: "hr-summary",
+      label: "HR Summary",
+      value: hrHeadcount != null ? String(hrHeadcount) : (hrStatus || "—"),
+      meta: "Open HR / People Center",
+      path: "/hq/people",
+      status: hrHeadcount != null || Boolean(hrStatus && hrStatus !== "unknown") ? "live" : "empty",
+    },
+    {
+      id: "communications",
+      label: "Communications",
+      value: commCount.ready ? String(commCount.count) : "—",
+      meta: commCount.ready ? "Open Communications Center" : "No data available",
+      path: "/hq/communications",
+      status: commCount.ready ? "live" : "empty",
+      variant: commCount.ready ? "gold" : "muted",
+    },
+    {
+      id: "system-health",
+      label: "System Health",
+      value: monitoringScore != null ? `${monitoringScore}` : "—",
+      meta: mon ? `${mon.overallStatus} · Technical operations` : "Open Monitoring",
+      path: "/hq/monitoring",
+      status: monitoringScore != null ? "live" : "empty",
+      variant: monitoringScore != null && monitoringScore < 70 ? "warning" : "success",
+    },
+    {
+      id: "alerts",
+      label: "Critical Alerts",
+      value: String(criticalAlerts.length),
+      meta: "Open notifications / alerts",
+      path: "/hq/notifications",
+      status: "live",
+      variant: criticalAlerts.length ? "warning" : "success",
+    },
+    {
+      id: "projects",
+      label: "Active Projects",
+      value: String(projectCount),
+      meta: "Operations project dashboard",
+      path: "/hq/operations",
+      status: "live",
+    },
+    {
+      id: "calendar",
+      label: "Calendar",
+      value: "Open",
+      meta: "Executive calendar",
+      path: "/hq/calendar",
+      status: "live",
+    },
+    {
+      id: "documents",
+      label: "Documents",
+      value: docCount.ready ? String(docCount.count) : "—",
+      meta: docCount.ready ? "Document Management" : "No data available",
+      path: "/hq/documents",
+      status: docCount.ready ? "live" : "empty",
+      variant: docCount.ready ? "gold" : "muted",
+    },
+    {
+      id: "software-division",
+      label: "Software Division",
+      value: softwareScore != null ? String(softwareScore) : "Open",
+      meta: mc?.softwareHealth?.label || "Software Engineering dashboard",
+      path: "/hq/software-engineering",
+      status: "live",
+      variant: mc?.softwareHealth?.deployAligned === false ? "warning" : "gold",
+    },
+  ];
+
+  const priorityItems = recommendations
+    .filter((r) => r.confidence === "high")
+    .slice(0, 6)
+    .map((r) => ({ title: r.title, path: r.path, id: r.id }));
+
+  if (pendingApprovals > 0) {
+    priorityItems.unshift({
+      id: "priority-approvals",
+      title: `Clear ${pendingApprovals} Founder approval(s)`,
+      path: "/hq/workflows",
+    });
+  }
+
   return {
     aoVersion: AO_VERSION,
     generatedAt: new Date().toISOString(),
     todayPriorities: priorities.slice(0, 8),
-    pendingApprovals: Number(mc?.pendingApprovals ?? 0),
+    todayPriorityItems: priorityItems.slice(0, 8),
+    pendingApprovals,
     executiveRecommendations: recommendations,
     activeGrants: {
-      pipelineValue: mc?.fundingPipeline?.pipelineValue ?? null,
-      activeAwards: mc?.fundingPipeline?.activeAwards ?? null,
+      pipelineValue,
+      activeAwards,
       path: "/hq/grants",
     },
     activeProjects: {
-      count: eo5?.activeProjects?.count ?? 0,
+      count: projectCount,
       path: "/hq/operations",
     },
     criticalAlerts: criticalAlerts.map((a) => ({
@@ -541,35 +745,51 @@ export async function buildFounderWorkspace() {
       path: a.path ? String(a.path) : "/hq/notifications",
       priority: String(a.priority || "high"),
     })),
-    organizationHealth: mc?.organizationHealth ?? mc?.enterpriseHealthScore ?? null,
-    enterpriseHealth: mc?.enterpriseHealthScore ?? mon?.overallScore ?? null,
+    organizationHealth: orgHealth,
+    enterpriseHealth,
     strategicGoals: goalList.slice(0, 8).map((g) => ({
       title: String(g.title || ""),
       progressPercent: Number(g.progressPercent ?? g.progress_percent ?? 0),
       status: String(g.status || ""),
+      path: "/hq/enterprise-ops",
     })),
     personalReminders: [
-      Number(mc?.pendingApprovals ?? 0) > 0 ? `${mc?.pendingApprovals} Founder approval(s) waiting` : null,
+      pendingApprovals > 0 ? `${pendingApprovals} Founder approval(s) waiting` : null,
       mc?.softwareHealth?.deployAligned === false ? "Manual Deploy may be required" : null,
       "High-impact actions require explicit Founder approval",
     ].filter(Boolean) as string[],
-    dailyBriefing: briefing,
+    personalReminderItems: [
+      pendingApprovals > 0
+        ? { id: "rem-approvals", title: `${pendingApprovals} Founder approval(s) waiting`, path: "/hq/workflows" }
+        : null,
+      mc?.softwareHealth?.deployAligned === false
+        ? { id: "rem-deploy", title: "Manual Deploy may be required", path: "/hq/software-engineering" }
+        : null,
+      { id: "rem-gate", title: "High-impact actions require Founder approval", path: "/hq/workflows" },
+    ].filter(Boolean) as Array<{ id: string; title: string; path: string }>,
+    dailyBriefing: briefing
+      ? {
+          ...(typeof briefing === "object" ? briefing : { content: String(briefing) }),
+          path: "/hq/founder",
+        }
+      : null,
     preparedPackages: prepared.map((p) => ({
       id: String(p.id),
       kind: String(p.kind),
       title: String(p.title),
       status: String(p.status),
       summary: String(p.summary || ""),
-      path: String(p.path || "/hq/founder-workspace"),
+      path: String(p.path || "/hq/enterprise-ops"),
       createdAt: String(p.created_at || ""),
     })),
     monitoring: mon
-      ? { score: mon.overallScore, status: mon.overallStatus, alerts: mon.alerts?.length || 0 }
+      ? { score: mon.overallScore, status: mon.overallStatus, alerts: mon.alerts?.length || 0, path: "/hq/monitoring" }
       : null,
     memorySummary:
       memory && typeof memory === "object" && "speechSummary" in memory
         ? String((memory as { speechSummary: string }).speechSummary)
         : null,
+    memoryPath: "/hq/knowledge",
     latestCycle: latestCycle
       ? {
           id: String((latestCycle as { id: string }).id),
@@ -578,14 +798,21 @@ export async function buildFounderWorkspace() {
           createdAt: String((latestCycle as { created_at: string }).created_at),
         }
       : null,
+    commandCards,
     deepLinks: [
       { label: "Founder Command Center", path: "/hq/founder" },
-      { label: "Enterprise Ops 5.0", path: "/hq/enterprise-ops" },
-      { label: "Enterprise OS 4.0", path: "/hq/enterprise-os" },
+      { label: "Grant Center", path: "/hq/grants" },
+      { label: "Financial Center", path: "/hq/finance" },
+      { label: "HR / People", path: "/hq/people" },
+      { label: "Communications", path: "/hq/communications" },
+      { label: "Operations", path: "/hq/operations" },
+      { label: "Workflows / Approvals", path: "/hq/workflows" },
       { label: "Monitoring", path: "/hq/monitoring" },
-      { label: "Enterprise Readiness", path: "/hq/enterprise-readiness" },
+      { label: "Software Engineering", path: "/hq/software-engineering" },
+      { label: "Documents", path: "/hq/documents" },
+      { label: "Calendar", path: "/hq/calendar" },
+      { label: "Enterprise Ops 5.0", path: "/hq/enterprise-ops" },
       { label: "AURA Chat", path: "/hq/aura" },
-      { label: "Workflows", path: "/hq/workflows" },
     ],
     policy: {
       highImpactRequiresFounderApproval: true,

@@ -14,10 +14,21 @@ export type AutonomousRecommendation = {
   founderApprovalRequired: boolean;
 };
 
+export type FounderCommandCard = {
+  id: string;
+  label: string;
+  value: string;
+  meta: string;
+  path: string;
+  status: "live" | "empty";
+  variant?: "gold" | "success" | "warning" | "danger" | "muted";
+};
+
 export type FounderWorkspace = {
   aoVersion: string;
   generatedAt: string;
   todayPriorities: string[];
+  todayPriorityItems?: Array<{ id: string; title: string; path: string }>;
   pendingApprovals: number;
   executiveRecommendations: AutonomousRecommendation[];
   activeGrants: { pipelineValue: number | null; activeAwards: number | null; path: string };
@@ -25,9 +36,10 @@ export type FounderWorkspace = {
   criticalAlerts: Array<{ id: string; title: string; message: string; path: string; priority: string }>;
   organizationHealth: number | null;
   enterpriseHealth: number | null;
-  strategicGoals: Array<{ title: string; progressPercent: number; status: string }>;
+  strategicGoals: Array<{ title: string; progressPercent: number; status: string; path?: string }>;
   personalReminders: string[];
-  dailyBriefing: unknown;
+  personalReminderItems?: Array<{ id: string; title: string; path: string }>;
+  dailyBriefing: (Record<string, unknown> & { path?: string }) | null;
   preparedPackages: Array<{
     id: string;
     kind: string;
@@ -37,9 +49,11 @@ export type FounderWorkspace = {
     path: string;
     createdAt: string;
   }>;
-  monitoring: { score: number; status: string; alerts: number } | null;
+  monitoring: { score: number; status: string; alerts: number; path?: string } | null;
   memorySummary: string | null;
+  memoryPath?: string;
   latestCycle: { id: string; speechSummary: string; monitoringScore: number | null; createdAt: string } | null;
+  commandCards?: FounderCommandCard[];
   deepLinks: Array<{ label: string; path: string }>;
   policy: {
     highImpactRequiresFounderApproval: boolean;
@@ -63,6 +77,7 @@ export const EMPTY_FOUNDER_WORKSPACE: FounderWorkspace = {
   aoVersion: "1.0",
   generatedAt: new Date().toISOString(),
   todayPriorities: [],
+  todayPriorityItems: [],
   pendingApprovals: 0,
   executiveRecommendations: [],
   activeGrants: { pipelineValue: null, activeAwards: null, path: "/hq/grants" },
@@ -72,11 +87,14 @@ export const EMPTY_FOUNDER_WORKSPACE: FounderWorkspace = {
   enterpriseHealth: null,
   strategicGoals: [],
   personalReminders: [],
+  personalReminderItems: [],
   dailyBriefing: null,
   preparedPackages: [],
   monitoring: null,
   memorySummary: null,
+  memoryPath: "/hq/knowledge",
   latestCycle: null,
+  commandCards: [],
   deepLinks: [],
   policy: {
     highImpactRequiresFounderApproval: true,

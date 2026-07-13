@@ -98,6 +98,17 @@ body:has(.hq-login-shell) {
   transition: transform var(--hq-transition), box-shadow var(--hq-transition);
 }
 .hq-kpi-card:hover { transform: translateY(-2px); box-shadow: var(--hq-shadow); }
+.hq-kpi-card--link {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+.hq-kpi-card--link:focus-visible {
+  outline: 2px solid var(--hq-gold);
+  outline-offset: 2px;
+}
+.hq-kpi-card--link:hover .hq-kpi-meta { color: var(--hq-gold); }
 .hq-kpi-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent, var(--hq-gold), transparent); opacity: 0.6; }
 .hq-kpi-label { font-size: 0.75rem; color: var(--hq-text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.4rem; }
 .hq-kpi-value { font-size: 1.85rem; font-weight: 800; color: var(--hq-gold); line-height: 1.1; }
