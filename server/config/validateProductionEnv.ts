@@ -45,6 +45,12 @@ export function assertProductionEnv(): void {
     errors.push("GRANTS_OPERATOR_PASSWORD must be set in production");
   }
 
+  if (founderPassword && grantsPassword && founderPassword === grantsPassword) {
+    errors.push(
+      "FOUNDER_SEED_PASSWORD and GRANTS_OPERATOR_PASSWORD must be different values (Founder vs Grants Operator)",
+    );
+  }
+
   if (!(process.env.PUBLIC_APP_URL || "").trim()) {
     errors.push("PUBLIC_APP_URL must be set in production");
   }

@@ -26,10 +26,13 @@ if (!isDev) {
 }
 
 const FOUNDER_EMAIL = getSuperAdminEmail();
-const FOUNDER_SEED_PASSWORD = getSuperAdminPassword() || "IFCDC@2026Secure";
+// Founder password: FOUNDER_SEED_PASSWORD only. Never fall back to GRANTS_OPERATOR_PASSWORD.
+const FOUNDER_SEED_PASSWORD =
+  getSuperAdminPassword() || (isDev ? "IFCDC@2026Secure" : "");
 const FOUNDER_NAME = process.env.FOUNDER_NAME || "IFCDC Super Admin";
 const GRANTS_OPERATOR = {
   email: getGrantsOperatorEmail(),
+  // Grants Operator password: GRANTS_OPERATOR_PASSWORD only. Never use FOUNDER_SEED_PASSWORD.
   seedPassword: getGrantsOperatorPassword(),
   name: process.env.GRANTS_OPERATOR_NAME || "IFCDC Grants Operator",
 };
@@ -99,21 +102,32 @@ async function startServer() {
   attachHqRealtimeHub(server);
 
   const { initializeHqModules } = await import("./bootstrap/initializeHqModules");
-  void initializeHqModules({
-    email: FOUNDER_EMAIL,
-    seedPassword: FOUNDER_SEED_PASSWORD,
-    name: FOUNDER_NAME,
-    grantsOperator: GRANTS_OPERATOR.seedPassword
-      ? { email: GRANTS_OPERATOR.email, seedPassword: GRANTS_OPERATOR.seedPassword, name: GRANTS_OPERATOR.name }
-      : undefined,
-  })
-    .then(async () => {
-      const { scheduleGrantCenterProductionQa } = await import("./hq/grantCenterProductionQaRunner");
-      scheduleGrantCenterProductionQa(PORT);
+  if (!FOUNDER_SEED_PASSWORD) {
+    console.error(
+      "FOUNDER_SEED_PASSWORD is required to seed/sync the Founder account (service@ifcdc.org). " +
+        "Do not use GRANTS_OPERATOR_PASSWORD for Founder authentication.",
+    );
+  } else {
+    console.log(
+      `Credential seed map: Founder=${FOUNDER_EMAIL}←FOUNDER_SEED_PASSWORD; ` +
+        `GrantsOperator=${GRANTS_OPERATOR.email}←${GRANTS_OPERATOR.seedPassword ? "GRANTS_OPERATOR_PASSWORD" : "unset"}`,
+    );
+    void initializeHqModules({
+      email: FOUNDER_EMAIL,
+      seedPassword: FOUNDER_SEED_PASSWORD,
+      name: FOUNDER_NAME,
+      grantsOperator: GRANTS_OPERATOR.seedPassword
+        ? { email: GRANTS_OPERATOR.email, seedPassword: GRANTS_OPERATOR.seedPassword, name: GRANTS_OPERATOR.name }
+        : undefined,
     })
-    .catch((err) => {
-      console.error("Failed to initialize IFCDC HQ (API remains up):", err);
-    });
+      .then(async () => {
+        const { scheduleGrantCenterProductionQa } = await import("./hq/grantCenterProductionQaRunner");
+        scheduleGrantCenterProductionQa(PORT);
+      })
+      .catch((err) => {
+        console.error("Failed to initialize IFCDC HQ (API remains up):", err);
+      });
+  }
 }
 
 startServer().catch((err) => {

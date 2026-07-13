@@ -577,6 +577,7 @@ async function ensureGrantOperatorAccount(
   db: Database,
   operator: { email: string; seedPassword: string; name: string },
 ): Promise<void> {
+  // Seeds/syncs Grants Operator from GRANTS_OPERATOR_PASSWORD only — never FOUNDER_SEED_PASSWORD.
   const email = operator.email.toLowerCase();
   const password_hash = await bcrypt.hash(operator.seedPassword, 10);
   const created_at = new Date().toISOString();
@@ -598,6 +599,7 @@ async function ensureGrantOperatorAccount(
 }
 
 async function ensureFounderAccount(db: Database, founder: FounderSeedConfig) {
+  // Seeds/syncs Founder from FOUNDER_SEED_PASSWORD only — never GRANTS_OPERATOR_PASSWORD.
   const email = founder.email;
   const password_hash = await bcrypt.hash(founder.seedPassword, 10);
   const created_at = new Date().toISOString();

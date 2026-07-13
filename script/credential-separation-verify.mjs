@@ -63,12 +63,20 @@ async function main() {
   log(SUPER_ADMIN === "service@ifcdc.org", "Super Admin email is service@ifcdc.org", SUPER_ADMIN);
   log(GRANTS_OP === "813786b@gmail.com", "Grants operator email is 813786b@gmail.com", GRANTS_OP);
   log(SUPER_ADMIN !== GRANTS_OP, "Accounts are distinct");
+  if (SUPER_PW && GRANTS_PW) {
+    log(SUPER_PW !== GRANTS_PW, "FOUNDER_SEED_PASSWORD ≠ GRANTS_OPERATOR_PASSWORD");
+  } else {
+    logSkip("Password distinctness", "Set both FOUNDER_SEED_PASSWORD and GRANTS_OPERATOR_PASSWORD to verify");
+  }
 
   const health = await jsonFetch(`${BASE}/api/health`);
   log(health.ok, "Production health", health.body?.commit ?? "?");
 
   if (health.body?.credentials) {
     log(health.body.credentials.separated === true, "Health reports credentials separated");
+    if (typeof health.body.credentials.passwordsDistinct === "boolean") {
+      log(health.body.credentials.passwordsDistinct === true, "Health reports passwords distinct");
+    }
     log(
       (health.body.credentials.superAdminEmail || "").toLowerCase() === SUPER_ADMIN,
       "Health superAdminEmail matches env",
@@ -132,6 +140,24 @@ async function main() {
     } catch (e) {
       log(false, "Grants operator login", e.message);
     }
+  }
+
+  // Cross-credential negative checks — each password must only unlock its own account
+  if (SUPER_PW && GRANTS_PW && SUPER_PW !== GRANTS_PW) {
+    try {
+      await login(SUPER_ADMIN, GRANTS_PW);
+      log(false, "Founder rejects GRANTS_OPERATOR_PASSWORD", "unexpectedly accepted");
+    } catch {
+      log(true, "Founder rejects GRANTS_OPERATOR_PASSWORD");
+    }
+    try {
+      await login(GRANTS_OP, SUPER_PW);
+      log(false, "Grants Operator rejects FOUNDER_SEED_PASSWORD", "unexpectedly accepted");
+    } catch {
+      log(true, "Grants Operator rejects FOUNDER_SEED_PASSWORD");
+    }
+  } else {
+    logSkip("Cross-credential rejection", "Need distinct FOUNDER_SEED_PASSWORD and GRANTS_OPERATOR_PASSWORD");
   }
 
   if (!CAN_SIGN_TOKENS) {

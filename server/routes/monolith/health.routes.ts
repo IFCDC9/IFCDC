@@ -9,6 +9,7 @@ import {
   credentialsAreSeparated,
   getGrantsOperatorEmail,
   getSuperAdminEmail,
+  passwordsAreDistinct,
 } from "../../config/credentials";
 import { openAiConfigStatus } from "../../lib/openaiConfig";
 import { getEmailDeliveryStatus, resolveResendFromEmail } from "../../lib/notifications";
@@ -93,6 +94,7 @@ export function registerHealthRoutes(app: Express): void {
         superAdminEmail: getSuperAdminEmail(),
         grantsOperatorEmail: getGrantsOperatorEmail(),
         separated: credentialsAreSeparated(),
+        passwordsDistinct: passwordsAreDistinct(),
       },
       integrations: {
         openai: {
