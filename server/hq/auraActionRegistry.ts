@@ -929,14 +929,19 @@ const sendEmail: AuraAction = {
   module: "communications",
   kind: "execute",
   description:
-    "Founder Mode: send email via Resend. ONLY pass { to, subject, body } — never the full user prompt. "
-    + "For multi-step tests, call this once per email with the exact subject/body only.",
+    "Founder Mode: send branded HTML email via Resend. Prefer { to, intent, context } and let AURA compose. "
+    + "Or pass { to, subject, body }. Never paste multi-step instructions into body. Placeholders are replaced with AURA-generated content.",
   parameters: {
     to: { type: "string", description: "Recipient email, comma-separated list, or 'board'." },
-    subject: { type: "string", description: "Email subject only." },
-    body: { type: "string", description: "Email body only (plain text). Never paste instructions." },
+    subject: { type: "string", description: "Optional subject hint." },
+    body: { type: "string", description: "Optional plain-text body. Do not pass instruction dumps." },
+    intent: { type: "string", description: "What the email should accomplish — AURA composes from this." },
+    context: { type: "string", description: "Extra HQ context for personalization." },
+    module: { type: "string", description: "HQ module hint (grants, executive, bookings, …)." },
+    generate: { type: "boolean", description: "Force AURA composition even when body is provided." },
+    recipientName: { type: "string", description: "Optional recipient display name." },
   },
-  required: ["to", "subject", "body"],
+  required: ["to"],
   async run(args, ctx) {
     return executeSendEmail(args, ctx);
   },

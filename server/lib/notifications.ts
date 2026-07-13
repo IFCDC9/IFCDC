@@ -72,15 +72,33 @@ function createResendEmailProvider() {
   if (!apiKey) return undefined;
   return {
     async send(payload: NotificationPayload): Promise<HqDeliveryResult> {
-      const from = resolveResendFromEmail();
+      const verified = await resolveVerifiedResendFromEmail();
       const text = payload.body;
-      const html = text
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/\n/g, "<br>");
+      let html =
+        typeof payload.metadata?.html === "string" && payload.metadata.html.trim()
+          ? String(payload.metadata.html)
+          : "";
+      if (!html) {
+        try {
+          const { renderEmailTemplate } = await import("../hq/emailTemplates");
+          html = renderEmailTemplate("generic", {
+            message: text,
+            subjectOverride: payload.subject || "IFCDC Headquarters",
+            fields: { headline: payload.subject || "IFCDC Headquarters" },
+          }).html;
+        } catch {
+          html = text
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/\n/g, "<br>");
+        }
+      }
       try {
-        console.log(`[email] Resend send → to=${payload.to} from=${from} subject=${payload.subject ?? "(none)"}`);
+        console.log(
+          `[email] Resend send → to=${payload.to} from=${verified.from} subject=${payload.subject ?? "(none)"}`
+            + (verified.usedFallback ? " (verified-domain fallback)" : ""),
+        );
         const res = await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: {
@@ -88,7 +106,7 @@ function createResendEmailProvider() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            from,
+            from: verified.from,
             to: [payload.to],
             subject: payload.subject ?? "IFCDC Headquarters",
             text,
@@ -123,7 +141,11 @@ function createResendEmailProvider() {
           success: true,
           messageId: data.id,
           providerStatus: res.status,
-          providerResponse: data as Record<string, unknown>,
+          providerResponse: {
+            ...(data as Record<string, unknown>),
+            fromUsed: verified.from,
+            usedFallback: verified.usedFallback,
+          },
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : "Email send failed";
@@ -231,6 +253,7 @@ export async function sendFounderSecurityEmail(opts: {
   to: string;
   subject: string;
   body: string;
+  html?: string;
 }): Promise<HqDeliveryResult> {
   const apiKey = resolveResendApiKey();
   if (!apiKey) {
@@ -243,15 +266,26 @@ export async function sendFounderSecurityEmail(opts: {
 
   const verified = await resolveVerifiedResendFromEmail();
   const text = opts.body;
-  const html = text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\n/g, "<br>");
+  let html = opts.html || "";
+  if (!html) {
+    try {
+      const { renderEmailTemplate } = await import("../hq/emailTemplates");
+      html = renderEmailTemplate("executive_alert", {
+        message: text,
+        fields: { alertTitle: opts.subject, priority: "High", source: "AURA" },
+      }).html;
+    } catch {
+      html = text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\n/g, "<br>");
+    }
+  }
 
   try {
     console.log(
-      `[email] Resend Founder OTP → to=${opts.to} from=${verified.from}`
+      `[email] Resend Founder → to=${opts.to} from=${verified.from}`
       + (verified.usedFallback ? ` (fallback; configured=${verified.configuredFrom})` : "")
     );
     const res = await fetch("https://api.resend.com/emails", {

@@ -390,6 +390,38 @@ export async function setFounderApproval(
     } catch {
       /* optional */
     }
+    try {
+      const { sendGrantNotificationEmail } = await import("./emailEngine");
+      const { getFounderEmail } = await import("./auraFounderTrustEngine");
+      await sendGrantNotificationEmail({
+        to: getFounderEmail(),
+        grantTitle: `Application ${applicationId}`,
+        status: "Founder approved — ready for portal submission",
+        applicationId,
+        message:
+          `Application ${applicationId} was approved by the Founder and is ready_to_submit. `
+          + "Complete the Grants.gov portal submission, then confirm the confirmation ID in Headquarters.",
+      });
+    } catch {
+      /* optional branded email */
+    }
+  }
+
+  if (action === "reject") {
+    try {
+      const { sendApprovalEmail } = await import("./emailEngine");
+      const { getFounderEmail } = await import("./auraFounderTrustEngine");
+      await sendApprovalEmail({
+        to: getFounderEmail(),
+        itemTitle: `Grant application ${applicationId}`,
+        approved: false,
+        actor: opts.actorEmail,
+        notes: opts.note,
+        message: `Grant application ${applicationId} was not approved.`,
+      });
+    } catch {
+      /* optional */
+    }
   }
 
   return { ok: true, workspace: await buildFullApplicationWorkspace(applicationId, opts) };

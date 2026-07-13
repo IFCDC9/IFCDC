@@ -123,18 +123,93 @@ router.get("/health", (_req: Request, res: Response) => {
 router.get("/email/status", async (_req: Request, res: Response) => {
   const status = getEmailDeliveryStatus();
   const { probeResendSender } = await import("../lib/notifications");
-  const resendProbe = await probeResendSender().catch((err) => ({
-    ok: false,
-    apiKeySet: status.apiKeySet,
-    from: status.from || "",
-    error: err instanceof Error ? err.message : "probe failed",
-  }));
+  const { getSenderAuthStatus, emailEngineCatalog } = await import("../hq/emailEngine");
+  const [resendProbe, senderAuth] = await Promise.all([
+    probeResendSender().catch((err) => ({
+      ok: false,
+      apiKeySet: status.apiKeySet,
+      from: status.from || "",
+      error: err instanceof Error ? err.message : "probe failed",
+    })),
+    getSenderAuthStatus().catch((err) => ({
+      configured: status.apiKeySet,
+      from: status.from || "",
+      fromDomain: null,
+      domainVerified: false,
+      usedFallback: false,
+      spf: { status: "unknown" },
+      dkim: { status: "unknown" },
+      dmarc: { status: "unknown" },
+      records: [],
+      domains: [],
+      trustedSender: false,
+      guidance: [],
+      error: err instanceof Error ? err.message : "auth status failed",
+    })),
+  ]);
   res.json({
     ...status,
     fromPreview: status.apiKeySet ? resolveResendFromEmail() : null,
     founderOtpTo: process.env.MASTER_OWNER_EMAIL || process.env.FOUNDER_EMAIL || "service@ifcdc.org",
-    purpose: "AURA Founder verification OTP + Communications Center",
+    purpose: "AURA Founder verification OTP + Communications Center + branded HQ email engine",
     resendProbe,
+    senderAuth,
+    engine: emailEngineCatalog(),
+  });
+});
+
+router.get("/email/templates", hqAuthRequired, async (_req: Request, res: Response) => {
+  const { emailEngineCatalog } = await import("../hq/emailEngine");
+  res.json(emailEngineCatalog());
+});
+
+router.post("/email/send-template", hqAuthRequired, async (req: Request, res: Response) => {
+  const email = (req.hqUser?.email || "").toLowerCase();
+  if (!req.hqUser || (req.hqUser.role !== "owner" && email !== "service@ifcdc.org")) {
+    return res.status(403).json({ error: "Founder Mode required" });
+  }
+  const { sendBrandedEmail } = await import("../hq/emailEngine");
+  const templateId = String(req.body?.templateId || "aura_message");
+  const to = String(req.body?.to || "").trim();
+  if (!to) return res.status(400).json({ error: "to is required" });
+  const result = await sendBrandedEmail({
+    to,
+    templateId: templateId as import("../hq/emailTemplates").EmailTemplateId,
+    template: {
+      recipientName: req.body?.recipientName,
+      message: req.body?.message,
+      subjectOverride: req.body?.subject,
+      fields: req.body?.fields || {},
+      cta: req.body?.cta,
+    },
+  });
+  res.status(result.success ? 200 : 502).json(result);
+});
+
+router.post("/email/test-branded", hqAuthRequired, async (req: Request, res: Response) => {
+  const email = (req.hqUser?.email || "").toLowerCase();
+  if (!req.hqUser || (req.hqUser.role !== "owner" && email !== "service@ifcdc.org")) {
+    return res.status(403).json({ error: "Founder Mode required" });
+  }
+  const { sendAuraGeneratedEmail, getSenderAuthStatus } = await import("../hq/emailEngine");
+  const to = String(req.body?.to || req.hqUser.email || "service@ifcdc.org").trim();
+  const [senderAuth, send] = await Promise.all([
+    getSenderAuthStatus(),
+    sendAuraGeneratedEmail({
+      to,
+      intent: String(req.body?.intent || "Confirm IFCDC Headquarters branded email engine is live in production"),
+      context: "Founder requested a live end-to-end branded email verification from the production Email Engine.",
+      module: "executive",
+      recipientName: "Fahreal Allah",
+      subjectHint: "IFCDC Headquarters — branded email engine verification",
+    }),
+  ]);
+  res.status(send.success ? 200 : 502).json({
+    ok: send.success,
+    send,
+    senderAuth,
+    trustedSender: senderAuth.trustedSender,
+    unverifiedSenderRisk: senderAuth.usedFallback || !senderAuth.domainVerified,
   });
 });
 

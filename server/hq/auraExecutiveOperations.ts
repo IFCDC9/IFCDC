@@ -490,21 +490,9 @@ export async function executeSendEmail(
   const denied = requireFounder(ctx);
   if (denied) return denied;
 
-  const picked = pickEmailArgs(args);
-  if (!picked) {
-    return {
-      status: "error",
-      summary:
-        "send_email requires exact fields { to, subject, body }. "
-        + "I will not forward a multi-step instruction dump as email content.",
-    };
-  }
-  const { to: toRaw, subject, body } = picked;
-  if (isUnsafeToolContent(body, String(args._rawCommand || ""))) {
-    return {
-      status: "error",
-      summary: "Refused to send email — body looks like a multi-step instruction dump, not a message.",
-    };
+  const toRaw = String(args.to || "").trim();
+  if (!toRaw) {
+    return { status: "error", summary: "send_email requires a recipient (to)." };
   }
 
   const recipients =
@@ -516,53 +504,129 @@ export async function executeSendEmail(
     return { status: "error", summary: "I could not resolve any email recipients." };
   }
 
-  const results: Array<{ to: string; ok: boolean; error?: string; messageId?: string }> = [];
-  for (const to of recipients) {
-    const send = await sendFounderSecurityEmail({ to, subject, body });
-    results.push({ to, ok: send.success, error: send.error, messageId: send.messageId });
-    if (!send.success) {
-      const fallback = await sendHqNotification({
-        to,
-        subject,
-        body,
-        channel: "email",
-      });
-      results[results.length - 1] = {
-        to,
-        ok: fallback.success,
-        error: fallback.error,
-        messageId: fallback.messageId,
+  const {
+    isPlaceholderEmailBody,
+    sendAuraGeneratedEmail,
+    sendBrandedEmail,
+  } = await import("./emailEngine");
+
+  const subjectIn = String(args.subject || "").trim();
+  const bodyIn = String(args.body || "").trim();
+  const moduleHint = String(args.module || ctx.module || "aura");
+  const intent = String(args.intent || args.context || args._rawCommand || subjectIn || "Headquarters update").slice(0, 800);
+  const forceGenerate = args.generate === true || args.generate === "true";
+  const wantsAura =
+    forceGenerate
+    || !bodyIn
+    || isPlaceholderEmailBody(bodyIn)
+    || isUnsafeToolContent(bodyIn, String(args._rawCommand || ""));
+
+  if (bodyIn && isUnsafeToolContent(bodyIn, String(args._rawCommand || "")) && !forceGenerate) {
+    // Instruction dump without explicit generate → refuse rather than email the dump
+    if (!wantsAura || isUnsafeToolContent(bodyIn, bodyIn)) {
+      return {
+        status: "error",
+        summary:
+          "Refused to send email — body looks like a multi-step instruction dump. "
+          + "Provide a real message or ask AURA to compose one.",
       };
+    }
+  }
+
+  const results: Array<{
+    to: string;
+    ok: boolean;
+    error?: string;
+    messageId?: string;
+    generatedBy?: string;
+    from?: string;
+  }> = [];
+
+  for (const to of recipients) {
+    if (wantsAura) {
+      const send = await sendAuraGeneratedEmail({
+        to,
+        intent,
+        context: String(args.context || args._rawCommand || "").slice(0, 4000),
+        module: moduleHint,
+        recipientName: String(args.recipientName || ""),
+        fallbackBody: bodyIn && !isPlaceholderEmailBody(bodyIn) && !isUnsafeToolContent(bodyIn, "")
+          ? bodyIn
+          : undefined,
+        subjectHint: subjectIn || undefined,
+      });
+      results.push({
+        to,
+        ok: send.success,
+        error: send.error,
+        messageId: send.messageId,
+        generatedBy: send.generatedBy,
+        from: send.from,
+      });
+    } else {
+      const pickedOk = pickEmailArgs({ to, subject: subjectIn, body: bodyIn });
+      if (!pickedOk) {
+        results.push({ to, ok: false, error: "Invalid subject/body" });
+        continue;
+      }
+      const send = await sendBrandedEmail({
+        to,
+        templateId: "aura_message",
+        subjectOverride: pickedOk.subject,
+        template: {
+          message: pickedOk.body,
+          fields: { headline: pickedOk.subject, subjectHint: pickedOk.subject },
+        },
+      });
+      results.push({
+        to,
+        ok: send.success,
+        error: send.error,
+        messageId: send.messageId,
+        generatedBy: "template",
+        from: send.from,
+      });
     }
   }
 
   const ok = results.filter((r) => r.ok).length;
   const acceptedIds = results.filter((r) => r.ok && r.messageId).map((r) => r.messageId);
+  const subjectOut = subjectIn || results[0]?.generatedBy || "AURA Headquarters email";
   await logHqAudit({
     action: "aura_exec_send_email",
     entityType: "aura_executive_op",
     entityId: crypto.randomUUID(),
     detail: `sent ${ok}/${results.length}`,
-    metadata: { recipients, subject, actor: ctx.actorEmail, messageIds: acceptedIds },
+    metadata: {
+      recipients,
+      actor: ctx.actorEmail,
+      messageIds: acceptedIds,
+      branded: true,
+      auraGenerated: wantsAura,
+    },
   }).catch(() => undefined);
 
   if (!ok) {
     return {
       status: "error",
-      summary: `Email failed: ${results.map((r) => r.error || "unknown").join("; ")}. Check Resend configuration.`,
-      data: { results, providerAccepted: false, subject, bodyPreview: body.slice(0, 120) },
+      summary: `Email failed: ${results.map((r) => r.error || "unknown").join("; ")}. Check Resend + sender domain verification.`,
+      data: { results, providerAccepted: false },
     };
   }
 
   return {
     status: "done",
-    summary: `Email sent to ${results.filter((r) => r.ok).map((r) => r.to).join(", ")} via Resend. Subject: ${subject}.`,
+    summary:
+      `Branded email sent to ${results.filter((r) => r.ok).map((r) => r.to).join(", ")} via Resend`
+      + (wantsAura ? " (AURA-composed)" : " (template)")
+      + `. From: ${results.find((r) => r.from)?.from || "verified sender"}.`,
     data: {
       results,
-      subject,
-      bodyPreview: body.slice(0, 120),
+      subject: subjectOut,
       providerAccepted: true,
       messageId: acceptedIds[0] || null,
+      branded: true,
+      auraGenerated: wantsAura,
     },
     navigation: { path: "/hq/communications", label: "Open Communications Center" },
   };

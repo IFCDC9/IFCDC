@@ -59,9 +59,6 @@ export type ExecutivePlanExecution = {
 };
 
 const FOUNDER_TEST_EMAIL_TO = "service@ifcdc.org";
-const FOUNDER_TEST_EMAIL_SUBJECT = "AURA Founder Test";
-const FOUNDER_TEST_EMAIL_BODY =
-  "This is a live production email from AURA confirming that Founder Mode and outbound email are working.";
 const FOUNDER_TEST_SMS_TO = "+18484694448";
 const FOUNDER_TEST_SMS_MESSAGE =
   "AURA Founder Test: SMS and Founder authorization are working.";
@@ -162,11 +159,16 @@ export function buildFounderOperationsAcceptancePlan(): ExecutivePlanningPreview
     step(
       "send_email",
       "send_email",
-      "Send Founder test email",
+      "Send branded AURA production email",
       {
         to: FOUNDER_TEST_EMAIL_TO,
-        subject: FOUNDER_TEST_EMAIL_SUBJECT,
-        body: FOUNDER_TEST_EMAIL_BODY,
+        generate: true,
+        module: "executive",
+        intent:
+          "Confirm IFCDC Headquarters branded email engine is live — Founder Mode, Resend delivery, and authenticated sender domain.",
+        context:
+          "Founder Operations Acceptance Test. Compose a personalized executive email (not a placeholder). Include that AURA and outbound email are production-ready.",
+        recipientName: "Fahreal Allah",
       },
     ),
     step(
