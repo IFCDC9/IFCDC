@@ -492,6 +492,15 @@ export function scheduleEnterpriseMonitoringWatchdog(): void {
           `Enterprise monitoring: score=${overview.overallScore ?? "n/a"} recovered=${retry.recovered.length} failed=${retry.failed.length}`
         );
       }
+      try {
+        const { runEnterpriseHealthWatchdogTick } = await import("./enterpriseHealthImprovementEngine");
+        await runEnterpriseHealthWatchdogTick();
+      } catch (err) {
+        console.warn(
+          "Enterprise health watchdog tick failed:",
+          err instanceof Error ? err.message : err
+        );
+      }
     } catch (err) {
       console.warn(
         "Enterprise monitoring watchdog tick failed:",
