@@ -89,18 +89,47 @@ export async function ensureAutonomousOperationsTables(): Promise<void> {
   tablesReady = true;
 }
 
-async function soft<T>(label: string, fn: () => Promise<T>, fallback: T): Promise<T> {
+async function softTimed<T>(label: string, fn: () => Promise<T>, fallback: T, timeoutMs = 3_500): Promise<{ value: T; ms: number; timedOut: boolean; error?: string }> {
+  const t0 = Date.now();
   try {
-    return await fn();
+    const value = await Promise.race([
+      fn(),
+      new Promise<T>((_, reject) => {
+        setTimeout(() => reject(new Error(`timeout ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+    return { value, ms: Date.now() - t0, timedOut: false };
   } catch (err) {
-    console.warn(`[aura-autonomous] ${label}:`, err instanceof Error ? err.message : err);
-    return fallback;
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[aura-autonomous] ${label}:`, message);
+    return {
+      value: fallback,
+      ms: Date.now() - t0,
+      timedOut: /timeout/i.test(message),
+      error: message,
+    };
   }
 }
 
+async function soft<T>(label: string, fn: () => Promise<T>, fallback: T): Promise<T> {
+  const r = await softTimed(label, fn, fallback, 8_000);
+  return r.value;
+}
+
+type WorkspaceMcLite = {
+  organizationHealth?: number | null;
+  enterpriseHealthScore?: number | null;
+  fundingPipeline?: { pipelineValue: number | null; activeAwards: number | null };
+  financialHealth?: { financialHealthScore?: number | null; cashFlow?: number | null };
+  softwareHealth?: { score?: number | null; label?: string | null; deployAligned?: boolean | null };
+  hrStatus?: string;
+  compliance?: { overdue?: number; dueNext14Days?: number };
+  pendingApprovals?: number;
+};
+
 function buildRecommendations(ctx: {
-  mc: Awaited<ReturnType<typeof import("./auraEnterpriseOs4").buildEnterpriseOsMissionControl>> | null;
-  mon: Awaited<ReturnType<typeof import("./enterpriseMonitoringEngine").buildEnterpriseMonitoringOverview>> | null;
+  mc: WorkspaceMcLite | null;
+  mon: { overallScore?: number; overallStatus?: string; alerts?: unknown[] } | null;
   proactive: { alerts: Array<{ title: string; message: string; path?: string; priority: string; sourceModule: string }> };
   goalsAtRisk: number;
   pendingApprovals: number;
@@ -139,7 +168,7 @@ function buildRecommendations(ctx: {
     });
   }
 
-  if (ctx.mon && ctx.mon.overallScore < 70) {
+  if (ctx.mon && typeof ctx.mon.overallScore === "number" && ctx.mon.overallScore < 70) {
     recs.push({
       id: "rec-monitoring",
       title: "Stabilize enterprise monitoring health",
@@ -447,94 +476,218 @@ export async function runAutonomousOperationsCycle(opts?: {
   };
 }
 
-export async function buildFounderWorkspace() {
-  await ensureAutonomousOperationsTables();
 
+let workspaceCache: { at: number; data: Awaited<ReturnType<typeof buildFounderWorkspaceUncached>> } | null = null;
+const WORKSPACE_CACHE_TTL_MS = 25_000;
+
+export async function buildFounderWorkspace(opts?: { bypassCache?: boolean }) {
+  const now = Date.now();
+  if (!opts?.bypassCache && workspaceCache && now - workspaceCache.at < WORKSPACE_CACHE_TTL_MS) {
+    return {
+      ...workspaceCache.data,
+      generatedAt: new Date().toISOString(),
+      cache: { hit: true, ageMs: now - workspaceCache.at, ttlMs: WORKSPACE_CACHE_TTL_MS },
+    };
+  }
+  const data = await buildFounderWorkspaceUncached();
+  workspaceCache = { at: Date.now(), data };
+  return { ...data, cache: { hit: false, ageMs: 0, ttlMs: WORKSPACE_CACHE_TTL_MS } };
+}
+
+async function buildFounderWorkspaceUncached() {
+  await ensureAutonomousOperationsTables();
+  const wallStart = Date.now();
+
+  // Light, parallel, hard-timed sources — avoid Mission Control / EO5 / Brain aggregates.
   const [
-    briefing,
-    mc,
-    mon,
-    eo5,
-    alerts,
-    goals,
-    prepared,
-    memory,
-    latestCycle,
-    workforce,
-    docCount,
-    commCount,
+    orgHealthR,
+    grantsR,
+    financeR,
+    monR,
+    briefingR,
+    alertsR,
+    goalsR,
+    preparedR,
+    latestCycleR,
+    workforceR,
+    docR,
+    commR,
+    approvalsR,
+    projectsR,
+    softwareR,
   ] = await Promise.all([
-    soft("briefing", () => import("./executiveBriefings").then((m) => m.getOrGenerateDailyBriefing(false)), null),
-    soft("mc", () => import("./auraEnterpriseOs4").then((m) => m.buildEnterpriseOsMissionControl()), null),
-    soft("mon", () => import("./enterpriseMonitoringEngine").then((m) => m.buildEnterpriseMonitoringOverview()), null),
-    soft("eo5", () => import("./auraEnterpriseOs5").then((m) => m.buildEnterpriseOperationsCommandCenter()), null),
-    soft("alerts", () => listLeadershipAlerts(20), [] as Record<string, unknown>[]),
-    soft("goals", async () => {
-      const m = await import("./strategicGoalsEngine");
-      return m.listStrategicGoals() as Promise<{ goals: Array<Record<string, unknown>> }>;
-    }, { goals: [] }),
-    soft("prepared", async () => {
-      const db = await getDb();
-      return ((await db.all(
-        `SELECT id, kind, title, status, summary, path, created_at FROM aura_ao_prepared ORDER BY created_at DESC LIMIT 20`
-      )) || []) as Array<Record<string, unknown>>;
-    }, [] as Array<Record<string, unknown>>),
-    soft(
-      "memory",
-      () =>
-        import("./auraOrganizationalMemory").then((m) =>
-          m.retrieveOrganizationalMemory("Founder workspace priorities and approved decisions")
-        ),
-      null
+    softTimed("org-health", () => import("./analyticsReporting").then((m) => m.buildOrganizationHealthScore()), null, 2_500),
+    softTimed("grants", () => import("./grantReporting").then((m) => m.buildGrantExecutiveDashboard()), null, 2_500),
+    softTimed("finance", () => import("./financeReporting").then((m) => m.buildExecutiveDashboard()), null, 2_500),
+    softTimed(
+      "monitoring",
+      () => import("./enterpriseMonitoringEngine").then((m) => m.buildEnterpriseMonitoringOverview({ bypassCache: false })),
+      null,
+      4_000
     ),
-    soft("cycle", async () => {
-      const db = await getDb();
-      return db.get(
-        `SELECT id, speech_summary, recommendations_json, prepared_json, monitoring_score, alerts_emitted, created_at
-         FROM aura_ao_cycles ORDER BY created_at DESC LIMIT 1`
-      );
-    }, null),
-    soft("workforce", () => import("./workforceFoundation").then((m) => m.buildWorkforceDashboard()), null),
-    soft("documents", async () => {
-      const db = await getDb();
-      const row = await db.get<{ c: number }>(
-        `SELECT COUNT(*) as c FROM sqlite_master WHERE type='table' AND name LIKE '%document%'`
-      ).catch(() => ({ c: 0 }));
-      if (!(row?.c)) return { count: 0, ready: false };
-      const countRow = await db.get<{ c: number }>(
-        `SELECT COUNT(*) as c FROM hq_documents`
-      ).catch(() => null);
-      if (countRow) return { count: Number(countRow.c || 0), ready: true };
-      const alt = await db.get<{ c: number }>(
-        `SELECT COUNT(*) as c FROM documents`
-      ).catch(() => ({ c: 0 }));
-      return { count: Number(alt?.c || 0), ready: true };
-    }, { count: 0, ready: false }),
-    soft("comms", async () => {
-      const db = await getDb();
-      const row = await db.get<{ c: number }>(
-        `SELECT COUNT(*) as c FROM hq_communications_messages`
-      ).catch(() => null);
-      if (row) return { count: Number(row.c || 0), ready: true };
-      const alt = await db.get<{ c: number }>(
-        `SELECT COUNT(*) as c FROM sqlite_master WHERE type='table' AND name LIKE 'comm%'`
-      ).catch(() => ({ c: 0 }));
-      return { count: 0, ready: (alt?.c || 0) > 0 };
-    }, { count: 0, ready: false }),
+    softTimed("briefing", () => import("./executiveBriefings").then((m) => m.getOrGenerateDailyBriefing(false)), null, 2_500),
+    softTimed("alerts", () => listLeadershipAlerts(20), [] as Record<string, unknown>[], 2_000),
+    softTimed(
+      "goals",
+      async () => {
+        const m = await import("./strategicGoalsEngine");
+        return m.listStrategicGoals() as Promise<{ goals: Array<Record<string, unknown>> }>;
+      },
+      { goals: [] },
+      2_000
+    ),
+    softTimed(
+      "prepared",
+      async () => {
+        const db = await getDb();
+        return ((await db.all(
+          `SELECT id, kind, title, status, summary, path, created_at FROM aura_ao_prepared ORDER BY created_at DESC LIMIT 20`
+        )) || []) as Array<Record<string, unknown>>;
+      },
+      [] as Array<Record<string, unknown>>,
+      1_500
+    ),
+    softTimed(
+      "cycle",
+      async () => {
+        const db = await getDb();
+        return db.get(
+          `SELECT id, speech_summary, recommendations_json, prepared_json, monitoring_score, alerts_emitted, created_at
+           FROM aura_ao_cycles ORDER BY created_at DESC LIMIT 1`
+        );
+      },
+      null,
+      1_500
+    ),
+    softTimed("workforce", () => import("./workforceFoundation").then((m) => m.buildWorkforceDashboard()), null, 2_500),
+    softTimed(
+      "documents",
+      async () => {
+        const db = await getDb();
+        const countRow = await db.get<{ c: number }>(`SELECT COUNT(*) as c FROM hq_documents`).catch(() => null);
+        if (countRow) return { count: Number(countRow.c || 0), ready: true };
+        return { count: 0, ready: false };
+      },
+      { count: 0, ready: false },
+      1_500
+    ),
+    softTimed(
+      "comms",
+      async () => {
+        const db = await getDb();
+        const row = await db.get<{ c: number }>(`SELECT COUNT(*) as c FROM hq_communications_messages`).catch(() => null);
+        if (row) return { count: Number(row.c || 0), ready: true };
+        const alt = await db.get<{ c: number }>(
+          `SELECT COUNT(*) as c FROM sqlite_master WHERE type='table' AND name LIKE 'comm%'`
+        ).catch(() => ({ c: 0 }));
+        return { count: 0, ready: (alt?.c || 0) > 0 };
+      },
+      { count: 0, ready: false },
+      1_500
+    ),
+    softTimed(
+      "approvals",
+      () =>
+        import("./enterpriseApprovals").then((m) => m.buildApprovalQueue(20)).catch(() => ({ tasks: [], counts: { total: 0 } })),
+      { tasks: [], counts: { total: 0 } },
+      2_000
+    ),
+    softTimed(
+      "projects",
+      async () => {
+        const db = await getDb();
+        const row = await db.get<{ c: number }>(
+          `SELECT COUNT(*) as c FROM ops_projects WHERE status IN ('planning','active')`
+        ).catch(() => ({ c: 0 }));
+        return Number(row?.c || 0);
+      },
+      0,
+      1_500
+    ),
+    softTimed(
+      "software",
+      () =>
+        import("./auraTechnicalCommandEngine")
+          .then((m) => m.buildTechnicalCommandBriefing())
+          .catch(() => null),
+      null,
+      3_000
+    ),
   ]);
+
+  const timings: Record<string, { ms: number; timedOut: boolean; error?: string }> = {
+    "org-health": { ms: orgHealthR.ms, timedOut: orgHealthR.timedOut, error: orgHealthR.error },
+    grants: { ms: grantsR.ms, timedOut: grantsR.timedOut, error: grantsR.error },
+    finance: { ms: financeR.ms, timedOut: financeR.timedOut, error: financeR.error },
+    monitoring: { ms: monR.ms, timedOut: monR.timedOut, error: monR.error },
+    briefing: { ms: briefingR.ms, timedOut: briefingR.timedOut, error: briefingR.error },
+    alerts: { ms: alertsR.ms, timedOut: alertsR.timedOut, error: alertsR.error },
+    goals: { ms: goalsR.ms, timedOut: goalsR.timedOut, error: goalsR.error },
+    prepared: { ms: preparedR.ms, timedOut: preparedR.timedOut, error: preparedR.error },
+    cycle: { ms: latestCycleR.ms, timedOut: latestCycleR.timedOut, error: latestCycleR.error },
+    workforce: { ms: workforceR.ms, timedOut: workforceR.timedOut, error: workforceR.error },
+    documents: { ms: docR.ms, timedOut: docR.timedOut, error: docR.error },
+    comms: { ms: commR.ms, timedOut: commR.timedOut, error: commR.error },
+    approvals: { ms: approvalsR.ms, timedOut: approvalsR.timedOut, error: approvalsR.error },
+    projects: { ms: projectsR.ms, timedOut: projectsR.timedOut, error: projectsR.error },
+    software: { ms: softwareR.ms, timedOut: softwareR.timedOut, error: softwareR.error },
+  };
+
+  const orgHealthScore = orgHealthR.value?.overall ?? null;
+  const grants = grantsR.value;
+  const finance = financeR.value;
+  const mon = monR.value;
+  const briefing = briefingR.value;
+  const alerts = alertsR.value || [];
+  const goals = goalsR.value;
+  const prepared = preparedR.value || [];
+  const latestCycle = latestCycleR.value;
+  const workforce = workforceR.value;
+  const docCount = docR.value;
+  const commCount = commR.value;
+  const approvals = approvalsR.value as { counts?: { total?: number }; tasks?: unknown[] };
+  const projectCount = projectsR.value;
+  const software = softwareR.value as { overallScore?: number; overallLabel?: string; deployAligned?: boolean | null } | null;
+
+  const pipelineValue = grants?.pipelineValue ?? null;
+  const activeAwards = grants?.activeAwards ?? null;
+  const pendingApprovals =
+    Number(approvals?.counts?.total ?? approvals?.tasks?.length ?? 0);
+  const financeScore = finance?.financialHealthScore ?? null;
+  const cashFlow = finance?.cashFlow ?? null;
+  const hrHeadcount = workforce?.kpis?.totalWorkforce ?? workforce?.kpis?.totalEmployees ?? null;
+  const monitoringScore = mon?.overallScore ?? null;
+  const softwareScore = software?.overallScore ?? null;
+  const enterpriseHealth = monitoringScore ?? orgHealthScore;
+  const orgHealth = orgHealthScore;
+
+  const mcLite: WorkspaceMcLite = {
+    organizationHealth: orgHealth,
+    enterpriseHealthScore: enterpriseHealth,
+    fundingPipeline: { pipelineValue, activeAwards },
+    financialHealth: { financialHealthScore: financeScore, cashFlow },
+    softwareHealth: {
+      score: softwareScore,
+      label: software?.overallLabel ?? null,
+      deployAligned: software?.deployAligned ?? null,
+    },
+    hrStatus: hrHeadcount != null ? `${hrHeadcount} people` : "unknown",
+    compliance: { overdue: 0, dueNext14Days: 0 },
+    pendingApprovals,
+  };
 
   const goalList = (goals as { goals?: Array<Record<string, unknown>> })?.goals || [];
   const recommendations: AutonomousRecommendation[] =
     latestCycle && (latestCycle as { recommendations_json?: string }).recommendations_json
       ? (JSON.parse(String((latestCycle as { recommendations_json: string }).recommendations_json)) as AutonomousRecommendation[])
       : buildRecommendations({
-          mc,
-          mon,
+          mc: mcLite,
+          mon: mon,
           proactive: { alerts: [] },
           goalsAtRisk: goalList.filter(
             (g) => String(g.status || "") === "at_risk" || Number(g.progressPercent ?? 100) < 40
           ).length,
-          pendingApprovals: Number(mc?.pendingApprovals ?? 0),
+          pendingApprovals,
         });
 
   const criticalAlerts = (alerts || [])
@@ -546,21 +699,9 @@ export async function buildFounderWorkspace() {
 
   const priorities = [
     ...recommendations.filter((r) => r.confidence === "high").slice(0, 5).map((r) => r.title),
-    pendingLabel(Number(mc?.pendingApprovals ?? 0)),
+    pendingLabel(pendingApprovals),
   ].filter(Boolean) as string[];
 
-  const orgHealth = mc?.organizationHealth ?? mc?.enterpriseHealthScore ?? null;
-  const enterpriseHealth = mc?.enterpriseHealthScore ?? mon?.overallScore ?? null;
-  const pipelineValue = mc?.fundingPipeline?.pipelineValue ?? null;
-  const activeAwards = mc?.fundingPipeline?.activeAwards ?? null;
-  const pendingApprovals = Number(mc?.pendingApprovals ?? 0);
-  const projectCount = eo5?.activeProjects?.count ?? 0;
-  const financeScore = mc?.financialHealth?.financialHealthScore ?? null;
-  const cashFlow = mc?.financialHealth?.cashFlow ?? null;
-  const hrHeadcount = workforce?.kpis?.totalWorkforce ?? workforce?.kpis?.totalEmployees ?? null;
-  const hrStatus = mc?.hrStatus ?? (hrHeadcount != null ? `${hrHeadcount} people` : null);
-  const monitoringScore = mon?.overallScore ?? null;
-  const softwareScore = mc?.softwareHealth?.score ?? null;
   const briefingObj = briefing as { title?: string; content?: string; highlights?: string[]; generatedAt?: string; date?: string } | null;
   const briefingReady = Boolean(briefingObj?.content || briefingObj?.title);
 
@@ -570,21 +711,31 @@ export async function buildFounderWorkspace() {
     value: string;
     meta: string;
     path: string;
-    status: "live" | "empty";
+    status: "live" | "empty" | "degraded";
     variant?: "gold" | "success" | "warning" | "danger" | "muted";
   };
 
   const fmtMoney = (n: number | null | undefined) =>
     n == null ? "—" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
 
+  const cardStatus = (live: boolean, timedOut?: boolean): CommandCard["status"] => {
+    if (live) return "live";
+    if (timedOut) return "degraded";
+    return "empty";
+  };
+
   const commandCards: CommandCard[] = [
     {
       id: "executive-briefing",
       label: "Executive Briefing",
-      value: briefingReady ? "Today" : "No data",
-      meta: briefingReady ? (briefingObj?.title || "Open live briefing") : "No data available — run autonomous cycle",
+      value: briefingReady ? "Today" : briefingR.timedOut ? "Unavailable" : "No data",
+      meta: briefingReady
+        ? (briefingObj?.title || "Open live briefing")
+        : briefingR.timedOut
+          ? "Service unavailable — open Founder Command Center"
+          : "No data available",
       path: "/hq/founder",
-      status: briefingReady ? "live" : "empty",
+      status: cardStatus(briefingReady, briefingR.timedOut),
       variant: briefingReady ? "gold" : "muted",
     },
     {
@@ -599,70 +750,79 @@ export async function buildFounderWorkspace() {
     {
       id: "organization-health",
       label: "Organization Health",
-      value: orgHealth != null ? `${orgHealth}%` : "—",
-      meta: "Enterprise health dashboard",
+      value: orgHealth != null ? `${orgHealth}%` : orgHealthR.timedOut ? "Unavailable" : "No data",
+      meta:
+        orgHealth != null
+          ? `Grade ${(orgHealthR.value as { grade?: string } | null)?.grade || "—"} · Enterprise health dashboard`
+          : orgHealthR.timedOut
+            ? "Service unavailable"
+            : "No data available",
       path: "/hq/enterprise-os",
-      status: orgHealth != null ? "live" : "empty",
-      variant: "gold",
+      status: cardStatus(orgHealth != null, orgHealthR.timedOut),
+      variant: orgHealth != null ? "gold" : "muted",
     },
     {
       id: "enterprise-health",
       label: "Enterprise Health",
-      value: enterpriseHealth != null ? String(enterpriseHealth) : "—",
-      meta: "Mission Control / OS 4.0",
+      value: enterpriseHealth != null ? String(enterpriseHealth) : "No data",
+      meta: "Composite of org + monitoring",
       path: "/hq/enterprise-os",
-      status: enterpriseHealth != null ? "live" : "empty",
+      status: cardStatus(enterpriseHealth != null),
     },
     {
       id: "active-grants",
       label: "Active Grants",
-      value: activeAwards != null ? String(activeAwards) : "—",
+      value: activeAwards != null ? String(activeAwards) : grantsR.timedOut ? "Unavailable" : "No data",
       meta: "Open Grant Center",
       path: "/hq/grants",
-      status: activeAwards != null ? "live" : "empty",
+      status: cardStatus(activeAwards != null, grantsR.timedOut),
     },
     {
       id: "funding-pipeline",
       label: "Funding Pipeline",
-      value: fmtMoney(pipelineValue),
-      meta: "Enterprise funding pipeline",
+      value: pipelineValue != null ? fmtMoney(pipelineValue) : grantsR.timedOut ? "Unavailable" : "No data",
+      meta: pipelineValue != null ? "Enterprise funding pipeline" : grantsR.timedOut ? "Service unavailable" : "No data available",
       path: "/hq/grants",
-      status: pipelineValue != null ? "live" : "empty",
-      variant: "gold",
+      status: cardStatus(pipelineValue != null, grantsR.timedOut),
+      variant: pipelineValue != null ? "gold" : "muted",
     },
     {
       id: "financial-summary",
       label: "Financial Summary",
-      value: financeScore != null ? String(financeScore) : "—",
+      value: financeScore != null ? String(financeScore) : cashFlow != null ? fmtMoney(cashFlow) : financeR.timedOut ? "Unavailable" : "No data",
       meta: cashFlow != null ? `Cash ${fmtMoney(cashFlow)} · Financial Center` : "Open Financial Center",
       path: "/hq/finance",
-      status: financeScore != null || cashFlow != null ? "live" : "empty",
+      status: cardStatus(financeScore != null || cashFlow != null, financeR.timedOut),
     },
     {
       id: "hr-summary",
       label: "HR Summary",
-      value: hrHeadcount != null ? String(hrHeadcount) : (hrStatus || "—"),
+      value: hrHeadcount != null ? String(hrHeadcount) : workforceR.timedOut ? "Unavailable" : "No data",
       meta: "Open HR / People Center",
       path: "/hq/people",
-      status: hrHeadcount != null || Boolean(hrStatus && hrStatus !== "unknown") ? "live" : "empty",
+      status: cardStatus(hrHeadcount != null, workforceR.timedOut),
     },
     {
       id: "communications",
       label: "Communications",
-      value: commCount.ready ? String(commCount.count) : "—",
+      value: commCount.ready ? String(commCount.count) : "No data",
       meta: commCount.ready ? "Open Communications Center" : "No data available",
       path: "/hq/communications",
-      status: commCount.ready ? "live" : "empty",
+      status: cardStatus(commCount.ready),
       variant: commCount.ready ? "gold" : "muted",
     },
     {
       id: "system-health",
       label: "System Health",
-      value: monitoringScore != null ? `${monitoringScore}` : "—",
-      meta: mon ? `${mon.overallStatus} · Technical operations` : "Open Monitoring",
+      value: monitoringScore != null ? String(monitoringScore) : monR.timedOut ? "Unavailable" : "No data",
+      meta: mon
+        ? `${mon.overallStatus} · Technical operations`
+        : monR.timedOut
+          ? "Service unavailable — open Monitoring"
+          : "No data available",
       path: "/hq/monitoring",
-      status: monitoringScore != null ? "live" : "empty",
-      variant: monitoringScore != null && monitoringScore < 70 ? "warning" : "success",
+      status: cardStatus(monitoringScore != null, monR.timedOut),
+      variant: monitoringScore != null && monitoringScore < 70 ? "warning" : monitoringScore != null ? "success" : "muted",
     },
     {
       id: "alerts",
@@ -692,20 +852,20 @@ export async function buildFounderWorkspace() {
     {
       id: "documents",
       label: "Documents",
-      value: docCount.ready ? String(docCount.count) : "—",
+      value: docCount.ready ? String(docCount.count) : "No data",
       meta: docCount.ready ? "Document Management" : "No data available",
       path: "/hq/documents",
-      status: docCount.ready ? "live" : "empty",
+      status: cardStatus(docCount.ready),
       variant: docCount.ready ? "gold" : "muted",
     },
     {
       id: "software-division",
       label: "Software Division",
       value: softwareScore != null ? String(softwareScore) : "Open",
-      meta: mc?.softwareHealth?.label || "Software Engineering dashboard",
+      meta: software?.overallLabel || "Software Engineering dashboard",
       path: "/hq/software-engineering",
       status: "live",
-      variant: mc?.softwareHealth?.deployAligned === false ? "warning" : "gold",
+      variant: software?.deployAligned === false ? "warning" : "gold",
     },
   ];
 
@@ -721,6 +881,20 @@ export async function buildFounderWorkspace() {
       path: "/hq/workflows",
     });
   }
+
+  const liveCards = commandCards.filter((c) => c.status === "live").length;
+  const degradedCards = commandCards.filter((c) => c.status === "degraded").length;
+  const emptyCards = commandCards.filter((c) => c.status === "empty").length;
+  const totalMs = Date.now() - wallStart;
+  const timedOutCount = Object.values(timings).filter((t) => t.timedOut).length;
+  const workspaceHealthScore = Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round((liveCards / Math.max(commandCards.length, 1)) * 100 - timedOutCount * 5 - (totalMs > 5000 ? 10 : 0))
+    )
+  );
+  const slowest = Object.entries(timings).sort((a, b) => b[1].ms - a[1].ms)[0];
 
   return {
     aoVersion: AO_VERSION,
@@ -755,14 +929,14 @@ export async function buildFounderWorkspace() {
     })),
     personalReminders: [
       pendingApprovals > 0 ? `${pendingApprovals} Founder approval(s) waiting` : null,
-      mc?.softwareHealth?.deployAligned === false ? "Manual Deploy may be required" : null,
+      software?.deployAligned === false ? "Manual Deploy may be required" : null,
       "High-impact actions require explicit Founder approval",
     ].filter(Boolean) as string[],
     personalReminderItems: [
       pendingApprovals > 0
         ? { id: "rem-approvals", title: `${pendingApprovals} Founder approval(s) waiting`, path: "/hq/workflows" }
         : null,
-      mc?.softwareHealth?.deployAligned === false
+      software?.deployAligned === false
         ? { id: "rem-deploy", title: "Manual Deploy may be required", path: "/hq/software-engineering" }
         : null,
       { id: "rem-gate", title: "High-impact actions require Founder approval", path: "/hq/workflows" },
@@ -785,10 +959,7 @@ export async function buildFounderWorkspace() {
     monitoring: mon
       ? { score: mon.overallScore, status: mon.overallStatus, alerts: mon.alerts?.length || 0, path: "/hq/monitoring" }
       : null,
-    memorySummary:
-      memory && typeof memory === "object" && "speechSummary" in memory
-        ? String((memory as { speechSummary: string }).speechSummary)
-        : null,
+    memorySummary: null,
     memoryPath: "/hq/knowledge",
     latestCycle: latestCycle
       ? {
@@ -819,8 +990,21 @@ export async function buildFounderWorkspace() {
       externalDistributionRequiresFounderApproval: true,
       autonomousPrepOnly: true,
     },
+    performance: {
+      totalMs,
+      timings,
+      slowestEndpoint: slowest ? { id: slowest[0], ms: slowest[1].ms } : null,
+      liveCards,
+      degradedCards,
+      emptyCards,
+      timedOutCount,
+      workspaceHealthScore,
+      targetLoadMs: 2000,
+      targetRefreshMs: 5000,
+    },
   };
 }
+
 
 function pendingLabel(n: number): string | null {
   return n > 0 ? `Clear ${n} Founder approval(s)` : null;

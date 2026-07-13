@@ -20,8 +20,21 @@ export type FounderCommandCard = {
   value: string;
   meta: string;
   path: string;
-  status: "live" | "empty";
+  status: "live" | "empty" | "degraded";
   variant?: "gold" | "success" | "warning" | "danger" | "muted";
+};
+
+export type WorkspacePerformance = {
+  totalMs: number;
+  timings: Record<string, { ms: number; timedOut: boolean; error?: string }>;
+  slowestEndpoint: { id: string; ms: number } | null;
+  liveCards: number;
+  degradedCards: number;
+  emptyCards: number;
+  timedOutCount: number;
+  workspaceHealthScore: number;
+  targetLoadMs: number;
+  targetRefreshMs: number;
 };
 
 export type FounderWorkspace = {
@@ -60,6 +73,8 @@ export type FounderWorkspace = {
     externalDistributionRequiresFounderApproval: boolean;
     autonomousPrepOnly: boolean;
   };
+  performance?: WorkspacePerformance;
+  cache?: { hit: boolean; ageMs: number; ttlMs: number };
 };
 
 export type AutonomousCycle = {
@@ -104,8 +119,11 @@ export const EMPTY_FOUNDER_WORKSPACE: FounderWorkspace = {
 };
 
 export const autonomousOpsApi = {
-  workspace: () =>
-    hqApiFetch<FounderWorkspace>("/api/hq/aura/autonomous/workspace", { timeoutMs: 45_000 }),
+  workspace: (opts?: { refresh?: boolean }) =>
+    hqApiFetch<FounderWorkspace>(
+      `/api/hq/aura/autonomous/workspace${opts?.refresh ? "?refresh=1" : ""}`,
+      { timeoutMs: 12_000 }
+    ),
   runCycle: (opts?: { notifyFounderChannels?: boolean }) =>
     hqApiFetch<AutonomousCycle>("/api/hq/aura/autonomous/cycle", {
       method: "POST",

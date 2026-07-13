@@ -50,9 +50,19 @@ const FounderWorkspacePage: React.FC = () => {
   const ws = useQuery({
     queryKey: ["founder-workspace"],
     queryFn: () => autonomousOpsApi.workspace(),
-    staleTime: 30_000,
+    staleTime: 25_000,
     refetchInterval: 60_000,
     retry: 1,
+    placeholderData: (prev) => prev ?? EMPTY_FOUNDER_WORKSPACE,
+  });
+
+  const refreshMutation = useMutation({
+    mutationFn: () => autonomousOpsApi.workspace({ refresh: true }),
+    onSuccess: (data) => {
+      setActionError(null);
+      qc.setQueryData(["founder-workspace"], data);
+    },
+    onError: (err) => setActionError(errorMessage(err)),
   });
 
   const cycleMutation = useMutation({
@@ -60,12 +70,16 @@ const FounderWorkspacePage: React.FC = () => {
     onSuccess: (data) => {
       setActionError(null);
       setCycleNote(data.speechSummary);
-      qc.invalidateQueries({ queryKey: ["founder-workspace"] });
+      void qc.invalidateQueries({ queryKey: ["founder-workspace"] });
     },
     onError: (err) => setActionError(errorMessage(err)),
   });
 
   const d = ws.data ?? EMPTY_FOUNDER_WORKSPACE;
+  const hasServerPayload = Boolean(ws.data?.performance || (ws.data?.commandCards && ws.data.commandCards.length > 0));
+  const isInitialLoad = !hasServerPayload && (ws.isPending || ws.isFetching);
+  const isRefreshing = (ws.isFetching || refreshMutation.isPending) && hasServerPayload;
+  const perf = d.performance;
   const cards: FounderCommandCard[] = d.commandCards?.length
     ? d.commandCards
     : [
@@ -170,17 +184,23 @@ const FounderWorkspacePage: React.FC = () => {
           <button
             type="button"
             className="hq-btn hq-btn-ghost"
-            disabled={ws.isFetching}
-            onClick={() => void ws.refetch()}
+            disabled={isRefreshing}
+            onClick={() => refreshMutation.mutate()}
           >
-            Refresh workspace
+            {refreshMutation.isPending ? "Refreshing…" : "Refresh workspace"}
           </button>
           <label style={{ fontSize: "0.82rem", display: "flex", gap: "0.4rem", alignItems: "center" }}>
             <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />
             Notify Founder channels on high alerts
           </label>
           <span style={{ fontSize: "0.8rem", color: "var(--hq-muted-text)", marginLeft: "auto" }}>
-            {ws.isFetching ? "Refreshing…" : `Updated ${new Date(d.generatedAt).toLocaleTimeString()}`}
+            {isInitialLoad
+              ? "Loading…"
+              : isRefreshing
+                ? "Refreshing…"
+                : `Last updated ${new Date(d.generatedAt).toLocaleTimeString()}${
+                    d.cache?.hit ? " · cached" : ""
+                  }${perf ? ` · ${perf.totalMs}ms · health ${perf.workspaceHealthScore}%` : ""}`}
           </span>
         </div>
         {cycleNote && (
@@ -188,19 +208,26 @@ const FounderWorkspacePage: React.FC = () => {
         )}
       </div>
 
-      {(ws.isLoading || cycleMutation.isPending) && (
-        <HqLoading label={cycleMutation.isPending ? "AURA is preparing packages…" : "Loading live Founder Workspace…"} />
+      {isInitialLoad && (
+        <HqLoading label="Loading live Founder Workspace…" />
+      )}
+      {cycleMutation.isPending && !isInitialLoad && (
+        <p style={{ fontSize: "0.85rem", color: "var(--hq-muted-text)", marginBottom: "0.75rem" }}>
+          AURA is running an autonomous cycle in the background…
+        </p>
       )}
 
+      {!isInitialLoad && (
+        <>
       <div className="hq-kpi-grid" style={{ marginBottom: "1rem" }}>
         {cards.map((card) => (
           <KpiCard
             key={card.id}
             label={card.label}
-            value={card.status === "empty" && card.value === "—" ? "No data" : card.value}
+            value={card.value}
             meta={card.meta}
             icon={CARD_ICONS[card.id]}
-            variant={card.variant || (card.status === "empty" ? "muted" : "gold")}
+            variant={card.variant || (card.status === "empty" || card.status === "degraded" ? "muted" : "gold")}
             to={card.path}
           />
         ))}
@@ -396,6 +423,19 @@ const FounderWorkspacePage: React.FC = () => {
           ))}
         </div>
       </div>
+
+      {perf && (
+        <div className="hq-panel" style={{ marginTop: "1rem" }}>
+          <div className="hq-panel-body" style={{ fontSize: "0.8rem", color: "var(--hq-muted-text)" }}>
+            Workspace health {perf.workspaceHealthScore}% · load {perf.totalMs}ms
+            {perf.slowestEndpoint ? ` · slowest ${perf.slowestEndpoint.id} ${perf.slowestEndpoint.ms}ms` : ""}
+            {" · "}live {perf.liveCards} · degraded {perf.degradedCards} · empty {perf.emptyCards}
+            {perf.timedOutCount ? ` · timeouts ${perf.timedOutCount}` : ""}
+          </div>
+        </div>
+      )}
+        </>
+      )}
     </HQLayout>
   );
 };

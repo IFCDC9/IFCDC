@@ -24,9 +24,10 @@ function isFounder(req: Request): boolean {
 
 router.use(hqAuthRequired, requireHQModule("aura"));
 
-router.get("/workspace", async (_req, res) => {
+router.get("/workspace", async (req, res) => {
   await ensureAutonomousOperationsTables();
-  res.json(await buildFounderWorkspace());
+  const bypassCache = String(req.query.refresh ?? "") === "1" || String(req.query.bypassCache ?? "") === "1";
+  res.json(await buildFounderWorkspace({ bypassCache }));
 });
 
 router.get("/prepared", async (req, res) => {
