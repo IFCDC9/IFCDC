@@ -1037,11 +1037,74 @@ export const grantsApi = {
     ),
   fullApplicationWorkspace: (applicationId: string) =>
     apiFetch<Record<string, unknown>>(`/applications/${applicationId}/full-workspace`),
-  founderApproval: (applicationId: string, action: "approve" | "request_changes" | "mark_ready", note?: string) =>
-    apiFetch<{ ok: boolean; workspace?: Record<string, unknown> }>(
+  founderApproval: (applicationId: string, action: "approve" | "request_changes" | "mark_ready" | "reject" | "save_draft", note?: string) =>
+    apiFetch<{ ok: boolean; workspace?: Record<string, unknown>; founderMode?: boolean }>(
       `/applications/${applicationId}/founder-approval`,
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, note }) }
     ),
+  applicationReadiness: (applicationId: string) =>
+    apiFetch<{
+      applicationId: string;
+      readinessScore: number;
+      readyForFounderReview: boolean;
+      readyForSubmissionPrep: boolean;
+      completenessPct: number;
+      missingSections: string[];
+      items: { id: string; label: string; ok: boolean; severity: string; detail: string }[];
+      founderApprovalStatus: string | null;
+      generatedAt: string;
+    }>(`/applications/${applicationId}/readiness`),
+  founderReviewPackage: (applicationId: string) =>
+    apiFetch<Record<string, unknown>>(`/applications/${applicationId}/founder-review`),
+  submissionPackage: (applicationId: string) =>
+    apiFetch<Record<string, unknown>>(`/applications/${applicationId}/submission-package`),
+  confirmPortalSubmission: (
+    applicationId: string,
+    payload: { portalConfirmationId: string; portalUrl?: string; notes?: string }
+  ) =>
+    apiFetch<{ ok: boolean }>(`/applications/${applicationId}/confirm-portal-submission`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        portal_confirmation_id: payload.portalConfirmationId,
+        portal_url: payload.portalUrl,
+        notes: payload.notes,
+      }),
+    }),
+  runProductionLifecycle: (opts?: {
+    opportunityId?: string;
+    applicationId?: string;
+    autoDraft?: boolean;
+    syncFeeds?: boolean;
+  }) =>
+    apiFetch<{
+      version: string;
+      ok: boolean;
+      applicationId: string | null;
+      opportunityId: string | null;
+      stages: { id: string; label: string; status: string; detail: string }[];
+      readiness: Record<string, unknown> | null;
+      speechSummary: string;
+      generatedAt: string;
+    }>("/production-lifecycle/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(opts ?? {}),
+      timeoutMs: 180_000,
+    }),
+  liveExecutiveWorkflow: (opts?: {
+    program?: string;
+    query?: string;
+    opportunityId?: string;
+    syncFeeds?: boolean;
+    autoDraft?: boolean;
+  }) =>
+    apiFetch<Record<string, unknown>>("/executive/live-workflow", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(opts ?? {}),
+      timeoutMs: 180_000,
+    }),
   workflowStages: () => apiFetch<{ stages: { key: string; label: string }[] }>("/intelligence/workflow-stages"),
 
   // Enterprise Funding Pipeline

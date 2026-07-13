@@ -167,6 +167,27 @@ import {
 
 const router = Router();
 
+/** Production Founder Mode — only verified Founder/owner may approve grants for submission. */
+function isFounderMode(req: Request): boolean {
+  const u = req.hqUser;
+  if (!u) return false;
+  const role = String(u.role || "").toLowerCase();
+  if (role === "owner" || role === "founder") return true;
+  const email = (u.email || "").toLowerCase();
+  const master = (process.env.MASTER_OWNER_EMAIL || "service@ifcdc.org").toLowerCase();
+  return email === master;
+}
+
+function requireFounderMode(req: Request, res: Response): boolean {
+  if (isFounderMode(req)) return true;
+  res.status(403).json({
+    error: "Founder Mode required",
+    code: "founder_mode_required",
+    detail: "Only a verified Founder identity can approve grants or confirm portal submission.",
+  });
+  return false;
+}
+
 /** Public QA report (no credentials). Runs on Render using secure env vars. */
 router.get("/qa/report", (_req, res) => {
   const env = grantCenterQaEnvReady();
@@ -431,20 +452,25 @@ router.get("/applications/enriched", async (req, res) => {
 });
 
 router.post("/applications/:id/founder-approval", async (req: Request, res: Response) => {
+  if (!requireFounderMode(req, res)) return;
   const action = req.body?.action;
-  if (!["approve", "request_changes", "mark_ready"].includes(action)) {
-    return res.status(400).json({ error: "action must be approve, request_changes, or mark_ready" });
+  if (!["approve", "request_changes", "mark_ready", "reject", "save_draft"].includes(action)) {
+    return res.status(400).json({
+      error: "action must be approve, request_changes, mark_ready, reject, or save_draft",
+    });
   }
   const result = await setFounderApproval(req.params.id, action, {
     actorEmail: req.hqUser?.email,
     note: req.body?.note,
+    priority: typeof req.body?.priority === "string" ? req.body.priority : undefined,
   });
   if (!result.ok) return res.status(400).json(result);
-  res.json(result);
+  res.json({ ...result, founderMode: true, actorEmail: req.hqUser?.email });
 });
 
 /** Record Grants.gov (or funder) portal confirmation after Founder approval — HQ never auto-submits. */
 router.post("/applications/:id/confirm-portal-submission", async (req: Request, res: Response) => {
+  if (!requireFounderMode(req, res)) return;
   const portalConfirmationId = String(req.body?.portal_confirmation_id ?? req.body?.confirmationId ?? "").trim();
   if (!portalConfirmationId) {
     return res.status(400).json({ error: "portal_confirmation_id is required" });
@@ -457,11 +483,12 @@ router.post("/applications/:id/confirm-portal-submission", async (req: Request, 
     notes: typeof req.body?.notes === "string" ? req.body.notes : undefined,
   });
   if (!result.ok) return res.status(403).json(result);
-  res.json(result);
+  res.json({ ...result, founderMode: true });
 });
 
 /** End-to-end live grant workflow: sync → match → draft → Founder gate (no auto-submit). */
 router.post("/executive/live-workflow", async (req: Request, res: Response) => {
+  if (!requireFounderMode(req, res)) return;
   const { runLiveGrantExecutiveWorkflow } = await import("../hq/executiveGrantWorkflowEngine");
   const result = await runLiveGrantExecutiveWorkflow({
     actorEmail: req.hqUser?.email,
@@ -472,12 +499,55 @@ router.post("/executive/live-workflow", async (req: Request, res: Response) => {
     autoDraft: req.body?.autoDraft !== false,
   });
   if (!result.ok) return res.status(400).json(result);
+  res.json({ ...result, founderMode: true });
+});
+
+/** Grant readiness score + validation items before Founder review. */
+router.get("/applications/:id/readiness", async (req: Request, res: Response) => {
+  const { computeGrantReadinessReport } = await import("../hq/grantProductionLifecycleEngine");
+  const report = await computeGrantReadinessReport(req.params.id);
+  if (!report) return res.status(404).json({ error: "Application not found" });
+  res.json(report);
+});
+
+/** One-click Founder review package (read). Mutations still require Founder Mode. */
+router.get("/applications/:id/founder-review", async (req: Request, res: Response) => {
+  const { buildFounderGrantReviewPackage } = await import("../hq/grantProductionLifecycleEngine");
+  const pack = await buildFounderGrantReviewPackage(req.params.id);
+  if (!pack) return res.status(404).json({ error: "Application not found" });
+  res.json({
+    ...pack,
+    founderMode: isFounderMode(req),
+    canDecide: isFounderMode(req),
+  });
+});
+
+/**
+ * Full production grant lifecycle E2E:
+ * discover → eligibility → workspace → applicationId → draft → validate → readiness → Founder review → submission package.
+ * Approval mutations remain Founder-gated; this run prepares the package.
+ */
+router.post("/production-lifecycle/run", async (req: Request, res: Response) => {
+  const { runGrantProductionLifecycle } = await import("../hq/grantProductionLifecycleEngine");
+  const result = await runGrantProductionLifecycle({
+    opportunityId: typeof req.body?.opportunityId === "string" ? req.body.opportunityId : undefined,
+    applicationId: typeof req.body?.applicationId === "string" ? req.body.applicationId : undefined,
+    actorEmail: req.hqUser?.email,
+    founderMode: isFounderMode(req),
+    autoDraft: req.body?.autoDraft === true,
+    syncFeeds: req.body?.syncFeeds === true,
+  });
   res.json(result);
 });
 
 router.get("/applications/:id/submission-package", async (req: Request, res: Response) => {
   const { buildGrantSubmissionPackage } = await import("../hq/executiveGrantWorkflowEngine");
-  res.json(await buildGrantSubmissionPackage(req.params.id));
+  const { computeGrantReadinessReport } = await import("../hq/grantProductionLifecycleEngine");
+  const [pkg, readiness] = await Promise.all([
+    buildGrantSubmissionPackage(req.params.id),
+    computeGrantReadinessReport(req.params.id).catch(() => null),
+  ]);
+  res.json({ ...pkg, readiness });
 });
 
 router.get("/applications/:id/monitor", async (req: Request, res: Response) => {
@@ -553,7 +623,27 @@ router.post("/opportunities/:id/score-intelligence", async (req: Request, res: R
     actorEmail: req.hqUser?.email,
   });
   if (!score) return res.status(404).json({ error: "Opportunity not found" });
-  res.json({ intelligence: score });
+
+  // Auto-create Grant Workspace when AURA/Founder selects a qualified opportunity
+  const shouldCreateWorkspace =
+    req.body?.createWorkspace === true ||
+    req.body?.select === true ||
+    (req.body?.autoWorkspace !== false && Number(score.composite) >= 60);
+  let workspace: Awaited<ReturnType<typeof startGrantApplicationWorkflow>> | null = null;
+  if (shouldCreateWorkspace) {
+    workspace = await startGrantApplicationWorkflow(req.params.id, {
+      actorEmail: req.hqUser?.email,
+      generateDrafts: req.body?.generateDrafts === true,
+    });
+  }
+
+  res.json({
+    intelligence: score,
+    applicationId: workspace?.ok ? workspace.applicationId : null,
+    workspaceCreated: Boolean(workspace?.ok && !workspace.existing),
+    workspaceResumed: Boolean(workspace?.ok && workspace.existing),
+    workspace,
+  });
 });
 
 router.post("/opportunities/:id/start-application", async (req: Request, res: Response) => {
@@ -1819,13 +1909,17 @@ router.get("/pipeline/enterprise/founder", async (req, res) => {
 });
 
 router.post("/pipeline/enterprise/founder/:applicationId/decision", async (req: Request, res: Response) => {
+  if (!requireFounderMode(req, res)) return;
   const decision = req.body?.decision;
   if (!["approve", "reject"].includes(decision)) return res.status(400).json({ error: "decision must be approve or reject" });
-  res.json(await setFounderPipelineDecision(req.params.applicationId, decision, {
-    actorEmail: req.hqUser?.email,
-    note: req.body?.note,
-    priority: req.body?.priority,
-  }));
+  res.json({
+    ...(await setFounderPipelineDecision(req.params.applicationId, decision, {
+      actorEmail: req.hqUser?.email,
+      note: req.body?.note,
+      priority: req.body?.priority,
+    })),
+    founderMode: true,
+  });
 });
 
 router.post("/pipeline/enterprise/applications/:id/priority", async (req: Request, res: Response) => {

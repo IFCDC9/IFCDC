@@ -275,12 +275,16 @@ export async function buildWriterStudio(applicationId: string, opts?: { template
   const templates = await listGrantTemplates();
   const sectionRows = (sections.sections ?? []) as { section_key: string; content: string }[];
   const completeness = computeProposalCompleteness(sectionRows);
+  const { computeGrantReadinessReport } = await import("./grantProductionLifecycleEngine");
+  const readiness = await computeGrantReadinessReport(applicationId).catch(() => null);
   return {
     ...workspace,
     writerSections: sections,
     templates: templates.templates,
     activeDraftJob: activeJob,
     proposalCompleteness: completeness,
+    readiness,
+    readinessScore: readiness?.readinessScore ?? completeness.completionPct,
     humanReviewRequired: true,
     founderApprovalRequired: true,
   };

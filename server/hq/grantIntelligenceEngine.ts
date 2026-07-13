@@ -304,8 +304,8 @@ export async function buildFullApplicationWorkspace(applicationId: string, opts?
 
 export async function setFounderApproval(
   applicationId: string,
-  action: "approve" | "request_changes" | "mark_ready",
-  opts?: { actorEmail?: string; note?: string }
+  action: "approve" | "request_changes" | "mark_ready" | "reject" | "save_draft",
+  opts?: { actorEmail?: string; note?: string; priority?: string }
 ) {
   const db = await getDb();
   const app = await db.get<{ id: string; status: string }>("SELECT id, status FROM grant_applications WHERE id = ?", applicationId);
@@ -314,15 +314,28 @@ export async function setFounderApproval(
   const now = new Date().toISOString();
   if (action === "approve") {
     await db.run(
-      `UPDATE grant_applications SET founder_approval_status = 'approved', founder_approved_at = ?, founder_approved_by = ?, ready_to_submit = 1, lifecycle_stage = 'internal_approval', pipeline_stage = 'ready_for_submission', updated_at = ? WHERE id = ?`,
+      `UPDATE grant_applications SET founder_approval_status = 'approved', founder_approved_at = ?, founder_approved_by = ?, ready_to_submit = 1, lifecycle_stage = 'internal_approval', pipeline_stage = 'ready_for_submission', founder_priority = COALESCE(?, founder_priority), updated_at = ? WHERE id = ?`,
       now,
       opts?.actorEmail ?? null,
+      opts?.priority ?? null,
       now,
       applicationId
     );
   } else if (action === "request_changes") {
     await db.run(
       `UPDATE grant_applications SET founder_approval_status = 'changes_requested', ready_to_submit = 0, lifecycle_stage = 'application_drafting', pipeline_stage = 'internal_review', updated_at = ? WHERE id = ?`,
+      now,
+      applicationId
+    );
+  } else if (action === "reject") {
+    await db.run(
+      `UPDATE grant_applications SET founder_approval_status = 'rejected', ready_to_submit = 0, pipeline_stage = 'declined', status = 'denied', lifecycle_stage = 'closed', updated_at = ? WHERE id = ?`,
+      now,
+      applicationId
+    );
+  } else if (action === "save_draft") {
+    await db.run(
+      `UPDATE grant_applications SET founder_approval_status = COALESCE(NULLIF(founder_approval_status, ''), 'pending'), ready_to_submit = 0, lifecycle_stage = 'application_drafting', pipeline_stage = COALESCE(pipeline_stage, 'internal_review'), updated_at = ? WHERE id = ?`,
       now,
       applicationId
     );

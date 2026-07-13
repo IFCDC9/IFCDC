@@ -9,6 +9,7 @@ import {
   enrichAllOpportunities,
   enrichMissingDeadlines,
   scoreOpportunityIntelligence,
+  setFounderApproval,
   IFCDC_PROGRAM_CATALOG,
 } from "./grantIntelligenceEngine";
 import { syncGrantFeeds } from "./grantFeedConnectors";
@@ -550,25 +551,12 @@ export async function setFounderPipelineDecision(
   decision: "approve" | "reject",
   opts?: { actorEmail?: string; note?: string; priority?: string }
 ) {
-  const db = await getDb();
-  const app = await db.get("SELECT id, title FROM grant_applications WHERE id = ?", applicationId);
-  if (!app) return { ok: false, error: "Application not found" };
-
-  const now = new Date().toISOString();
-  if (decision === "approve") {
-    await db.run(
-      `UPDATE grant_applications SET founder_approval_status = 'approved', founder_approved_at = ?, founder_approved_by = ?,
-       pipeline_stage = 'ready_for_submission', ready_to_submit = 1, founder_priority = COALESCE(?, founder_priority), updated_at = ? WHERE id = ?`,
-      now, opts?.actorEmail ?? null, opts?.priority ?? null, now, applicationId
-    );
-  } else {
-    await db.run(
-      `UPDATE grant_applications SET founder_approval_status = 'rejected', pipeline_stage = 'declined', status = 'denied', updated_at = ? WHERE id = ?`,
-      now, applicationId
-    );
-  }
-
-  await logGrantActivity("application", applicationId, `founder_${decision}`, opts?.note ?? decision, opts?.actorEmail);
+  const result = await setFounderApproval(applicationId, decision, {
+    actorEmail: opts?.actorEmail,
+    note: opts?.note,
+    priority: opts?.priority,
+  });
+  if (!result.ok) return result;
   await logHqAudit({
     action: `founder_pipeline_${decision}`,
     entityType: "grant_application",
@@ -576,7 +564,6 @@ export async function setFounderPipelineDecision(
     actorEmail: opts?.actorEmail,
     detail: opts?.note ?? decision,
   });
-
   return { ok: true, decision, applicationId };
 }
 

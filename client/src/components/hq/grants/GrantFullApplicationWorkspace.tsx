@@ -46,6 +46,20 @@ export const GrantFullApplicationWorkspace: React.FC<{
     refetchInterval: draftProgress ? 3000 : false,
   });
 
+  const readiness = useQuery({
+    queryKey: ["grant-readiness", applicationId],
+    queryFn: () => grantsApi.applicationReadiness(String(applicationId)),
+    enabled: !!applicationId,
+    staleTime: 20_000,
+  });
+
+  const founderReview = useQuery({
+    queryKey: ["grant-founder-review", applicationId],
+    queryFn: () => grantsApi.founderReviewPackage(String(applicationId)),
+    enabled: !!applicationId,
+    staleTime: 20_000,
+  });
+
   const foundation = useQuery({
     queryKey: ["grant-foundation-workspace", applicationId],
     queryFn: () => grantsApi.foundationWorkspace(String(applicationId)),
@@ -56,6 +70,8 @@ export const GrantFullApplicationWorkspace: React.FC<{
   const invalidateWorkspace = () => {
     qc.invalidateQueries({ queryKey: ["grant-full-workspace", applicationId] });
     qc.invalidateQueries({ queryKey: ["grant-writer-studio", applicationId] });
+    qc.invalidateQueries({ queryKey: ["grant-readiness", applicationId] });
+    qc.invalidateQueries({ queryKey: ["grant-founder-review", applicationId] });
     qc.invalidateQueries({ queryKey: ["grant-enriched-applications"] });
     qc.invalidateQueries({ queryKey: ["grants-applications"] });
     qc.invalidateQueries({ queryKey: ["grant-enterprise-pipeline"] });
@@ -97,8 +113,10 @@ export const GrantFullApplicationWorkspace: React.FC<{
   });
 
   const founderAction = useMutation({
-    mutationFn: (payload: { action: "approve" | "request_changes" | "mark_ready"; note?: string }) =>
-      grantsApi.founderApproval(String(applicationId), payload.action, payload.note),
+    mutationFn: (payload: {
+      action: "approve" | "request_changes" | "mark_ready" | "reject" | "save_draft";
+      note?: string;
+    }) => grantsApi.founderApproval(String(applicationId), payload.action, payload.note),
     onMutate: () => {
       setActionError(null);
       setActionMessage(null);
@@ -115,6 +133,11 @@ export const GrantFullApplicationWorkspace: React.FC<{
         setActionMessage("Change request recorded. Writers can revise sections and resubmit for approval.");
         setShowChangeForm(false);
         setChangeNote("");
+      } else if (variables.action === "reject") {
+        setActionMessage("Application rejected by Founder.");
+        setShowChangeForm(false);
+      } else if (variables.action === "save_draft") {
+        setActionMessage("Draft saved — still pending Founder decision.");
       } else {
         setActionMessage("Marked ready to submit.");
       }
@@ -161,6 +184,14 @@ export const GrantFullApplicationWorkspace: React.FC<{
   const deadlines = (ws.deadlineTracker ?? []) as { title: string; due_date: string; completed: number }[];
   const budget = ws.budgetDraft as Record<string, unknown>;
   const checklist = ws.documentChecklist as { byCategory?: { category: string; documents: unknown[] }[]; totalDocuments?: number };
+  const readinessReport = readiness.data;
+  const reviewPack = founderReview.data as {
+    executiveSummary?: string;
+    fundingAmount?: number | null;
+    matchRequirements?: string;
+    riskAssessment?: { risk: string; severity: string; detail: string }[];
+    canDecide?: boolean;
+  } | undefined;
   const foundationWs = foundation.data as {
     pipeline?: { productLabel?: string };
     progress?: { percent?: number; checklistComplete?: number; checklistTotal?: number };
@@ -173,12 +204,47 @@ export const GrantFullApplicationWorkspace: React.FC<{
       <HqPanel title="Application Workspace" subtitle={`${String(ws.application?.title ?? "")} · ${foundationWs?.pipeline?.productLabel ?? workflow?.label ?? "Drafting"}`}>
         <div className="hq-kpi-grid" style={{ marginBottom: "1rem" }}>
           <div><div className="hq-muted-text" style={{ fontSize: "0.72rem" }}>Match Score</div><strong>{(ws.intelligence as { composite?: number })?.composite ?? "—"}%</strong></div>
-          <div><div className="hq-muted-text" style={{ fontSize: "0.72rem" }}>Completion</div><strong>{ws.completionPct ?? 0}%</strong></div>
+          <div><div className="hq-muted-text" style={{ fontSize: "0.72rem" }}>Completion</div><strong>{ws.completionPct ?? readinessReport?.completenessPct ?? 0}%</strong></div>
+          <div><div className="hq-muted-text" style={{ fontSize: "0.72rem" }}>Readiness Score</div><strong>{readinessReport?.readinessScore ?? "—"}%</strong></div>
           <div><div className="hq-muted-text" style={{ fontSize: "0.72rem" }}>Founder Approval</div><StatusBadge label={founder?.status ?? "pending"} variant={founder?.status === "approved" ? "success" : "warning"} /></div>
           <div><div className="hq-muted-text" style={{ fontSize: "0.72rem" }}>Ready to Submit</div><strong>{founder?.readyToSubmit ? "Yes" : "No"}</strong></div>
-          <div><div className="hq-muted-text" style={{ fontSize: "0.72rem" }}>Lifecycle Stage</div><StatusBadge label={foundationWs?.pipeline?.productLabel ?? "—"} variant="gold" /></div>
           <div><div className="hq-muted-text" style={{ fontSize: "0.72rem" }}>Required Docs</div><strong>{foundationWs?.progress?.checklistComplete ?? 0}/{foundationWs?.progress?.checklistTotal ?? 12}</strong></div>
         </div>
+
+        {readinessReport && (
+          <div style={{ marginBottom: "1rem" }}>
+            <h4 style={{ fontSize: "0.85rem", color: "var(--hq-gold)", marginBottom: "0.5rem" }}>
+              Validation · {readinessReport.readyForFounderReview ? "Ready for Founder review" : "Not ready for Founder review"}
+            </h4>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+              {readinessReport.items.map((item) => (
+                <StatusBadge
+                  key={item.id}
+                  label={`${item.label}: ${item.ok ? "OK" : "Gap"}`}
+                  variant={item.ok ? "success" : item.severity === "critical" ? "danger" : "warning"}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {reviewPack && (
+          <div style={{ marginBottom: "1rem" }}>
+            <h4 style={{ fontSize: "0.85rem", color: "var(--hq-gold)", marginBottom: "0.5rem" }}>Founder Review Package</h4>
+            <ul className="hq-feature-list" style={{ fontSize: "0.82rem" }}>
+              <li>Funding: {reviewPack.fundingAmount != null ? formatCurrency(Number(reviewPack.fundingAmount)) : "—"}</li>
+              <li>Match: {reviewPack.matchRequirements ?? "—"}</li>
+              <li>Summary: {(reviewPack.executiveSummary ?? "").slice(0, 220)}{(reviewPack.executiveSummary ?? "").length > 220 ? "…" : ""}</li>
+            </ul>
+            {!!reviewPack.riskAssessment?.length && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", marginTop: "0.5rem" }}>
+                {reviewPack.riskAssessment.slice(0, 6).map((r) => (
+                  <StatusBadge key={r.risk} label={`${r.risk} (${r.severity})`} variant="warning" />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {foundationWs?.documents?.checklist && (
           <div style={{ marginBottom: "1rem" }}>
@@ -246,6 +312,22 @@ export const GrantFullApplicationWorkspace: React.FC<{
               }}
             >
               Request Changes
+            </button>
+            <button
+              type="button"
+              className="hq-btn hq-btn-sm hq-btn-ghost"
+              disabled={founderAction.isPending}
+              onClick={() => founderAction.mutate({ action: "save_draft" })}
+            >
+              Save Draft
+            </button>
+            <button
+              type="button"
+              className="hq-btn hq-btn-sm hq-btn-ghost"
+              disabled={founderAction.isPending}
+              onClick={() => founderAction.mutate({ action: "reject", note: "Rejected by Founder" })}
+            >
+              Reject
             </button>
             <button
               type="button"
