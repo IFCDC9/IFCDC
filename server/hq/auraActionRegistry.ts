@@ -885,6 +885,38 @@ const enterpriseReadinessCertification: AuraAction = {
   },
 };
 
+const autonomousOperations: AuraAction = {
+  id: "autonomous_operations",
+  label: "AURA Autonomous Operations",
+  module: "executive",
+  kind: "execute",
+  description:
+    "AURA as Executive Chief of Staff — Founder Workspace, daily briefing, autonomous prep cycle, proactive recommendations. High-impact actions stay Founder-gated.",
+  parameters: {
+    request: {
+      type: "string",
+      description: "e.g. Show Founder Workspace, Run autonomous cycle, Daily briefing, Today's priorities",
+    },
+  },
+  async run(args, ctx) {
+    const { runAutonomousOperationsCommand } = await import("./auraAutonomousOperations");
+    const result = await runAutonomousOperationsCommand({
+      request: str(args.request) || "Show Founder Workspace",
+      actorEmail: ctx.actorEmail,
+      founderMode: Boolean(ctx.identity?.founderMode || ctx.identity?.isFounder),
+    });
+    return {
+      status: result.founderApprovalRequired ? "pending_approval" : "done",
+      summary: result.speechSummary,
+      data: result,
+      navigation: { path: "/hq/founder-workspace", label: "Open Founder Workspace" },
+      approval: result.founderApprovalRequired
+        ? { path: "/hq/founder-workspace", label: "Founder Mode required" }
+        : undefined,
+    };
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Executive Operations (Founder Mode execute)
 // ---------------------------------------------------------------------------
@@ -1433,6 +1465,7 @@ export const AURA_ACTIONS: AuraAction[] = [
   enterpriseOs,
   enterpriseOperations5,
   enterpriseReadinessCertification,
+  autonomousOperations,
   sendEmail,
   sendSms,
   placeCall,

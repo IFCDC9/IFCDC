@@ -55,6 +55,7 @@ export const HQ_NAV_SECTIONS = [
 export const HQ_NAV_ITEMS: HQNavItem[] = [
   { label: "Executive Dashboard", path: "/hq", icon: LayoutDashboard, section: "Command" },
   { label: "Founder Command Center", path: "/hq/founder", icon: Briefcase, section: "Command", badge: "New" },
+  { label: "Founder Workspace", path: "/hq/founder-workspace", icon: Sparkles, section: "Command", badge: "AO" },
   { label: "Organization Analytics", path: "/hq/analytics", icon: BarChart3, section: "Command" },
   { label: "Enterprise Reporting", path: "/hq/reports", icon: FileBarChart, section: "Command" },
   { label: "Organization Calendar", path: "/hq/calendar", icon: Calendar, section: "Command" },

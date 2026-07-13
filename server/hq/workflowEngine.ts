@@ -511,6 +511,15 @@ async function executeScheduledJob(jobKey: string, actorEmail?: string): Promise
       });
       break;
     }
+    case "aura_autonomous_ops": {
+      const { runAutonomousOperationsCycle } = await import("./auraAutonomousOperations");
+      await runAutonomousOperationsCycle({
+        actorEmail: actorEmail ?? "system-scheduler",
+        notifyFounderChannels: false,
+        prepareCadences: true,
+      });
+      break;
+    }
     case "onboarding_check":
       await syncApprovalTasksToWorkflows();
       break;

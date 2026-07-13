@@ -256,6 +256,45 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
     }
   }
 
+  // AURA Autonomous Operations — Chief of Staff loop (before readiness/EO5/SE).
+  {
+    const { wantsAutonomousOperations, runAutonomousOperationsCommand } = await import("./auraAutonomousOperations");
+    if (wantsAutonomousOperations(command)) {
+      const ao = await runAutonomousOperationsCommand({
+        request: command,
+        actorEmail: identity.email || input.actorEmail,
+        founderMode: Boolean(identity.founderMode || identity.isFounder),
+      });
+      await logAuraIdentityAction({
+        identity,
+        action: "aura_autonomous_operations",
+        detail: ao.speechSummary.slice(0, 240),
+        metadata: { founderApprovalRequired: ao.founderApprovalRequired },
+      });
+      return {
+        reply: ao.speechSummary,
+        actions: [
+          {
+            id: "autonomous_operations",
+            label: "AURA Autonomous Operations",
+            status: ao.founderApprovalRequired ? "pending_approval" : "done",
+            summary: ao.speechSummary,
+            data: ao,
+            navigation: { path: "/hq/founder-workspace", label: "Open Founder Workspace" },
+            approval: ao.founderApprovalRequired
+              ? { path: "/hq/founder-workspace", label: "Founder Mode required" }
+              : undefined,
+          },
+        ],
+        approvalsCreated: ao.founderApprovalRequired
+          ? [{ path: "/hq/founder-workspace", label: "Founder Mode required" }]
+          : [],
+        poweredBy: "AURA Autonomous Operations",
+        identity: publicIdentitySummary(identity),
+      };
+    }
+  }
+
   // Enterprise Readiness Certification — live production validation (before SE/LLM).
   {
     const { wantsEnterpriseReadinessCertification, runEnterpriseReadinessCommand } = await import(

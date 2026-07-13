@@ -92,6 +92,7 @@ export async function ensureWorkflowTables(): Promise<void> {
     { key: "db_backup", name: "Database Backup Snapshot", schedule: "daily", module: "security" },
     { key: "executive_report_daily", name: "Daily Executive Report", schedule: "daily", module: "executive" },
     { key: "onboarding_check", name: "Onboarding Progress Check", schedule: "daily", module: "people" },
+    { key: "aura_autonomous_ops", name: "AURA Autonomous Operations Cycle", schedule: "hourly", module: "aura" },
   ];
   for (const job of jobs) {
     const exists = await db.get("SELECT id FROM hq_scheduled_jobs WHERE job_key = ?", job.key);

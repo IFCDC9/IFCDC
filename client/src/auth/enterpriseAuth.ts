@@ -18,6 +18,7 @@ export type Permission =
 export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   "/hq": "hq.executive",
   "/hq/founder": "hq.executive",
+  "/hq/founder-workspace": "hq.aura",
   "/hq/reports": "hq.analytics",
   "/hq/analytics": "hq.analytics",
   "/hq/notifications": "hq.notifications",

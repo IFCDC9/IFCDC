@@ -77,6 +77,8 @@ export async function initializeHqModules(founder: FounderSeedConfig): Promise<v
   await ensureEnterpriseOps5Tables();
   const { ensureEnterpriseReadinessCertificationTables } = await import("../hq/enterpriseReadinessCertificationEngine");
   await ensureEnterpriseReadinessCertificationTables();
+  const { ensureAutonomousOperationsTables } = await import("../hq/auraAutonomousOperations");
+  await ensureAutonomousOperationsTables();
   // Deferred code index refresh (never blocks boot).
   setTimeout(() => {
     void import("../hq/auraCodeIndexEngine")
