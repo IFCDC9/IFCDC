@@ -74,11 +74,13 @@ You help authenticated users run the organization by turning commands into real 
 
 RULES:
 - Prefer EXECUTING a tool over describing what you would do. If a tool fits, call it.
+- Compound requests (email AND SMS AND notify, or "Founder Operations Acceptance Test") must be decomposed into separate tool calls with STRICT args — never put the full user prompt into subject/body/message.
+- send_email args: ONLY { to, subject, body }. send_sms args: ONLY { to, message }. send_notification args: ONLY { title, message, recipient? }.
 - Founder Mode may use execute tools: send_email, send_sms, place_call, create_calendar_event, create_document, send_notification, generate_executive_report, enterprise_diagnostics, etc.
 - Software engineering (diagnose bugs, prepare fixes, run tests, prepare PRs, compare GitHub vs Render) must use se_* tools. Never invent test results. Never push/deploy without Founder approval.
 - For high-impact irreversible work (submit grant, payments, production delete/deploy, org-wide blast), stage with prepare_for_approval or queue_grant_submission — do not claim it was submitted.
 - For "find the best live grant / prepare complete application", call run_live_grant_workflow. After Founder approval and portal submit, call confirm_grant_portal_submission with the confirmation ID. Use monitor_grant_application to track status.
-- Casual Founder requests like "email service@ifcdc.org", "text my phone", "call me", "schedule a meeting" MUST call the matching execute tool immediately.
+- Casual Founder requests like "email service@ifcdc.org saying …", "text my phone saying …", "call me", "schedule a meeting" MUST call the matching execute tool immediately with only the intended content fields.
 - Be concise and executive. Never invent data.
 - When Founder Mode is active, recognize Fahreal Allah as Founder / Super Admin without re-asking identity.`;
 
@@ -221,34 +223,51 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
     };
   }
 
-  // Founder Executive Operations — execute email/SMS/call/calendar/docs immediately.
+  // Founder Executive Operations — plan compound requests, then execute (email/SMS/…).
   {
     const { tryRunExecutiveCommand } = await import("./auraExecutiveOperations");
     const exec = await tryRunExecutiveCommand(command, ctx);
     if (exec.handled) {
-      const executed = toExecuted(exec.op, exec.op.replace(/_/g, " "), {
-        ...exec.result,
-        summary: redactConfidentialForIdentity(identity, exec.result.summary),
-      });
-      const approvalsCreated = executed.approval ? [executed.approval] : [];
+      const stepActions =
+        exec.stepReports?.map((s) =>
+          toExecuted(s.tool, s.tool.replace(/_/g, " "), {
+            status: s.status === "PASS" ? "done" : s.status === "SKIP" ? "prepared" : "error",
+            summary: `Step ${s.step} ${s.status}: ${s.summary}`,
+            data: { ...((s.data as object) || {}), providerAccepted: s.providerAccepted, messageId: s.messageId },
+          }),
+        ) ?? [];
+      const executed =
+        stepActions.length > 0
+          ? stepActions
+          : [
+              toExecuted(exec.op, String(exec.op).replace(/_/g, " "), {
+                ...exec.result,
+                summary: redactConfidentialForIdentity(identity, exec.result.summary),
+              }),
+            ];
+      const approvalsCreated = executed.flatMap((a) => (a.approval ? [a.approval] : []));
       await recordAuraTurn({ actorEmail: ctx.actorEmail, module: ctx.module, role: "user", content: command });
       await recordAuraTurn({
         actorEmail: ctx.actorEmail,
         module: ctx.module,
         role: "assistant",
-        content: executed.summary,
-        action: executed,
+        content: exec.result.summary,
+        action: executed[executed.length - 1],
       });
       await logAuraIdentityAction({
         identity,
         action: `aura_exec_${exec.op}`,
-        detail: executed.summary.slice(0, 400),
-        metadata: { status: executed.status },
+        detail: exec.result.summary.slice(0, 400),
+        metadata: {
+          status: exec.result.status,
+          steps: exec.stepReports?.length ?? 1,
+          planIntent: exec.plan?.intent,
+        },
       });
       return {
-        reply: executed.summary,
-        actions: [executed],
-        navigation: executed.navigation,
+        reply: redactConfidentialForIdentity(identity, exec.result.summary),
+        actions: executed,
+        navigation: exec.result.navigation,
         approvalsCreated,
         poweredBy: "AURA Executive Operations",
         identity: publicIdentitySummary(identity),

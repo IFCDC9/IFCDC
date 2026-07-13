@@ -114,9 +114,90 @@ function extractPhone(text: string): string | null {
   return normalizeE164(m[0]);
 }
 
+/** Extract a short content clause — never return the full command as content. */
+function extractQuotedOrLabeledContent(command: string, labels: string[]): string | null {
+  const c = command.trim();
+  for (const label of labels) {
+    const re = new RegExp(
+      `\\b(?:${label})[:\\s]+["']([^"']{2,800})["']`,
+      "i",
+    );
+    const m = c.match(re);
+    if (m?.[1]?.trim()) return m[1].trim();
+  }
+  for (const label of labels) {
+    const re = new RegExp(
+      `\\b(?:${label})[:\\s]+(.+?)(?:\\n|$)`,
+      "i",
+    );
+    const m = c.match(re);
+    const v = m?.[1]?.trim().replace(/^["']|["']$/g, "");
+    if (v && v.length >= 2 && v.length <= 800) return v;
+  }
+  // "email X that …" / "text me that …"
+  const that = c.match(/\bthat\s+["']([^"']{2,800})["']/i)
+    || c.match(/\bthat\s+([^.!?\n]{2,400})[.!?]?$/i);
+  if (that?.[1]?.trim()) return that[1].trim();
+  return null;
+}
+
+function isUnsafeToolContent(value: string, fullCommand: string): boolean {
+  const v = value.trim();
+  if (!v) return true;
+  if (v.length > 1000) return true;
+  // Exact dump of the user prompt
+  if (v === fullCommand.trim()) return true;
+  if (v.includes(fullCommand.trim()) && fullCommand.trim().length > 80) return true;
+  // Multi-step instruction markers
+  if (
+    /verify_founder_session|check_resend_health|Required fix:|Acceptance criteria|execution plan|Step\s+\d+\s*:/i.test(v)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** Strict allow-lists — never pass the raw NL prompt into tool fields. */
+export function pickEmailArgs(args: Record<string, unknown>): { to: string; subject: string; body: string } | null {
+  const to = String(args.to ?? "").trim();
+  const subject = String(args.subject ?? "").trim();
+  const body = String(args.body ?? "").trim();
+  if (!to || !subject || !body) return null;
+  if (/verify_founder_session|check_resend_health|Required fix:|Acceptance criteria|Step\s+\d+\s*:/i.test(body)) {
+    return null;
+  }
+  return { to, subject, body };
+}
+
+export function pickSmsArgs(args: Record<string, unknown>): { to: string; message: string } | null {
+  const to = String(args.to ?? "").trim();
+  const message = String(args.message ?? args.body ?? "").trim();
+  if (!to || !message) return null;
+  if (/verify_founder_session|check_resend_health|Step\s+\d+\s*:/i.test(message) && message.length > 200) {
+    return null;
+  }
+  return { to, message };
+}
+
+export function pickNotificationArgs(
+  args: Record<string, unknown>,
+): { title: string; message: string; recipient?: string; role?: string } | null {
+  const title = String(args.title ?? "").trim();
+  const message = String(args.message ?? "").trim();
+  if (!title || !message) return null;
+  if (/verify_founder_session|Required fix:|Acceptance criteria/i.test(message) && message.length > 200) {
+    return null;
+  }
+  const out: { title: string; message: string; recipient?: string; role?: string } = { title, message };
+  if (args.recipient) out.recipient = String(args.recipient).trim();
+  if (args.role) out.role = String(args.role).trim();
+  return out;
+}
+
 /**
  * Deterministic parser for Founder executive commands.
  * Prefer this over LLM for "send email / text me / call me / schedule meeting".
+ * Never uses the full user prompt as email/SMS content.
  */
 export function parseExecutiveIntent(command: string): ParsedExecutiveIntent | null {
   const c = command.trim();
@@ -127,19 +208,24 @@ export function parseExecutiveIntent(command: string): ParsedExecutiveIntent | n
     const toBoard = /\b(the )?board\b/i.test(c);
     const to = toBoard ? "board" : extractEmail(c) || (/\b(me|myself|my inbox)\b/i.test(c) ? getFounderEmail() : null);
     if (to) {
-      const subjectMatch = c.match(/\b(?:subject|about|re)[:\s]+["']?([^"'\n.]+)["']?/i);
-      const bodyMatch = c.match(/\b(?:saying|body|message|tell them)[:\s]+["']?(.+?)["']?\s*$/i);
+      const subjectMatch = c.match(/\b(?:subject|about|re)[:\s]+["']?([^"'\n.]{2,120})["']?/i);
+      const bodyRaw = extractQuotedOrLabeledContent(c, ["saying", "body", "message", "tell them"]);
+      const subject =
+        subjectMatch?.[1]?.trim()
+        || (toBoard ? "IFCDC Board Update from AURA" : "Message from IFCDC AURA");
+      let body =
+        bodyRaw
+        || (toBoard
+          ? "The Founder asked AURA to email the Board from Headquarters. Please check HQ for the full executive context."
+          : null);
+      if (body && isUnsafeToolContent(body, c)) body = null;
+      if (!body) {
+        // Refuse to dump the prompt — require an explicit content clause
+        return null;
+      }
       return {
         op: "send_email",
-        args: {
-          to,
-          subject: subjectMatch?.[1]?.trim() || (toBoard ? "IFCDC Board Update from AURA" : "Message from IFCDC AURA"),
-          body:
-            bodyMatch?.[1]?.trim()
-            || (toBoard
-              ? "The Founder asked AURA to email the Board from Headquarters. Please check HQ for the full executive context."
-              : `Message from IFCDC Headquarters (AURA):\n\n${c}`),
-        },
+        args: { to, subject, body },
         highImpact: toBoard || /\bbroadcast\b/i.test(c),
         confidence: "high",
       };
@@ -151,13 +237,23 @@ export function parseExecutiveIntent(command: string): ParsedExecutiveIntent | n
     const toMe = /\b(my phone|me|myself|founder)\b/i.test(c);
     const to = toMe ? "founder" : extractPhone(c);
     if (to) {
-      const bodyMatch = c.match(/\b(?:saying|message|tell me)[:\s]+["']?(.+?)["']?\s*$/i);
+      const messageRaw = extractQuotedOrLabeledContent(c, ["saying", "message", "tell me", "text"]);
+      let message = messageRaw;
+      if (message && isUnsafeToolContent(message, c)) message = null;
+      if (!message) {
+        // Short remnant after stripping verbs — only if it stays small and clean
+        const remnant = c
+          .replace(/\b(text|sms|send a text|send text|my phone|me|myself|founder)\b/gi, "")
+          .replace(/(\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g, "")
+          .replace(/[:\s]+/g, " ")
+          .trim()
+          .slice(0, 280);
+        message = remnant && !isUnsafeToolContent(remnant, c) ? remnant : null;
+      }
+      if (!message) return null;
       return {
         op: "send_sms",
-        args: {
-          to,
-          body: bodyMatch?.[1]?.trim() || `AURA (IFCDC HQ): ${c.replace(/\b(text|sms|send a text|send text)\b/gi, "").trim().slice(0, 280) || "Founder notification"}`,
-        },
+        args: { to, message, body: message },
         highImpact: false,
         confidence: "high",
       };
@@ -186,7 +282,7 @@ export function parseExecutiveIntent(command: string): ParsedExecutiveIntent | n
       op: "create_calendar_event",
       args: {
         title: titleMatch?.[1]?.trim() || "IFCDC Executive Meeting",
-        description: c,
+        description: "Scheduled by AURA on behalf of the Founder.",
         startAt: null,
       },
       highImpact: false,
@@ -197,7 +293,7 @@ export function parseExecutiveIntent(command: string): ParsedExecutiveIntent | n
   if (/\b(cancel|delete)\b.*\b(meeting|event)\b/i.test(c)) {
     return {
       op: "cancel_calendar_event",
-      args: { query: c },
+      args: { query: c.slice(0, 200) },
       highImpact: false,
       confidence: "medium",
     };
@@ -205,11 +301,17 @@ export function parseExecutiveIntent(command: string): ParsedExecutiveIntent | n
 
   // Notifications / announcements
   if (/\b(notify me|send (me )?(a )?notification|alert me)\b/i.test(c)) {
+    const messageRaw = extractQuotedOrLabeledContent(c, ["saying", "message", "that"])
+      || c.replace(/\b(notify me|send me a notification|alert me)\b/gi, "").trim();
+    const message = messageRaw && !isUnsafeToolContent(messageRaw, c)
+      ? messageRaw.slice(0, 400)
+      : "AURA Founder notification";
     return {
       op: "send_notification",
       args: {
         title: "AURA Alert",
-        message: c.replace(/\b(notify me|send me a notification|alert me)\b/gi, "").trim() || c,
+        message,
+        recipient: "founder",
       },
       highImpact: false,
       confidence: "high",
@@ -221,7 +323,7 @@ export function parseExecutiveIntent(command: string): ParsedExecutiveIntent | n
       op: "broadcast_announcement",
       args: {
         title: "HQ Announcement",
-        body: c,
+        body: "HQ announcement from AURA (Founder requested).",
         priority: "normal",
       },
       highImpact: true,
@@ -232,7 +334,7 @@ export function parseExecutiveIntent(command: string): ParsedExecutiveIntent | n
   if (/\bschedule\b.*\b(reminder|follow[- ]?up)\b/i.test(c) || /\bremind me\b/i.test(c)) {
     return {
       op: "schedule_reminder",
-      args: { title: "AURA Reminder", message: c },
+      args: { title: "AURA Reminder", message: "Reminder from AURA." },
       highImpact: false,
       confidence: "high",
     };
@@ -244,7 +346,7 @@ export function parseExecutiveIntent(command: string): ParsedExecutiveIntent | n
       op: "save_report",
       args: {
         title: c.match(/["']([^"']+)["']/)?.[1] || "AURA Executive Report",
-        body: c,
+        body: "Executive report saved by AURA.",
       },
       highImpact: false,
       confidence: "high",
@@ -254,7 +356,7 @@ export function parseExecutiveIntent(command: string): ParsedExecutiveIntent | n
   if (/\b(create|generate|prepare)\b.*\b(today'?s )?executive report\b/i.test(c) || /\bexecutive (daily )?brief(ing)?\b/i.test(c)) {
     return {
       op: "generate_executive_report",
-      args: { request: c },
+      args: { request: "executive report" },
       highImpact: false,
       confidence: "high",
     };
@@ -283,7 +385,7 @@ export function parseExecutiveIntent(command: string): ParsedExecutiveIntent | n
     || /\b(check (all )?(apis|databases|deployments)|detect (failures|offline))\b/i.test(c)) {
     return {
       op: "enterprise_diagnostics",
-      args: { request: c },
+      args: { request: "enterprise diagnostics" },
       highImpact: false,
       confidence: "high",
     };
@@ -292,7 +394,7 @@ export function parseExecutiveIntent(command: string): ParsedExecutiveIntent | n
   if (/\bnotify me when (finished|done|complete)\b/i.test(c)) {
     return {
       op: "notify_when_finished",
-      args: { message: c },
+      args: { message: "Notify when finished" },
       highImpact: false,
       confidence: "high",
     };
@@ -308,7 +410,7 @@ export function parseExecutiveIntent(command: string): ParsedExecutiveIntent | n
   ) {
     return {
       op: "run_live_grant_workflow",
-      args: { query: c, note: c },
+      args: { query: c.slice(0, 500), note: "live grant workflow" },
       highImpact: false,
       confidence: "high",
     };
@@ -326,7 +428,7 @@ export function parseExecutiveIntent(command: string): ParsedExecutiveIntent | n
       args: {
         portalConfirmationId: idMatch?.[1] ?? "",
         applicationId: appMatch?.[1] ?? "",
-        note: c,
+        note: "portal confirmation",
       },
       highImpact: true,
       confidence: "medium",
@@ -337,7 +439,7 @@ export function parseExecutiveIntent(command: string): ParsedExecutiveIntent | n
     const appMatch = c.match(/\b(?:application|app)[:\s]+([a-z0-9-]{8,})\b/i);
     return {
       op: "monitor_grant_application",
-      args: { applicationId: appMatch?.[1] ?? "", note: c },
+      args: { applicationId: appMatch?.[1] ?? "", note: "monitor grant" },
       highImpact: false,
       confidence: "medium",
     };
@@ -347,7 +449,7 @@ export function parseExecutiveIntent(command: string): ParsedExecutiveIntent | n
   if (/\b(queue|prepare)\b.*\b(submission|submit)\b/i.test(c) && /\bgrant\b/i.test(c)) {
     return {
       op: "queue_grant_submission",
-      args: { note: c },
+      args: { note: "queue grant submission" },
       highImpact: true,
       confidence: "medium",
     };
@@ -357,6 +459,14 @@ export function parseExecutiveIntent(command: string): ParsedExecutiveIntent | n
 }
 
 export function wantsExecutiveOperation(command: string): boolean {
+  if (/founder\s+operations?\s+acceptance\s+test/i.test(command)) return true;
+  if (
+    /verify_founder_session/i.test(command)
+    && /send_email/i.test(command)
+    && /send_sms/i.test(command)
+  ) {
+    return true;
+  }
   return Boolean(parseExecutiveIntent(command));
 }
 
@@ -380,11 +490,21 @@ export async function executeSendEmail(
   const denied = requireFounder(ctx);
   if (denied) return denied;
 
-  const toRaw = String(args.to || "").trim();
-  const subject = String(args.subject || "Message from IFCDC AURA").trim();
-  const body = String(args.body || "").trim();
-  if (!toRaw || !body) {
-    return { status: "error", summary: "I need a recipient and a message body to send email." };
+  const picked = pickEmailArgs(args);
+  if (!picked) {
+    return {
+      status: "error",
+      summary:
+        "send_email requires exact fields { to, subject, body }. "
+        + "I will not forward a multi-step instruction dump as email content.",
+    };
+  }
+  const { to: toRaw, subject, body } = picked;
+  if (isUnsafeToolContent(body, String(args._rawCommand || ""))) {
+    return {
+      status: "error",
+      summary: "Refused to send email — body looks like a multi-step instruction dump, not a message.",
+    };
   }
 
   const recipients =
@@ -396,44 +516,54 @@ export async function executeSendEmail(
     return { status: "error", summary: "I could not resolve any email recipients." };
   }
 
-  // Org-wide / board still allowed for Founder, but log as high-visibility.
-  const results: Array<{ to: string; ok: boolean; error?: string }> = [];
+  const results: Array<{ to: string; ok: boolean; error?: string; messageId?: string }> = [];
   for (const to of recipients) {
     const send = await sendFounderSecurityEmail({ to, subject, body });
-    results.push({ to, ok: send.success, error: send.error });
+    results.push({ to, ok: send.success, error: send.error, messageId: send.messageId });
     if (!send.success) {
-      // Fallback through HQ notification path
       const fallback = await sendHqNotification({
         to,
         subject,
         body,
         channel: "email",
       });
-      results[results.length - 1] = { to, ok: fallback.success, error: fallback.error };
+      results[results.length - 1] = {
+        to,
+        ok: fallback.success,
+        error: fallback.error,
+        messageId: fallback.messageId,
+      };
     }
   }
 
   const ok = results.filter((r) => r.ok).length;
+  const acceptedIds = results.filter((r) => r.ok && r.messageId).map((r) => r.messageId);
   await logHqAudit({
     action: "aura_exec_send_email",
     entityType: "aura_executive_op",
     entityId: crypto.randomUUID(),
     detail: `sent ${ok}/${results.length}`,
-    metadata: { recipients, subject, actor: ctx.actorEmail },
+    metadata: { recipients, subject, actor: ctx.actorEmail, messageIds: acceptedIds },
   }).catch(() => undefined);
 
   if (!ok) {
     return {
       status: "error",
       summary: `Email failed: ${results.map((r) => r.error || "unknown").join("; ")}. Check Resend configuration.`,
-      data: { results },
+      data: { results, providerAccepted: false, subject, bodyPreview: body.slice(0, 120) },
     };
   }
 
   return {
     status: "done",
     summary: `Email sent to ${results.filter((r) => r.ok).map((r) => r.to).join(", ")} via Resend. Subject: ${subject}.`,
-    data: { results, subject },
+    data: {
+      results,
+      subject,
+      bodyPreview: body.slice(0, 120),
+      providerAccepted: true,
+      messageId: acceptedIds[0] || null,
+    },
     navigation: { path: "/hq/communications", label: "Open Communications Center" },
   };
 }
@@ -445,15 +575,31 @@ export async function executeSendSms(
   const denied = requireFounder(ctx);
   if (denied) return denied;
 
-  let to = String(args.to || "").trim();
+  const picked = pickSmsArgs(args);
+  if (!picked) {
+    return {
+      status: "error",
+      summary:
+        "send_sms requires exact fields { to, message }. "
+        + "I will not forward a multi-step instruction dump as SMS content.",
+    };
+  }
+
+  let to = picked.to;
   if (to === "founder" || to === "me") {
     to = resolveFounderMobile(ctx.identity?.phoneE164) || "";
   } else {
     to = normalizeE164(to) || to;
   }
-  const body = String(args.body || "").trim().slice(0, 400);
+  const body = picked.message.slice(0, 400);
   if (!to || !body) {
     return { status: "error", summary: "I need a phone number and message to send SMS." };
+  }
+  if (isUnsafeToolContent(body, String(args._rawCommand || ""))) {
+    return {
+      status: "error",
+      summary: "Refused to send SMS — message looks like a multi-step instruction dump.",
+    };
   }
 
   const send = await sendFounderSecuritySms({ to, body });
@@ -462,21 +608,21 @@ export async function executeSendSms(
     entityType: "aura_executive_op",
     entityId: crypto.randomUUID(),
     detail: send.success ? "sent" : send.error || "failed",
-    metadata: { to, actor: ctx.actorEmail },
+    metadata: { to, actor: ctx.actorEmail, messageId: send.messageId },
   }).catch(() => undefined);
 
-  if (!send.success) {
+  if (!send.success || !send.messageId) {
     return {
       status: "error",
-      summary: `SMS failed: ${send.error || "Twilio error"}. Check Twilio configuration.`,
-      data: send,
+      summary: `SMS failed: ${send.error || "Twilio did not accept the message"}. Check Twilio configuration.`,
+      data: { ...send, providerAccepted: false },
     };
   }
 
   return {
     status: "done",
     summary: `SMS sent to ${to} via Twilio.`,
-    data: { to, messageId: send.messageId },
+    data: { to, messageId: send.messageId, providerAccepted: true, messagePreview: body.slice(0, 80) },
     navigation: { path: "/hq/communications", label: "Open Communications Center" },
   };
 }
@@ -551,9 +697,16 @@ export async function executeSendNotification(
 ): Promise<ExecutiveActionResult> {
   const denied = requireFounder(ctx);
   if (denied) return denied;
-  const title = String(args.title || "AURA Notification").trim();
-  const message = String(args.message || "").trim();
-  if (!message) return { status: "error", summary: "What should the notification say?" };
+  const picked = pickNotificationArgs(args);
+  if (!picked) {
+    return {
+      status: "error",
+      summary:
+        "send_notification / create_founder_notification requires { title, message } "
+        + "(optional recipient/role). Instruction dumps are rejected.",
+    };
+  }
+  const { title, message } = picked;
 
   const id = await createLeadershipAlert({
     alertType: "aura_executive",
@@ -564,17 +717,25 @@ export async function executeSendNotification(
     path: "/hq/communications",
   });
 
-  // Also push email/SMS to Founder for visibility
+  if (!id) {
+    return {
+      status: "error",
+      summary: "Notification record was not created.",
+      data: { providerAccepted: false },
+    };
+  }
+
+  // Also push email to Founder for visibility (strict short fields only)
   await sendFounderSecurityEmail({
     to: getFounderEmail(),
-    subject: title,
-    body: message,
+    subject: title.slice(0, 120),
+    body: message.slice(0, 800),
   }).catch(() => undefined);
 
   return {
     status: "done",
     summary: `Notification posted to Headquarters (alert ${id}) and emailed to ${getFounderEmail()}.`,
-    data: { alertId: id },
+    data: { alertId: id, providerAccepted: true, recipient: picked.recipient || "founder", role: picked.role },
     navigation: { path: "/hq/communications", label: "Open Notification Center" },
   };
 }
@@ -1134,18 +1295,66 @@ export async function runExecutiveOperation(
   return fn(args, ctx);
 }
 
-/** Fast-path: parse + execute Founder command without waiting for LLM tools. */
+/** Fast-path: plan + execute Founder command (compound or single) without waiting for LLM tools. */
 export async function tryRunExecutiveCommand(
   command: string,
   ctx: ExecutiveActionContext
-): Promise<{ handled: false } | { handled: true; result: ExecutiveActionResult; op: ExecutiveOpId }> {
+): Promise<
+  | { handled: false }
+  | {
+      handled: true;
+      result: ExecutiveActionResult;
+      op: ExecutiveOpId | "founder_operations_acceptance" | "compound_executive_plan";
+      plan?: import("./auraExecutiveCommandPlanner").ExecutivePlanningPreview;
+      stepReports?: import("./auraExecutiveCommandPlanner").ExecutiveStepReport[];
+    }
+> {
   if (!ctx.identity?.founderMode && !ctx.identity?.isFounder) {
     return { handled: false };
   }
+
+  const {
+    planExecutiveCommand,
+    executeExecutivePlan,
+    wantsFounderOperationsAcceptanceTest,
+    looksLikeInstructionDump,
+  } = await import("./auraExecutiveCommandPlanner");
+
+  // Guard: if the command is a multi-step instruction dump that also mentions email,
+  // never treat the whole prompt as a single send_email body.
+  const planned = planExecutiveCommand(command);
+  if (planned) {
+    const execution = await executeExecutivePlan(planned, ctx);
+    return {
+      handled: true,
+      result: execution.result,
+      op: wantsFounderOperationsAcceptanceTest(command)
+        ? "founder_operations_acceptance"
+        : "compound_executive_plan",
+      plan: execution.preview,
+      stepReports: execution.steps,
+    };
+  }
+
+  // If the prompt looks like an instruction dump but didn't match the acceptance
+  // detector, refuse emailing it — surface a clear error instead.
+  if (looksLikeInstructionDump(command) && /\b(email|sms|text|notification)\b/i.test(command)) {
+    return {
+      handled: true,
+      result: {
+        status: "error",
+        summary:
+          "This looks like a multi-step operations test. "
+          + "Say \"Run the Founder Operations Acceptance Test\" and I will execute each registered action separately "
+          + "instead of forwarding the instructions as email.",
+      },
+      op: "send_email",
+    };
+  }
+
   const parsed = parseExecutiveIntent(command);
   if (!parsed) return { handled: false };
 
-  // High-impact without confirm → stage via executor's own pending_approval path
-  const result = await runExecutiveOperation(parsed.op, parsed.args, ctx);
+  const result = await runExecutiveOperation(parsed.op, { ...parsed.args, _rawCommand: command }, ctx);
   return { handled: true, result, op: parsed.op };
 }

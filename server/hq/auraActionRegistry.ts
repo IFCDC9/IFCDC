@@ -92,6 +92,8 @@ export interface AuraAction {
   description: string;
   /** JSON-schema "properties" object for LLM function-calling. */
   parameters: Record<string, unknown>;
+  /** Required parameter names for OpenAI tool schema (strict tool contracts). */
+  required?: string[];
   run(args: Record<string, unknown>, ctx: AuraActionContext): Promise<AuraActionResult>;
 }
 
@@ -927,12 +929,14 @@ const sendEmail: AuraAction = {
   module: "communications",
   kind: "execute",
   description:
-    "Founder Mode: actually send an email via Resend. Use for 'email service@…', 'email the Board', or reply-style messages. Requires to, subject, body.",
+    "Founder Mode: send email via Resend. ONLY pass { to, subject, body } — never the full user prompt. "
+    + "For multi-step tests, call this once per email with the exact subject/body only.",
   parameters: {
     to: { type: "string", description: "Recipient email, comma-separated list, or 'board'." },
-    subject: { type: "string", description: "Email subject." },
-    body: { type: "string", description: "Email body (plain text)." },
+    subject: { type: "string", description: "Email subject only." },
+    body: { type: "string", description: "Email body only (plain text). Never paste instructions." },
   },
+  required: ["to", "subject", "body"],
   async run(args, ctx) {
     return executeSendEmail(args, ctx);
   },
@@ -943,11 +947,13 @@ const sendSms: AuraAction = {
   label: "Send SMS",
   module: "communications",
   kind: "execute",
-  description: "Founder Mode: send SMS via Twilio. Use to='founder' or E.164 number.",
+  description:
+    "Founder Mode: send SMS via Twilio. ONLY pass { to, message }. Use to='founder' or E.164. Never paste the full prompt.",
   parameters: {
     to: { type: "string", description: "Phone E.164 or 'founder'." },
-    body: { type: "string", description: "SMS body (max ~320 chars)." },
+    message: { type: "string", description: "SMS message only (max ~320 chars)." },
   },
+  required: ["to", "message"],
   async run(args, ctx) {
     return executeSendSms(args, ctx);
   },
@@ -963,6 +969,7 @@ const placeCall: AuraAction = {
     to: { type: "string", description: "Phone E.164 or 'founder'." },
     message: { type: "string", description: "Spoken message." },
   },
+  required: ["to", "message"],
   async run(args, ctx) {
     return executePlaceCall(args, ctx);
   },
@@ -973,11 +980,15 @@ const sendNotification: AuraAction = {
   label: "Send HQ Notification",
   module: "communications",
   kind: "execute",
-  description: "Founder Mode: post a Headquarters leadership notification and email the Founder.",
+  description:
+    "Founder Mode: post a Headquarters leadership notification. ONLY pass { title, message, recipient? or role? }.",
   parameters: {
-    title: { type: "string" },
-    message: { type: "string" },
+    title: { type: "string", description: "Notification title only." },
+    message: { type: "string", description: "Notification message only." },
+    recipient: { type: "string", description: "Optional recipient email or 'founder'." },
+    role: { type: "string", description: "Optional role target (e.g. founder, board)." },
   },
+  required: ["title", "message"],
   async run(args, ctx) {
     return executeSendNotification(args, ctx);
   },
@@ -1512,7 +1523,7 @@ export function auraToolDefinitions(): Array<{
       parameters: {
         type: "object",
         properties: a.parameters,
-        required: [],
+        required: a.required ?? [],
         additionalProperties: false,
       },
     },

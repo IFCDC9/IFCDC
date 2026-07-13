@@ -4,6 +4,40 @@
 **Product:** IFCDC Headquarters / AURA  
 **Success criterion:** Founder can ask AURA to find the best *live* grant, prepare a complete application from real org data, present for approval, record portal submission after approval, and monitor until award decision.
 
+## Compound command planning (required)
+
+AURA must **plan before tools** for multi-step Founder requests. The full natural-language prompt must **never** be inserted into `send_email.body`, `send_sms.message`, or notification fields.
+
+### Founder Operations Acceptance Test
+
+Say: **Run the Founder Operations Acceptance Test**
+
+Planned steps (in order):
+
+1. `verify_founder_session`
+2. `check_resend_health`
+3. `check_twilio_sms_health`
+4. `check_twilio_voice_health`
+5. `check_founder_contact_configuration`
+6. `check_action_registry`
+7. `check_communications_center`
+8. `send_email` → only `{ to: service@ifcdc.org, subject: AURA Founder Test, body: <exact test sentence> }`
+9. `send_sms` → only `{ to: +18484694448, message: <exact test SMS> }`
+10. `create_founder_notification` → only `{ title, message, recipient }`
+11. Structured PASS/FAIL report for every step (failure isolation — continue remaining safe steps)
+
+Implementation: `server/hq/auraExecutiveCommandPlanner.ts` + `tryRunExecutiveCommand` in `auraExecutiveOperations.ts`.
+
+### Strict tool schemas
+
+| Tool | Allowed fields only |
+|---|---|
+| `send_email` | `to`, `subject`, `body` |
+| `send_sms` | `to`, `message` |
+| `send_notification` | `title`, `message`, `recipient?`, `role?` |
+
+Provider verification: Resend/Twilio must accept the message (`messageId`) and notification records must be created before PASS.
+
 ## What AURA executes (not placeholders)
 
 | Capability | Backend | Founder Mode |
@@ -62,17 +96,17 @@
 - Watchdog (`scheduleEnterpriseMonitoringWatchdog`) retries degraded integrations every ~15 minutes.
 - Sustained failures raise Founder leadership alerts with recovery recommendations.
 
-## Validation command
+## Validation commands
 
 ```bash
+# Planner unit (no network)
+node script/aura-exec-planner-unit.mjs
+
+# NL Founder Operations Acceptance (after Manual Deploy)
 export IFCDC_BASE_URL=https://ifcdc-hq-wst6.onrender.com
-export MASTER_OWNER_EMAIL=service@ifcdc.org
-export FOUNDER_SEED_PASSWORD='…'
+export FOUNDER_SEED_PASSWORD='…'   # must match Render
+node script/founder-ops-acceptance-nl.mjs
+
+# Grant lifecycle
 node script/grant-lifecycle-acceptance.mjs
 ```
-
-After Manual Deploy on Render, run the Founder prompt in AURA:
-
-> Find the best live grant for IFCDC, prepare the complete application using our real organizational data, present it for my approval, submit it after approval, monitor the application, and keep me informed until a final award decision.
-
-Expected behavior: package staged for approval → you approve → you complete Grants.gov → you (or AURA) confirm confirmation ID → HQ monitors and notifies.
