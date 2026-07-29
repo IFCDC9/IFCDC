@@ -40,7 +40,8 @@ export const IntegrationHubCardView: React.FC<{
   onConfigure: () => void;
   onOAuth: () => void;
   oauthPending?: boolean;
-}> = ({ card, testMessage, testPending, onTest, onConfigure, onOAuth, oauthPending }) => {
+  onOpenDetail?: () => void;
+}> = ({ card, testMessage, testPending, onTest, onConfigure, onOAuth, oauthPending, onOpenDetail }) => {
   const configuredCount = card.requiredCredentials.filter((c) => c.configured).length;
   const totalCreds = card.requiredCredentials.length;
 
@@ -54,13 +55,20 @@ export const IntegrationHubCardView: React.FC<{
       const external = action.href.startsWith("http");
       if (external) {
         return (
-          <a key={action.id} href={action.href} target="_blank" rel="noopener noreferrer" className={className}>
+          <a
+            key={action.id}
+            href={action.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={className}
+            onClick={(e) => e.stopPropagation()}
+          >
             {action.label}
           </a>
         );
       }
       return (
-        <Link key={action.id} to={action.href} className={className}>
+        <Link key={action.id} to={action.href} className={className} onClick={(e) => e.stopPropagation()}>
           {action.label}
         </Link>
       );
@@ -68,7 +76,17 @@ export const IntegrationHubCardView: React.FC<{
 
     if (action.action === "test") {
       return (
-        <button key={action.id} type="button" className={className} disabled={disabled} onClick={onTest} title={action.reason}>
+        <button
+          key={action.id}
+          type="button"
+          className={className}
+          disabled={disabled}
+          onClick={(e) => {
+            e.stopPropagation();
+            onTest();
+          }}
+          title={action.reason}
+        >
           {testPending ? "Testing…" : action.label}
         </button>
       );
@@ -76,7 +94,17 @@ export const IntegrationHubCardView: React.FC<{
 
     if (action.action === "oauth") {
       return (
-        <button key={action.id} type="button" className={className} disabled={disabled} onClick={onOAuth} title={action.reason}>
+        <button
+          key={action.id}
+          type="button"
+          className={className}
+          disabled={disabled}
+          onClick={(e) => {
+            e.stopPropagation();
+            onOAuth();
+          }}
+          title={action.reason}
+        >
           {oauthPending ? "Connecting…" : action.label}
         </button>
       );
@@ -89,7 +117,10 @@ export const IntegrationHubCardView: React.FC<{
           type="button"
           className={className}
           disabled={action.kind === "disabled"}
-          onClick={onConfigure}
+          onClick={(e) => {
+            e.stopPropagation();
+            onConfigure();
+          }}
           title={action.reason}
         >
           {action.label}
@@ -98,14 +129,31 @@ export const IntegrationHubCardView: React.FC<{
     }
 
     return (
-      <button key={action.id} type="button" className={className} disabled title={action.reason}>
+      <button key={action.id} type="button" className={className} disabled title={action.reason} onClick={(e) => e.stopPropagation()}>
         {action.label}
       </button>
     );
   }
 
   return (
-    <div className="hq-panel hq-fade-in" style={{ padding: "1.25rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+    <div
+      className={`hq-panel hq-fade-in${onOpenDetail ? " hq-integration-card--clickable" : ""}`}
+      style={{ padding: "1.25rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}
+      role={onOpenDetail ? "button" : undefined}
+      tabIndex={onOpenDetail ? 0 : undefined}
+      aria-label={onOpenDetail ? `Open ${card.name} integration details` : undefined}
+      onClick={onOpenDetail}
+      onKeyDown={
+        onOpenDetail
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onOpenDetail();
+              }
+            }
+          : undefined
+      }
+    >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.5rem" }}>
         <div>
           <h4 style={{ margin: 0, fontSize: "0.95rem", color: "var(--hq-gold)" }}>{card.name}</h4>
@@ -184,6 +232,18 @@ export const IntegrationHubCardView: React.FC<{
 
       <div style={{ marginTop: "auto", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
         {card.actions.map((action) => renderAction(action))}
+        {onOpenDetail && (
+          <button
+            type="button"
+            className="hq-btn hq-btn-sm hq-btn-ghost"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenDetail();
+            }}
+          >
+            Details
+          </button>
+        )}
       </div>
 
       {testMessage && (

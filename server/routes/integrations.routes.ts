@@ -71,13 +71,35 @@ router.get("/health", async (req, res) => {
       failedRequests: 0,
       uptimeSeconds: Math.floor(process.uptime()),
       uptimeLabel: "—",
+      uptime24hPct: null,
+      uptime7dPct: null,
+      successFailureTrend: [],
+      responseTimeHistoryMs: [],
+      last10SyncEvents: [],
       services: [],
       recentFailures: [],
       startupVerifiedAt: null,
       monitoredAt: new Date().toISOString(),
       source: "live",
+      environmentName: process.env.RENDER_SERVICE_NAME || "unknown",
+      productionVsTest: process.env.NODE_ENV === "production" ? "production" : "test",
       degraded: true,
     });
+  }
+});
+
+/** Live detail for one integration (modal drill-down). */
+router.get("/health/:id", async (req, res) => {
+  try {
+    const { getIntegrationLiveDetail } = await import("../hq/integrationHealthDashboard");
+    const detail = await getIntegrationLiveDetail(String(req.params.id));
+    if (!detail.ok) {
+      return res.status(404).json({ error: "Integration not found", ...detail });
+    }
+    res.json(detail);
+  } catch (err) {
+    console.error("[integrations-hub] GET /health/:id error:", err);
+    res.status(500).json({ error: err instanceof Error ? err.message : "Detail unavailable" });
   }
 });
 

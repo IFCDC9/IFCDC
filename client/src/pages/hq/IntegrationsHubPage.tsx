@@ -18,7 +18,11 @@ import {
   IntegrationHubCardView,
   IntegrationsHubEmptyState,
 } from "../../components/hq/integrations/IntegrationHubCard";
-import { IntegrationsHealthPanel } from "../../components/hq/integrations/IntegrationsHealthPanel";
+import {
+  IntegrationsHealthPanel,
+  type HealthFilter,
+} from "../../components/hq/integrations/IntegrationsHealthPanel";
+import { IntegrationDetailModal } from "../../components/hq/integrations/IntegrationDetailModal";
 
 type HubLoadResult = {
   hub: IntegrationsHubPayload;
@@ -49,7 +53,9 @@ const REQUIRED_INTEGRATION_IDS = [
 const IntegrationsHubPage: React.FC = () => {
   const qc = useQueryClient();
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [healthFilter, setHealthFilter] = useState<HealthFilter>("all");
   const [configuring, setConfiguring] = useState<IntegrationHubCard | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, string>>({});
 
   const hubQuery = useQuery({
@@ -104,6 +110,7 @@ const IntegrationsHubPage: React.FC = () => {
       setTestResults((prev) => ({ ...prev, [provider]: msg || data.message }));
       void qc.invalidateQueries({ queryKey: ["integrations-hub"] });
       void qc.invalidateQueries({ queryKey: ["integrations-health"] });
+      void qc.invalidateQueries({ queryKey: ["integrations-health-detail", provider] });
       if (provider === "grants_gov" && data.success) {
         void qc.invalidateQueries({ queryKey: ["grant-opportunity-finder"] });
       }
@@ -144,21 +151,49 @@ const IntegrationsHubPage: React.FC = () => {
   const integrations = hub.integrations;
   const degraded = hubQuery.data?.degraded ?? false;
   const loadWarning = hubQuery.data?.warning;
-  const healthScore =
-    hub.summary.healthScore ?? healthQuery.data?.overallHealthScore ?? 0;
-  const connectedCount = hub.summary.connected ?? hub.connectedCount ?? 0;
-  const warningCount = hub.summary.warning ?? healthQuery.data?.warningCount ?? 0;
+  const health = healthQuery.data ?? EMPTY_INTEGRATION_HEALTH;
+  const healthScore = health.overallHealthScore || hub.summary.healthScore || 0;
+  const connectedCount = health.connectedCount || hub.summary.connected || hub.connectedCount || 0;
+  const warningCount = health.warningCount || hub.summary.warning || 0;
   const offlineCount =
-    hub.summary.offline ?? hub.summary.notConfigured ?? healthQuery.data?.offlineCount ?? 0;
+    health.offlineCount || hub.summary.offline || hub.summary.notConfigured || 0;
 
   const categories = useMemo(
     () => ["all", ...Array.from(new Set(integrations.map((i) => i.category))).sort()],
     [integrations]
   );
 
-  const filtered = useMemo(
-    () => (categoryFilter === "all" ? integrations : integrations.filter((i) => i.category === categoryFilter)),
-    [integrations, categoryFilter]
+  const statusFilteredIds = useMemo(() => {
+    if (healthFilter === "all") return null;
+    const services = health.services ?? [];
+    const ids = new Set(
+      services
+        .filter((s) => {
+          if (healthFilter === "connected") return s.displayStatus === "Connected";
+          if (healthFilter === "warning") return s.displayStatus === "Warning";
+          if (healthFilter === "offline") return s.displayStatus === "Disconnected";
+          if (healthFilter === "latency") return typeof s.latencyMs === "number";
+          if (healthFilter === "failed") {
+            return !s.healthy || (s.ops?.failedRequestCount ?? 0) > 0 || s.displayStatus === "Disconnected";
+          }
+          return true;
+        })
+        .map((s) => s.id)
+    );
+    return ids;
+  }, [health.services, healthFilter]);
+
+  const filtered = useMemo(() => {
+    let list = categoryFilter === "all" ? integrations : integrations.filter((i) => i.category === categoryFilter);
+    if (statusFilteredIds) {
+      list = list.filter((i) => statusFilteredIds.has(i.id));
+    }
+    return list;
+  }, [integrations, categoryFilter, statusFilteredIds]);
+
+  const detailFallback = useMemo(
+    () => (detailId ? integrations.find((i) => i.id === detailId) ?? null : null),
+    [detailId, integrations]
   );
 
   const missingRequired = REQUIRED_INTEGRATION_IDS.filter(
@@ -196,6 +231,9 @@ const IntegrationsHubPage: React.FC = () => {
             <IntegrationsHealthPanel
               health={healthQuery.data ?? null}
               loading={healthQuery.isLoading && !healthQuery.isFetched}
+              filter={healthFilter}
+              onFilterChange={setHealthFilter}
+              onOpenService={(s) => setDetailId(s.id)}
             />
           </HqWidgetErrorBoundary>
 
@@ -205,14 +243,40 @@ const IntegrationsHubPage: React.FC = () => {
               value={`${healthScore}/100`}
               icon={Activity}
               variant={healthScore >= 80 ? "success" : healthScore >= 60 ? "warning" : "danger"}
+              active={healthFilter === "all"}
+              onClick={() => setHealthFilter("all")}
             />
-            <KpiCard label="Connected" value={connectedCount} icon={CheckCircle} variant="success" />
-            <KpiCard label="Warning" value={warningCount} icon={AlertTriangle} variant={warningCount > 0 ? "warning" : "muted"} />
-            <KpiCard label="Offline" value={offlineCount} icon={Plug} variant={offlineCount > 0 ? "danger" : "muted"} />
+            <KpiCard
+              label="Connected"
+              value={connectedCount}
+              icon={CheckCircle}
+              variant="success"
+              active={healthFilter === "connected"}
+              onClick={() => setHealthFilter((f) => (f === "connected" ? "all" : "connected"))}
+            />
+            <KpiCard
+              label="Warning"
+              value={warningCount}
+              icon={AlertTriangle}
+              variant={warningCount > 0 ? "warning" : "muted"}
+              active={healthFilter === "warning"}
+              onClick={() => setHealthFilter((f) => (f === "warning" ? "all" : "warning"))}
+            />
+            <KpiCard
+              label="Offline"
+              value={offlineCount}
+              icon={Plug}
+              variant={offlineCount > 0 ? "danger" : "muted"}
+              active={healthFilter === "offline"}
+              onClick={() => setHealthFilter((f) => (f === "offline" ? "all" : "offline"))}
+            />
           </div>
 
           <div className="hq-sd-toolbar" style={{ marginBottom: "1rem", flexWrap: "wrap", gap: "0.5rem" }}>
             <StatusBadge label="Live production connectors" variant="gold" />
+            {healthFilter !== "all" && (
+              <StatusBadge label={`Filter: ${healthFilter}`} variant="warning" />
+            )}
             <button
               type="button"
               className="hq-btn hq-btn-sm hq-btn-secondary"
@@ -233,7 +297,9 @@ const IntegrationsHubPage: React.FC = () => {
             >
               <RefreshCw size={14} className={hubQuery.isFetching || healthQuery.isFetching ? "hq-spin" : ""} /> Refresh
             </button>
-            <Link to="/hq/monitoring" className="hq-btn hq-btn-sm hq-btn-ghost">Enterprise Monitoring</Link>
+            <Link to="/hq/monitoring" className="hq-btn hq-btn-sm hq-btn-ghost">
+              Enterprise Monitoring
+            </Link>
             {testResults._bulk && <StatusBadge label={testResults._bulk} variant="muted" />}
             {categories.map((cat) => (
               <button
@@ -259,9 +325,31 @@ const IntegrationsHubPage: React.FC = () => {
 
           {integrations.length === 0 ? (
             <IntegrationsHubEmptyState onRetry={() => void hubQuery.refetch()} />
+          ) : filtered.length === 0 ? (
+            <div className="hq-panel" style={{ padding: "1.5rem", textAlign: "center" }}>
+              <p className="hq-muted-text" style={{ marginBottom: "0.75rem" }}>
+                No connector cards match the current health/category filter.
+              </p>
+              <button
+                type="button"
+                className="hq-btn hq-btn-secondary"
+                onClick={() => {
+                  setHealthFilter("all");
+                  setCategoryFilter("all");
+                }}
+              >
+                Clear filters
+              </button>
+            </div>
           ) : (
             <HqWidgetErrorBoundary label="Integration connectors">
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "1rem" }}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 320px), 1fr))",
+                  gap: "1rem",
+                }}
+              >
                 {filtered.map((card) => (
                   <IntegrationHubCardView
                     key={card.id}
@@ -272,10 +360,32 @@ const IntegrationsHubPage: React.FC = () => {
                     onTest={() => test.mutate(card.id)}
                     onOAuth={() => qbConnect.mutate()}
                     onConfigure={() => setConfiguring(card)}
+                    onOpenDetail={() => setDetailId(card.id)}
                   />
                 ))}
               </div>
             </HqWidgetErrorBoundary>
+          )}
+
+          {detailId && (
+            <IntegrationDetailModal
+              providerId={detailId}
+              fallbackCard={detailFallback}
+              onClose={() => setDetailId(null)}
+              onConfigure={(card) => {
+                setDetailId(null);
+                setConfiguring(card);
+              }}
+              onOpenLogs={() => {
+                setDetailId(null);
+                requestAnimationFrame(() => {
+                  document.getElementById("integrations-probe-log")?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start",
+                  });
+                });
+              }}
+            />
           )}
 
           {configuring && (
@@ -313,7 +423,9 @@ const IntegrationsHubPage: React.FC = () => {
                         Register webhook URL in PayPal Developer Dashboard:{" "}
                         <code>https://ifcdc-hq-wst6.onrender.com/api/paypal/webhook-log</code>
                       </li>
-                      <li>Click <strong>Test Connection</strong> to verify OAuth and order creation.</li>
+                      <li>
+                        Click <strong>Test Connection</strong> to verify OAuth and order creation.
+                      </li>
                     </ol>
                   </div>
                 )}
@@ -327,8 +439,8 @@ const IntegrationsHubPage: React.FC = () => {
                       <a href="https://grants.gov/api/api-guide" target="_blank" rel="noopener noreferrer">
                         official API Guide
                       </a>
-                      , <strong>no API key or credentials are required</strong> for search2 or fetchOpportunity.
-                      Click <strong>Test Connection</strong> to probe the live public API and sync opportunities.
+                      , <strong>no API key or credentials are required</strong> for search2 or fetchOpportunity. Click{" "}
+                      <strong>Test Connection</strong> to probe the live public API and sync opportunities.
                     </p>
                   </div>
                 )}
@@ -380,13 +492,16 @@ const IntegrationsHubPage: React.FC = () => {
                         (classic <code>repo</code> read, or fine-grained read on <code>IFCDC9/IFCDC</code>).
                       </li>
                       <li>
-                        In Render → <strong>ifcdc-hq</strong> → Environment, add{" "}
-                        <code>GITHUB_TOKEN</code> = your token (secret).
+                        In Render → <strong>ifcdc-hq</strong> → Environment, add <code>GITHUB_TOKEN</code> = your token
+                        (secret).
                       </li>
-                      <li>Save — Render redeploys automatically. Return here and click <strong>Test Connection</strong>.</li>
+                      <li>
+                        Save — Render redeploys automatically. Return here and click <strong>Test Connection</strong>.
+                      </li>
                     </ol>
                     <p className="hq-muted-text" style={{ marginTop: "0.5rem", fontSize: "0.78rem" }}>
-                      Note: Render already deploys from GitHub without this token. This only powers HQ Integrations Hub health checks.
+                      Note: Render already deploys from GitHub without this token. This only powers HQ Integrations Hub
+                      health checks.
                     </p>
                   </div>
                 )}

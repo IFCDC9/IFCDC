@@ -1,6 +1,6 @@
 import { hqApiFetch } from "./hqApiFetch";
 import { INTEGRATIONS_HUB_FETCH_TIMEOUT_MS } from "../data/integrationsHubDefaults";
-import type { IntegrationsHubPayload } from "../data/integrationsHubDefaults";
+import type { IntegrationsHubPayload, IntegrationHubCard, IntegrationHubAction } from "../data/integrationsHubDefaults";
 
 async function apiFetch<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
   const { timeoutMs, ...init } = options ?? {};
@@ -23,6 +23,45 @@ export interface IntegrationConnection {
   configuredAt?: string;
 }
 
+export type IntegrationProbeLogEntry = {
+  at: string;
+  provider: string;
+  ok: boolean;
+  latencyMs: number;
+  message: string;
+  errorCode?: string;
+  rootCause?: string;
+};
+
+export type IntegrationOpsMetrics = {
+  uptime24hPct: number | null;
+  uptime7dPct: number | null;
+  successFailureTrend: { at: string; ok: boolean; latencyMs: number }[];
+  responseTimeHistoryMs: number[];
+  last10SyncEvents: IntegrationProbeLogEntry[];
+  failedRequestCount: number;
+  lastSuccessfulSync: string | null;
+  authStatus: "authenticated" | "partial" | "missing" | "unknown";
+  environmentName: string;
+  productionVsTest: "production" | "test" | "mixed" | "unknown";
+  serviceOwner: string;
+  credentialExpirationWarning: string | null;
+  connectedEnvironment: string;
+};
+
+export type IntegrationHealthService = {
+  id: string;
+  name: string;
+  category: string;
+  displayStatus: "Connected" | "Warning" | "Disconnected";
+  status: string;
+  healthy: boolean;
+  latencyMs: number | null;
+  lastChecked: string | null;
+  message: string;
+  ops?: IntegrationOpsMetrics;
+};
+
 export type IntegrationHealthDashboard = {
   overallHealthScore: number;
   overallLabel: string;
@@ -35,21 +74,28 @@ export type IntegrationHealthDashboard = {
   failedRequests: number;
   uptimeSeconds: number;
   uptimeLabel: string;
-  services: {
-    id: string;
-    name: string;
-    category: string;
-    displayStatus: "Connected" | "Warning" | "Disconnected";
-    status: string;
-    healthy: boolean;
-    latencyMs: number | null;
-    lastChecked: string | null;
-    message: string;
-  }[];
-  recentFailures: { at: string; provider: string; ok: boolean; latencyMs: number; message: string }[];
+  uptime24hPct: number | null;
+  uptime7dPct: number | null;
+  successFailureTrend: { at: string; ok: number; fail: number }[];
+  responseTimeHistoryMs: number[];
+  last10SyncEvents: IntegrationProbeLogEntry[];
+  services: IntegrationHealthService[];
+  recentFailures: IntegrationProbeLogEntry[];
   startupVerifiedAt: string | null;
   monitoredAt: string;
   source: "live";
+  environmentName?: string;
+  productionVsTest?: "production" | "test" | "mixed";
+};
+
+export type IntegrationLiveDetail = {
+  ok: boolean;
+  service: IntegrationHealthService | null;
+  hubCard: IntegrationHubCard | null;
+  recentErrors: IntegrationProbeLogEntry[];
+  recentWarnings: IntegrationProbeLogEntry[];
+  syncHistory: IntegrationProbeLogEntry[];
+  actions: IntegrationHubAction[];
 };
 
 export const EMPTY_INTEGRATION_HEALTH: IntegrationHealthDashboard = {
@@ -64,6 +110,11 @@ export const EMPTY_INTEGRATION_HEALTH: IntegrationHealthDashboard = {
   failedRequests: 0,
   uptimeSeconds: 0,
   uptimeLabel: "—",
+  uptime24hPct: null,
+  uptime7dPct: null,
+  successFailureTrend: [],
+  responseTimeHistoryMs: [],
+  last10SyncEvents: [],
   services: [],
   recentFailures: [],
   startupVerifiedAt: null,
@@ -78,11 +129,15 @@ export const integrationsApi = {
     apiFetch<IntegrationHealthDashboard>(`/health${refresh ? "?refresh=1" : ""}`, {
       timeoutMs: 25_000,
     }),
+  healthDetail: (id: string) =>
+    apiFetch<IntegrationLiveDetail>(`/health/${encodeURIComponent(id)}`, {
+      timeoutMs: 25_000,
+    }),
   diagnostics: () =>
     apiFetch<{
       startupVerifiedAt: string | null;
       counters: { failedRequestTotal: number; successfulProbeTotal: number };
-      recent: { at: string; provider: string; ok: boolean; latencyMs: number; message: string }[];
+      recent: IntegrationProbeLogEntry[];
     }>("/diagnostics", { timeoutMs: 10_000 }),
   retryDegraded: (providerIds?: string[]) =>
     apiFetch<{
