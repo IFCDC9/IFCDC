@@ -43,6 +43,15 @@ async function main() {
         console.log("\n→ Add the records above in GoDaddy, wait for DNS, then verify.\n");
         process.exit(2);
       }
+    } else if (ds?.error) {
+      console.log(`\n✗ domainSetup.error: ${ds.error}`);
+      if (/plan includes 1 domain|upgrade to add more/i.test(ds.error)) {
+        console.log(
+          "\n→ Resend free plan allows 1 domain. Deploy the domain-replace build, then re-poll.\n" +
+            "  HQ will swap ifcdcbarbersapp.com → ifcdc.org (or upgrade Resend to Pro).\n",
+        );
+        process.exit(3);
+      }
     }
     if (i < maxAttempts) await sleep(delayMs);
   }

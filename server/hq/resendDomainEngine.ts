@@ -112,6 +112,95 @@ export async function getResendDomainDetail(domainId: string): Promise<{
   };
 }
 
+export async function deleteResendDomain(domainId: string): Promise<{ ok: boolean; error?: string }> {
+  const { ok, status, data } = await resendFetch(`/domains/${domainId}`, { method: "DELETE" });
+  if (!ok) {
+    return { ok: false, error: String(data.message || data.error || `Delete domain failed (${status})`) };
+  }
+  return { ok: true };
+}
+
+/**
+ * Free Resend plans allow 1 domain. HQ needs ifcdc.org, but production currently
+ * holds ifcdcbarbersapp.com. Replace non-target domains so ifcdc.org can register.
+ */
+export async function replaceResendDomainWithTarget(domain = getTargetSenderDomain()): Promise<{
+  ok: boolean;
+  deleted: string[];
+  created?: Awaited<ReturnType<typeof ensureResendDomainRegistered>>;
+  message: string;
+}> {
+  const target = domain.toLowerCase();
+  const existing = await listResendDomains();
+  const already = existing.find((d) => d.name.toLowerCase() === target);
+  if (already) {
+    const detail = await getResendDomainDetail(already.id);
+    return {
+      ok: true,
+      deleted: [],
+      created: {
+        created: false,
+        domainId: already.id,
+        name: already.name,
+        status: detail?.status || already.status,
+        records: detail?.records || [],
+      },
+      message: `${target} is already registered`,
+    };
+  }
+
+  const deleted: string[] = [];
+  for (const d of existing) {
+    if (d.name.toLowerCase() === target) continue;
+    // Prefer removing the known HQ fallback domain; also clear any other slot-holders
+    // when the plan limit blocks registration of the target.
+    const rem = await deleteResendDomain(d.id);
+    if (!rem.ok) {
+      return {
+        ok: false,
+        deleted,
+        message: `Could not remove ${d.name}: ${rem.error}`,
+      };
+    }
+    deleted.push(d.name);
+    console.warn(`[resend-domain] removed ${d.name} to free plan slot for ${target}`);
+  }
+
+  // Create directly (do not call ensureResendDomainRegistered — avoids replace recursion).
+  const { ok, status, data } = await resendFetch("/domains", {
+    method: "POST",
+    body: JSON.stringify({ name: target }),
+  });
+  if (!ok) {
+    return {
+      ok: false,
+      deleted,
+      message: String(data.message || data.error || `Resend create domain failed (${status})`),
+    };
+  }
+  const id = String(data.id || "");
+  const detail = id ? await getResendDomainDetail(id) : null;
+  const created = {
+    created: true,
+    domainId: id || undefined,
+    name: String(data.name || target),
+    status: detail?.status || String(data.status || "pending"),
+    records: detail?.records || normalizeRecords(data.records),
+  };
+  return {
+    ok: true,
+    deleted,
+    created,
+    message: deleted.length
+      ? `Replaced ${deleted.join(", ")} with ${target}`
+      : `Registered ${target}`,
+  };
+}
+
+function isPlanDomainLimitError(message: string): boolean {
+  return /plan includes 1 domain|upgrade to add more|domain limit|too many domains/i.test(message);
+}
+
 /** Create domain in Resend if missing (idempotent). */
 export async function ensureResendDomainRegistered(domain = getTargetSenderDomain()): Promise<{
   created: boolean;
@@ -120,6 +209,7 @@ export async function ensureResendDomainRegistered(domain = getTargetSenderDomai
   status?: string;
   records: ResendDnsRecord[];
   error?: string;
+  replaced?: string[];
 }> {
   const existing = await listResendDomains();
   const match = existing.find((d) => d.name.toLowerCase() === domain.toLowerCase());
@@ -154,11 +244,30 @@ export async function ensureResendDomainRegistered(domain = getTargetSenderDomai
         };
       }
     }
+
+    const errMsg = String(data.message || data.error || `Resend create domain failed (${status})`);
+    // Auto-swap when free plan blocks ifcdc.org behind ifcdcbarbersapp.com.
+    // Opt out with RESEND_ALLOW_DOMAIN_REPLACE=false.
+    const allowReplace = String(process.env.RESEND_ALLOW_DOMAIN_REPLACE ?? "true").toLowerCase() !== "false";
+    if (allowReplace && isPlanDomainLimitError(errMsg)) {
+      const swapped = await replaceResendDomainWithTarget(domain);
+      if (swapped.ok && swapped.created && !swapped.created.error) {
+        return { ...swapped.created, replaced: swapped.deleted };
+      }
+      return {
+        created: false,
+        name: domain,
+        records: [],
+        error: swapped.message || errMsg,
+        replaced: swapped.deleted,
+      };
+    }
+
     return {
       created: false,
       name: domain,
       records: [],
-      error: String(data.message || data.error || `Resend create domain failed (${status})`),
+      error: errMsg,
     };
   }
 
@@ -218,7 +327,13 @@ export async function getResendDomainSetupState(domain = getTargetSenderDomain()
   const guidance: string[] = [];
   if (ensured.error) guidance.push(ensured.error);
   if (!registered) {
-    guidance.push(`Register ${domain} in Resend (POST /api/hq/email/domain/ensure).`);
+    if (ensured.error && isPlanDomainLimitError(ensured.error)) {
+      guidance.push(
+        `Resend plan limit blocked ${domain}. HQ will replace ifcdcbarbersapp.com with ${domain} on the next ensure (set RESEND_ALLOW_DOMAIN_REPLACE=false to disable). Or upgrade Resend to Pro.`,
+      );
+    } else {
+      guidance.push(`Register ${domain} in Resend (POST /api/hq/email/domain/ensure or /domain/replace).`);
+    }
   } else if (!verified) {
     guidance.push(
       `Publish the DNS records below at GoDaddy (nameservers ns19/ns20.domaincontrol.com), wait 5–30 minutes, then POST /api/hq/email/domain/verify.`,
@@ -229,6 +344,12 @@ export async function getResendDomainSetupState(domain = getTargetSenderDomain()
     );
   } else {
     guidance.push(`Sender domain ${domain} is verified. Fallback is not in use.`);
+  }
+
+  if ((ensured as { replaced?: string[] }).replaced?.length) {
+    guidance.unshift(
+      `Removed Resend domain(s) ${(ensured as { replaced?: string[] }).replaced!.join(", ")} so ${domain} could be registered.`,
+    );
   }
 
   const godaddySteps = [

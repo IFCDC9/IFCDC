@@ -175,6 +175,23 @@ router.post("/email/domain/ensure", hqAuthRequired, async (req: Request, res: Re
   res.json({ ok: !ensured.error, ensured, setup });
 });
 
+/** Replace plan-slot domain (e.g. ifcdcbarbersapp.com) with ifcdc.org. Founder only. */
+router.post("/email/domain/replace", hqAuthRequired, async (req: Request, res: Response) => {
+  const email = (req.hqUser?.email || "").toLowerCase();
+  if (!req.hqUser || (req.hqUser.role !== "owner" && email !== "service@ifcdc.org")) {
+    return res.status(403).json({ error: "Founder Mode required" });
+  }
+  const {
+    replaceResendDomainWithTarget,
+    getResendDomainSetupState,
+    getTargetSenderDomain,
+  } = await import("../hq/resendDomainEngine");
+  const domain = String(req.body?.domain || getTargetSenderDomain()).toLowerCase();
+  const result = await replaceResendDomainWithTarget(domain);
+  const setup = await getResendDomainSetupState(domain);
+  res.status(result.ok ? 200 : 409).json({ ...result, setup });
+});
+
 router.post("/email/domain/verify", hqAuthRequired, async (req: Request, res: Response) => {
   const email = (req.hqUser?.email || "").toLowerCase();
   if (!req.hqUser || (req.hqUser.role !== "owner" && email !== "service@ifcdc.org")) {
