@@ -478,6 +478,37 @@ const IntegrationsHubPage: React.FC = () => {
                     </ol>
                   </div>
                 )}
+                {configuring.id === "resend" && (
+                  <div style={{ fontSize: "0.82rem", marginTop: "0.75rem", lineHeight: 1.5 }}>
+                    <p style={{ margin: "0 0 0.5rem" }}>
+                      <strong>Email (Resend) — reach Connected (100%)</strong>
+                    </p>
+                    <ol style={{ margin: 0, paddingLeft: "1.2rem" }}>
+                      <li>
+                        Confirm Render has{" "}
+                        <code>RESEND_FROM_EMAIL=IFCDC Headquarters &lt;service@ifcdc.org&gt;</code> (already expected
+                        in production).
+                      </li>
+                      <li>
+                        After deploy, open{" "}
+                        <code>/api/hq/email/status</code> — HQ auto-registers <code>ifcdc.org</code> in Resend and
+                        returns <code>domainSetup.records</code>.
+                      </li>
+                      <li>
+                        In GoDaddy → DNS for <strong>ifcdc.org</strong>, add every SPF/DKIM record exactly (host{" "}
+                        <code>send</code> + DKIM). Optional DMARC at <code>_dmarc</code>.
+                      </li>
+                      <li>
+                        As Founder, run Verify Domain (<code>POST /api/hq/email/domain/verify</code>) or click{" "}
+                        <strong>Test Connection</strong> after DNS propagates.
+                      </li>
+                      <li>
+                        Success = Connected · sender domain verified · fallback Off · test from{" "}
+                        <code>service@ifcdc.org</code>.
+                      </li>
+                    </ol>
+                  </div>
+                )}
                 {configuring.id === "github" && (
                   <div style={{ fontSize: "0.82rem", marginTop: "0.75rem", lineHeight: 1.5 }}>
                     <p style={{ margin: "0 0 0.5rem" }}>

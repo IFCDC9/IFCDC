@@ -124,7 +124,8 @@ router.get("/email/status", async (_req: Request, res: Response) => {
   const status = getEmailDeliveryStatus();
   const { probeResendSender } = await import("../lib/notifications");
   const { getSenderAuthStatus, emailEngineCatalog } = await import("../hq/emailEngine");
-  const [resendProbe, senderAuth] = await Promise.all([
+  const { getResendDomainSetupState } = await import("../hq/resendDomainEngine");
+  const [resendProbe, senderAuth, domainSetup] = await Promise.all([
     probeResendSender().catch((err) => ({
       ok: false,
       apiKeySet: status.apiKeySet,
@@ -146,6 +147,9 @@ router.get("/email/status", async (_req: Request, res: Response) => {
       guidance: [],
       error: err instanceof Error ? err.message : "auth status failed",
     })),
+    getResendDomainSetupState().catch((err) => ({
+      error: err instanceof Error ? err.message : "domain setup failed",
+    })),
   ]);
   res.json({
     ...status,
@@ -154,8 +158,33 @@ router.get("/email/status", async (_req: Request, res: Response) => {
     purpose: "AURA Founder verification OTP + Communications Center + branded HQ email engine",
     resendProbe,
     senderAuth,
+    domainSetup,
     engine: emailEngineCatalog(),
   });
+});
+
+router.post("/email/domain/ensure", hqAuthRequired, async (req: Request, res: Response) => {
+  const email = (req.hqUser?.email || "").toLowerCase();
+  if (!req.hqUser || (req.hqUser.role !== "owner" && email !== "service@ifcdc.org")) {
+    return res.status(403).json({ error: "Founder Mode required" });
+  }
+  const { ensureResendDomainRegistered, getResendDomainSetupState, getTargetSenderDomain } = await import("../hq/resendDomainEngine");
+  const domain = String(req.body?.domain || getTargetSenderDomain()).toLowerCase();
+  const ensured = await ensureResendDomainRegistered(domain);
+  const setup = await getResendDomainSetupState(domain);
+  res.json({ ok: !ensured.error, ensured, setup });
+});
+
+router.post("/email/domain/verify", hqAuthRequired, async (req: Request, res: Response) => {
+  const email = (req.hqUser?.email || "").toLowerCase();
+  if (!req.hqUser || (req.hqUser.role !== "owner" && email !== "service@ifcdc.org")) {
+    return res.status(403).json({ error: "Founder Mode required" });
+  }
+  const { verifyResendDomain, getResendDomainSetupState, getTargetSenderDomain } = await import("../hq/resendDomainEngine");
+  const domain = String(req.body?.domain || getTargetSenderDomain()).toLowerCase();
+  const result = await verifyResendDomain(domain);
+  const setup = await getResendDomainSetupState(domain);
+  res.status(result.ok ? 200 : 409).json({ ...result, setup });
 });
 
 router.get("/email/templates", hqAuthRequired, async (_req: Request, res: Response) => {

@@ -190,29 +190,48 @@ async function buildSamGovCard(feed: Awaited<ReturnType<typeof getGrantFeedInteg
   const required = ["SAM_GOV_API_KEY", "SAM_GOV_UEI"];
   const feedStatus = feed.samGov;
   const now = new Date().toISOString();
-  const health = await probe("sam_gov", async () => {
-    const missing = required.filter((k) => !envSet(k));
-    if (missing.length) return { healthy: false, message: `Missing: ${missing.join(", ")}` };
-    return {
-      healthy: feedStatus?.status === "connected",
-      message: feedStatus?.note ?? "SAM credentials present",
-    };
-  }, { healthy: false, message: "Health probe timed out" });
+  const { probeSamGovEntityLive } = await import("./grantFeedConnectors");
+
+  const missing = required.filter((k) => !envSet(k));
+  let live: Awaited<ReturnType<typeof probeSamGovEntityLive>> | null = null;
+  if (!missing.length) {
+    live = await probeSamGovEntityLive();
+  }
+
+  const liveOk = Boolean(live?.ok);
+  const status = liveOk
+    ? "connected"
+    : required.every((k) => envSet(k))
+      ? "degraded"
+      : statusFromEnv(required);
 
   return {
     id: "sam_gov",
     name: "SAM.gov",
     category: "Federal Grants",
     description: "System for Award Management entity verification and federal compliance",
-    status: feedStatus?.status === "connected" ? "connected" : statusFromEnv(required),
-    lastChecked: feedStatus?.lastSync ?? now,
+    status,
+    lastChecked: now,
     environmentReadiness: {
       ready: required.every((k) => envSet(k)),
       missing: required.filter((k) => !envSet(k)),
       configured: required.filter((k) => envSet(k)),
     },
     requiredCredentials: required.map((k) => credential(k, k.replace(/_/g, " "))),
-    health,
+    health: {
+      healthy: liveOk,
+      latencyMs: live?.latencyMs,
+      message: missing.length
+        ? `Missing: ${missing.join(", ")}`
+        : live?.message || feedStatus?.note || "SAM.gov",
+    },
+    details: [
+      { label: "UEI", value: process.env.SAM_GOV_UEI || process.env.IFCDC_SAM_UEI || "Not set" },
+      { label: "API key", value: envSet("SAM_GOV_API_KEY") ? "Set" : "Missing" },
+      { label: "Last feed sync", value: feedStatus?.lastSync || feedStatus?.note || "—" },
+      ...(live?.legalBusinessName ? [{ label: "Legal name", value: live.legalBusinessName }] : []),
+      ...(live?.httpStatus ? [{ label: "HTTP", value: String(live.httpStatus) }] : []),
+    ],
     actions: [
       { id: "open-grants", label: "Open Grant Center", kind: "primary", action: "link", href: "/hq/grants" },
       { id: "test", label: "Test Connection", kind: "secondary", action: "test" },
@@ -328,17 +347,35 @@ async function buildResendCard(): Promise<IntegrationHubCard> {
     || process.env.EMAIL_FROM
     || process.env.SMTP_FROM
     || "IFCDC Headquarters <service@ifcdc.org>";
+
+  let domainSetup: Awaited<ReturnType<typeof import("./resendDomainEngine").getResendDomainSetupState>> | null = null;
+  if (apiKeySet) {
+    try {
+      const { getResendDomainSetupState } = await import("./resendDomainEngine");
+      domainSetup = await getResendDomainSetupState("ifcdc.org");
+    } catch {
+      domainSetup = null;
+    }
+  }
+
   const health = await probe("resend", async () => {
     if (!apiKeySet) return { healthy: false, message: "RESEND_API_KEY not set", latencyMs: 0 };
     const started = Date.now();
     const { probeResendSender } = await import("../lib/notifications");
     const live = await probeResendSender();
+    const verified = Boolean(domainSetup?.verified);
+    const noFallback = Boolean(domainSetup && !domainSetup.usedFallback);
+    const fullyConnected = live.ok && verified && noFallback;
     return {
-      healthy: live.ok,
+      healthy: fullyConnected,
       latencyMs: Date.now() - started,
-      message: live.ok
-        ? `Resend API OK · sender ${live.from}${live.domains?.length ? ` · ${live.domains.length} domain(s)` : ""}`
-        : live.error || "Resend domains probe failed",
+      message: fullyConnected
+        ? `Connected · sender domain verified · ${live.from}`
+        : domainSetup?.verified && domainSetup.usedFallback
+          ? `Domain verified but fallback still active — confirm RESEND_FROM_EMAIL=service@ifcdc.org`
+          : domainSetup && !domainSetup.verified
+            ? `ifcdc.org registered but DNS pending (${domainSetup.status || "unverified"}) — publish SPF/DKIM at GoDaddy`
+            : live.error || "Resend sender domain not verified",
     };
   }, { healthy: false, message: "Health probe timed out", latencyMs: 0 });
 
@@ -348,6 +385,7 @@ async function buildResendCard(): Promise<IntegrationHubCard> {
       ? "degraded"
       : statusFromEnv(required, optional);
   const status = normalizeHubStatus(rawStatus, health.healthy);
+  const envComplete = apiKeySet && fromSet && Boolean(domainSetup?.verified) && !domainSetup?.usedFallback;
 
   return {
     id: "resend",
@@ -357,9 +395,16 @@ async function buildResendCard(): Promise<IntegrationHubCard> {
     status,
     lastChecked: now,
     environmentReadiness: {
-      ready: apiKeySet && health.healthy,
-      missing: [...required, ...optional].filter((k) => !envSet(k)),
-      configured: [...required, ...optional].filter((k) => envSet(k)),
+      ready: envComplete,
+      missing: [
+        ...required.filter((k) => !envSet(k)),
+        ...(!fromSet ? ["RESEND_FROM_EMAIL"] : []),
+        ...(!domainSetup?.verified ? ["RESEND_DOMAIN_DNS"] : []),
+      ],
+      configured: [
+        ...[...required, ...optional].filter((k) => envSet(k)),
+        ...(domainSetup?.verified ? ["RESEND_DOMAIN_VERIFIED"] : []),
+      ],
     },
     requiredCredentials: [
       credential("RESEND_API_KEY", "Resend API key"),
@@ -371,18 +416,41 @@ async function buildResendCard(): Promise<IntegrationHubCard> {
       message: health.message,
     },
     details: [
-      { label: "From", value: from, status: fromSet ? "success" : "warning" },
+      { label: "From (configured)", value: domainSetup?.fromConfigured || from, status: fromSet ? "success" : "warning" },
+      { label: "From (effective)", value: domainSetup?.fromEffective || from, status: domainSetup?.usedFallback ? "warning" : "success" },
       { label: "API key", value: apiKeySet ? "Configured" : "Missing", status: apiKeySet ? "success" : "danger" },
+      {
+        label: "Sender domain",
+        value: domainSetup
+          ? `${domainSetup.targetDomain} · ${domainSetup.verified ? "verified" : domainSetup.status || "pending"}`
+          : "Unknown",
+        status: domainSetup?.verified ? "success" : "warning",
+      },
+      {
+        label: "SPF / DKIM",
+        value: domainSetup?.verified ? "Validated in Resend" : "Awaiting GoDaddy DNS + Resend verify",
+        status: domainSetup?.verified ? "success" : "warning",
+      },
+      {
+        label: "Fallback",
+        value: domainSetup?.usedFallback ? "Active (barbers domain)" : "Off",
+        status: domainSetup?.usedFallback ? "warning" : "success",
+      },
+      {
+        label: "Environment",
+        value: envComplete ? "Complete" : "Incomplete",
+        status: envComplete ? "success" : "warning",
+      },
     ],
     actions: [
       { id: "comms", label: "Open Communications", kind: "primary", action: "link", href: "/hq/communications" },
       { id: "test", label: "Test Connection", kind: "secondary", action: "test" },
       {
         id: "configure",
-        label: apiKeySet ? "Configured on Render" : "Not configured",
-        kind: apiKeySet ? "secondary" : "disabled",
+        label: domainSetup?.verified ? "Domain verified" : "DNS / Configure",
+        kind: "secondary",
         action: "configure",
-        reason: "Set RESEND_API_KEY on Render",
+        reason: domainSetup?.guidance?.[0] || "Verify ifcdc.org in Resend and set RESEND_FROM_EMAIL",
       },
     ],
   };
@@ -1025,19 +1093,52 @@ export async function testIntegrationHubProvider(provider: string) {
   }
   if (provider === "resend") {
     const { probeResendSender } = await import("../lib/notifications");
-    const live = await probeResendSender();
+    const { getResendDomainSetupState } = await import("./resendDomainEngine");
+    const [live, domain] = await Promise.all([
+      probeResendSender(),
+      getResendDomainSetupState().catch(() => null),
+    ]);
     invalidateIntegrationsHubCache();
+    const success = Boolean(domain?.verified && !domain.usedFallback && live.ok);
     return {
-      success: live.ok,
-      message: live.ok
-        ? `Resend API OK · sender ${live.from}`
-        : live.error || "Resend probe failed",
+      success,
+      message: domain
+        ? domain.verified
+          ? domain.usedFallback
+            ? `Resend OK but fallback still active — set RESEND_FROM_EMAIL to service@${domain.targetDomain}`
+            : `Test email path ready · ${domain.targetDomain} verified · sender ${live.from}`
+          : `Resend API OK · ${domain.targetDomain} pending DNS (${domain.status || "unverified"})`
+        : live.ok
+          ? `Resend API OK · sender ${live.from}`
+          : live.error || "Resend probe failed",
       provider,
       testedAt: new Date().toISOString(),
       details: [
         { label: "API key", value: live.apiKeySet ? "Set" : "Missing" },
-        { label: "From", value: live.from },
+        { label: "Configured From", value: domain?.fromConfigured || live.from },
+        { label: "Effective From", value: domain?.fromEffective || live.from },
+        { label: "Target domain", value: domain?.targetDomain || "—" },
+        { label: "Domain status", value: domain?.status || "—" },
+        { label: "Fallback", value: domain?.usedFallback ? "Yes" : "No" },
         ...(live.domains || []).slice(0, 5).map((d) => ({ label: "Domain", value: `${d.name} (${d.status})` })),
+      ],
+    };
+  }
+  if (provider === "sam_gov") {
+    const { probeSamGovEntityLive } = await import("./grantFeedConnectors");
+    const live = await probeSamGovEntityLive();
+    invalidateIntegrationsHubCache();
+    return {
+      success: live.ok,
+      message: live.message,
+      provider,
+      testedAt: new Date().toISOString(),
+      details: [
+        { label: "UEI", value: live.uei || "Not set" },
+        { label: "API key", value: live.apiKeySet ? "Set" : "Missing" },
+        { label: "Latency", value: `${live.latencyMs}ms` },
+        ...(live.legalBusinessName ? [{ label: "Legal name", value: live.legalBusinessName }] : []),
+        ...(live.httpStatus ? [{ label: "HTTP", value: String(live.httpStatus) }] : []),
       ],
     };
   }
