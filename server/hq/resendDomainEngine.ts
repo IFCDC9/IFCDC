@@ -5,7 +5,6 @@
  */
 import {
   resolveResendFromEmail,
-  resolveVerifiedResendFromEmail,
   probeResendSender,
 } from "../lib/notifications";
 
