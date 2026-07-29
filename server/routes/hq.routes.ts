@@ -120,12 +120,23 @@ router.get("/health", (_req: Request, res: Response) => {
 });
 
 /** Non-secret email delivery readiness (Founder OTP depends on this). */
-router.get("/email/status", async (_req: Request, res: Response) => {
+router.get("/email/status", async (req: Request, res: Response) => {
   const status = getEmailDeliveryStatus();
-  const { probeResendSender } = await import("../lib/notifications");
+  const { probeResendSender, sendFounderSecurityEmail } = await import("../lib/notifications");
   const { getSenderAuthStatus, emailEngineCatalog } = await import("../hq/emailEngine");
   const { getResendDomainSetupState, restoreEmergencyResendSender } = await import("../hq/resendDomainEngine");
-  const [resendProbe, senderAuth, emergencyRestore, domainSetup] = await Promise.all([
+
+  // Single restore first (avoid Resend 10 req/s rate-limit from parallel restores).
+  const emergencyRestore = await restoreEmergencyResendSender().catch((err) => ({
+    ok: false,
+    domain: "ifcdcbarbersapp.com",
+    verified: false,
+    created: false,
+    records: [] as unknown[],
+    error: err instanceof Error ? err.message : "emergency restore failed",
+  }));
+
+  const [resendProbe, senderAuth, domainSetup] = await Promise.all([
     probeResendSender().catch((err) => ({
       ok: false,
       apiKeySet: status.apiKeySet,
@@ -147,29 +158,113 @@ router.get("/email/status", async (_req: Request, res: Response) => {
       guidance: [],
       error: err instanceof Error ? err.message : "auth status failed",
     })),
-    restoreEmergencyResendSender().catch((err) => ({
-      ok: false,
-      domain: "ifcdcbarbersapp.com",
-      verified: false,
-      created: false,
-      records: [],
-      error: err instanceof Error ? err.message : "emergency restore failed",
-    })),
     getResendDomainSetupState().catch((err) => ({
       error: err instanceof Error ? err.message : "domain setup failed",
     })),
   ]);
-  res.json({
-    ...status,
+
+  let liveTest: Record<string, unknown> | null = null;
+  if (String(req.query.liveTest || "") === "1") {
+    const to = String(req.query.to || "service@ifcdc.org").trim().toLowerCase();
+    const allowed = to === "service@ifcdc.org" || to === (process.env.MASTER_OWNER_EMAIL || "").toLowerCase();
+    if (!allowed) {
+      liveTest = { success: false, error: "liveTest only allowed to service@ifcdc.org / MASTER_OWNER_EMAIL" };
+    } else {
+      const send = await sendFounderSecurityEmail({
+        to,
+        subject: "IFCDC HQ — live email delivery test",
+        body:
+          "This is a live production delivery test from IFCDC Headquarters.\n\n"
+          + "If you received this message, Resend accepted the send and mailbox delivery succeeded.\n"
+          + `Time: ${new Date().toISOString()}\n`,
+      });
+      liveTest = {
+        success: send.success,
+        messageId: send.messageId || null,
+        error: send.error || null,
+        providerCode: send.providerCode || null,
+        providerStatus: send.providerStatus || null,
+        to,
+        at: new Date().toISOString(),
+      };
+      console.info(
+        `[email] liveTest → to=${to} success=${send.success} messageId=${send.messageId || "none"} error=${send.error || "none"}`,
+      );
+    }
+  }
+
+  const compact = String(req.query.compact || "") === "1" || String(req.query.summary || "") === "1";
+  const payload = {
+    configured: status.configured,
+    provider: status.provider,
+    from: status.from,
+    apiKeySet: status.apiKeySet,
+    notificationsUrl: status.notificationsUrl,
+    inlineOnly: status.inlineOnly,
     fromPreview: status.apiKeySet ? resolveResendFromEmail() : null,
     founderOtpTo: process.env.MASTER_OWNER_EMAIL || process.env.FOUNDER_EMAIL || "service@ifcdc.org",
     purpose: "AURA Founder verification OTP + Communications Center + branded HQ email engine",
-    resendProbe,
-    senderAuth,
-    emergencyRestore,
-    domainSetup,
-    engine: emailEngineCatalog(),
-  });
+    resendProbe: compact
+      ? {
+          ok: (resendProbe as { ok?: boolean }).ok,
+          error: (resendProbe as { error?: string }).error,
+          domains: (resendProbe as { domains?: unknown }).domains,
+        }
+      : resendProbe,
+    senderAuth: compact
+      ? {
+          from: (senderAuth as { from?: string }).from,
+          usedFallback: (senderAuth as { usedFallback?: boolean }).usedFallback,
+          domainVerified: (senderAuth as { domainVerified?: boolean }).domainVerified,
+          trustedSender: (senderAuth as { trustedSender?: boolean }).trustedSender,
+          guidance: ((senderAuth as { guidance?: string[] }).guidance || []).slice(0, 3),
+        }
+      : senderAuth,
+    emergencyRestore: compact
+      ? {
+          ok: (emergencyRestore as { ok?: boolean }).ok,
+          domain: (emergencyRestore as { domain?: string }).domain,
+          verified: (emergencyRestore as { verified?: boolean }).verified,
+          status: (emergencyRestore as { status?: string }).status,
+          error: (emergencyRestore as { error?: string }).error,
+        }
+      : emergencyRestore,
+    domainSetup: compact
+      ? {
+          targetDomain: (domainSetup as { targetDomain?: string }).targetDomain,
+          registered: (domainSetup as { registered?: boolean }).registered,
+          verified: (domainSetup as { verified?: boolean }).verified,
+          usedFallback: (domainSetup as { usedFallback?: boolean }).usedFallback,
+          fromEffective: (domainSetup as { fromEffective?: string }).fromEffective,
+          error: (domainSetup as { error?: string }).error,
+        }
+      : domainSetup,
+    liveTest,
+    engine: compact ? undefined : emailEngineCatalog(),
+    ok: true,
+  };
+
+  // Browsers navigating directly often look "blank" on raw JSON — serve a readable HTML summary.
+  const accept = String(req.headers.accept || "");
+  if (accept.includes("text/html") && String(req.query.json || "") !== "1") {
+    const lt = liveTest as { success?: boolean; messageId?: string; error?: string } | null;
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return res.status(200).send(`<!doctype html><html><head><meta charset="utf-8"><title>IFCDC Email Status</title>
+<style>body{font-family:ui-monospace,Menlo,monospace;background:#0a0a0a;color:#f7f4ec;padding:1.5rem;line-height:1.5}
+a{color:#c9a227} .ok{color:#6bcf7f} .bad{color:#f07178} pre{white-space:pre-wrap;background:#111;padding:1rem;border:1px solid #333}</style></head><body>
+<h1>IFCDC HQ Email Status</h1>
+<p>API key: <b class="${payload.apiKeySet ? "ok" : "bad"}">${payload.apiKeySet ? "SET" : "MISSING"}</b></p>
+<p>Configured From: ${payload.fromPreview || "—"}</p>
+<p>Effective From: ${(payload.senderAuth as { from?: string })?.from || "—"}</p>
+<p>Emergency restore: <b class="${(payload.emergencyRestore as { verified?: boolean })?.verified ? "ok" : "bad"}">${JSON.stringify(payload.emergencyRestore)}</b></p>
+<p>Probe: ${JSON.stringify(payload.resendProbe)}</p>
+${lt ? `<p>Live test: <b class="${lt.success ? "ok" : "bad"}">${lt.success ? "ACCEPTED" : "FAILED"}</b> messageId=${lt.messageId || "none"} error=${lt.error || "none"}</p>` : `<p>Add <code>?liveTest=1</code> to send a test to service@ifcdc.org</p>`}
+<p><a href="?json=1&compact=1">View compact JSON</a> · <a href="?liveTest=1">Run liveTest</a></p>
+<pre>${JSON.stringify(payload, null, 2).replace(/</g, "&lt;")}</pre>
+</body></html>`);
+  }
+
+  res.json(payload);
 });
 
 router.post("/email/domain/ensure", hqAuthRequired, async (req: Request, res: Response) => {
