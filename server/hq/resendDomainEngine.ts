@@ -120,9 +120,14 @@ export async function deleteResendDomain(domainId: string): Promise<{ ok: boolea
   return { ok: true };
 }
 
+export const RESEND_EMERGENCY_FALLBACK_DOMAIN = "ifcdcbarbersapp.com";
+export const RESEND_EMERGENCY_FROM =
+  "IFCDC Headquarters <service@ifcdcbarbersapp.com>";
+
 /**
  * Free Resend plans allow 1 domain. HQ needs ifcdc.org, but production currently
- * holds ifcdcbarbersapp.com. Replace non-target domains so ifcdc.org can register.
+ * holds ifcdcbarbersapp.com. Replace is Founder-opt-in only — never auto-delete
+ * a working verified sender domain (that outage is what this restore fixes).
  */
 export async function replaceResendDomainWithTarget(domain = getTargetSenderDomain()): Promise<{
   ok: boolean;
@@ -130,6 +135,15 @@ export async function replaceResendDomainWithTarget(domain = getTargetSenderDoma
   created?: Awaited<ReturnType<typeof ensureResendDomainRegistered>>;
   message: string;
 }> {
+  const allow = String(process.env.RESEND_ALLOW_DOMAIN_REPLACE || "").toLowerCase() === "true";
+  if (!allow) {
+    return {
+      ok: false,
+      deleted: [],
+      message:
+        "Domain replace disabled. Set RESEND_ALLOW_DOMAIN_REPLACE=true on Render only when intentionally swapping domains. Prefer keeping ifcdcbarbersapp.com verified until ifcdc.org DNS is live.",
+    };
+  }
   const target = domain.toLowerCase();
   const existing = await listResendDomains();
   const already = existing.find((d) => d.name.toLowerCase() === target);
@@ -152,8 +166,6 @@ export async function replaceResendDomainWithTarget(domain = getTargetSenderDoma
   const deleted: string[] = [];
   for (const d of existing) {
     if (d.name.toLowerCase() === target) continue;
-    // Prefer removing the known HQ fallback domain; also clear any other slot-holders
-    // when the plan limit blocks registration of the target.
     const rem = await deleteResendDomain(d.id);
     if (!rem.ok) {
       return {
@@ -166,7 +178,6 @@ export async function replaceResendDomainWithTarget(domain = getTargetSenderDoma
     console.warn(`[resend-domain] removed ${d.name} to free plan slot for ${target}`);
   }
 
-  // Create directly (do not call ensureResendDomainRegistered — avoids replace recursion).
   const { ok, status, data } = await resendFetch("/domains", {
     method: "POST",
     body: JSON.stringify({ name: target }),
@@ -201,6 +212,54 @@ function isPlanDomainLimitError(message: string): boolean {
   return /plan includes 1 domain|upgrade to add more|domain limit|too many domains/i.test(message);
 }
 
+/**
+ * Restore the last known working Resend sender domain (ifcdcbarbersapp.com).
+ * Re-registers + requests verify so OTP/booking/payment mail can send again.
+ */
+export async function restoreEmergencyResendSender(): Promise<{
+  ok: boolean;
+  domain: string;
+  status?: string;
+  verified: boolean;
+  created: boolean;
+  verifyMessage?: string;
+  records: ResendDnsRecord[];
+  error?: string;
+}> {
+  const domain = RESEND_EMERGENCY_FALLBACK_DOMAIN;
+  const ensured = await ensureResendDomainRegistered(domain);
+  if (ensured.error && !ensured.domainId) {
+    return {
+      ok: false,
+      domain,
+      verified: false,
+      created: false,
+      records: [],
+      error: ensured.error,
+    };
+  }
+  let status = (ensured.status || "").toLowerCase();
+  let verified = status === "verified";
+  let verifyMessage: string | undefined;
+  if (ensured.domainId && !verified) {
+    const v = await verifyResendDomain(domain);
+    verifyMessage = v.message;
+    status = (v.status || status).toLowerCase();
+    verified = status === "verified" || v.ok;
+  }
+  const detail = ensured.domainId ? await getResendDomainDetail(ensured.domainId) : null;
+  return {
+    ok: verified || Boolean(ensured.domainId),
+    domain,
+    status: detail?.status || status,
+    verified,
+    created: Boolean(ensured.created),
+    verifyMessage,
+    records: detail?.records || ensured.records || [],
+    error: verified ? undefined : verifyMessage || ensured.error || "Domain pending DNS verification",
+  };
+}
+
 /** Create domain in Resend if missing (idempotent). */
 export async function ensureResendDomainRegistered(domain = getTargetSenderDomain()): Promise<{
   created: boolean;
@@ -229,7 +288,6 @@ export async function ensureResendDomainRegistered(domain = getTargetSenderDomai
     body: JSON.stringify({ name: domain }),
   });
   if (!ok) {
-    // Already exists race
     if (status === 409 || /already|exists/i.test(String(data.message || data.error || ""))) {
       const again = await listResendDomains();
       const m = again.find((d) => d.name.toLowerCase() === domain.toLowerCase());
@@ -246,9 +304,8 @@ export async function ensureResendDomainRegistered(domain = getTargetSenderDomai
     }
 
     const errMsg = String(data.message || data.error || `Resend create domain failed (${status})`);
-    // Auto-swap when free plan blocks ifcdc.org behind ifcdcbarbersapp.com.
-    // Opt out with RESEND_ALLOW_DOMAIN_REPLACE=false.
-    const allowReplace = String(process.env.RESEND_ALLOW_DOMAIN_REPLACE ?? "true").toLowerCase() !== "false";
+    // Auto-swap is OFF by default — deleting the only verified sender caused production outage.
+    const allowReplace = String(process.env.RESEND_ALLOW_DOMAIN_REPLACE || "").toLowerCase() === "true";
     if (allowReplace && isPlanDomainLimitError(errMsg)) {
       const swapped = await replaceResendDomainWithTarget(domain);
       if (swapped.ok && swapped.created && !swapped.created.error) {
@@ -315,30 +372,65 @@ export async function verifyResendDomain(domain = getTargetSenderDomain()): Prom
 }
 
 export async function getResendDomainSetupState(domain = getTargetSenderDomain()): Promise<ResendDomainState> {
+  // Always restore last-known working sender first so mail can send while ifcdc.org DNS is pending.
+  const emergency = await restoreEmergencyResendSender().catch((err) => ({
+    ok: false,
+    domain: RESEND_EMERGENCY_FALLBACK_DOMAIN,
+    verified: false,
+    created: false,
+    records: [] as ResendDnsRecord[],
+    error: err instanceof Error ? err.message : "emergency restore failed",
+  }));
+
   const configuredFrom = resolveResendFromEmail();
-  const verifiedFrom = await resolveVerifiedResendFromEmail();
   const probe = await probeResendSender();
+  const fromDomain = configuredFrom.match(/@([a-z0-9.-]+)/i)?.[1]?.toLowerCase();
+  const configuredOk = Boolean(
+    fromDomain && (probe.domains || []).some((d) => d.name.toLowerCase() === fromDomain && d.status === "verified"),
+  );
+  const verifiedDomain = (probe.domains || []).find((d) => d.status === "verified");
+  let fromEffective = configuredFrom;
+  let usedFallback = false;
+  if (!configuredOk && verifiedDomain) {
+    const local =
+      configuredFrom.match(/<([^@>]+)@/)?.[1]
+      || configuredFrom.match(/^([^@\s]+)@/)?.[1]
+      || "service";
+    fromEffective = `IFCDC Headquarters <${local}@${verifiedDomain.name}>`;
+    usedFallback = true;
+  } else if (!configuredOk) {
+    fromEffective = RESEND_EMERGENCY_FROM;
+    usedFallback = true;
+  }
+
   const ensured = await ensureResendDomainRegistered(domain);
   const registered = Boolean(ensured.domainId) && !ensured.error;
   const status = (ensured.status || "").toLowerCase();
   const verified = status === "verified";
-  const fallbackRemoved = !verifiedFrom.usedFallback && verified;
+  const fallbackRemoved = !usedFallback && verified;
 
   const guidance: string[] = [];
+  if (emergency.verified) {
+    guidance.push(
+      `Emergency sender ${RESEND_EMERGENCY_FALLBACK_DOMAIN} is verified — outbound mail uses this until ifcdc.org DNS is complete.`,
+    );
+  } else if (emergency.error) {
+    guidance.push(`Emergency domain restore: ${emergency.error}`);
+  }
   if (ensured.error) guidance.push(ensured.error);
   if (!registered) {
     if (ensured.error && isPlanDomainLimitError(ensured.error)) {
       guidance.push(
-        `Resend plan limit blocked ${domain}. HQ will replace ifcdcbarbersapp.com with ${domain} on the next ensure (set RESEND_ALLOW_DOMAIN_REPLACE=false to disable). Or upgrade Resend to Pro.`,
+        `Resend plan limit blocked ${domain}. Keep ${RESEND_EMERGENCY_FALLBACK_DOMAIN} verified for delivery. Upgrade Resend or set RESEND_ALLOW_DOMAIN_REPLACE=true only for a deliberate swap.`,
       );
     } else {
-      guidance.push(`Register ${domain} in Resend (POST /api/hq/email/domain/ensure or /domain/replace).`);
+      guidance.push(`Register ${domain} in Resend (POST /api/hq/email/domain/ensure).`);
     }
   } else if (!verified) {
     guidance.push(
       `Publish the DNS records below at GoDaddy (nameservers ns19/ns20.domaincontrol.com), wait 5–30 minutes, then POST /api/hq/email/domain/verify.`,
     );
-  } else if (verifiedFrom.usedFallback) {
+  } else if (usedFallback) {
     guidance.push(
       `Domain ${domain} is verified but RESEND_FROM_EMAIL still resolves to an unverified From. Set RESEND_FROM_EMAIL=IFCDC Headquarters <service@${domain}> on Render and Manual Deploy.`,
     );
@@ -369,11 +461,11 @@ export async function getResendDomainSetupState(domain = getTargetSenderDomain()
     status: ensured.status,
     records: ensured.records,
     fromConfigured: configuredFrom,
-    fromEffective: verifiedFrom.from,
-    usedFallback: verifiedFrom.usedFallback,
+    fromEffective,
+    usedFallback,
     fallbackRemoved,
     guidance,
     godaddySteps,
-    error: ensured.error || (!probe.ok && !verified ? probe.error : undefined),
+    error: ensured.error || (!probe.ok && !verified && !emergency.verified ? probe.error : undefined),
   };
 }

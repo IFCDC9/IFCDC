@@ -229,23 +229,53 @@ export async function resolveVerifiedResendFromEmail(): Promise<{
   probe: Awaited<ReturnType<typeof probeResendSender>>;
 }> {
   const configuredFrom = resolveResendFromEmail();
+
+  // Production outage restore: ensure the last-known working domain exists before probing.
+  try {
+    const { restoreEmergencyResendSender, RESEND_EMERGENCY_FROM, RESEND_EMERGENCY_FALLBACK_DOMAIN } =
+      await import("../hq/resendDomainEngine");
+    const restored = await restoreEmergencyResendSender();
+    if (!restored.verified) {
+      console.warn(
+        `[email] Emergency Resend domain ${RESEND_EMERGENCY_FALLBACK_DOMAIN} status=${restored.status || "unknown"} — ${restored.error || restored.verifyMessage || "pending"}`,
+      );
+    }
+  } catch (err) {
+    console.error(
+      "[email] Emergency Resend domain restore failed:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
   const probe = await probeResendSender();
   if (probe.ok) {
     return { from: configuredFrom, configuredFrom, usedFallback: false, probe };
   }
+
   const verified = (probe.domains || []).find((d) => d.status === "verified");
-  if (!verified) {
-    return { from: configuredFrom, configuredFrom, usedFallback: false, probe };
+  if (verified) {
+    const local =
+      configuredFrom.match(/<([^@>]+)@/)?.[1]
+      || configuredFrom.match(/^([^@\s]+)@/)?.[1]
+      || "service";
+    const from = `IFCDC Headquarters <${local}@${verified.name}>`;
+    console.warn(
+      `[email] RESEND_FROM_EMAIL domain unverified (${configuredFrom}). Falling back to verified domain: ${from}`,
+    );
+    return { from, configuredFrom, usedFallback: true, probe };
   }
-  const local =
-    configuredFrom.match(/<([^@>]+)@/)?.[1]
-    || configuredFrom.match(/^([^@\s]+)@/)?.[1]
-    || "service";
-  const from = `IFCDC Headquarters <${local}@${verified.name}>`;
-  console.warn(
-    `[email] RESEND_FROM_EMAIL domain unverified (${configuredFrom}). Falling back to verified domain: ${from}`
+
+  // Last-known working From when Resend has no verified domains yet (DNS re-verify in progress).
+  const { RESEND_EMERGENCY_FROM } = await import("../hq/resendDomainEngine");
+  console.error(
+    `[email] No verified Resend domain available. Using emergency From ${RESEND_EMERGENCY_FROM}. Probe: ${probe.error || "unknown"}`,
   );
-  return { from, configuredFrom, usedFallback: true, probe };
+  return {
+    from: RESEND_EMERGENCY_FROM,
+    configuredFrom,
+    usedFallback: true,
+    probe,
+  };
 }
 
 /** Direct Resend path for security-critical Founder OTP (skips microservice). */

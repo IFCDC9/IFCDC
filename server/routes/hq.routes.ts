@@ -124,8 +124,8 @@ router.get("/email/status", async (_req: Request, res: Response) => {
   const status = getEmailDeliveryStatus();
   const { probeResendSender } = await import("../lib/notifications");
   const { getSenderAuthStatus, emailEngineCatalog } = await import("../hq/emailEngine");
-  const { getResendDomainSetupState } = await import("../hq/resendDomainEngine");
-  const [resendProbe, senderAuth, domainSetup] = await Promise.all([
+  const { getResendDomainSetupState, restoreEmergencyResendSender } = await import("../hq/resendDomainEngine");
+  const [resendProbe, senderAuth, emergencyRestore, domainSetup] = await Promise.all([
     probeResendSender().catch((err) => ({
       ok: false,
       apiKeySet: status.apiKeySet,
@@ -147,6 +147,14 @@ router.get("/email/status", async (_req: Request, res: Response) => {
       guidance: [],
       error: err instanceof Error ? err.message : "auth status failed",
     })),
+    restoreEmergencyResendSender().catch((err) => ({
+      ok: false,
+      domain: "ifcdcbarbersapp.com",
+      verified: false,
+      created: false,
+      records: [],
+      error: err instanceof Error ? err.message : "emergency restore failed",
+    })),
     getResendDomainSetupState().catch((err) => ({
       error: err instanceof Error ? err.message : "domain setup failed",
     })),
@@ -158,6 +166,7 @@ router.get("/email/status", async (_req: Request, res: Response) => {
     purpose: "AURA Founder verification OTP + Communications Center + branded HQ email engine",
     resendProbe,
     senderAuth,
+    emergencyRestore,
     domainSetup,
     engine: emailEngineCatalog(),
   });
@@ -190,6 +199,18 @@ router.post("/email/domain/replace", hqAuthRequired, async (req: Request, res: R
   const result = await replaceResendDomainWithTarget(domain);
   const setup = await getResendDomainSetupState(domain);
   res.status(result.ok ? 200 : 409).json({ ...result, setup });
+});
+
+/** Emergency restore: re-register ifcdcbarbersapp.com and verify so mail can send. */
+router.post("/email/domain/restore-emergency", hqAuthRequired, async (req: Request, res: Response) => {
+  const email = (req.hqUser?.email || "").toLowerCase();
+  if (!req.hqUser || (req.hqUser.role !== "owner" && email !== "service@ifcdc.org")) {
+    return res.status(403).json({ error: "Founder Mode required" });
+  }
+  const { restoreEmergencyResendSender, getResendDomainSetupState } = await import("../hq/resendDomainEngine");
+  const restored = await restoreEmergencyResendSender();
+  const setup = await getResendDomainSetupState();
+  res.status(restored.verified || restored.ok ? 200 : 409).json({ restored, setup });
 });
 
 router.post("/email/domain/verify", hqAuthRequired, async (req: Request, res: Response) => {
