@@ -1143,6 +1143,32 @@ router.get("/aura/brain-v1/org-health", hqAuthRequired, requireHQModule("aura"),
   res.json(payload);
 });
 
+/** AURA Enterprise Brain v1 — Executive Daily Briefing (Founder-only, read-only). */
+router.get("/aura/brain-v1/daily-briefing", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const {
+    buildExecutiveDailyBriefingV1,
+    logAuraBrainV1Action,
+  } = await import("../hq/auraEnterpriseBrainV1");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "AURA Enterprise Brain v1 requires Founder access." });
+  }
+  const payload = await buildExecutiveDailyBriefingV1();
+  await logAuraBrainV1Action({
+    userId: identity.userId || req.hqUser?.id,
+    userEmail: identity.email || req.hqUser?.email,
+    command: "brain_v1.daily_briefing.read",
+    result: `ok source=${payload.source} highlights=${payload.highlights.length} degraded=${payload.degraded}`,
+    metadata: { module: "daily-briefing", mode: "read_only", cached: payload.cached },
+  });
+  res.json(payload);
+});
+
 /** AURA Enterprise Brain 2.0 */
 router.post("/aura/brain", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
   const { resolveIdentityFromHqUser, publicIdentitySummary } = await import("../hq/auraFounderTrustEngine");

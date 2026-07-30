@@ -421,7 +421,11 @@ export async function buildExecutiveCommandCenterV1(opts: {
       emailConfigured: email.configured,
       emailFrom: email.from,
     },
-    moduleRoadmap: brainV1ModuleRoadmap(["executive-command-center", "organization-health"]),
+    moduleRoadmap: brainV1ModuleRoadmap([
+      "executive-command-center",
+      "organization-health",
+      "daily-briefing",
+    ]),
     degraded,
     warning: warnings.length ? warnings.join(" ") : null,
   };
@@ -542,6 +546,82 @@ export async function buildOrganizationHealthDashboardV1(): Promise<Organization
     watchItems: watchItems.slice(0, 12),
     degraded,
     warning: warnings.length ? warnings.join(" ") : null,
-    moduleRoadmap: brainV1ModuleRoadmap(["executive-command-center", "organization-health"]),
+    moduleRoadmap: brainV1ModuleRoadmap([
+      "executive-command-center",
+      "organization-health",
+      "daily-briefing",
+    ]),
+  };
+}
+
+export type ExecutiveDailyBriefingV1 = {
+  module: "daily-briefing";
+  version: "v1";
+  generatedAt: string;
+  mode: "read_only";
+  title: string;
+  date: string | null;
+  content: string;
+  highlights: string[];
+  brainHighlights: string[];
+  cached: boolean;
+  source: string;
+  degraded: boolean;
+  warning: string | null;
+  moduleRoadmap: Array<{ id: number; name: string; status: "live" | "planned" }>;
+};
+
+export async function buildExecutiveDailyBriefingV1(): Promise<ExecutiveDailyBriefingV1> {
+  const generatedAt = new Date().toISOString();
+  let degraded = false;
+  const warnings: string[] = [];
+
+  const [legacy, brain] = await Promise.all([
+    withTimeout(
+      import("./executiveBriefings").then((m) => m.getOrGenerateDailyBriefing(false)),
+      null,
+      "daily-briefing"
+    ),
+    withTimeout(
+      import("./auraEnterpriseBrain").then((m) => m.buildEnterpriseBrainDailyBriefing()),
+      null,
+      "brain-briefing"
+    ),
+  ]);
+
+  if (!legacy && !brain) {
+    degraded = true;
+    warnings.push("Daily briefing sources unavailable.");
+  }
+
+  const highlights = [
+    ...(legacy?.highlights ?? []),
+    ...(brain?.highlights ?? []).slice(0, 6),
+  ].filter((h, i, arr) => arr.indexOf(h) === i).slice(0, 12);
+
+  const content =
+    (legacy?.content && String(legacy.content).trim())
+    || (brain?.content && String(brain.content).trim())
+    || "Daily briefing is not available yet. Retry shortly or open Founder Command Center.";
+
+  return {
+    module: "daily-briefing",
+    version: "v1",
+    generatedAt,
+    mode: "read_only",
+    title: legacy?.title || brain?.title || "Executive Daily Briefing",
+    date: legacy?.date ?? null,
+    content: content.slice(0, 12_000),
+    highlights,
+    brainHighlights: (brain?.highlights ?? []).slice(0, 8),
+    cached: Boolean(legacy?.cached),
+    source: legacy ? (legacy.cached ? "executive-briefings-cache" : "executive-briefings-live") : brain ? "enterprise-brain-2" : "none",
+    degraded,
+    warning: warnings.length ? warnings.join(" ") : null,
+    moduleRoadmap: brainV1ModuleRoadmap([
+      "executive-command-center",
+      "organization-health",
+      "daily-briefing",
+    ]),
   };
 }

@@ -6,7 +6,7 @@ import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Activity, AlertTriangle, Brain, CheckCircle2, Clock, Mail, Monitor,
+  Activity, AlertTriangle, Brain, CheckCircle2, Clock, FileText, Mail, Monitor,
   RefreshCw, Shield, Target,
 } from "lucide-react";
 import HQLayout from "../../layouts/HQLayout";
@@ -16,7 +16,7 @@ import { StatusBadge } from "../../components/hq/StatusBadge";
 import { HqLoading } from "../../components/hq/HqLoading";
 import { HqApiError } from "../../api/hqApiFetch";
 
-type BrainTab = "command" | "health";
+type BrainTab = "command" | "health" | "briefing";
 
 function errorMessage(err: unknown): string {
   if (err instanceof HqApiError) {
@@ -56,14 +56,31 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
     enabled: tab === "health",
   });
 
+  const briefing = useQuery({
+    queryKey: ["aura-brain-v1-daily-briefing"],
+    queryFn: hqApi.auraBrainV1DailyBriefing,
+    staleTime: 60_000,
+    refetchInterval: tab === "briefing" ? 120_000 : false,
+    retry: 1,
+    enabled: tab === "briefing",
+  });
+
   const d = cc.data;
   const h = health.data;
-  const roadmap = d?.moduleRoadmap ?? h?.moduleRoadmap ?? [];
+  const b = briefing.data;
+  const roadmap = d?.moduleRoadmap ?? h?.moduleRoadmap ?? b?.moduleRoadmap ?? [];
+
+  const refetchActive = () => {
+    if (tab === "command") return cc.refetch();
+    if (tab === "health") return health.refetch();
+    return briefing.refetch();
+  };
+  const fetching = tab === "command" ? cc.isFetching : tab === "health" ? health.isFetching : briefing.isFetching;
 
   return (
     <HQLayout
       title="AURA Enterprise Brain v1"
-      subtitle="Founder read-only — Command Center and Organization Health"
+      subtitle="Founder read-only — Command Center, Organization Health, Daily Briefing"
       auraModule="aura"
     >
       <div className="hq-analytics-toolbar" style={{ marginBottom: "1rem", flexWrap: "wrap" }}>
@@ -81,12 +98,19 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
         >
           2. Organization Health
         </button>
+        <button
+          type="button"
+          className={`hq-btn hq-btn-sm ${tab === "briefing" ? "hq-btn-primary" : "hq-btn-secondary"}`}
+          onClick={() => setTab("briefing")}
+        >
+          3. Daily Briefing
+        </button>
         <StatusBadge label="Read-only" variant="muted" />
         <button
           type="button"
           className="hq-btn hq-btn-secondary hq-btn-sm"
-          onClick={() => void (tab === "command" ? cc.refetch() : health.refetch())}
-          disabled={tab === "command" ? cc.isFetching : health.isFetching}
+          onClick={() => void refetchActive()}
+          disabled={fetching}
         >
           <RefreshCw size={14} /> Refresh
         </button>
@@ -337,6 +361,50 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
         </>
       )}
 
+      {tab === "briefing" && (
+        <>
+          {briefing.isPending && !b && <HqLoading message="Loading Executive Daily Briefing…" />}
+          {briefing.isError && (
+            <div className="hq-anomaly-alert hq-sev-medium" style={{ marginBottom: "1rem" }} role="status">
+              <AlertTriangle size={16} />
+              <div>
+                <strong>Daily Briefing unavailable</strong>
+                <span> {errorMessage(briefing.error)}</span>
+              </div>
+            </div>
+          )}
+          {b?.warning && (
+            <p style={{ color: "var(--hq-warning)", marginBottom: "0.75rem", fontSize: "0.85rem" }}>{b.warning}</p>
+          )}
+          {b && (
+            <>
+              <div className="hq-kpi-grid" style={{ marginBottom: "1.25rem" }}>
+                <KpiCard label="Briefing" value={b.cached ? "Cached" : "Live"} meta={b.date || undefined} icon={FileText} variant="gold" />
+                <KpiCard label="Highlights" value={b.highlights.length} icon={Brain} />
+                <KpiCard label="Source" value={b.source.replace(/-/g, " ").slice(0, 18)} icon={Activity} />
+                <KpiCard label="Brain signals" value={b.brainHighlights.length} icon={Target} />
+              </div>
+
+              <div className="hq-panel" style={{ marginBottom: "1rem" }}>
+                <div className="hq-panel-body">
+                  <h4 style={{ color: "var(--hq-gold)", marginBottom: "0.5rem" }}>{b.title}</h4>
+                  <p className="hq-muted-text" style={{ fontSize: "0.78rem", marginBottom: "0.75rem" }}>
+                    Generated {new Date(b.generatedAt).toLocaleString()} · mode {b.mode}
+                  </p>
+                  <h5 style={{ margin: "0 0 0.5rem", fontSize: "0.85rem" }}>Highlights</h5>
+                  <ul style={{ margin: "0 0 1rem", paddingLeft: "1.1rem", fontSize: "0.85rem", lineHeight: 1.55 }}>
+                    {b.highlights.length ? b.highlights.map((line) => <li key={line}>{line}</li>) : <li className="hq-muted-text">No highlights</li>}
+                  </ul>
+                  <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: "0.8rem", lineHeight: 1.55, maxHeight: 420, overflow: "auto", margin: 0, color: "var(--hq-text-muted)" }}>
+                    {b.content}
+                  </pre>
+                </div>
+              </div>
+            </>
+          )}
+        </>
+      )}
+
       <div className="hq-panel">
         <div className="hq-panel-body">
           <h4 style={{ color: "var(--hq-gold)", marginBottom: "0.75rem" }}>Brain v1 module roadmap</h4>
@@ -350,7 +418,7 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
             ))}
           </div>
           <p className="hq-muted-text" style={{ marginTop: "0.75rem", fontSize: "0.78rem" }}>
-            Modules 3–8 ship next in separate commits. Mutations require confirmation. Every Brain v1 read is logged.
+            Modules 4–8 ship next in separate commits. Mutations require confirmation. Every Brain v1 read is logged.
           </p>
         </div>
       </div>
