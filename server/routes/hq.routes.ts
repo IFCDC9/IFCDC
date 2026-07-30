@@ -1195,6 +1195,32 @@ router.get("/aura/brain-v1/projects", hqAuthRequired, requireHQModule("aura"), a
   res.json(payload);
 });
 
+/** AURA Enterprise Brain v1 — System Health Monitor (Founder-only, read-only). */
+router.get("/aura/brain-v1/system-health", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const {
+    buildSystemHealthMonitorV1,
+    logAuraBrainV1Action,
+  } = await import("../hq/auraEnterpriseBrainV1");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "AURA Enterprise Brain v1 requires Founder access." });
+  }
+  const payload = await buildSystemHealthMonitorV1();
+  await logAuraBrainV1Action({
+    userId: identity.userId || req.hqUser?.id,
+    userEmail: identity.email || req.hqUser?.email,
+    command: "brain_v1.system_health.read",
+    result: `ok status=${payload.overallStatus} score=${payload.overallScore} alerts=${payload.alerts.length} degraded=${payload.degraded}`,
+    metadata: { module: "system-health", mode: "read_only" },
+  });
+  res.json(payload);
+});
+
 /** AURA Enterprise Brain 2.0 */
 router.post("/aura/brain", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
   const { resolveIdentityFromHqUser, publicIdentitySummary } = await import("../hq/auraFounderTrustEngine");

@@ -20,6 +20,7 @@ export const BRAIN_V1_LIVE_MODULES = [
   "organization-health",
   "daily-briefing",
   "project-status",
+  "system-health",
 ] as string[];
 
 export function markBrainV1ModuleLive(key: string): void {
@@ -681,6 +682,65 @@ export async function buildProjectStatusMonitorV1(): Promise<ProjectStatusMonito
     },
     degraded: false,
     warning: null,
+    moduleRoadmap: brainV1ModuleRoadmap(BRAIN_V1_LIVE_MODULES),
+  };
+}
+
+
+export type SystemHealthMonitorV1 = {
+  module: "system-health";
+  version: "v1";
+  generatedAt: string;
+  mode: "read_only";
+  overallScore: number | null;
+  overallStatus: string;
+  components: Array<{ id: string; label: string; status: string; score: number; detail: string }>;
+  alerts: Array<{ id: string; severity: string; title: string; detail: string; path?: string }>;
+  degraded: boolean;
+  warning: string | null;
+  moduleRoadmap: Array<{ id: number; name: string; status: "live" | "planned" }>;
+};
+
+export async function buildSystemHealthMonitorV1(): Promise<SystemHealthMonitorV1> {
+  markBrainV1ModuleLive("system-health");
+  const generatedAt = new Date().toISOString();
+  const monitoring = await withTimeout(
+    import("./enterpriseMonitoringEngine").then((m) => m.buildEnterpriseMonitoringOverview()),
+    null,
+    "enterprise-monitoring"
+  );
+  if (!monitoring) {
+    return {
+      module: "system-health",
+      version: "v1",
+      generatedAt,
+      mode: "read_only",
+      overallScore: null,
+      overallStatus: "unknown",
+      components: [],
+      alerts: [],
+      degraded: true,
+      warning: "Enterprise monitoring unavailable.",
+      moduleRoadmap: brainV1ModuleRoadmap(BRAIN_V1_LIVE_MODULES),
+    };
+  }
+  return {
+    module: "system-health",
+    version: "v1",
+    generatedAt,
+    mode: "read_only",
+    overallScore: monitoring.overallScore,
+    overallStatus: monitoring.overallStatus,
+    components: monitoring.components.map((c) => ({
+      id: c.id,
+      label: c.label,
+      status: c.status,
+      score: c.score,
+      detail: c.detail,
+    })),
+    alerts: monitoring.alerts.slice(0, 20),
+    degraded: Boolean(monitoring.degraded),
+    warning: monitoring.warning,
     moduleRoadmap: brainV1ModuleRoadmap(BRAIN_V1_LIVE_MODULES),
   };
 }

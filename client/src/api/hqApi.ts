@@ -391,6 +391,20 @@ export const hqApi = {
       warning: string | null;
       moduleRoadmap: Array<{ id: number; name: string; status: "live" | "planned" }>;
     }>("/aura/brain-v1/projects", { timeoutMs: 45_000 }),
+  auraBrainV1SystemHealth: () =>
+    hqFetch<{
+      module: string;
+      version: string;
+      generatedAt: string;
+      mode: "read_only";
+      overallScore: number | null;
+      overallStatus: string;
+      components: Array<{ id: string; label: string; status: string; score: number; detail: string }>;
+      alerts: Array<{ id: string; severity: string; title: string; detail: string; path?: string }>;
+      degraded: boolean;
+      warning: string | null;
+      moduleRoadmap: Array<{ id: number; name: string; status: "live" | "planned" }>;
+    }>("/aura/brain-v1/system-health", { timeoutMs: 45_000 }),
   auraEnterpriseBrain: (request: string) =>
     hqFetch<Record<string, unknown>>("/aura/brain", {
       method: "POST",

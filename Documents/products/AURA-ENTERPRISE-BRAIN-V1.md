@@ -18,7 +18,7 @@ Founder-only executive operating surface for IFCDC HQ. Built incrementally on ex
 | 2 | Organization Health Dashboard | **Live** (`/hq/aura-brain` · tab 2) |
 | 3 | Executive Daily Briefing | **Live** (`/hq/aura-brain` · tab 3) |
 | 4 | Project Status Monitor | **Live** (`/hq/aura-brain` · tab 4) |
-| 5 | System Health Monitor | Planned |
+| 5 | System Health Monitor | **Live** (`/hq/aura-brain` · tab 5) |
 | 6 | Executive Priority Queue | Planned |
 | 7 | Executive Action Center | Planned |
 | 8 | Secure AURA Action Log | Planned (table + write path live with Module 1) |

@@ -16,7 +16,7 @@ import { StatusBadge } from "../../components/hq/StatusBadge";
 import { HqLoading } from "../../components/hq/HqLoading";
 import { HqApiError } from "../../api/hqApiFetch";
 
-type BrainTab = "command" | "health" | "briefing" | "projects";
+type BrainTab = "command" | "health" | "briefing" | "projects" | "systems";
 
 function errorMessage(err: unknown): string {
   if (err instanceof HqApiError) {
@@ -74,23 +74,35 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
     enabled: tab === "projects",
   });
 
+  const systems = useQuery({
+    queryKey: ["aura-brain-v1-system-health"],
+    queryFn: hqApi.auraBrainV1SystemHealth,
+    staleTime: 30_000,
+    refetchInterval: tab === "systems" ? 90_000 : false,
+    retry: 1,
+    enabled: tab === "systems",
+  });
+
   const d = cc.data;
   const h = health.data;
   const b = briefing.data;
   const p = projects.data;
-  const roadmap = d?.moduleRoadmap ?? h?.moduleRoadmap ?? b?.moduleRoadmap ?? p?.moduleRoadmap ?? [];
+  const s = systems.data;
+  const roadmap = d?.moduleRoadmap ?? h?.moduleRoadmap ?? b?.moduleRoadmap ?? p?.moduleRoadmap ?? s?.moduleRoadmap ?? [];
 
   const refetchActive = () => {
     if (tab === "command") return cc.refetch();
     if (tab === "health") return health.refetch();
     if (tab === "briefing") return briefing.refetch();
-    return projects.refetch();
+    if (tab === "projects") return projects.refetch();
+    return systems.refetch();
   };
   const fetching =
     tab === "command" ? cc.isFetching
       : tab === "health" ? health.isFetching
         : tab === "briefing" ? briefing.isFetching
-          : projects.isFetching;
+          : tab === "projects" ? projects.isFetching
+            : systems.isFetching;
 
   return (
     <HQLayout
@@ -126,6 +138,13 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
           onClick={() => setTab("projects")}
         >
           4. Projects
+        </button>
+        <button
+          type="button"
+          className={`hq-btn hq-btn-sm ${tab === "systems" ? "hq-btn-primary" : "hq-btn-secondary"}`}
+          onClick={() => setTab("systems")}
+        >
+          5. Systems
         </button>
         <StatusBadge label="Read-only" variant="muted" />
         <button
@@ -475,6 +494,61 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
         </>
       )}
 
+      {tab === "systems" && (
+        <>
+          {systems.isPending && !s && <HqLoading message="Loading System Health Monitor…" />}
+          {systems.isError && (
+            <div className="hq-anomaly-alert hq-sev-medium" style={{ marginBottom: "1rem" }} role="status">
+              <AlertTriangle size={16} />
+              <div>
+                <strong>System Health unavailable</strong>
+                <span> {errorMessage(systems.error)}</span>
+              </div>
+            </div>
+          )}
+          {s?.warning && (
+            <p style={{ color: "var(--hq-warning)", marginBottom: "0.75rem", fontSize: "0.85rem" }}>{s.warning}</p>
+          )}
+          {s && (
+            <>
+              <div className="hq-kpi-grid" style={{ marginBottom: "1.25rem" }}>
+                <KpiCard label="Overall Score" value={s.overallScore != null ? `${s.overallScore}` : "—"} meta={s.overallStatus} icon={Shield} variant="gold" />
+                <KpiCard label="Components" value={s.components.length} icon={Monitor} />
+                <KpiCard label="Healthy" value={s.components.filter((c) => c.status === "healthy").length} icon={CheckCircle2} variant="success" />
+                <KpiCard label="Alerts" value={s.alerts.length} icon={AlertTriangle} variant={s.alerts.length ? "warning" : "success"} />
+              </div>
+              <div className="hq-grid-2" style={{ marginBottom: "1rem" }}>
+                <div className="hq-panel">
+                  <div className="hq-panel-body">
+                    <h4 style={{ color: "var(--hq-gold)", marginBottom: "0.75rem" }}>Components</h4>
+                    {s.components.map((c) => (
+                      <div key={c.id} style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem", padding: "0.4rem 0", borderBottom: "1px solid var(--hq-border-subtle)", fontSize: "0.85rem" }}>
+                        <div>
+                          <strong>{c.label}</strong>
+                          <div style={{ opacity: 0.85 }}>{c.detail}</div>
+                        </div>
+                        <StatusBadge label={`${c.score} · ${c.status}`} variant={severityVariant(c.status === "critical" ? "critical" : c.status === "degraded" ? "watch" : c.status)} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="hq-panel">
+                  <div className="hq-panel-body">
+                    <h4 style={{ color: "var(--hq-gold)", marginBottom: "0.75rem" }}>Monitoring alerts</h4>
+                    {s.alerts.length ? s.alerts.map((a) => (
+                      <div key={a.id} style={{ padding: "0.4rem 0", borderBottom: "1px solid var(--hq-border-subtle)", fontSize: "0.85rem" }}>
+                        <strong>{a.title}</strong>
+                        <div style={{ opacity: 0.85 }}>{a.detail}</div>
+                      </div>
+                    )) : <p className="hq-muted-text">No monitoring alerts.</p>}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </>
+      )}
+
       <div className="hq-panel">
         <div className="hq-panel-body">
           <h4 style={{ color: "var(--hq-gold)", marginBottom: "0.75rem" }}>Brain v1 module roadmap</h4>
@@ -488,7 +562,7 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
             ))}
           </div>
           <p className="hq-muted-text" style={{ marginTop: "0.75rem", fontSize: "0.78rem" }}>
-            Modules 5–8 ship next in separate commits. Mutations require confirmation. Every Brain v1 read is logged.
+            Modules 6–8 ship next in separate commits. Mutations require confirmation. Every Brain v1 read is logged.
           </p>
         </div>
       </div>
