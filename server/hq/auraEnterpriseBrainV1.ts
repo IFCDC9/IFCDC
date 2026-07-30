@@ -21,6 +21,7 @@ export const BRAIN_V1_LIVE_MODULES = [
   "daily-briefing",
   "project-status",
   "system-health",
+  "priority-queue",
 ] as string[];
 
 export function markBrainV1ModuleLive(key: string): void {
@@ -741,6 +742,54 @@ export async function buildSystemHealthMonitorV1(): Promise<SystemHealthMonitorV
     alerts: monitoring.alerts.slice(0, 20),
     degraded: Boolean(monitoring.degraded),
     warning: monitoring.warning,
+    moduleRoadmap: brainV1ModuleRoadmap(BRAIN_V1_LIVE_MODULES),
+  };
+}
+
+
+export type ExecutivePriorityQueueV1 = {
+  module: "priority-queue";
+  version: "v1";
+  generatedAt: string;
+  mode: "read_only";
+  items: AuraBrainV1AttentionItem[];
+  summary: { total: number; critical: number; high: number; watch: number };
+  degraded: boolean;
+  warning: string | null;
+  moduleRoadmap: Array<{ id: number; name: string; status: "live" | "planned" }>;
+};
+
+function priorityRank(severity: AuraBrainV1AttentionItem["severity"]): number {
+  if (severity === "critical") return 0;
+  if (severity === "high") return 1;
+  if (severity === "watch") return 2;
+  return 3;
+}
+
+export async function buildExecutivePriorityQueueV1(opts: {
+  userId?: string | null;
+  userEmail?: string | null;
+}): Promise<ExecutivePriorityQueueV1> {
+  markBrainV1ModuleLive("priority-queue");
+  const generatedAt = new Date().toISOString();
+  const cc = await withTimeout(buildExecutiveCommandCenterV1(opts), null, "command-center-for-queue");
+  const items = [...(cc?.answers.needsAttention ?? [])].sort(
+    (a, b) => priorityRank(a.severity) - priorityRank(b.severity)
+  );
+  return {
+    module: "priority-queue",
+    version: "v1",
+    generatedAt,
+    mode: "read_only",
+    items,
+    summary: {
+      total: items.length,
+      critical: items.filter((i) => i.severity === "critical").length,
+      high: items.filter((i) => i.severity === "high").length,
+      watch: items.filter((i) => i.severity === "watch").length,
+    },
+    degraded: Boolean(cc?.degraded),
+    warning: cc?.warning ?? (cc ? null : "Priority queue could not load command center."),
     moduleRoadmap: brainV1ModuleRoadmap(BRAIN_V1_LIVE_MODULES),
   };
 }

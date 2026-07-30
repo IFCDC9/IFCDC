@@ -19,7 +19,7 @@ Founder-only executive operating surface for IFCDC HQ. Built incrementally on ex
 | 3 | Executive Daily Briefing | **Live** (`/hq/aura-brain` · tab 3) |
 | 4 | Project Status Monitor | **Live** (`/hq/aura-brain` · tab 4) |
 | 5 | System Health Monitor | **Live** (`/hq/aura-brain` · tab 5) |
-| 6 | Executive Priority Queue | Planned |
+| 6 | Executive Priority Queue | **Live** (`/hq/aura-brain` · tab 6) |
 | 7 | Executive Action Center | Planned |
 | 8 | Secure AURA Action Log | Planned (table + write path live with Module 1) |
 
@@ -63,6 +63,20 @@ Wraps existing executive daily briefing cache (`getOrGenerateDailyBriefing(false
 **UI:** `/hq/aura-brain` · Projects tab
 
 Software Division registry + health polls: active projects, pending production status, unhealthy apps. Logs `brain_v1.projects.read`.
+
+## Module 5 — System Health Monitor
+
+**API:** `GET /api/hq/aura/brain-v1/system-health`  
+**UI:** `/hq/aura-brain` · Systems tab
+
+Wraps Enterprise Monitoring overview (components + alerts). Logs `brain_v1.system_health.read`.
+
+## Module 6 — Executive Priority Queue
+
+**API:** `GET /api/hq/aura/brain-v1/priority-queue`  
+**UI:** `/hq/aura-brain` · Priority Queue tab
+
+Ranked attention items from Command Center. Logs `brain_v1.priority_queue.read`.
 
 ## Out of scope (this phase)
 
