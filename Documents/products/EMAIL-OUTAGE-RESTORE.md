@@ -49,7 +49,7 @@ Then:
 - [x] Live test email accepted by Resend (`messageId` returned; inbox: check `service@ifcdc.org`)
 - [x] Booking + payment confirmation paths verified on Barbers production (2026-07-29)
 - [x] `ifcdc.org` verified in Resend (2026-07-30) — DNS SPF/DKIM/DMARC published
-- [ ] After HQ deploy of sender cutover: `usedFallback === false`, From = `service@ifcdc.org`
+- [x] After HQ deploy of sender cutover: `usedFallback === false`, From = `service@ifcdc.org` (commit `2ae17f0`, liveTest `cff0e198…`)
 
 ### Live probes (2026-07-30)
 
