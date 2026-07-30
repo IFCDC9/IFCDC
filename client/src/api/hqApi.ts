@@ -303,6 +303,40 @@ export const hqApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ request }),
     }),
+  /** AURA Enterprise Brain v1 — Executive Command Center (Founder-only, read-only). */
+  auraBrainV1CommandCenter: () =>
+    hqFetch<{
+      module: string;
+      version: string;
+      generatedAt: string;
+      mode: "read_only";
+      lastLoginAt: string | null;
+      answers: {
+        needsAttention: Array<{ id: string; severity: string; title: string; detail: string; path?: string; source: string }>;
+        changedSinceLastLogin: Array<{ id: string; severity: string; title: string; detail: string; path?: string; source: string }>;
+        systemsHealthy: Array<{ id: string; label: string; status: string; detail: string }>;
+        systemsRequireAction: Array<{ id: string; label: string; status: string; detail: string }>;
+        activeProjects: Array<{ id: string; name: string; status: string; healthy: boolean | null; detail: string }>;
+        deploymentsPending: Array<{ id: string; name: string; status: string; healthy: boolean | null; detail: string }>;
+        emailsFailed: Array<{ id: string; severity: string; title: string; detail: string; path?: string; source: string }>;
+        doNext: string[];
+      };
+      summary: {
+        attentionCount: number;
+        changeCount: number;
+        healthySystemCount: number;
+        actionSystemCount: number;
+        activeProjectCount: number;
+        pendingDeployCount: number;
+        failedEmailCount: number;
+        commandHealthOverall: number | null;
+        emailConfigured: boolean;
+        emailFrom: string | null;
+      };
+      moduleRoadmap: Array<{ id: number; name: string; status: "live" | "planned" }>;
+      degraded: boolean;
+      warning: string | null;
+    }>("/aura/brain-v1/command-center", { timeoutMs: 45_000 }),
   auraEnterpriseBrain: (request: string) =>
     hqFetch<Record<string, unknown>>("/aura/brain", {
       method: "POST",

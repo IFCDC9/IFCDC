@@ -77,6 +77,10 @@ const EnterpriseMonitoringPage = lazyWithRetry(() => import("./pages/hq/Enterpri
 const EnterpriseHealthPage = lazyWithRetry(() => import("./pages/hq/EnterpriseHealthPage"), "EnterpriseHealthPage");
 const EnterpriseReadinessPage = lazyWithRetry(() => import("./pages/hq/EnterpriseReadinessPage"), "EnterpriseReadinessPage");
 const FounderWorkspacePage = lazyWithRetry(() => import("./pages/hq/FounderWorkspacePage"), "FounderWorkspacePage");
+const AuraEnterpriseBrainV1Page = lazyWithRetry(
+  () => import("./pages/hq/AuraEnterpriseBrainV1Page"),
+  "AuraEnterpriseBrainV1Page"
+);
 const IntegrationsHubPage = lazyWithRetry(() => import("./pages/hq/IntegrationsHubPage"), "IntegrationsHubPage");
 const EmailReadinessPage = lazyWithRetry(() => import("./pages/hq/EmailReadinessPage"), "EmailReadinessPage");
 const SsoGatewayPage = lazyWithRetry(() => import("./pages/hq/SsoGatewayPage"), "SsoGatewayPage");
@@ -171,6 +175,7 @@ const App: React.FC = () => (
           <Route path="/hq/sso" element={<HqRoute path="/hq/sso"><SsoGatewayPage /></HqRoute>} />
           <Route path="/hq/developer" element={<HqRoute path="/hq/developer"><DeveloperPortalPage /></HqRoute>} />
           <Route path="/hq/aura" element={<HqRoute path="/hq/aura"><AuraCommandCenterPage /></HqRoute>} />
+          <Route path="/hq/aura-brain" element={<HqRoute path="/hq/aura-brain"><AuraEnterpriseBrainV1Page /></HqRoute>} />
           <Route path="/hq/aura-executive" element={<HqRoute path="/hq/aura-executive"><AuraExecutiveIntelligencePage /></HqRoute>} />
           <Route path="/hq/executive-brain" element={<HqRoute path="/hq/executive-brain"><EnterpriseBrainDashboardPage /></HqRoute>} />
           <Route path="/hq/enterprise-os" element={<HqRoute path="/hq/enterprise-os"><EnterpriseOsMissionControlPage /></HqRoute>} />

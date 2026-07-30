@@ -67,6 +67,8 @@ export async function initializeHqModules(founder: FounderSeedConfig): Promise<v
   await ensureTechCommandTables();
   await ensureProactiveIntelligenceTables();
   await ensureEnterpriseBrainTables();
+  const { ensureAuraBrainV1Tables } = await import("../hq/auraEnterpriseBrainV1");
+  await ensureAuraBrainV1Tables();
   const { ensureExecutiveDecisionIntelligenceTables } = await import("../hq/auraExecutiveDecisionIntelligence");
   await ensureExecutiveDecisionIntelligenceTables();
   const { ensureEnterpriseOsTables } = await import("../hq/auraEnterpriseOs4");

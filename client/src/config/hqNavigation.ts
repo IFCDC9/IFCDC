@@ -64,6 +64,7 @@ export const HQ_NAV_ITEMS: HQNavItem[] = [
   { label: "Mission Control", path: "/hq/phase10", icon: LayoutDashboard, section: "Command", badge: "Phase 10" },
   { label: "Intelligent OS", path: "/hq/phase9", icon: Sparkles, section: "Command", badge: "Phase 9" },
   { label: "Enterprise Intelligence", path: "/hq/intelligence", icon: LineChart, section: "Command", badge: "New" },
+  { label: "AURA Brain v1", path: "/hq/aura-brain", icon: Brain, section: "Command", badge: "v1" },
   { label: "Enterprise Brain", path: "/hq/executive-brain", icon: Brain, section: "Command", badge: "3.0" },
   { label: "Enterprise OS", path: "/hq/enterprise-os", icon: LayoutDashboard, section: "Command", badge: "4.0" },
   { label: "Enterprise Operations", path: "/hq/enterprise-ops", icon: LayoutDashboard, section: "Command", badge: "5.0" },
