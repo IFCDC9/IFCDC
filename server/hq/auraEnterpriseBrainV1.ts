@@ -14,6 +14,18 @@ import { checkIfcdcServices } from "../lib/ifcdc";
 
 const SECTION_TIMEOUT_MS = 10_000;
 
+/** Keys marked live as Brain v1 modules ship (single source for roadmap badges). */
+export const BRAIN_V1_LIVE_MODULES = [
+  "executive-command-center",
+  "organization-health",
+  "daily-briefing",
+  "project-status",
+] as string[];
+
+export function markBrainV1ModuleLive(key: string): void {
+  if (!BRAIN_V1_LIVE_MODULES.includes(key)) BRAIN_V1_LIVE_MODULES.push(key);
+}
+
 export type AuraBrainV1AttentionItem = {
   id: string;
   severity: "critical" | "high" | "watch" | "info";
@@ -421,11 +433,7 @@ export async function buildExecutiveCommandCenterV1(opts: {
       emailConfigured: email.configured,
       emailFrom: email.from,
     },
-    moduleRoadmap: brainV1ModuleRoadmap([
-      "executive-command-center",
-      "organization-health",
-      "daily-briefing",
-    ]),
+    moduleRoadmap: brainV1ModuleRoadmap(BRAIN_V1_LIVE_MODULES),
     degraded,
     warning: warnings.length ? warnings.join(" ") : null,
   };
@@ -546,11 +554,7 @@ export async function buildOrganizationHealthDashboardV1(): Promise<Organization
     watchItems: watchItems.slice(0, 12),
     degraded,
     warning: warnings.length ? warnings.join(" ") : null,
-    moduleRoadmap: brainV1ModuleRoadmap([
-      "executive-command-center",
-      "organization-health",
-      "daily-briefing",
-    ]),
+    moduleRoadmap: brainV1ModuleRoadmap(BRAIN_V1_LIVE_MODULES),
   };
 }
 
@@ -618,10 +622,65 @@ export async function buildExecutiveDailyBriefingV1(): Promise<ExecutiveDailyBri
     source: legacy ? (legacy.cached ? "executive-briefings-cache" : "executive-briefings-live") : brain ? "enterprise-brain-2" : "none",
     degraded,
     warning: warnings.length ? warnings.join(" ") : null,
-    moduleRoadmap: brainV1ModuleRoadmap([
-      "executive-command-center",
-      "organization-health",
-      "daily-briefing",
-    ]),
+    moduleRoadmap: brainV1ModuleRoadmap(BRAIN_V1_LIVE_MODULES),
+  };
+}
+
+export type ProjectStatusMonitorV1 = {
+  module: "project-status";
+  version: "v1";
+  generatedAt: string;
+  mode: "read_only";
+  projects: Array<{
+    id: string;
+    name: string;
+    status: string;
+    priority: number;
+    healthy: boolean | null;
+    latencyMs: number | null;
+    detail: string;
+    path: string;
+  }>;
+  summary: { total: number; productionLike: number; pending: number; unhealthy: number };
+  degraded: boolean;
+  warning: string | null;
+  moduleRoadmap: Array<{ id: number; name: string; status: "live" | "planned" }>;
+};
+
+export async function buildProjectStatusMonitorV1(): Promise<ProjectStatusMonitorV1> {
+  markBrainV1ModuleLive("project-status");
+  const generatedAt = new Date().toISOString();
+  const apps = await withTimeout(pollAllApps(), [], "poll-apps");
+  const healthByApp = new Map(apps.map((a) => [a.id, a]));
+  const projects = [...SOFTWARE_DIVISION_APPS]
+    .sort((a, b) => a.priority - b.priority)
+    .map((a) => {
+      const health = healthByApp.get(a.id);
+      return {
+        id: a.id,
+        name: a.name,
+        status: a.status,
+        priority: a.priority,
+        healthy: health ? Boolean(health.healthy) : null,
+        latencyMs: health?.latencyMs ?? null,
+        detail: a.description,
+        path: "/hq/software",
+      };
+    });
+  return {
+    module: "project-status",
+    version: "v1",
+    generatedAt,
+    mode: "read_only",
+    projects,
+    summary: {
+      total: projects.length,
+      productionLike: projects.filter((p) => p.status === "production" || p.status === "locked").length,
+      pending: projects.filter((p) => ["development", "mvp", "planned"].includes(p.status)).length,
+      unhealthy: projects.filter((p) => p.healthy === false).length,
+    },
+    degraded: false,
+    warning: null,
+    moduleRoadmap: brainV1ModuleRoadmap(BRAIN_V1_LIVE_MODULES),
   };
 }

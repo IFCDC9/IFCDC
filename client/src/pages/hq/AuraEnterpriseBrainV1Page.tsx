@@ -16,7 +16,7 @@ import { StatusBadge } from "../../components/hq/StatusBadge";
 import { HqLoading } from "../../components/hq/HqLoading";
 import { HqApiError } from "../../api/hqApiFetch";
 
-type BrainTab = "command" | "health" | "briefing";
+type BrainTab = "command" | "health" | "briefing" | "projects";
 
 function errorMessage(err: unknown): string {
   if (err instanceof HqApiError) {
@@ -65,22 +65,37 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
     enabled: tab === "briefing",
   });
 
+  const projects = useQuery({
+    queryKey: ["aura-brain-v1-projects"],
+    queryFn: hqApi.auraBrainV1Projects,
+    staleTime: 30_000,
+    refetchInterval: tab === "projects" ? 90_000 : false,
+    retry: 1,
+    enabled: tab === "projects",
+  });
+
   const d = cc.data;
   const h = health.data;
   const b = briefing.data;
-  const roadmap = d?.moduleRoadmap ?? h?.moduleRoadmap ?? b?.moduleRoadmap ?? [];
+  const p = projects.data;
+  const roadmap = d?.moduleRoadmap ?? h?.moduleRoadmap ?? b?.moduleRoadmap ?? p?.moduleRoadmap ?? [];
 
   const refetchActive = () => {
     if (tab === "command") return cc.refetch();
     if (tab === "health") return health.refetch();
-    return briefing.refetch();
+    if (tab === "briefing") return briefing.refetch();
+    return projects.refetch();
   };
-  const fetching = tab === "command" ? cc.isFetching : tab === "health" ? health.isFetching : briefing.isFetching;
+  const fetching =
+    tab === "command" ? cc.isFetching
+      : tab === "health" ? health.isFetching
+        : tab === "briefing" ? briefing.isFetching
+          : projects.isFetching;
 
   return (
     <HQLayout
       title="AURA Enterprise Brain v1"
-      subtitle="Founder read-only — Command Center, Organization Health, Daily Briefing"
+      subtitle="Founder read-only — Command Center, Health, Briefing, Projects"
       auraModule="aura"
     >
       <div className="hq-analytics-toolbar" style={{ marginBottom: "1rem", flexWrap: "wrap" }}>
@@ -104,6 +119,13 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
           onClick={() => setTab("briefing")}
         >
           3. Daily Briefing
+        </button>
+        <button
+          type="button"
+          className={`hq-btn hq-btn-sm ${tab === "projects" ? "hq-btn-primary" : "hq-btn-secondary"}`}
+          onClick={() => setTab("projects")}
+        >
+          4. Projects
         </button>
         <StatusBadge label="Read-only" variant="muted" />
         <button
@@ -405,6 +427,54 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
         </>
       )}
 
+      {tab === "projects" && (
+        <>
+          {projects.isPending && !p && <HqLoading message="Loading Project Status Monitor…" />}
+          {projects.isError && (
+            <div className="hq-anomaly-alert hq-sev-medium" style={{ marginBottom: "1rem" }} role="status">
+              <AlertTriangle size={16} />
+              <div>
+                <strong>Project Status unavailable</strong>
+                <span> {errorMessage(projects.error)}</span>
+              </div>
+            </div>
+          )}
+          {p && (
+            <>
+              <div className="hq-kpi-grid" style={{ marginBottom: "1.25rem" }}>
+                <KpiCard label="Projects" value={p.summary.total} icon={Target} variant="gold" />
+                <KpiCard label="Production-like" value={p.summary.productionLike} icon={CheckCircle2} variant="success" />
+                <KpiCard label="Pending" value={p.summary.pending} icon={Monitor} variant={p.summary.pending ? "warning" : "muted"} />
+                <KpiCard label="Unhealthy" value={p.summary.unhealthy} icon={AlertTriangle} variant={p.summary.unhealthy ? "danger" : "success"} />
+              </div>
+              <div className="hq-panel" style={{ marginBottom: "1rem" }}>
+                <div className="hq-panel-body">
+                  <h4 style={{ color: "var(--hq-gold)", marginBottom: "0.75rem" }}>Software Division projects</h4>
+                  {p.projects.map((row) => (
+                    <div key={row.id} style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", padding: "0.45rem 0", borderBottom: "1px solid var(--hq-border-subtle)", fontSize: "0.85rem" }}>
+                      <div>
+                        <strong>{row.name}</strong>
+                        <div style={{ opacity: 0.85 }}>{row.detail}</div>
+                        <Link to={row.path} style={{ fontSize: "0.75rem" }}>{row.path}</Link>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <StatusBadge
+                          label={row.status}
+                          variant={row.healthy === false ? "danger" : row.status === "production" || row.status === "locked" ? "success" : "warning"}
+                        />
+                        <div className="hq-muted-text" style={{ fontSize: "0.75rem", marginTop: "0.25rem" }}>
+                          {row.healthy == null ? "health unknown" : row.healthy ? `healthy · ${row.latencyMs ?? "—"}ms` : "unhealthy"}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+        </>
+      )}
+
       <div className="hq-panel">
         <div className="hq-panel-body">
           <h4 style={{ color: "var(--hq-gold)", marginBottom: "0.75rem" }}>Brain v1 module roadmap</h4>
@@ -418,7 +488,7 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
             ))}
           </div>
           <p className="hq-muted-text" style={{ marginTop: "0.75rem", fontSize: "0.78rem" }}>
-            Modules 4–8 ship next in separate commits. Mutations require confirmation. Every Brain v1 read is logged.
+            Modules 5–8 ship next in separate commits. Mutations require confirmation. Every Brain v1 read is logged.
           </p>
         </div>
       </div>
