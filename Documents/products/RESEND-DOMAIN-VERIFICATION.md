@@ -1,49 +1,56 @@
 # Resend Domain Verification — ifcdc.org
 
-**Status:** Deploy live (`da5ad26+`) — blocked by Resend **1-domain plan limit**  
+**Status:** Blocked on GoDaddy DNS publish (Resend domain registered, status `failed`)  
 **DNS host:** GoDaddy (`ns19.domaincontrol.com` / `ns20.domaincontrol.com`)  
-**Updated:** 2026-07-29
+**Updated:** 2026-07-30  
+**Resend domain id:** `c770d1d2-fd0b-4cde-a7a9-be6b65637488`
 
 ## Live production diagnosis
 
 | Check | Result |
 |---|---|
-| Render commit | `da5ad26` (resendDomainEngine **is deployed**) |
-| `RESEND_FROM_EMAIL` | Already `IFCDC Headquarters <service@ifcdc.org>` |
-| Resend domains | Only `ifcdcbarbersapp.com` (verified) |
-| Create `ifcdc.org` | **Failed:** `Your plan includes 1 domain. Upgrade to add more.` |
-| Effective From | Fallback `service@ifcdcbarbersapp.com` (`usedFallback: true`) |
+| `RESEND_API_KEY` | Loaded |
+| `RESEND_FROM_EMAIL` | `IFCDC Headquarters <service@ifcdc.org>` |
+| Resend `ifcdc.org` | Registered, status **`failed`** (missing DNS) |
+| Resend `ifcdcbarbersapp.com` | **Verified** — production fallback |
+| Effective From | `service@ifcdcbarbersapp.com` (`usedFallback: true`) |
+| Live dig `resend._domainkey.ifcdc.org` | No TXT |
+| Live dig `send.ifcdc.org` | No MX / Resend SPF TXT |
+| Live dig `_dmarc.ifcdc.org` | No TXT |
 
-Poll timed out earlier because `domainSetup` existed but `registered=false` with that plan-limit error — not because the engine was missing.
+Outlook root MX/SPF on `ifcdc.org` must remain. Resend only needs the **`send.`** and **`resend._domainkey`** hosts (same pattern as working `ifcdcbarbersapp.com`).
 
-## Fix path (HQ sender = ifcdc.org)
+## GoDaddy DNS to publish (exact)
 
-1. **Manual Deploy** the commit that auto-replaces the plan-slot domain (`RESEND_ALLOW_DOMAIN_REPLACE` defaults to `true`).
-2. Hit `GET /api/hq/email/status` — HQ removes `ifcdcbarbersapp.com` from Resend and registers `ifcdc.org`, returning `domainSetup.records`.
-3. **GoDaddy DNS** for `ifcdc.org`: publish every SPF/DKIM record from `domainSetup.records` exactly.
-4. Optional DMARC TXT `_dmarc`: `v=DMARC1; p=none; rua=mailto:service@ifcdc.org`
-5. Founder → `POST /api/hq/email/domain/verify` (or Integrations Hub → Test Connection).
-6. Confirm `verified=true`, `usedFallback=false`, domains=`ifcdc.org`.
+Sign in → DNS for **ifcdc.org** → Add:
 
-### Alternative
+| Type | Host | Value | Priority |
+|---|---|---|---|
+| TXT | `resend._domainkey` | `p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDhRRVcMBZLyEEdSAVOskW7H1D85bGfBaVzAAoee8fEEjFX+NwpJMoipwx4UM/JIhIJFSS0p3oNmYmNh2RKXT4svUgmOSn+MWM41IkcFIC1qUkAteNr2tZtFicNMN4oGM8ETWBDG+exNyanxrteGmkhyX8E+ed6sbV8uXbfPyLYvwIDAQAB` | — |
+| MX | `send` | `feedback-smtp.us-east-1.amazonses.com` | **10** |
+| TXT | `send` | `v=spf1 include:amazonses.com ~all` | — |
+| TXT | `_dmarc` | `v=DMARC1; p=none; rua=mailto:service@ifcdc.org` | — |
 
-- Upgrade Resend to **Pro** (10 domains) and keep both `ifcdc.org` + `ifcdcbarbersapp.com`.
-- Or Founder-only: `POST /api/hq/email/domain/replace` with `{ "domain": "ifcdc.org" }`.
+Do **not** change root `@` MX (Outlook) or root SPF (`include:secureserver.net`).
 
-### Barbers note
+## After DNS saves
 
-After the slot swap, Barbers must send via `service@ifcdc.org` (same Resend account) **or** use a separate Resend API key / Pro plan if it still requires `@ifcdcbarbersapp.com`.
-
-## Render env
-
-```
-RESEND_FROM_EMAIL=IFCDC Headquarters <service@ifcdc.org>
-# optional: RESEND_ALLOW_DOMAIN_REPLACE=false  # disable auto-swap
-```
+1. Wait 5–30 minutes (sometimes faster).
+2. Confirm dig:
+   - `dig TXT resend._domainkey.ifcdc.org`
+   - `dig MX send.ifcdc.org`
+   - `dig TXT send.ifcdc.org`
+3. Founder → Integrations Hub → Verify Domain, or:
+   `POST /api/hq/email/domain/verify` (authenticated)
+4. Confirm:
+   - `domainSetup.verified === true`
+   - `usedFallback === false`
+   - `resendProbe.ok === true`
+   - live send From = `IFCDC Headquarters <service@ifcdc.org>`
 
 ## Success criteria
 
-- `domainSetup.verified === true`
-- `domainSetup.usedFallback === false`
-- Integrations Hub Email (Resend) = **Connected**
-- Communications / notifications From = `service@ifcdc.org`
+- [ ] DNS records published at GoDaddy
+- [ ] Resend `ifcdc.org` status = verified
+- [ ] `usedFallback === false`
+- [ ] Final liveTest From = `service@ifcdc.org`
