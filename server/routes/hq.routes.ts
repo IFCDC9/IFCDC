@@ -126,15 +126,30 @@ router.get("/email/status", async (req: Request, res: Response) => {
   const { getSenderAuthStatus, emailEngineCatalog } = await import("../hq/emailEngine");
   const { getResendDomainSetupState, restoreEmergencyResendSender } = await import("../hq/resendDomainEngine");
 
-  // Single restore first (avoid Resend 10 req/s rate-limit from parallel restores).
-  const emergencyRestore = await restoreEmergencyResendSender().catch((err) => ({
-    ok: false,
-    domain: "ifcdcbarbersapp.com",
-    verified: false,
-    created: false,
-    records: [] as unknown[],
-    error: err instanceof Error ? err.message : "emergency restore failed",
-  }));
+  // Only restore emergency sender when configured domain is not verified.
+  // Always-on restore caused rate limits and false fallback reporting after ifcdc.org verified.
+  let emergencyRestore: Awaited<ReturnType<typeof restoreEmergencyResendSender>> | {
+    ok: boolean;
+    domain: string;
+    verified: boolean;
+    created: boolean;
+    records: unknown[];
+    skipped?: boolean;
+    error?: string;
+  } = { ok: true, domain: "ifcdcbarbersapp.com", verified: false, created: false, records: [], skipped: true };
+  const probeQuick = await probeResendSender().catch(() => null);
+  // probe.ok means the configured RESEND_FROM_EMAIL domain itself is verified.
+  const configuredDomainOk = Boolean(probeQuick?.ok);
+  if (!configuredDomainOk) {
+    emergencyRestore = await restoreEmergencyResendSender().catch((err) => ({
+      ok: false,
+      domain: "ifcdcbarbersapp.com",
+      verified: false,
+      created: false,
+      records: [] as unknown[],
+      error: err instanceof Error ? err.message : "emergency restore failed",
+    }));
+  }
 
   const [resendProbe, senderAuth, domainSetup] = await Promise.all([
     probeResendSender().catch((err) => ({
@@ -170,12 +185,15 @@ router.get("/email/status", async (req: Request, res: Response) => {
     if (!allowed) {
       liveTest = { success: false, error: "liveTest only allowed to service@ifcdc.org / MASTER_OWNER_EMAIL" };
     } else {
+      const { resolveVerifiedResendFromEmail } = await import("../lib/notifications");
+      const verified = await resolveVerifiedResendFromEmail();
       const send = await sendFounderSecurityEmail({
         to,
         subject: "IFCDC HQ — live email delivery test",
         body:
           "This is a live production delivery test from IFCDC Headquarters.\n\n"
           + "If you received this message, Resend accepted the send and mailbox delivery succeeded.\n"
+          + `From: ${verified.from}\n`
           + `Time: ${new Date().toISOString()}\n`,
       });
       liveTest = {
@@ -184,6 +202,8 @@ router.get("/email/status", async (req: Request, res: Response) => {
         error: send.error || null,
         providerCode: send.providerCode || null,
         providerStatus: send.providerStatus || null,
+        from: verified.from,
+        usedFallback: verified.usedFallback,
         to,
         at: new Date().toISOString(),
       };

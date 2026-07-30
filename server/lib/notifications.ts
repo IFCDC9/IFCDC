@@ -230,9 +230,16 @@ export async function resolveVerifiedResendFromEmail(): Promise<{
 }> {
   const configuredFrom = resolveResendFromEmail();
 
-  // Production outage restore: ensure the last-known working domain exists before probing.
+  // Probe first — when ifcdc.org (or configured domain) is already verified, do not
+  // touch the emergency domain (avoids Resend rate limits + false fallback reporting).
+  let probe = await probeResendSender();
+  if (probe.ok) {
+    return { from: configuredFrom, configuredFrom, usedFallback: false, probe };
+  }
+
+  // Configured domain not verified yet — ensure last-known working sender exists, then re-probe.
   try {
-    const { restoreEmergencyResendSender, RESEND_EMERGENCY_FROM, RESEND_EMERGENCY_FALLBACK_DOMAIN } =
+    const { restoreEmergencyResendSender, RESEND_EMERGENCY_FALLBACK_DOMAIN } =
       await import("../hq/resendDomainEngine");
     const restored = await restoreEmergencyResendSender();
     if (!restored.verified) {
@@ -240,16 +247,15 @@ export async function resolveVerifiedResendFromEmail(): Promise<{
         `[email] Emergency Resend domain ${RESEND_EMERGENCY_FALLBACK_DOMAIN} status=${restored.status || "unknown"} — ${restored.error || restored.verifyMessage || "pending"}`,
       );
     }
+    probe = await probeResendSender();
+    if (probe.ok) {
+      return { from: configuredFrom, configuredFrom, usedFallback: false, probe };
+    }
   } catch (err) {
     console.error(
       "[email] Emergency Resend domain restore failed:",
       err instanceof Error ? err.message : err,
     );
-  }
-
-  const probe = await probeResendSender();
-  if (probe.ok) {
-    return { from: configuredFrom, configuredFrom, usedFallback: false, probe };
   }
 
   const verified = (probe.domains || []).find((d) => d.status === "verified");

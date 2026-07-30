@@ -45,20 +45,16 @@ Then:
 
 ## Success criteria
 
-- [x] `emergencyRestore.verified === true` (`ifcdcbarbersapp.com`)
+- [x] `emergencyRestore.verified === true` (`ifcdcbarbersapp.com` retained as emergency only)
 - [x] Live test email accepted by Resend (`messageId` returned; inbox: check `service@ifcdc.org`)
 - [x] Booking + payment confirmation paths verified on Barbers production (2026-07-29)
-- [ ] **Configured From matches verified domain** — still open:
-  - `RESEND_FROM_EMAIL` = `IFCDC Headquarters <service@ifcdc.org>` (env OK / loaded)
-  - Resend domain `ifcdc.org` status = **`failed`**
-  - Sends use fallback `service@ifcdcbarbersapp.com` (`usedFallback: true`)
-  - **Fix:** either verify `ifcdc.org` DNS in Resend, **or** set  
-    `RESEND_FROM_EMAIL=IFCDC Headquarters <service@ifcdcbarbersapp.com>` then Manual Deploy
+- [x] `ifcdc.org` verified in Resend (2026-07-30) — DNS SPF/DKIM/DMARC published
+- [ ] After HQ deploy of sender cutover: `usedFallback === false`, From = `service@ifcdc.org`
 
 ### Live probes (2026-07-30)
 
 | Probe | Result |
 |---|---|
 | `GET /api/hq/email/status` | `apiKeySet: true`, `from` configured as `service@ifcdc.org` |
-| `liveTest=1` | `success: true` — messageIds `7e17e59f…`, `9dc4f27c…` |
-| Effective From | `IFCDC Headquarters <service@ifcdcbarbersapp.com>` |
+| Resend domains | `ifcdc.org` **verified**, `ifcdcbarbersapp.com` verified |
+| Cutover | Prefer configured domain; emergency restore only if configured domain fails probe |

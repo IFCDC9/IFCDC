@@ -371,22 +371,43 @@ export async function verifyResendDomain(domain = getTargetSenderDomain()): Prom
 }
 
 export async function getResendDomainSetupState(domain = getTargetSenderDomain()): Promise<ResendDomainState> {
-  // Always restore last-known working sender first so mail can send while ifcdc.org DNS is pending.
-  const emergency = await restoreEmergencyResendSender().catch((err) => ({
+  const configuredFrom = resolveResendFromEmail();
+  let probe = await probeResendSender();
+  const fromDomain = configuredFrom.match(/@([a-z0-9.-]+)/i)?.[1]?.toLowerCase();
+  let configuredOk = Boolean(
+    fromDomain && (probe.domains || []).some((d) => d.name.toLowerCase() === fromDomain && d.status === "verified"),
+  );
+
+  // Only restore emergency sender when the configured domain is not yet verified.
+  let emergency: Awaited<ReturnType<typeof restoreEmergencyResendSender>> | {
+    ok: boolean;
+    domain: string;
+    verified: boolean;
+    created: boolean;
+    records: ResendDnsRecord[];
+    error?: string;
+  } = {
     ok: false,
     domain: RESEND_EMERGENCY_FALLBACK_DOMAIN,
     verified: false,
     created: false,
-    records: [] as ResendDnsRecord[],
-    error: err instanceof Error ? err.message : "emergency restore failed",
-  }));
+    records: [],
+  };
+  if (!configuredOk) {
+    emergency = await restoreEmergencyResendSender().catch((err) => ({
+      ok: false,
+      domain: RESEND_EMERGENCY_FALLBACK_DOMAIN,
+      verified: false,
+      created: false,
+      records: [] as ResendDnsRecord[],
+      error: err instanceof Error ? err.message : "emergency restore failed",
+    }));
+    probe = await probeResendSender();
+    configuredOk = Boolean(
+      fromDomain && (probe.domains || []).some((d) => d.name.toLowerCase() === fromDomain && d.status === "verified"),
+    );
+  }
 
-  const configuredFrom = resolveResendFromEmail();
-  const probe = await probeResendSender();
-  const fromDomain = configuredFrom.match(/@([a-z0-9.-]+)/i)?.[1]?.toLowerCase();
-  const configuredOk = Boolean(
-    fromDomain && (probe.domains || []).some((d) => d.name.toLowerCase() === fromDomain && d.status === "verified"),
-  );
   const verifiedDomain = (probe.domains || []).find((d) => d.status === "verified");
   let fromEffective = configuredFrom;
   let usedFallback = false;
@@ -405,15 +426,17 @@ export async function getResendDomainSetupState(domain = getTargetSenderDomain()
   const ensured = await ensureResendDomainRegistered(domain);
   const registered = Boolean(ensured.domainId) && !ensured.error;
   const status = (ensured.status || "").toLowerCase();
-  const verified = status === "verified";
+  const verified = status === "verified" || configuredOk;
   const fallbackRemoved = !usedFallback && verified;
 
   const guidance: string[] = [];
-  if (emergency.verified) {
+  if (verified && !usedFallback) {
+    guidance.push(`Sender domain ${domain} is verified. Production From is ${fromEffective}. Fallback is not in use.`);
+  } else if (emergency.verified && usedFallback) {
     guidance.push(
-      `Emergency sender ${RESEND_EMERGENCY_FALLBACK_DOMAIN} is verified — outbound mail uses this until ifcdc.org DNS is complete.`,
+      `Emergency sender ${RESEND_EMERGENCY_FALLBACK_DOMAIN} is verified — outbound mail uses this until ${domain} DNS is complete.`,
     );
-  } else if (emergency.error) {
+  } else if (emergency.error && usedFallback) {
     guidance.push(`Emergency domain restore: ${emergency.error}`);
   }
   if (ensured.error) guidance.push(ensured.error);
@@ -433,8 +456,6 @@ export async function getResendDomainSetupState(domain = getTargetSenderDomain()
     guidance.push(
       `Domain ${domain} is verified but RESEND_FROM_EMAIL still resolves to an unverified From. Set RESEND_FROM_EMAIL=IFCDC Headquarters <service@${domain}> on Render and Manual Deploy.`,
     );
-  } else {
-    guidance.push(`Sender domain ${domain} is verified. Fallback is not in use.`);
   }
 
   if ((ensured as { replaced?: string[] }).replaced?.length) {
@@ -457,7 +478,7 @@ export async function getResendDomainSetupState(domain = getTargetSenderDomain()
     registered,
     verified,
     domainId: ensured.domainId,
-    status: ensured.status,
+    status: ensured.status || (configuredOk ? "verified" : undefined),
     records: ensured.records,
     fromConfigured: configuredFrom,
     fromEffective,
