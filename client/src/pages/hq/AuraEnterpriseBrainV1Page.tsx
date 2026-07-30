@@ -614,7 +614,7 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
         </>
       )}
 
-      <div className="hq-panel">
+      <div className="hq-panel" style={{ marginBottom: "1rem" }}>
         <div className="hq-panel-body">
           <h4 style={{ color: "var(--hq-gold)", marginBottom: "0.75rem" }}>Brain v1 module roadmap</h4>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
@@ -626,6 +626,11 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
               />
             ))}
           </div>
+          <p className="hq-muted-text" style={{ marginTop: "0.75rem", fontSize: "0.78rem" }}>
+            All eight Brain v1 modules are live. Production-changing actions remain blocked pending Founder approval. Every Brain v1 read/action is logged.
+          </p>
+        </div>
+      </div>
 
       {tab === "queue" && (
         <>
@@ -667,7 +672,6 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
           )}
         </>
       )}
-
 
       {tab === "actions" && (
         <>
@@ -719,7 +723,6 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
         </>
       )}
 
-
       {tab === "log" && (
         <>
           {logQ.isPending && !log && <HqLoading message="Loading AURA Action Log…" />}
@@ -767,12 +770,6 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
           )}
         </>
       )}
-
-          <p className="hq-muted-text" style={{ marginTop: "0.75rem", fontSize: "0.78rem" }}>
-            All eight Brain v1 modules are live. Production-changing actions remain blocked pending Founder approval. Every Brain v1 read/action is logged.
-          </p>
-        </div>
-      </div>
     </HQLayout>
   );
 };
