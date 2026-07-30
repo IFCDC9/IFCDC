@@ -379,6 +379,42 @@ router.post("/email/live-send", async (req: Request, res: Response) => {
   return res.status(send.success ? 200 : 502).json(payload);
 });
 
+/** Read-only Executive Email Readiness Report (inventory + dry-render + last matrix results). */
+router.get("/email/readiness", async (_req: Request, res: Response) => {
+  const { buildEmailReadinessReport } = await import("../hq/emailReadinessEngine");
+  const report = await buildEmailReadinessReport();
+  res.json({ ok: true, report });
+});
+
+/**
+ * Founder-inbox template matrix (real Resend). Same recipient allowlist as live-send.
+ * Does not bulk-broadcast. Sends one branded email per catalog template.
+ */
+router.post("/email/readiness/run-matrix", async (req: Request, res: Response) => {
+  const to = String(req.body?.to || "service@ifcdc.org").trim().toLowerCase();
+  const { runFounderInboxTemplateMatrix, buildEmailReadinessReport } = await import("../hq/emailReadinessEngine");
+  try {
+    const lastResults = await runFounderInboxTemplateMatrix(to);
+    const report = await buildEmailReadinessReport({ lastResults });
+    res.json({
+      ok: true,
+      matrix: {
+        to,
+        sent: lastResults.filter((r) => r.result === "PASS").length,
+        failed: lastResults.filter((r) => r.result === "FAIL").length,
+        notConfigured: lastResults.filter((r) => r.result === "NOT_CONFIGURED").length,
+      },
+      lastResults,
+      report,
+    });
+  } catch (err) {
+    res.status(403).json({
+      ok: false,
+      error: err instanceof Error ? err.message : "matrix failed",
+    });
+  }
+});
+
 router.get("/email/templates", hqAuthRequired, async (_req: Request, res: Response) => {
   const { emailEngineCatalog } = await import("../hq/emailEngine");
   res.json(emailEngineCatalog());

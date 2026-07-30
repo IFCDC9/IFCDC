@@ -1,0 +1,133 @@
+{
+  "generatedAt": "2026-07-30T13:20:03.744Z",
+  "base": "https://ifcdc-hq-wst6.onrender.com",
+  "to": "service@ifcdc.org",
+  "rows": [
+    {
+      "name": "Transport / sender health",
+      "result": "PASS",
+      "route": "GET /api/hq/email/status",
+      "sender": "IFCDC Headquarters <service@ifcdc.org>",
+      "recipient": null,
+      "template": null,
+      "http": 200,
+      "messageId": null,
+      "delivery": "probe_ok",
+      "warnings": []
+    },
+    {
+      "name": "AURA / live-send",
+      "result": "PASS",
+      "route": "POST /api/hq/email/live-send",
+      "sender": "IFCDC Headquarters <service@ifcdc.org>",
+      "recipient": "service@ifcdc.org",
+      "template": "executive_alert (via sendFounderSecurityEmail)",
+      "http": 200,
+      "messageId": "cd8f8727-0a6a-4e4d-a3b7-31322f792a67",
+      "delivery": "accepted",
+      "warnings": [],
+      "error": null
+    },
+    {
+      "name": "Founder security path",
+      "result": "PASS",
+      "route": "POST /api/hq/email/live-send",
+      "sender": "IFCDC Headquarters <service@ifcdc.org>",
+      "recipient": "service@ifcdc.org",
+      "template": "executive_alert (via sendFounderSecurityEmail)",
+      "http": 200,
+      "messageId": "c6df7d67-c70e-41e7-9189-f10389b30357",
+      "delivery": "accepted",
+      "warnings": [],
+      "error": null
+    },
+    {
+      "name": "Executive alert path",
+      "result": "PASS",
+      "route": "POST /api/hq/email/live-send",
+      "sender": "IFCDC Headquarters <service@ifcdc.org>",
+      "recipient": "service@ifcdc.org",
+      "template": "executive_alert (via sendFounderSecurityEmail)",
+      "http": 200,
+      "messageId": "5ec41c0b-8a5c-441a-9feb-013bc499a8c8",
+      "delivery": "accepted",
+      "warnings": [],
+      "error": null
+    },
+    {
+      "name": "Email verification",
+      "result": "NOT_CONFIGURED",
+      "route": "(none)",
+      "sender": null,
+      "recipient": null,
+      "template": null,
+      "http": null,
+      "messageId": null,
+      "delivery": "not_configured",
+      "warnings": [
+        "No Resend caller in HQ codebase"
+      ]
+    },
+    {
+      "name": "Password-reset confirmation",
+      "result": "NOT_CONFIGURED",
+      "route": "(none)",
+      "sender": null,
+      "recipient": null,
+      "template": null,
+      "http": null,
+      "messageId": null,
+      "delivery": "not_configured",
+      "warnings": [
+        "No Resend caller in HQ codebase"
+      ]
+    },
+    {
+      "name": "Booking cancellation",
+      "result": "NOT_CONFIGURED",
+      "route": "(none)",
+      "sender": null,
+      "recipient": null,
+      "template": null,
+      "http": null,
+      "messageId": null,
+      "delivery": "not_configured",
+      "warnings": [
+        "No Resend caller in HQ codebase"
+      ]
+    },
+    {
+      "name": "Booking reschedule",
+      "result": "NOT_CONFIGURED",
+      "route": "(none)",
+      "sender": null,
+      "recipient": null,
+      "template": null,
+      "http": null,
+      "messageId": null,
+      "delivery": "not_configured",
+      "warnings": [
+        "No Resend caller in HQ codebase"
+      ]
+    },
+    {
+      "name": "HR hiring email",
+      "result": "NOT_CONFIGURED",
+      "route": "(none)",
+      "sender": null,
+      "recipient": null,
+      "template": null,
+      "http": null,
+      "messageId": null,
+      "delivery": "not_configured",
+      "warnings": [
+        "No Resend caller in HQ codebase"
+      ]
+    }
+  ],
+  "summary": {
+    "pass": 4,
+    "fail": 0,
+    "notConfigured": 5
+  }
+}
