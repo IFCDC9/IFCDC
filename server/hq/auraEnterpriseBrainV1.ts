@@ -22,6 +22,7 @@ export const BRAIN_V1_LIVE_MODULES = [
   "project-status",
   "system-health",
   "priority-queue",
+  "action-center",
 ] as string[];
 
 export function markBrainV1ModuleLive(key: string): void {
@@ -792,4 +793,113 @@ export async function buildExecutivePriorityQueueV1(opts: {
     warning: cc?.warning ?? (cc ? null : "Priority queue could not load command center."),
     moduleRoadmap: brainV1ModuleRoadmap(BRAIN_V1_LIVE_MODULES),
   };
+}
+
+
+export type ExecutiveActionCenterV1 = {
+  module: "action-center";
+  version: "v1";
+  generatedAt: string;
+  mode: "read_only";
+  actions: Array<{
+    id: string;
+    label: string;
+    description: string;
+    changesProduction: boolean;
+    confirmRequired: boolean;
+    href?: string;
+    command?: string;
+  }>;
+  note: string;
+  moduleRoadmap: Array<{ id: number; name: string; status: "live" | "planned" }>;
+};
+
+export async function buildExecutiveActionCenterV1(): Promise<ExecutiveActionCenterV1> {
+  markBrainV1ModuleLive("action-center");
+  return {
+    module: "action-center",
+    version: "v1",
+    generatedAt: new Date().toISOString(),
+    mode: "read_only",
+    actions: [
+      {
+        id: "open-monitoring",
+        label: "Open System Monitoring",
+        description: "Navigate to Enterprise Monitoring (no data change).",
+        changesProduction: false,
+        confirmRequired: false,
+        href: "/hq/monitoring",
+        command: "brain_v1.action.navigate_monitoring",
+      },
+      {
+        id: "open-software",
+        label: "Open Software Division",
+        description: "Review app health and deployments (no data change).",
+        changesProduction: false,
+        confirmRequired: false,
+        href: "/hq/software",
+        command: "brain_v1.action.navigate_software",
+      },
+      {
+        id: "open-email-readiness",
+        label: "Open Email Readiness",
+        description: "Inspect email workflow readiness (no data change).",
+        changesProduction: false,
+        confirmRequired: false,
+        href: "/hq/email-readiness",
+        command: "brain_v1.action.navigate_email_readiness",
+      },
+      {
+        id: "acknowledge-priorities",
+        label: "Acknowledge priority queue review",
+        description: "Logs that the Founder reviewed priorities. Does not mutate operational records.",
+        changesProduction: false,
+        confirmRequired: true,
+        command: "brain_v1.action.acknowledge_priorities",
+      },
+    ],
+    note: "Production-changing AURA actions remain disabled here until explicitly approved. Confirm is required for logged acknowledgments.",
+    moduleRoadmap: brainV1ModuleRoadmap(BRAIN_V1_LIVE_MODULES),
+  };
+}
+
+export async function executeBrainV1ConfirmedAction(opts: {
+  actionId: string;
+  confirmed: boolean;
+  userId?: string | null;
+  userEmail?: string | null;
+}): Promise<{ ok: boolean; error?: string; result?: string; href?: string }> {
+  markBrainV1ModuleLive("action-center");
+  if (!opts.confirmed) {
+    return { ok: false, error: "Confirmation required before executing this action." };
+  }
+  const catalog = await buildExecutiveActionCenterV1();
+  const action = catalog.actions.find((a) => a.id === opts.actionId);
+  if (!action) return { ok: false, error: "Unknown action." };
+  if (action.changesProduction) {
+    return { ok: false, error: "Production-changing actions are not enabled in Brain v1 yet." };
+  }
+  if (action.href) {
+    const result = `navigate:${action.href}`;
+    await logAuraBrainV1Action({
+      userId: opts.userId,
+      userEmail: opts.userEmail,
+      command: action.command || `brain_v1.action.${action.id}`,
+      result,
+      metadata: { actionId: action.id, confirmed: true },
+    });
+    return { ok: true, result, href: action.href };
+  }
+  if (action.id === "acknowledge-priorities") {
+    const result = "acknowledged_priority_review";
+    await logAuraBrainV1Action({
+      userId: opts.userId,
+      userEmail: opts.userEmail,
+      command: action.command || "brain_v1.action.acknowledge_priorities",
+      result,
+      metadata: { actionId: action.id, confirmed: true },
+    });
+    return { ok: true, result };
+  }
+  return { ok: false, error: "Action not executable." };
 }

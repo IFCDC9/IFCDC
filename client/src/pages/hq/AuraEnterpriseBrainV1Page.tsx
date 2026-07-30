@@ -4,7 +4,7 @@
  */
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Activity, AlertTriangle, Brain, CheckCircle2, Clock, FileText, Mail, Monitor,
   RefreshCw, Shield, Target,
@@ -16,7 +16,7 @@ import { StatusBadge } from "../../components/hq/StatusBadge";
 import { HqLoading } from "../../components/hq/HqLoading";
 import { HqApiError } from "../../api/hqApiFetch";
 
-type BrainTab = "command" | "health" | "briefing" | "projects" | "systems" | "queue";
+type BrainTab = "command" | "health" | "briefing" | "projects" | "systems" | "queue" | "actions";
 
 function errorMessage(err: unknown): string {
   if (err instanceof HqApiError) {
@@ -92,13 +92,32 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
     enabled: tab === "queue",
   });
 
+  const actionsQ = useQuery({
+    queryKey: ["aura-brain-v1-actions"],
+    queryFn: hqApi.auraBrainV1Actions,
+    staleTime: 60_000,
+    enabled: tab === "actions",
+  });
+
+  const [actionNote, setActionNote] = useState<string | null>(null);
+  const execMutation = useMutation({
+    mutationFn: ({ actionId, confirmed }: { actionId: string; confirmed: boolean }) =>
+      hqApi.auraBrainV1ExecuteAction(actionId, confirmed),
+    onSuccess: (data) => {
+      setActionNote(data.result || "Action completed.");
+      if (data.href) window.location.assign(data.href);
+    },
+    onError: (err) => setActionNote(errorMessage(err)),
+  });
+
   const d = cc.data;
   const h = health.data;
   const b = briefing.data;
   const p = projects.data;
   const s = systems.data;
   const q = queue.data;
-  const roadmap = d?.moduleRoadmap ?? h?.moduleRoadmap ?? b?.moduleRoadmap ?? p?.moduleRoadmap ?? s?.moduleRoadmap ?? q?.moduleRoadmap ?? [];
+  const a = actionsQ.data;
+  const roadmap = d?.moduleRoadmap ?? h?.moduleRoadmap ?? b?.moduleRoadmap ?? p?.moduleRoadmap ?? s?.moduleRoadmap ?? q?.moduleRoadmap ?? a?.moduleRoadmap ?? [];
 
   const refetchActive = () => {
     if (tab === "command") return cc.refetch();
@@ -106,7 +125,8 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
     if (tab === "briefing") return briefing.refetch();
     if (tab === "projects") return projects.refetch();
     if (tab === "systems") return systems.refetch();
-    return queue.refetch();
+    if (tab === "queue") return queue.refetch();
+    return actionsQ.refetch();
   };
   const fetching =
     tab === "command" ? cc.isFetching
@@ -114,7 +134,8 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
         : tab === "briefing" ? briefing.isFetching
           : tab === "projects" ? projects.isFetching
             : tab === "systems" ? systems.isFetching
-              : queue.isFetching;
+              : tab === "queue" ? queue.isFetching
+                : actionsQ.isFetching;
 
   return (
     <HQLayout
@@ -164,6 +185,13 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
           onClick={() => setTab("queue")}
         >
           6. Priority Queue
+        </button>
+        <button
+          type="button"
+          className={`hq-btn hq-btn-sm ${tab === "actions" ? "hq-btn-primary" : "hq-btn-secondary"}`}
+          onClick={() => setTab("actions")}
+        >
+          7. Action Center
         </button>
         <StatusBadge label="Read-only" variant="muted" />
         <button
@@ -622,8 +650,59 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
         </>
       )}
 
+
+      {tab === "actions" && (
+        <>
+          {actionsQ.isPending && !a && <HqLoading message="Loading Action Center…" />}
+          {actionsQ.isError && (
+            <div className="hq-anomaly-alert hq-sev-medium" style={{ marginBottom: "1rem" }} role="status">
+              <AlertTriangle size={16} />
+              <div>
+                <strong>Action Center unavailable</strong>
+                <span> {errorMessage(actionsQ.error)}</span>
+              </div>
+            </div>
+          )}
+          {actionNote && <p style={{ marginBottom: "0.75rem", fontSize: "0.85rem" }}>{actionNote}</p>}
+          {a && (
+            <div className="hq-panel" style={{ marginBottom: "1rem" }}>
+              <div className="hq-panel-body">
+                <h4 style={{ color: "var(--hq-gold)", marginBottom: "0.5rem" }}>Safe Founder actions</h4>
+                <p className="hq-muted-text" style={{ fontSize: "0.8rem", marginBottom: "0.75rem" }}>{a.note}</p>
+                {a.actions.map((act) => (
+                  <div key={act.id} style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", padding: "0.55rem 0", borderBottom: "1px solid var(--hq-border-subtle)", fontSize: "0.85rem" }}>
+                    <div>
+                      <strong>{act.label}</strong>
+                      <div style={{ opacity: 0.85 }}>{act.description}</div>
+                      <div className="hq-muted-text" style={{ fontSize: "0.75rem" }}>
+                        {act.changesProduction ? "Changes production" : "No production data change"}
+                        {act.confirmRequired ? " · confirm required" : ""}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="hq-btn hq-btn-secondary hq-btn-sm"
+                      disabled={execMutation.isPending}
+                      onClick={() => {
+                        if (act.confirmRequired) {
+                          const ok = window.confirm(`Confirm AURA action:\n\n${act.label}\n\n${act.description}`);
+                          if (!ok) return;
+                        }
+                        execMutation.mutate({ actionId: act.id, confirmed: true });
+                      }}
+                    >
+                      {act.href ? "Open" : "Run"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
           <p className="hq-muted-text" style={{ marginTop: "0.75rem", fontSize: "0.78rem" }}>
-            Modules 7–8 ship next in separate commits. Mutations require confirmation. Every Brain v1 read is logged.
+            Module 8 ships next. Mutations that change production data remain blocked. Every Brain v1 action is logged.
           </p>
         </div>
       </div>

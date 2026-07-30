@@ -1250,6 +1250,57 @@ router.get("/aura/brain-v1/priority-queue", hqAuthRequired, requireHQModule("aur
   res.json(payload);
 });
 
+/** AURA Enterprise Brain v1 — Executive Action Center catalog (Founder-only). */
+router.get("/aura/brain-v1/actions", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const {
+    buildExecutiveActionCenterV1,
+    logAuraBrainV1Action,
+  } = await import("../hq/auraEnterpriseBrainV1");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "AURA Enterprise Brain v1 requires Founder access." });
+  }
+  const payload = await buildExecutiveActionCenterV1();
+  await logAuraBrainV1Action({
+    userId: identity.userId || req.hqUser?.id,
+    userEmail: identity.email || req.hqUser?.email,
+    command: "brain_v1.actions.read",
+    result: `ok actions=${payload.actions.length}`,
+    metadata: { module: "action-center", mode: "read_only" },
+  });
+  res.json(payload);
+});
+
+/** Confirm-gated Brain v1 action execution (no production mutations enabled yet). */
+router.post("/aura/brain-v1/actions/execute", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { executeBrainV1ConfirmedAction } = await import("../hq/auraEnterpriseBrainV1");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "AURA Enterprise Brain v1 requires Founder access." });
+  }
+  const actionId = String(req.body?.actionId ?? "").trim();
+  const confirmed = Boolean(req.body?.confirmed);
+  if (!actionId) return res.status(400).json({ error: "actionId required" });
+  const result = await executeBrainV1ConfirmedAction({
+    actionId,
+    confirmed,
+    userId: identity.userId || req.hqUser?.id,
+    userEmail: identity.email || req.hqUser?.email,
+  });
+  if (!result.ok) return res.status(400).json(result);
+  res.json(result);
+});
+
 /** AURA Enterprise Brain 2.0 */
 router.post("/aura/brain", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
   const { resolveIdentityFromHqUser, publicIdentitySummary } = await import("../hq/auraFounderTrustEngine");
