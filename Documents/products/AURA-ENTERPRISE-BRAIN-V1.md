@@ -14,8 +14,8 @@ Founder-only executive operating surface for IFCDC HQ. Built incrementally on ex
 
 | # | Module | Status |
 |---|--------|--------|
-| 1 | Executive Command Center | **Live** (`/hq/aura-brain`) |
-| 2 | Organization Health Dashboard | Planned |
+| 1 | Executive Command Center | **Live** (`/hq/aura-brain` · tab 1) |
+| 2 | Organization Health Dashboard | **Live** (`/hq/aura-brain` · tab 2) |
 | 3 | Executive Daily Briefing | Planned |
 | 4 | Project Status Monitor | Planned |
 | 5 | System Health Monitor | Planned |
@@ -42,6 +42,13 @@ Answers:
 Sources (aggregated, timeout-bounded): command health, platform services, software division health polls, leadership alerts, activity feed, login history, email delivery status + audit email failures.
 
 Action log table: `aura_enterprise_brain_v1_action_log` (redacts secret-like tokens).
+
+## Module 2 — Organization Health Dashboard
+
+**API:** `GET /api/hq/aura/brain-v1/org-health`  
+**UI:** `/hq/aura-brain` · Organization Health tab
+
+Surfaces overall org health grade/score, weighted factors with healthy/watch/action status, and command-health pillars. Read-only; logs `brain_v1.org_health.read`.
 
 ## Out of scope (this phase)
 

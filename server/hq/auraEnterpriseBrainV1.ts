@@ -9,7 +9,7 @@ import { getEmailDeliveryStatus } from "../lib/notifications";
 import { SOFTWARE_DIVISION_APPS, pollAllApps } from "./appRegistry";
 import { buildExecutiveCommandHealth } from "./executiveCommandHealth";
 import { listLeadershipAlerts } from "./criticalAlerts";
-import { buildHeadquartersActivityFeed } from "./analyticsReporting";
+import { buildHeadquartersActivityFeed, buildOrganizationHealthScore } from "./analyticsReporting";
 import { checkIfcdcServices } from "../lib/ifcdc";
 
 const SECTION_TIMEOUT_MS = 10_000;
@@ -421,17 +421,127 @@ export async function buildExecutiveCommandCenterV1(opts: {
       emailConfigured: email.configured,
       emailFrom: email.from,
     },
-    moduleRoadmap: [
-      { id: 1, name: "Executive Command Center", status: "live" },
-      { id: 2, name: "Organization Health Dashboard", status: "planned" },
-      { id: 3, name: "Executive Daily Briefing", status: "planned" },
-      { id: 4, name: "Project Status Monitor", status: "planned" },
-      { id: 5, name: "System Health Monitor", status: "planned" },
-      { id: 6, name: "Executive Priority Queue", status: "planned" },
-      { id: 7, name: "Executive Action Center", status: "planned" },
-      { id: 8, name: "Secure AURA Action Log", status: "planned" },
-    ],
+    moduleRoadmap: brainV1ModuleRoadmap(["executive-command-center", "organization-health"]),
     degraded,
     warning: warnings.length ? warnings.join(" ") : null,
+  };
+}
+
+export type OrganizationHealthDashboardV1 = {
+  module: "organization-health";
+  version: "v1";
+  generatedAt: string;
+  mode: "read_only";
+  overall: number | null;
+  grade: string;
+  factors: Array<{
+    label: string;
+    score: number;
+    max: number;
+    weight: string;
+    status: "healthy" | "watch" | "action_required" | "unknown";
+  }>;
+  commandPillars: Array<{
+    id: string;
+    label: string;
+    score: number;
+    grade: string;
+    status: string;
+    meta: string;
+  }>;
+  highlights: string[];
+  watchItems: string[];
+  degraded: boolean;
+  warning: string | null;
+  moduleRoadmap: Array<{ id: number; name: string; status: "live" | "planned" }>;
+};
+
+function factorStatus(score: number): "healthy" | "watch" | "action_required" | "unknown" {
+  if (!Number.isFinite(score)) return "unknown";
+  if (score >= 80) return "healthy";
+  if (score >= 60) return "watch";
+  return "action_required";
+}
+
+function brainV1ModuleRoadmap(live: string[]): Array<{ id: number; name: string; status: "live" | "planned" }> {
+  const all = [
+    { id: 1, name: "Executive Command Center", key: "executive-command-center" },
+    { id: 2, name: "Organization Health Dashboard", key: "organization-health" },
+    { id: 3, name: "Executive Daily Briefing", key: "daily-briefing" },
+    { id: 4, name: "Project Status Monitor", key: "project-status" },
+    { id: 5, name: "System Health Monitor", key: "system-health" },
+    { id: 6, name: "Executive Priority Queue", key: "priority-queue" },
+    { id: 7, name: "Executive Action Center", key: "action-center" },
+    { id: 8, name: "Secure AURA Action Log", key: "action-log" },
+  ];
+  return all.map((m) => ({
+    id: m.id,
+    name: m.name,
+    status: live.includes(m.key) ? "live" : "planned",
+  }));
+}
+
+export async function buildOrganizationHealthDashboardV1(): Promise<OrganizationHealthDashboardV1> {
+  const generatedAt = new Date().toISOString();
+  let degraded = false;
+  const warnings: string[] = [];
+
+  const [orgHealth, commandHealth] = await Promise.all([
+    withTimeout(buildOrganizationHealthScore(), null, "org-health"),
+    withTimeout(buildExecutiveCommandHealth(), null, "command-health"),
+  ]);
+
+  if (!orgHealth) {
+    degraded = true;
+    warnings.push("Organization health score unavailable.");
+  }
+  if (!commandHealth) {
+    degraded = true;
+    warnings.push("Command health pillars unavailable.");
+  }
+
+  const factors = (orgHealth?.factors ?? []).map((f) => ({
+    ...f,
+    status: factorStatus(f.score),
+  }));
+
+  const highlights: string[] = [];
+  const watchItems: string[] = [];
+  for (const f of factors) {
+    if (f.status === "healthy") highlights.push(`${f.label} is healthy (${f.score}/${f.max}).`);
+    if (f.status === "watch") watchItems.push(`${f.label} needs watch (${f.score}/${f.max}).`);
+    if (f.status === "action_required") watchItems.push(`${f.label} requires action (${f.score}/${f.max}).`);
+  }
+  if (commandHealth) {
+    highlights.push(`Command health overall ${commandHealth.overall} (${commandHealth.grade}).`);
+    for (const p of commandHealth.pillars) {
+      if (p.status === "critical" || p.status === "watch") {
+        watchItems.push(`${p.label} pillar is ${p.status} (${p.score}).`);
+      }
+    }
+  }
+  if (!highlights.length) highlights.push("Health snapshot loading or degraded — retry shortly.");
+
+  return {
+    module: "organization-health",
+    version: "v1",
+    generatedAt,
+    mode: "read_only",
+    overall: orgHealth?.overall ?? null,
+    grade: orgHealth?.grade ?? "—",
+    factors,
+    commandPillars: (commandHealth?.pillars ?? []).map((p) => ({
+      id: p.id,
+      label: p.label,
+      score: p.score,
+      grade: p.grade,
+      status: p.status,
+      meta: p.meta,
+    })),
+    highlights: highlights.slice(0, 8),
+    watchItems: watchItems.slice(0, 12),
+    degraded,
+    warning: warnings.length ? warnings.join(" ") : null,
+    moduleRoadmap: brainV1ModuleRoadmap(["executive-command-center", "organization-health"]),
   };
 }
