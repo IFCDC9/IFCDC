@@ -43,9 +43,22 @@ Then:
 3. If still pending, in Resend dashboard click **Verify** on `ifcdcbarbersapp.com` (DNS should still be on the Barbers GoDaddy account)
 4. Tell Tessa — live send test to `service@ifcdc.org` will run after deploy
 
-## Success criteria (not claimed until received)
+## Success criteria
 
-- [ ] `emergencyRestore.verified === true`
-- [ ] Test email received at `service@ifcdc.org`
-- [ ] Founder OTP / verification code received
-- [ ] Booking + payment confirmation paths accepted by Resend (`messageId`)
+- [x] `emergencyRestore.verified === true` (`ifcdcbarbersapp.com`)
+- [x] Live test email accepted by Resend (`messageId` returned; inbox: check `service@ifcdc.org`)
+- [x] Booking + payment confirmation paths verified on Barbers production (2026-07-29)
+- [ ] **Configured From matches verified domain** — still open:
+  - `RESEND_FROM_EMAIL` = `IFCDC Headquarters <service@ifcdc.org>` (env OK / loaded)
+  - Resend domain `ifcdc.org` status = **`failed`**
+  - Sends use fallback `service@ifcdcbarbersapp.com` (`usedFallback: true`)
+  - **Fix:** either verify `ifcdc.org` DNS in Resend, **or** set  
+    `RESEND_FROM_EMAIL=IFCDC Headquarters <service@ifcdcbarbersapp.com>` then Manual Deploy
+
+### Live probes (2026-07-30)
+
+| Probe | Result |
+|---|---|
+| `GET /api/hq/email/status` | `apiKeySet: true`, `from` configured as `service@ifcdc.org` |
+| `liveTest=1` | `success: true` — messageIds `7e17e59f…`, `9dc4f27c…` |
+| Effective From | `IFCDC Headquarters <service@ifcdcbarbersapp.com>` |
