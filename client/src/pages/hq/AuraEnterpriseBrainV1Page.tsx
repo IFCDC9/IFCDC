@@ -16,7 +16,7 @@ import { StatusBadge } from "../../components/hq/StatusBadge";
 import { HqLoading } from "../../components/hq/HqLoading";
 import { HqApiError } from "../../api/hqApiFetch";
 
-type BrainTab = "command" | "health" | "briefing" | "projects" | "systems" | "queue" | "actions";
+type BrainTab = "command" | "health" | "briefing" | "projects" | "systems" | "queue" | "actions" | "log";
 
 function errorMessage(err: unknown): string {
   if (err instanceof HqApiError) {
@@ -99,6 +99,14 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
     enabled: tab === "actions",
   });
 
+  const logQ = useQuery({
+    queryKey: ["aura-brain-v1-action-log"],
+    queryFn: () => hqApi.auraBrainV1ActionLog(50),
+    staleTime: 15_000,
+    refetchInterval: tab === "log" ? 60_000 : false,
+    enabled: tab === "log",
+  });
+
   const [actionNote, setActionNote] = useState<string | null>(null);
   const execMutation = useMutation({
     mutationFn: ({ actionId, confirmed }: { actionId: string; confirmed: boolean }) =>
@@ -117,7 +125,8 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
   const s = systems.data;
   const q = queue.data;
   const a = actionsQ.data;
-  const roadmap = d?.moduleRoadmap ?? h?.moduleRoadmap ?? b?.moduleRoadmap ?? p?.moduleRoadmap ?? s?.moduleRoadmap ?? q?.moduleRoadmap ?? a?.moduleRoadmap ?? [];
+  const log = logQ.data;
+  const roadmap = d?.moduleRoadmap ?? h?.moduleRoadmap ?? b?.moduleRoadmap ?? p?.moduleRoadmap ?? s?.moduleRoadmap ?? q?.moduleRoadmap ?? a?.moduleRoadmap ?? log?.moduleRoadmap ?? [];
 
   const refetchActive = () => {
     if (tab === "command") return cc.refetch();
@@ -126,7 +135,8 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
     if (tab === "projects") return projects.refetch();
     if (tab === "systems") return systems.refetch();
     if (tab === "queue") return queue.refetch();
-    return actionsQ.refetch();
+    if (tab === "actions") return actionsQ.refetch();
+    return logQ.refetch();
   };
   const fetching =
     tab === "command" ? cc.isFetching
@@ -135,7 +145,8 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
           : tab === "projects" ? projects.isFetching
             : tab === "systems" ? systems.isFetching
               : tab === "queue" ? queue.isFetching
-                : actionsQ.isFetching;
+                : tab === "actions" ? actionsQ.isFetching
+                  : logQ.isFetching;
 
   return (
     <HQLayout
@@ -192,6 +203,13 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
           onClick={() => setTab("actions")}
         >
           7. Action Center
+        </button>
+        <button
+          type="button"
+          className={`hq-btn hq-btn-sm ${tab === "log" ? "hq-btn-primary" : "hq-btn-secondary"}`}
+          onClick={() => setTab("log")}
+        >
+          8. Action Log
         </button>
         <StatusBadge label="Read-only" variant="muted" />
         <button
@@ -701,8 +719,57 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
         </>
       )}
 
+
+      {tab === "log" && (
+        <>
+          {logQ.isPending && !log && <HqLoading message="Loading AURA Action Log…" />}
+          {logQ.isError && (
+            <div className="hq-anomaly-alert hq-sev-medium" style={{ marginBottom: "1rem" }} role="status">
+              <AlertTriangle size={16} />
+              <div>
+                <strong>Action Log unavailable</strong>
+                <span> {errorMessage(logQ.error)}</span>
+              </div>
+            </div>
+          )}
+          {log && (
+            <div className="hq-panel" style={{ marginBottom: "1rem" }}>
+              <div className="hq-panel-body">
+                <h4 style={{ color: "var(--hq-gold)", marginBottom: "0.5rem" }}>Secure AURA Action Log</h4>
+                <p className="hq-muted-text" style={{ fontSize: "0.8rem", marginBottom: "0.75rem" }}>
+                  Showing {log.summary.totalReturned} recent entries · secrets redacted · Founder-only
+                </p>
+                <table className="hq-table" style={{ fontSize: "0.8rem" }}>
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>User</th>
+                      <th>Command</th>
+                      <th>Result</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {log.entries.map((e) => (
+                      <tr key={e.id}>
+                        <td>{new Date(e.createdAt).toLocaleString()}</td>
+                        <td>{e.userEmail || e.userId || "—"}</td>
+                        <td>{e.command}</td>
+                        <td>{e.result}</td>
+                      </tr>
+                    ))}
+                    {!log.entries.length && (
+                      <tr><td colSpan={4} className="hq-muted-text">No actions logged yet.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
           <p className="hq-muted-text" style={{ marginTop: "0.75rem", fontSize: "0.78rem" }}>
-            Module 8 ships next. Mutations that change production data remain blocked. Every Brain v1 action is logged.
+            All eight Brain v1 modules are live. Production-changing actions remain blocked pending Founder approval. Every Brain v1 read/action is logged.
           </p>
         </div>
       </div>

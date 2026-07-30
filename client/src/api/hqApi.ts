@@ -441,6 +441,23 @@ export const hqApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ actionId, confirmed }),
     }),
+  auraBrainV1ActionLog: (limit = 50) =>
+    hqFetch<{
+      module: string;
+      version: string;
+      generatedAt: string;
+      mode: "read_only";
+      entries: Array<{
+        id: string;
+        createdAt: string;
+        userId: string | null;
+        userEmail: string | null;
+        command: string;
+        result: string;
+      }>;
+      summary: { totalReturned: number };
+      moduleRoadmap: Array<{ id: number; name: string; status: "live" | "planned" }>;
+    }>(`/aura/brain-v1/action-log?limit=${limit}`),
   auraEnterpriseBrain: (request: string) =>
     hqFetch<Record<string, unknown>>("/aura/brain", {
       method: "POST",

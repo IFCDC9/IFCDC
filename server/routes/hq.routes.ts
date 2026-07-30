@@ -1301,6 +1301,33 @@ router.post("/aura/brain-v1/actions/execute", hqAuthRequired, requireHQModule("a
   res.json(result);
 });
 
+/** AURA Enterprise Brain v1 — Secure AURA Action Log (Founder-only, read-only). */
+router.get("/aura/brain-v1/action-log", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const {
+    buildSecureAuraActionLogV1,
+    logAuraBrainV1Action,
+  } = await import("../hq/auraEnterpriseBrainV1");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "AURA Enterprise Brain v1 requires Founder access." });
+  }
+  const limit = Math.min(parseInt(String(req.query.limit ?? "50"), 10) || 50, 200);
+  const payload = await buildSecureAuraActionLogV1(limit);
+  await logAuraBrainV1Action({
+    userId: identity.userId || req.hqUser?.id,
+    userEmail: identity.email || req.hqUser?.email,
+    command: "brain_v1.action_log.read",
+    result: `ok returned=${payload.summary.totalReturned}`,
+    metadata: { module: "action-log", mode: "read_only", limit },
+  });
+  res.json(payload);
+});
+
 /** AURA Enterprise Brain 2.0 */
 router.post("/aura/brain", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
   const { resolveIdentityFromHqUser, publicIdentitySummary } = await import("../hq/auraFounderTrustEngine");

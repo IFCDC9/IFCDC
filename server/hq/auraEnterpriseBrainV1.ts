@@ -23,6 +23,7 @@ export const BRAIN_V1_LIVE_MODULES = [
   "system-health",
   "priority-queue",
   "action-center",
+  "action-log",
 ] as string[];
 
 export function markBrainV1ModuleLive(key: string): void {
@@ -902,4 +903,43 @@ export async function executeBrainV1ConfirmedAction(opts: {
     return { ok: true, result };
   }
   return { ok: false, error: "Action not executable." };
+}
+
+
+export type SecureAuraActionLogV1 = {
+  module: "action-log";
+  version: "v1";
+  generatedAt: string;
+  mode: "read_only";
+  entries: Array<{
+    id: string;
+    createdAt: string;
+    userId: string | null;
+    userEmail: string | null;
+    command: string;
+    result: string;
+  }>;
+  summary: { totalReturned: number };
+  moduleRoadmap: Array<{ id: number; name: string; status: "live" | "planned" }>;
+};
+
+export async function buildSecureAuraActionLogV1(limit = 50): Promise<SecureAuraActionLogV1> {
+  markBrainV1ModuleLive("action-log");
+  const rows = await listAuraBrainV1Actions(limit);
+  return {
+    module: "action-log",
+    version: "v1",
+    generatedAt: new Date().toISOString(),
+    mode: "read_only",
+    entries: rows.map((r) => ({
+      id: String(r.id),
+      createdAt: String(r.created_at),
+      userId: r.user_id != null ? String(r.user_id) : null,
+      userEmail: r.user_email != null ? String(r.user_email) : null,
+      command: String(r.command),
+      result: String(r.result),
+    })),
+    summary: { totalReturned: rows.length },
+    moduleRoadmap: brainV1ModuleRoadmap(BRAIN_V1_LIVE_MODULES),
+  };
 }

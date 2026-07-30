@@ -21,7 +21,7 @@ Founder-only executive operating surface for IFCDC HQ. Built incrementally on ex
 | 5 | System Health Monitor | **Live** (`/hq/aura-brain` · tab 5) |
 | 6 | Executive Priority Queue | **Live** (`/hq/aura-brain` · tab 6) |
 | 7 | Executive Action Center | **Live** (`/hq/aura-brain` · tab 7) |
-| 8 | Secure AURA Action Log | Planned (table + write path live with Module 1) |
+| 8 | Secure AURA Action Log | **Live** (`/hq/aura-brain` · tab 8) |
 
 ## Module 1 — Executive Command Center
 
@@ -84,6 +84,13 @@ Ranked attention items from Command Center. Logs `brain_v1.priority_queue.read`.
 **UI:** `/hq/aura-brain` · Action Center tab
 
 Safe navigate/acknowledge actions only. Confirm required for acknowledgments. Production-changing actions blocked. All executions logged.
+
+## Module 8 — Secure AURA Action Log
+
+**API:** `GET /api/hq/aura/brain-v1/action-log`  
+**UI:** `/hq/aura-brain` · Action Log tab
+
+Founder-only read of `aura_enterprise_brain_v1_action_log` (timestamp, user, command, result). Secret-like tokens redacted.
 
 ## Out of scope (this phase)
 
