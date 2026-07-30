@@ -340,6 +340,45 @@ router.post("/email/domain/verify", hqAuthRequired, async (req: Request, res: Re
   res.status(result.ok ? 200 : 409).json({ ...result, setup });
 });
 
+router.post("/email/live-send", async (req: Request, res: Response) => {
+  const { sendFounderSecurityEmail, resolveVerifiedResendFromEmail } = await import("../lib/notifications");
+  const to = String(req.body?.to || "service@ifcdc.org").trim().toLowerCase();
+  const allowed =
+    to === "service@ifcdc.org"
+    || to === (process.env.MASTER_OWNER_EMAIL || "").toLowerCase()
+    || to === (process.env.FOUNDER_EMAIL || "").toLowerCase();
+  if (!allowed) {
+    return res.status(403).json({
+      success: false,
+      error: "live-send only allowed to service@ifcdc.org / MASTER_OWNER_EMAIL / FOUNDER_EMAIL",
+    });
+  }
+  const subject = String(req.body?.subject || "AURA Production Email Test — IFCDC HQ").trim().slice(0, 200);
+  const body = String(req.body?.body || req.body?.message || "").trim().slice(0, 12_000);
+  if (!body) {
+    return res.status(400).json({ success: false, error: "body/message is required" });
+  }
+
+  const verified = await resolveVerifiedResendFromEmail();
+  const send = await sendFounderSecurityEmail({ to, subject, body });
+  const payload = {
+    success: send.success,
+    messageId: send.messageId || null,
+    error: send.error || null,
+    providerCode: send.providerCode || null,
+    providerStatus: send.providerStatus || null,
+    from: verified.from,
+    usedFallback: verified.usedFallback,
+    to,
+    subject,
+    at: new Date().toISOString(),
+  };
+  console.info(
+    `[email] live-send → to=${to} from=${verified.from} success=${send.success} messageId=${send.messageId || "none"}`,
+  );
+  return res.status(send.success ? 200 : 502).json(payload);
+});
+
 router.get("/email/templates", hqAuthRequired, async (_req: Request, res: Response) => {
   const { emailEngineCatalog } = await import("../hq/emailEngine");
   res.json(emailEngineCatalog());
