@@ -301,13 +301,17 @@ export async function buildAuraE2eDiagnostics(opts: {
   probes.push({
     id: "voice-core",
     area: "Voice",
-    label: "Voice shares Founder trust + executive ops",
-    status: "partial",
-    detail: "Voice uses receptionist engine — not full runAuraCommand / action-registry / hq_aura_conversations",
-    route: "POST /api/twilio/aura/voice",
-    files: ["server/hq/auraReceptionistEngine.ts", "server/hq/auraCommandLayer.ts"],
+    label: "Voice/SMS Founder path → command layer",
+    status: "connected",
+    detail: "Phase 3 adapter: Founder voice/SMS uses runAuraCommand (same tools/memory as HQ text). Booking path stays on receptionist. Twilio URLs untouched.",
+    route: "POST /api/twilio/aura/voice · /sms",
+    files: [
+      "server/hq/auraReceptionistCommandAdapter.ts",
+      "server/hq/auraReceptionistEngine.ts",
+      "server/hq/auraCommandLayer.ts",
+    ],
     touchesTwilioConfig: false,
-    risk: "medium",
+    risk: "low",
   });
 
   probes.push({

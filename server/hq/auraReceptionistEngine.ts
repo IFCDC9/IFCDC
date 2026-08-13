@@ -331,106 +331,9 @@ export async function processReceptionistTurn(opts: {
     }
   }
 
-  // Founder Technical Command Mode — live ops briefing / repair tickets (no LLM guesswork).
+  // Founder Mode — Phase 3: route into unified command layer (same tools/memory as HQ text).
+  // Twilio webhook URLs/credentials are untouched; only the brain path changes.
   if (identity.founderMode && message) {
-    // Executive Operations — real email/SMS/call/calendar/docs (not explanations).
-    const { tryRunExecutiveCommand } = await import("./auraExecutiveOperations");
-    const exec = await tryRunExecutiveCommand(message, {
-      actorEmail: identity.email || "service@ifcdc.org",
-      identity,
-      module: "communications",
-    });
-    if (exec.handled) {
-      await logAuraIdentityAction({
-        identity,
-        action: `aura_exec_${exec.op}`,
-        detail: exec.result.summary.slice(0, 240),
-        metadata: { status: exec.result.status, channel },
-      });
-      void import("./auraUnifiedAudit").then(({ mirrorAuraUnifiedActionAsync }) =>
-        mirrorAuraUnifiedActionAsync({
-          source: "receptionist",
-          channel,
-          kind: "execute",
-          actionId: exec.op || "executive_op",
-          command: `receptionist:${exec.op}`,
-          result: exec.result.summary,
-          ok: exec.result.status !== "error",
-          userId: identity.userId,
-          userEmail: identity.email,
-          metadata: { status: exec.result.status },
-        })
-      );
-      const updated = await appendSessionTurn(session, "assistant", exec.result.summary);
-      return {
-        reply: exec.result.summary,
-        action: "none",
-        transferTo: null,
-        session: updated,
-        bookingConfirmed: false,
-        founderMode: true,
-        identityAssurance: identity.assurance,
-      };
-    }
-
-    const { wantsTechnicalCommand, handleTechnicalCommand } = await import("./auraTechnicalCommandEngine");
-    if (wantsTechnicalCommand(message)) {
-      const tech = await handleTechnicalCommand({
-        command: message,
-        channel,
-        actorEmail: identity.email || null,
-        founderMode: true,
-      });
-      await logAuraIdentityAction({
-        identity,
-        action: "aura_technical_command",
-        detail: tech.reply.slice(0, 240),
-        metadata: { action: tech.action, ticketId: tech.ticketId, blocked: tech.blocked },
-      });
-      const updated = await appendSessionTurn(session, "assistant", tech.reply);
-      return {
-        reply: tech.reply,
-        action: "none",
-        transferTo: null,
-        session: updated,
-        bookingConfirmed: false,
-        founderMode: true,
-        identityAssurance: identity.assurance,
-      };
-    }
-
-    const { wantsEnterpriseBrain, runEnterpriseBrain } = await import("./auraEnterpriseBrain");
-    const { wantsMultiAgentOrchestration } = await import("./auraExecutiveAgentOrchestrator");
-    if (wantsEnterpriseBrain(message) || wantsMultiAgentOrchestration(message)) {
-      const brain = await runEnterpriseBrain({
-        request: message,
-        channel,
-        actorEmail: identity.email || null,
-        founderMode: true,
-      });
-      const reply = channel === "sms" ? brain.smsSummary : brain.speechSummary;
-      await logAuraIdentityAction({
-        identity,
-        action: "aura_enterprise_brain",
-        detail: reply.slice(0, 240),
-        metadata: {
-          intent: brain.intent,
-          orchestrationId: brain.orchestrationId,
-          agentsDelegated: brain.agentsDelegated,
-        },
-      });
-      const updated = await appendSessionTurn(session, "assistant", reply);
-      return {
-        reply,
-        action: "none",
-        transferTo: null,
-        session: updated,
-        bookingConfirmed: false,
-        founderMode: true,
-        identityAssurance: identity.assurance,
-      };
-    }
-
     const { wantsCallFollowUp, deliverFounderCallFollowUp } = await import("./auraFounderCallReport");
     if (wantsCallFollowUp(message)) {
       const follow = await deliverFounderCallFollowUp({
@@ -456,19 +359,28 @@ export async function processReceptionistTurn(opts: {
       };
     }
 
-    const { wantsDecisionSupport, answerDecisionSupportQuestion } = await import("./auraDecisionSupport");
-    if (wantsDecisionSupport(message)) {
-      const decision = await answerDecisionSupportQuestion(message);
-      const reply = channel === "sms" ? decision.smsSummary : decision.speechSummary;
+    try {
+      const { runFounderVoiceSmsViaCommandLayer } = await import("./auraReceptionistCommandAdapter");
+      const via = await runFounderVoiceSmsViaCommandLayer({
+        message,
+        identity,
+        channel,
+        sessionKey: session.sessionId,
+      });
       await logAuraIdentityAction({
         identity,
-        action: "aura_decision_support",
-        detail: reply.slice(0, 240),
-        metadata: { founderApprovalRequired: decision.founderApprovalRequired, gaps: decision.gaps.length },
+        action: "aura_receptionist_command_adapter",
+        detail: via.reply.slice(0, 240),
+        metadata: {
+          channel,
+          poweredBy: via.poweredBy,
+          actionIds: via.response.actions.map((a) => a.id),
+          twilioConfigUntouched: true,
+        },
       });
-      const updated = await appendSessionTurn(session, "assistant", reply);
+      const updated = await appendSessionTurn(session, "assistant", via.reply);
       return {
-        reply,
+        reply: via.reply,
         action: "none",
         transferTo: null,
         session: updated,
@@ -476,15 +388,15 @@ export async function processReceptionistTurn(opts: {
         founderMode: true,
         identityAssurance: identity.assurance,
       };
-    }
-
-    if (/\b(mission|vision|organizational memory|what do we know|knowledge base|our programs|our budget)\b/i.test(message)) {
-      const { retrieveOrganizationalMemory } = await import("./auraOrganizationalMemory");
-      const memory = await retrieveOrganizationalMemory(message, { topK: 6 });
-      const reply = channel === "sms" ? memory.smsSummary : memory.speechSummary;
-      const updated = await appendSessionTurn(session, "assistant", reply);
+    } catch (err) {
+      console.error("[aura] receptionist→command adapter failed:", err instanceof Error ? err.message : err);
+      const fallback =
+        channel === "voice"
+          ? "I hit a brief command-layer issue. Please try that again, or say transfer for a person."
+          : "Command layer hiccup — please retry your request.";
+      const updated = await appendSessionTurn(session, "assistant", fallback);
       return {
-        reply,
+        reply: fallback,
         action: "none",
         transferTo: null,
         session: updated,

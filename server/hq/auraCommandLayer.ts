@@ -48,6 +48,11 @@ export interface AuraCommandInput {
   };
 }
 
+function resolveAuditChannel(contextRef?: Record<string, unknown>): string {
+  const ch = contextRef?.channel;
+  return typeof ch === "string" && ch.trim() ? ch.trim() : "hq_web";
+}
+
 export interface AuraExecutedAction {
   id: string;
   label: string;
@@ -158,7 +163,7 @@ export async function runAuraAction(
     void import("./auraUnifiedAudit").then(({ mirrorAuraUnifiedActionAsync }) =>
       mirrorAuraUnifiedActionAsync({
         source: "command_layer",
-        channel: "hq_web",
+        channel: resolveAuditChannel(enrichedCtx.contextRef),
         kind: "deny",
         actionId: action.id,
         command: action.label,
@@ -205,7 +210,7 @@ export async function runAuraAction(
     void import("./auraUnifiedAudit").then(({ mirrorAuraUnifiedActionAsync }) =>
       mirrorAuraUnifiedActionAsync({
         source: "command_layer",
-        channel: "hq_web",
+        channel: resolveAuditChannel(enrichedCtx.contextRef),
         kind: action.kind,
         actionId: action.id,
         command: action.label,
@@ -782,7 +787,7 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
         void import("./auraUnifiedAudit").then(({ mirrorAuraUnifiedActionAsync }) =>
           mirrorAuraUnifiedActionAsync({
             source: "command_layer",
-            channel: "hq_web",
+            channel: resolveAuditChannel(ctx.contextRef),
             kind: "deny",
             actionId: action.id,
             command: action.label,
@@ -818,7 +823,7 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
         void import("./auraUnifiedAudit").then(({ mirrorAuraUnifiedActionAsync }) =>
           mirrorAuraUnifiedActionAsync({
             source: "command_layer",
-            channel: "hq_web",
+            channel: resolveAuditChannel(ctx.contextRef),
             kind: action.kind,
             actionId: action.id,
             command: action.label,

@@ -1,6 +1,6 @@
 # AURA End-to-End Integration Audit & Connection Validation
 
-**Status:** AUDIT COMPLETE · Phase 1 (visibility) + Phase 2 (audit unification) SHIPPED — Twilio/SMS config untouched  
+**Status:** AUDIT COMPLETE · Phases 1–3 SHIPPED (visibility, audit unification, voice/text command adapter) — Twilio/SMS config untouched  
 **Date:** August 13, 2026  
 **Product:** IFCDC Headquarters / AURA  
 **Constraint:** Treat production Twilio/SMS as stable. No autonomous code/deploy authority for AURA.
@@ -17,7 +17,7 @@ HQ AURA is a **large in-process OS** (command layer + action registry + multiple
 | Reality today | Gap vs target |
 |---------------|---------------|
 | HQ chat uses `runAuraCommand` + `AURA_ACTIONS` + in-process OpenAI | Port `4101` `@ifcdc/aura-ai` microservice is **health-checked only**, not the executive path |
-| Voice/SMS receptionist shares Founder trust + executive ops | Voice does **not** call `runAuraCommand` / action-registry / same conversation memory |
+| Voice/SMS receptionist shares Founder trust + executive ops | Founder Mode voice/SMS now routes through `runAuraCommand` via Phase 3 adapter; public booking stays on receptionist |
 | Multiple parallel surfaces (Brain v1, Brain 2.0, EDI, OS4/OS5, AO) | Competing keyword short-circuits; consolidate later |
 | Module DB = HQ SQLite (`ifcdc.db`) | Not centralized `:4104` database microservice |
 | SMS send works; inbound status logged | Outbound AURA SMS **does not set** `statusCallback` in code (do not change Twilio Console in this audit) |
@@ -31,7 +31,7 @@ HQ AURA is a **large in-process OS** (command layer + action registry + multiple
 ```
 AURA UI (/hq/aura, Brain v1, chat widgets)
     → HQ API (/api/hq/aura/*)
-        → auraCommandLayer (text)  OR  auraReceptionistEngine (voice/SMS)
+        → auraCommandLayer (text + Founder voice/SMS via adapter)
             → AI: in-process OpenAI (@ifcdc/aura-ai helper / direct client)
             → Tools: auraActionRegistry + executive ops / brains (keyword paths)
             → DB: SQLite getDb() → module tables
@@ -39,8 +39,9 @@ AURA UI (/hq/aura, Brain v1, chat widgets)
             → Communications: send_sms / send_email / notifications
                 → Twilio messages.create  (SMS — DO NOT CHANGE CONFIG)
                 → Inbound: POST /api/twilio/aura/sms + /sms/status
-            → Logs: hq_audit_log + specialized aura_* tables + Brain v1 action log
+            → Logs: hq_audit_log + aura_unified_action_log + Brain v1 action log
             → Response back to UI / TwiML
+    → Public/booking voice/SMS still via auraReceptionistEngine (non-Founder)
 ```
 
 **Unused / parallel:** `IFCDC_AURA_URL:4101` chat microservice; `Shared/ifcdc-services.ts` `auraChat()`.
@@ -157,15 +158,16 @@ Legend: 🟢 CONNECTED · 🟡 PARTIAL · 🔴 MISSING · ⚠️ UNSAFE/INCOMPLE
 | Layer | Status | Same as text? |
 |-------|--------|---------------|
 | Founder trust / OTP | 🟢 | Shared |
-| Executive ops (SMS/email when Founder) | 🟢 | Shared implementations |
-| Org memory / brain branches | 🟡 | Partial shared engines |
-| `runAuraCommand` + action registry | 🔴 | Voice uses receptionist engine only |
-| Conversation memory (`hq_aura_conversations`) | 🔴 | Voice uses `aura_receptionist_sessions` |
+| Executive ops (SMS/email when Founder) | 🟢 | Via command layer (same as HQ text) |
+| Org memory / brain branches | 🟢 | Founder path uses `runAuraCommand` keyword engines |
+| `runAuraCommand` + action registry | 🟢 | Phase 3 adapter for Founder voice/SMS |
+| Conversation memory (`hq_aura_conversations`) | 🟢 | Founder path records via command layer; receptionist session kept for continuity |
 | Voice job queue / monitors | 🟢 | `aura_voice_jobs`, call monitors |
+| Public booking receptionist | 🟢 | Non-Founder path unchanged |
 
-**Routes:** `/api/twilio/aura/voice`, `/voice/respond`, `/voice/status`, etc.
+**Routes:** `/api/twilio/aura/voice`, `/voice/respond`, `/voice/status`, etc. (**unchanged**)
 
-**Gap:** Voice AURA and text AURA are **not yet one brain** — consolidate onto command layer later without touching Twilio credentials.
+**Phase 3:** Founder Mode voice/SMS → `auraReceptionistCommandAdapter` → `runAuraCommand`. Twilio credentials/URLs untouched.
 
 ---
 
@@ -233,14 +235,14 @@ Legend: 🟢 CONNECTED · 🟡 PARTIAL · 🔴 MISSING · ⚠️ UNSAFE/INCOMPLE
 
 | ID | Item | Missing | Files / routes | Env / DB | Fix (later) | Risk | Prod impact |
 |----|------|---------|----------------|----------|-------------|------|-------------|
-| G1 | Single AURA brain | Multiple entry points | `auraCommandLayer`, `auraReceptionistEngine`, brains | — | Route voice/SMS into `runAuraCommand` after adapter | High | Medium if rushed |
+| G1 | Single AURA brain | 🟡 Founder voice/SMS unified via Phase 3; public booking + parallel HQ brains remain | `auraReceptionistCommandAdapter`, command layer, brains | — | Continue consolidating Brain 2.0/EDI/OS surfaces | Med | Low |
+| G8 | Voice ≠ text tools/memory | ✅ Phase 3 Founder path unified | receptionist adapter → command layer | session + `hq_aura_conversations` | Optional: deeper shared session store | Low | Low |
 | G2 | Central :4101 unused | HQ doesn't call microservice | `Backend/ifcdc-services/aura-ai-core`, `Shared/ifcdc-services.ts` | `IFCDC_AURA_URL` | Either wire securely or deprecate for HQ OS | Med | Low if deprecate only |
 | G3 | Unauthenticated aura-ai-core | No auth on `/api/aura/*` | aura-ai-core | `CORS_ORIGIN` | Add auth or bind localhost | High if public | Low if not exposed |
 | G4 | Web Founder Mode without OTP | Weaker than voice | `auraFounderTrustEngine` | `MASTER_OWNER_EMAIL` | Optional step-up MFA for execute | Med | Low if Founder-only |
 | G5 | Module tool coverage | HR/finance/projects/donations thin | `auraActionRegistry.ts` | Module tables | Add read/prepare tools; Founder for mutate | Med | Low (additive) |
 | G6 | Barbers/bookings | Only receptionist path | `auraReceptionistActions.ts` | `clients`, `appointments` | Registry tools + events | Med | Low |
 | G7 | Outbound SMS statusCallback | Not in AURA `messages.create` | `auraExecutiveOperations` / `notifications.ts` | Twilio | Optional additive callback URL — **Founder approve; do not touch Console blindly** | Med | Low if additive |
-| G8 | Voice ≠ text tools/memory | Separate stacks | receptionist vs command layer | session tables | Unify | High | Medium |
 | G9 | Event bus incomplete | Bookings/payments/SMS fail weak | `hqRealtimeEvents`, webhooks | — | Emit notifyHqDataChange + AURA consumers | Med | Low |
 | G10 | Unified audit stream | ✅ Phase 2 shipped | `auraUnifiedAudit.ts`, Brain v1 log, command/exec/receptionist mirrors | `aura_unified_action_log` | Keep extending remaining prepare paths as needed | Low | Low |
 | G11 | Org operational memory graph | Not assembled | memory + modules | — | Context builder for Brain | Med | Low |
@@ -265,7 +267,7 @@ Legend: 🟢 CONNECTED · 🟡 PARTIAL · 🔴 MISSING · ⚠️ UNSAFE/INCOMPLE
 
 1. **Visibility** — ✅ **Shipped** — Unified AURA E2E diagnostics (`GET /api/hq/aura/diagnostics/e2e` · Brain v1 tab **9. E2E Diagnostics** · `server/hq/auraE2eDiagnosticsEngine.ts`). Twilio config untouched.  
 2. **Audit unification** — ✅ **Shipped** — `aura_unified_action_log` mirrors Brain v1, command-layer prepare/execute/deny, executive ops (SMS/email/call), and receptionist exec (`GET /api/hq/aura/diagnostics/unified-audit` · Brain v1 tab **8**).  
-3. **Voice/text unification** — Receptionist adapter → `runAuraCommand` (Twilio URLs unchanged).  
+3. **Voice/text unification** — ✅ **Shipped** — Founder voice/SMS → `auraReceptionistCommandAdapter` → `runAuraCommand` (Twilio URLs/credentials untouched; public booking path unchanged).  
 4. **Module tool expansion** — Read/prepare for HR, finance, projects, donations.  
 5. **Events** — Booking/payment/SMS-fail → `notifyHqDataChange` + AURA consumers.  
 6. **Optional SMS statusCallback** — Additive only; Founder-approved; no credential reset.  
@@ -285,6 +287,7 @@ Legend: 🟢 CONNECTED · 🟡 PARTIAL · 🔴 MISSING · ⚠️ UNSAFE/INCOMPLE
 | Brain v1 | `server/hq/auraEnterpriseBrainV1.ts` |
 | E2E diagnostics (Phase 1) | `server/hq/auraE2eDiagnosticsEngine.ts` |
 | Unified audit (Phase 2) | `server/hq/auraUnifiedAudit.ts` |
+| Voice/SMS command adapter (Phase 3) | `server/hq/auraReceptionistCommandAdapter.ts` |
 | Brain 2.0 | `server/hq/auraEnterpriseBrain.ts` |
 | Voice/SMS entry | `server/routes/twilioAura.routes.ts`, `auraReceptionistEngine.ts` |
 | Twilio log | `server/hq/twilioIntegrationEngine.ts` |
