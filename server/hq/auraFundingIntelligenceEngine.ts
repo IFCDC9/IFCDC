@@ -761,15 +761,15 @@ export async function buildFundingIntelligenceMetrics(): Promise<{
        AND (duplicate_of_id IS NULL OR duplicate_of_id = '')`
   );
 
-  const liveShare = await db.get<{ live: number; all: number }>(
+  const liveShare = await db.get<{ live: number; all_count: number }>(
     `SELECT
        SUM(CASE WHEN is_live = 1 THEN 1 ELSE 0 END) as live,
-       COUNT(*) as all
+       COUNT(*) as all_count
      FROM grant_opportunities
      WHERE (duplicate_of_id IS NULL OR duplicate_of_id = '')`
   );
 
-  const liveRatio = (liveShare?.all || 0) > 0 ? (liveShare?.live || 0) / (liveShare?.all || 1) : 0;
+  const liveRatio = (liveShare?.all_count || 0) > 0 ? (liveShare?.live || 0) / (liveShare?.all_count || 1) : 0;
   const dataConfidence: "high" | "medium" | "low" =
     liveRatio >= 0.5 ? "high" : liveRatio >= 0.15 ? "medium" : "low";
 
