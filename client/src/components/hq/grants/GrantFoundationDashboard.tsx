@@ -117,9 +117,12 @@ export const GrantFoundationDashboardPanel: React.FC<{
       {fundingIntel.data && (
         <div style={{ marginTop: "1rem" }}>
           <HqPanel
-            title="AURA Funding Intelligence (Phase 8A.2)"
+            title="AURA Funding Intelligence (Phase 8A.3)"
             subtitle={
-              fundingIntel.data.metrics.pipelineSummary
+              [
+                fundingIntel.data.metrics.pipelineSummary,
+                fundingIntel.data.metrics.addressableSummary,
+              ].filter(Boolean).join(" · ")
               || `Live HQ records · confidence ${fundingIntel.data.metrics.dataConfidence} · no auto-submit`
             }
             headerExtra={
@@ -139,74 +142,92 @@ export const GrantFoundationDashboardPanel: React.FC<{
                   type="button"
                   className="hq-btn hq-btn-sm hq-btn-ghost"
                   onClick={() => {
-                    void grantsApi.fundingIntelligenceEnrich({ limit: 40, onlyUnenriched: true }).then(() => {
+                    void grantsApi.fundingIntelligenceAwardability({ limit: 40 }).then(() => {
                       void fundingIntel.refetch();
                     });
                   }}
                 >
-                  Enrich records
+                  Verify awardability
                 </button>
               </div>
             }
           >
             <div className="hq-kpi-grid" style={{ marginBottom: "0.75rem" }}>
               <KpiCard label="Discovered" value={fundingIntel.data.metrics.totalOpportunitiesDiscovered} />
-              <KpiCard label="Potentially eligible" value={fundingIntel.data.metrics.potentiallyEligibleCount ?? 0} />
-              <KpiCard label="Fully qualified" value={fundingIntel.data.metrics.fullyQualifiedCount ?? 0} />
               <KpiCard
-                label="Verified qualified $"
-                value={fmt(fundingIntel.data.metrics.verifiedQualifiedPipelineValue ?? fundingIntel.data.metrics.qualifiedIfcdcFunding)}
+                label="Total qualified program $"
+                value={fmt(fundingIntel.data.metrics.totalQualifiedProgramFunding ?? fundingIntel.data.metrics.qualifiedIfcdcFunding)}
+              />
+              <KpiCard
+                label="IFCDC addressable $"
+                value={fmt(fundingIntel.data.metrics.ifcdcAddressableFunding ?? 0)}
                 variant="gold"
               />
               <KpiCard
-                label="Unknown-value qualified"
-                value={fundingIntel.data.metrics.unknownValueQualifiedCount ?? 0}
-                variant="warning"
+                label="High-priority addressable $"
+                value={fmt(fundingIntel.data.metrics.highPriorityAddressablePipeline ?? 0)}
+                variant="success"
               />
-              <KpiCard label="Priority $" value={fmt(fundingIntel.data.metrics.priorityPipelineValue)} variant="success" />
-              <KpiCard label="Priority Opps" value={fundingIntel.data.metrics.priorityCount} />
-              <KpiCard label="Apps Preparing" value={fundingIntel.data.metrics.applicationsInPreparation} />
-              <KpiCard label="Submitted $" value={fmt(fundingIntel.data.metrics.submittedApplicationValue)} />
-              <KpiCard label="Awarded $" value={fmt(fundingIntel.data.metrics.awardedValue)} variant="gold" />
+              <KpiCard
+                label="Application-ready $"
+                value={fmt(fundingIntel.data.metrics.applicationReadyFunding ?? 0)}
+                variant="gold"
+              />
+              <KpiCard label="READY NOW" value={fundingIntel.data.metrics.readyNowCount ?? 0} variant="success" />
+              <KpiCard label="Needs documents" value={fundingIntel.data.metrics.needsDocumentsCount ?? 0} variant="warning" />
+              <KpiCard label="Needs program dev" value={fundingIntel.data.metrics.needsProgramDevelopmentCount ?? 0} />
+              <KpiCard label="Needs matching $" value={fundingIntel.data.metrics.needsMatchingFundsCount ?? 0} variant="warning" />
+              <KpiCard label="Review required" value={fundingIntel.data.metrics.reviewRequiredCount ?? 0} variant="warning" />
+              <KpiCard label="Unknown addressable" value={fundingIntel.data.metrics.unknownAddressableCount ?? 0} variant="warning" />
               <KpiCard label="Deadlines 30d" value={fundingIntel.data.metrics.upcomingDeadlines} variant="warning" />
-              <KpiCard label="Founder Review" value={fundingIntel.data.metrics.needingFounderReview} variant="warning" />
             </div>
             <div className="hq-grid-2">
               <div>
-                <h4 style={{ fontSize: "0.8rem", color: "var(--hq-text-dim)", marginBottom: "0.5rem" }}>Priority opportunities</h4>
+                <h4 style={{ fontSize: "0.8rem", color: "var(--hq-text-dim)", marginBottom: "0.5rem" }}>Highest-value application-ready</h4>
                 <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.78rem" }}>
-                  {(fundingIntel.data.priorityOpportunities || []).slice(0, 6).map((o) => (
+                  {(fundingIntel.data.applicationReadyOpportunities || fundingIntel.data.priorityOpportunities || []).slice(0, 6).map((o) => (
                     <li key={String(o.id)}>
                       <a href={String(o.url || "#")} target="_blank" rel="noreferrer">
                         {String(o.title || "Opportunity")}
                       </a>
                       {" · "}
-                      score {String(o.enriched_final_score ?? o.qualification_score ?? "n/a")}
-                      {o.funding_amount_status ? ` · ${String(o.funding_amount_status)}` : ""}
-                      {o.best_program_slug
-                        ? ` · ${String(o.best_program_slug)}@${String(o.best_program_match_pct ?? "?")}%`
-                        : ""}
-                      {" · "}
-                      {String(o.eligibility_result || "")}
+                      addressable {o.ifcdc_addressable_amount != null ? fmt(Number(o.ifcdc_addressable_amount)) : "UNKNOWN"}
+                      {" · readiness "}
+                      {String(o.application_readiness_score ?? "n/a")}
+                      {o.readiness_class ? ` (${String(o.readiness_class)})` : ""}
                     </li>
                   ))}
-                  {!fundingIntel.data.priorityOpportunities?.length && (
-                    <li className="hq-muted-text">Run a live scan to populate priority opportunities.</li>
+                  {!fundingIntel.data.applicationReadyOpportunities?.length && !fundingIntel.data.priorityOpportunities?.length && (
+                    <li className="hq-muted-text">Run awardability verification to populate READY NOW opportunities.</li>
                   )}
                 </ul>
               </div>
               <div>
-                <h4 style={{ fontSize: "0.8rem", color: "var(--hq-text-dim)", marginBottom: "0.5rem" }}>Upcoming deadlines</h4>
-                <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.78rem" }}>
-                  {(fundingIntel.data.upcomingDeadlines || []).slice(0, 6).map((o) => (
-                    <li key={String(o.id)}>
-                      {String(o.deadline)} — {String(o.title || "")}
-                    </li>
-                  ))}
-                  {!fundingIntel.data.upcomingDeadlines?.length && (
-                    <li className="hq-muted-text">No upcoming deadlines in the next 45 days.</li>
-                  )}
-                </ul>
+                <h4 style={{ fontSize: "0.8rem", color: "var(--hq-text-dim)", marginBottom: "0.5rem" }}>First pilot recommendation</h4>
+                {fundingIntel.data.pilotRecommendation?.recommendedPilot ? (
+                  <div style={{ fontSize: "0.78rem" }}>
+                    <a
+                      href={String(fundingIntel.data.pilotRecommendation.recommendedPilot.url || "#")}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {String(fundingIntel.data.pilotRecommendation.recommendedPilot.title || "Pilot")}
+                    </a>
+                    <p className="hq-muted-text" style={{ marginTop: "0.35rem" }}>
+                      {fundingIntel.data.pilotRecommendation.rationale}
+                    </p>
+                    <p style={{ marginTop: "0.35rem" }}>Top 3:</p>
+                    <ol style={{ margin: 0, paddingLeft: "1.1rem" }}>
+                      {(fundingIntel.data.pilotRecommendation.top3 || []).map((o) => (
+                        <li key={String(o.id)}>{String(o.title)} · composite {String(o.pilotComposite ?? "")}</li>
+                      ))}
+                    </ol>
+                  </div>
+                ) : (
+                  <p className="hq-muted-text" style={{ fontSize: "0.78rem" }}>
+                    Verify awardability to generate a Founder pilot recommendation (no auto-submit).
+                  </p>
+                )}
               </div>
             </div>
           </HqPanel>

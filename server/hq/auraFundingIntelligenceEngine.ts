@@ -616,6 +616,20 @@ export async function enrichAndQualifyOpportunity(
     opts?.actorEmail
   );
 
+  // Phase 8A.3 — addressable funding + application readiness (after enrichment/score)
+  let awardability: Record<string, unknown> | null = null;
+  try {
+    const { verifyOpportunityAwardability } = await import("./auraFundingAwardabilityEngine");
+    awardability = await verifyOpportunityAwardability(opportunityId, {
+      actorEmail: opts?.actorEmail,
+    });
+  } catch (err) {
+    console.warn(
+      "[funding-intel] awardability skipped:",
+      err instanceof Error ? err.message : err
+    );
+  }
+
   if (opts?.emitEvents !== false) {
     if (scored.classification === "priority" && eligibility.result !== "not_eligible") {
       emitGrantOpsEvent({
@@ -646,6 +660,12 @@ export async function enrichAndQualifyOpportunity(
     programs: programs.map((p) => p.slug),
     fundingAmountStatus: String(opp.funding_amount_status || enrichmentMeta?.fundingAmountStatus || "unknown"),
     pipelineValue: enrichmentMeta?.pipelineValue ?? null,
+    addressableAmount:
+      awardability && (awardability.addressable as { addressableAmount?: number | null } | undefined)?.addressableAmount != null
+        ? (awardability.addressable as { addressableAmount: number }).addressableAmount
+        : (awardability?.maximumIfcdcCanRequest as number | null | undefined) ?? null,
+    readinessClass: awardability?.readinessClass as string | undefined,
+    applicationReadinessScore: awardability?.applicationReadinessScore as number | undefined,
   };
 }
 
@@ -757,6 +777,12 @@ export async function runFundingIntelligenceScan(opts?: {
   }
 
   const ingested = feedResults.reduce((s, r) => s + (r.imported || 0) + (r.updated || 0), 0);
+  try {
+    const { selectFirstPilotRecommendation } = await import("./auraFundingAwardabilityEngine");
+    await selectFirstPilotRecommendation();
+  } catch {
+    /* pilot ranking best-effort after scan */
+  }
   const metrics = await buildFundingIntelligenceMetrics();
 
   await writeAudit({
@@ -782,9 +808,16 @@ export async function buildFundingIntelligenceMetrics(): Promise<{
   potentiallyEligibleCount: number;
   fullyQualifiedCount: number;
   totalPotentialFundingDiscovered: number;
-  /** Verified/partial numeric award values only — never treats UNKNOWN as $0 */
+  /** @deprecated alias — total qualified program/opportunity associated funding */
   qualifiedIfcdcFunding: number;
   verifiedQualifiedPipelineValue: number;
+  /** Total Qualified Program Funding (program/opportunity values — NOT IFCDC requestable) */
+  totalQualifiedProgramFunding: number;
+  /** Sum of IFCDC addressable amounts only */
+  ifcdcAddressableFunding: number;
+  highPriorityAddressablePipeline: number;
+  applicationReadyFunding: number;
+  unknownAddressableCount: number;
   unknownValueQualifiedCount: number;
   priorityPipelineValue: number;
   applicationsInPreparation: number;
@@ -793,49 +826,61 @@ export async function buildFundingIntelligenceMetrics(): Promise<{
   availableForAllocationValue: number;
   qualifiedCount: number;
   priorityCount: number;
+  readyNowCount: number;
+  needsDocumentsCount: number;
+  needsProgramDevelopmentCount: number;
+  needsMatchingFundsCount: number;
+  reviewRequiredCount: number;
+  notReadyCount: number;
   upcomingDeadlines: number;
   needingFounderReview: number;
   dataConfidence: "high" | "medium" | "low";
   pipelineSummary: string;
+  addressableSummary: string;
 }> {
   await ensureGrantTables();
   const db = await getDb();
 
-  /** Only sum published numeric award fields when funding status is verified or partial. */
-  const verifiedSumExpr = `
+  /** Program/opportunity associated funding (ceilings or estimated totals) — not IFCDC-requestable alone. */
+  const programSumExpr = `
     CASE
       WHEN COALESCE(funding_amount_status, 'unknown') IN ('verified', 'partial') THEN
         CASE
-          WHEN funding_value_source = 'estimated_total_funding' AND estimated_funding IS NOT NULL AND estimated_funding > 0
-            THEN estimated_funding
-          WHEN funding_value_source = 'award_floor' AND COALESCE(award_floor, amount_min) IS NOT NULL AND COALESCE(award_floor, amount_min) > 0
-            THEN COALESCE(award_floor, amount_min)
+          WHEN estimated_funding IS NOT NULL AND estimated_funding > 0 THEN estimated_funding
           WHEN COALESCE(award_ceiling, amount_max) IS NOT NULL AND COALESCE(award_ceiling, amount_max) > 0
             THEN COALESCE(award_ceiling, amount_max)
-          WHEN estimated_funding IS NOT NULL AND estimated_funding > 0 THEN estimated_funding
           ELSE 0
         END
       ELSE 0
     END`;
 
+  const addressableSumExpr = `
+    CASE
+      WHEN ifcdc_addressable_amount IS NOT NULL AND ifcdc_addressable_amount > 0
+        AND COALESCE(addressable_status, 'unknown') IN ('verified', 'partial', 'derived')
+      THEN ifcdc_addressable_amount
+      ELSE 0
+    END`;
+
   const total = await db.get<{ c: number; pot: number }>(
     `SELECT COUNT(*) as c,
-            COALESCE(SUM(${verifiedSumExpr}), 0) as pot
+            COALESCE(SUM(${programSumExpr}), 0) as pot
      FROM grant_opportunities
      WHERE (duplicate_of_id IS NULL OR duplicate_of_id = '')`
   );
 
-  const qualified = await db.get<{ c: number; pot: number; unknown_c: number }>(
+  const qualified = await db.get<{ c: number; pot: number; unknown_c: number; addr: number; addr_unknown: number }>(
     `SELECT COUNT(*) as c,
-            COALESCE(SUM(${verifiedSumExpr}), 0) as pot,
+            COALESCE(SUM(${programSumExpr}), 0) as pot,
             SUM(CASE
-              WHEN COALESCE(funding_amount_status, 'unknown') IN ('unknown', 'conflicting')
-                OR (
-                  COALESCE(funding_amount_status, 'unknown') NOT IN ('verified', 'partial')
-                  AND COALESCE(award_ceiling, amount_max, estimated_funding) IS NULL
-                )
+              WHEN COALESCE(funding_amount_status, 'unknown') IN ('unknown', 'conflicting') THEN 1 ELSE 0
+            END) as unknown_c,
+            COALESCE(SUM(${addressableSumExpr}), 0) as addr,
+            SUM(CASE
+              WHEN ifcdc_addressable_amount IS NULL
+                OR COALESCE(addressable_status, 'unknown') IN ('unknown', 'conflicting')
               THEN 1 ELSE 0
-            END) as unknown_c
+            END) as addr_unknown
      FROM grant_opportunities
      WHERE eligibility_result IN ('eligible', 'possibly_eligible')
        AND (duplicate_of_id IS NULL OR duplicate_of_id = '')`
@@ -853,12 +898,41 @@ export async function buildFundingIntelligenceMetrics(): Promise<{
        AND (duplicate_of_id IS NULL OR duplicate_of_id = '')`
   );
 
-  const priority = await db.get<{ c: number; pot: number }>(
+  const priority = await db.get<{ c: number; pot: number; addr: number }>(
     `SELECT COUNT(*) as c,
-            COALESCE(SUM(${verifiedSumExpr}), 0) as pot
+            COALESCE(SUM(${programSumExpr}), 0) as pot,
+            COALESCE(SUM(${addressableSumExpr}), 0) as addr
      FROM grant_opportunities
      WHERE qualification_class = 'priority'
        AND eligibility_result != 'not_eligible'
+       AND (duplicate_of_id IS NULL OR duplicate_of_id = '')`
+  );
+
+  const appReady = await db.get<{ pot: number }>(
+    `SELECT COALESCE(SUM(${addressableSumExpr}), 0) as pot
+     FROM grant_opportunities
+     WHERE readiness_class = 'ready_now'
+       AND eligibility_result IN ('eligible', 'possibly_eligible')
+       AND (duplicate_of_id IS NULL OR duplicate_of_id = '')`
+  );
+
+  const readinessCounts = await db.get<{
+    ready_now: number;
+    needs_documents: number;
+    needs_program_development: number;
+    needs_matching_funds: number;
+    review_required: number;
+    not_ready: number;
+  }>(
+    `SELECT
+       SUM(CASE WHEN readiness_class = 'ready_now' THEN 1 ELSE 0 END) as ready_now,
+       SUM(CASE WHEN readiness_class = 'needs_documents' THEN 1 ELSE 0 END) as needs_documents,
+       SUM(CASE WHEN readiness_class = 'needs_program_development' THEN 1 ELSE 0 END) as needs_program_development,
+       SUM(CASE WHEN readiness_class = 'needs_matching_funds' THEN 1 ELSE 0 END) as needs_matching_funds,
+       SUM(CASE WHEN readiness_class = 'review_required' THEN 1 ELSE 0 END) as review_required,
+       SUM(CASE WHEN readiness_class = 'not_ready' THEN 1 ELSE 0 END) as not_ready
+     FROM grant_opportunities
+     WHERE eligibility_result IN ('eligible', 'possibly_eligible')
        AND (duplicate_of_id IS NULL OR duplicate_of_id = '')`
   );
 
@@ -910,21 +984,35 @@ export async function buildFundingIntelligenceMetrics(): Promise<{
   const dataConfidence: "high" | "medium" | "low" =
     enrichRatio >= 0.4 || liveRatio >= 0.5 ? "high" : liveRatio >= 0.15 || enrichRatio >= 0.15 ? "medium" : "low";
 
-  const verifiedQualified = Math.round(qualified?.pot ?? 0);
+  const totalQualifiedProgram = Math.round(qualified?.pot ?? 0);
+  const addressable = Math.round(qualified?.addr ?? 0);
   const unknownQualified = Math.round(qualified?.unknown_c ?? 0);
+  const unknownAddressable = Math.round(qualified?.addr_unknown ?? 0);
+  const highPriorityAddr = Math.round(priority?.addr ?? 0);
+  const appReadyFunding = Math.round(appReady?.pot ?? 0);
+
   const pipelineSummary =
-    `Qualified Pipeline: $${verifiedQualified.toLocaleString()} verified`
-    + (unknownQualified > 0
-      ? ` + ${unknownQualified} qualified opportunities with unpublished award values`
-      : "");
+    `Total Qualified Program Funding: $${totalQualifiedProgram.toLocaleString()}`
+    + (unknownQualified > 0 ? ` (+ ${unknownQualified} with unpublished program values)` : "");
+
+  const addressableSummary =
+    `IFCDC Addressable Funding: $${addressable.toLocaleString()}`
+    + ` · High-priority addressable: $${highPriorityAddr.toLocaleString()}`
+    + ` · Application-ready: $${appReadyFunding.toLocaleString()}`
+    + (unknownAddressable > 0 ? ` · ${unknownAddressable} qualified with UNKNOWN addressable` : "");
 
   return {
     totalOpportunitiesDiscovered: total?.c ?? 0,
     potentiallyEligibleCount: potentiallyEligible?.c ?? 0,
     fullyQualifiedCount: fullyQualified?.c ?? 0,
     totalPotentialFundingDiscovered: Math.round(total?.pot ?? 0),
-    qualifiedIfcdcFunding: verifiedQualified,
-    verifiedQualifiedPipelineValue: verifiedQualified,
+    qualifiedIfcdcFunding: totalQualifiedProgram,
+    verifiedQualifiedPipelineValue: totalQualifiedProgram,
+    totalQualifiedProgramFunding: totalQualifiedProgram,
+    ifcdcAddressableFunding: addressable,
+    highPriorityAddressablePipeline: highPriorityAddr,
+    applicationReadyFunding: appReadyFunding,
+    unknownAddressableCount: unknownAddressable,
     unknownValueQualifiedCount: unknownQualified,
     priorityPipelineValue: Math.round(priority?.pot ?? 0),
     applicationsInPreparation: appsPrep?.c ?? 0,
@@ -933,10 +1021,17 @@ export async function buildFundingIntelligenceMetrics(): Promise<{
     availableForAllocationValue: Math.round(available?.pot ?? 0),
     qualifiedCount: qualified?.c ?? 0,
     priorityCount: priority?.c ?? 0,
+    readyNowCount: readinessCounts?.ready_now ?? 0,
+    needsDocumentsCount: readinessCounts?.needs_documents ?? 0,
+    needsProgramDevelopmentCount: readinessCounts?.needs_program_development ?? 0,
+    needsMatchingFundsCount: readinessCounts?.needs_matching_funds ?? 0,
+    reviewRequiredCount: readinessCounts?.review_required ?? 0,
+    notReadyCount: readinessCounts?.not_ready ?? 0,
     upcomingDeadlines: upcoming?.c ?? 0,
     needingFounderReview: review?.c ?? 0,
     dataConfidence,
     pipelineSummary,
+    addressableSummary,
   };
 }
 
@@ -951,7 +1046,9 @@ export async function buildFundingIntelligenceDashboard() {
     `SELECT id, title, funder, url, source_type, external_id, eligibility_result,
             qualification_score, qualification_class, preliminary_score, enriched_final_score,
             amount_max, award_ceiling, estimated_funding, funding_amount_status, funding_value_source,
-            best_program_slug, best_program_match_pct, deadline
+            best_program_slug, best_program_match_pct, deadline,
+            ifcdc_addressable_amount, addressable_status, application_readiness_score, readiness_class,
+            match_required, pilot_rank
      FROM grant_opportunities
      WHERE qualification_class = 'priority'
        AND eligibility_result != 'not_eligible'
@@ -961,7 +1058,8 @@ export async function buildFundingIntelligenceDashboard() {
   );
   const upcoming = await db.all(
     `SELECT id, title, funder, url, deadline, qualification_score, eligibility_result, source_type, external_id,
-            funding_amount_status, best_program_slug, best_program_match_pct
+            funding_amount_status, best_program_slug, best_program_match_pct,
+            ifcdc_addressable_amount, readiness_class, application_readiness_score
      FROM grant_opportunities
      WHERE deadline IS NOT NULL
        AND date(deadline) >= date('now')
@@ -970,6 +1068,17 @@ export async function buildFundingIntelligenceDashboard() {
      ORDER BY date(deadline) ASC
      LIMIT 25`
   );
+  const applicationReady = await db.all(
+    `SELECT id, title, funder, url, source_type, external_id, eligibility_result,
+            ifcdc_addressable_amount, addressable_status, application_readiness_score, readiness_class,
+            best_program_slug, best_program_match_pct, deadline, enriched_final_score, pilot_rank
+     FROM grant_opportunities
+     WHERE readiness_class = 'ready_now'
+       AND eligibility_result IN ('eligible', 'possibly_eligible')
+       AND (duplicate_of_id IS NULL OR duplicate_of_id = '')
+     ORDER BY COALESCE(ifcdc_addressable_amount, 0) DESC, application_readiness_score DESC
+     LIMIT 15`
+  );
   let programProfiles: Array<Record<string, unknown>> = [];
   try {
     const { listIfcdcProgramProfiles } = await import("./auraFundingEnrichmentEngine");
@@ -977,14 +1086,23 @@ export async function buildFundingIntelligenceDashboard() {
   } catch {
     programProfiles = [];
   }
+  let pilot: Awaited<ReturnType<typeof import("./auraFundingAwardabilityEngine").selectFirstPilotRecommendation>> | null = null;
+  try {
+    const { selectFirstPilotRecommendation } = await import("./auraFundingAwardabilityEngine");
+    pilot = await selectFirstPilotRecommendation();
+  } catch {
+    pilot = null;
+  }
   return {
     generatedAt: new Date().toISOString(),
-    phase: "8A.2",
+    phase: "8A.3",
     metrics,
     sources,
     priorityOpportunities: priority,
     upcomingDeadlines: upcoming,
+    applicationReadyOpportunities: applicationReady,
     programProfiles,
+    pilotRecommendation: pilot,
     securityBoundary: {
       maySubmit: false,
       maySignCertifications: false,
@@ -1009,13 +1127,109 @@ export async function answerFundingIntelligenceQuery(opts: {
   if (/how much verified|verified funding|pipeline value|verified \$/.test(q)) {
     return {
       reply:
-        `${metrics.pipelineSummary}. `
-        + `Priority verified value: $${metrics.priorityPipelineValue.toLocaleString()} `
-        + `(${metrics.priorityCount} priority). Unknown-value qualified: ${metrics.unknownValueQualifiedCount}. `
-        + `Missing award amounts are stored as UNKNOWN — never counted as $0.`,
+        `${metrics.pipelineSummary}. ${metrics.addressableSummary}. `
+        + `Unknown-value qualified (program amounts): ${metrics.unknownValueQualifiedCount}. `
+        + `Total program funding is not the same as IFCDC-addressable funding.`,
       records: [],
       metrics,
     };
+  }
+
+  if (/addressable|realistically apply|how much.*can ifcdc|183\.?885|183,885/.test(q)) {
+    return {
+      reply:
+        `${metrics.addressableSummary}. `
+        + `Of total qualified program funding ($${metrics.totalQualifiedProgramFunding.toLocaleString()}), `
+        + `IFCDC can realistically pursue $${metrics.ifcdcAddressableFunding.toLocaleString()} in addressable individual-award capacity `
+        + `(ceilings/derived per-award amounts — never the full program pot by default). `
+        + `${metrics.unknownAddressableCount} qualified opportunities still have UNKNOWN addressable amounts.`,
+      records: [],
+      metrics,
+    };
+  }
+
+  if (/ready now|application-ready|application ready/.test(q)) {
+    const rows = await db.all<Record<string, unknown>>(
+      `SELECT id, title, funder, url, source_type, external_id, ifcdc_addressable_amount, addressable_status,
+              application_readiness_score, readiness_class, best_program_slug, best_program_match_pct, deadline
+       FROM grant_opportunities
+       WHERE readiness_class = 'ready_now'
+         AND (duplicate_of_id IS NULL OR duplicate_of_id = '')
+       ORDER BY COALESCE(ifcdc_addressable_amount, 0) DESC LIMIT 20`
+    );
+    return {
+      reply:
+        `${metrics.readyNowCount} READY NOW opportunities · Application-ready funding $${metrics.applicationReadyFunding.toLocaleString()}. `
+        + (rows[0]
+          ? `Top: ${rows[0].title} · addressable $${Number(rows[0].ifcdc_addressable_amount || 0).toLocaleString()} · ${rows[0].url}`
+          : "None classified READY NOW yet — run awardability verification."),
+      records: rows,
+      metrics,
+    };
+  }
+
+  if (/matching fund|cost.?share|needs match/.test(q)) {
+    const rows = await db.all<Record<string, unknown>>(
+      `SELECT id, title, url, match_required, match_type, match_percentage, readiness_class,
+              ifcdc_addressable_amount, application_readiness_score
+       FROM grant_opportunities
+       WHERE COALESCE(match_required, 0) = 1
+         AND (duplicate_of_id IS NULL OR duplicate_of_id = '')
+       ORDER BY application_readiness_score DESC LIMIT 20`
+    );
+    return {
+      reply: `${rows.length} opportunities require matching/cost-share. Needs-matching-funds class: ${metrics.needsMatchingFundsCount}.`,
+      records: rows,
+      metrics,
+    };
+  }
+
+  if (/missing document|needs documents|document gap/.test(q)) {
+    const rows = await db.all<Record<string, unknown>>(
+      `SELECT id, title, url, readiness_class, document_gaps_json, missing_info_json, application_readiness_score
+       FROM grant_opportunities
+       WHERE readiness_class = 'needs_documents'
+         AND (duplicate_of_id IS NULL OR duplicate_of_id = '')
+       ORDER BY application_readiness_score DESC LIMIT 20`
+    );
+    return {
+      reply: `${metrics.needsDocumentsCount} opportunities classified NEEDS DOCUMENTS. Missing items are listed per record for Founder review (not invented).`,
+      records: rows,
+      metrics,
+    };
+  }
+
+  if (/pursue first|first pilot|top 3|recommend(ed)? (this |the )?opportunity|which grant should/.test(q)) {
+    const { selectFirstPilotRecommendation } = await import("./auraFundingAwardabilityEngine");
+    const pilot = await selectFirstPilotRecommendation();
+    return {
+      reply: pilot.rationale,
+      records: pilot.top3,
+      metrics,
+    };
+  }
+
+  if (/how much could ifcdc request|request from this|maximum.*request/.test(q)) {
+    const top = await db.get<Record<string, unknown>>(
+      `SELECT id, title, url, ifcdc_addressable_amount, ifcdc_max_eligible_request,
+              ifcdc_recommended_request_min, ifcdc_recommended_request_max, addressable_explanation,
+              total_program_funding, award_ceiling, estimated_funding
+       FROM grant_opportunities
+       WHERE eligibility_result IN ('eligible', 'possibly_eligible')
+         AND (duplicate_of_id IS NULL OR duplicate_of_id = '')
+       ORDER BY COALESCE(pilot_rank, 99), COALESCE(application_readiness_score, 0) DESC
+       LIMIT 1`
+    );
+    if (top) {
+      return {
+        reply:
+          `For "${top.title}": IFCDC max request ${top.ifcdc_max_eligible_request != null ? `$${Number(top.ifcdc_max_eligible_request).toLocaleString()}` : "UNKNOWN"}; `
+          + `recommended range ${top.ifcdc_recommended_request_min != null ? `$${Number(top.ifcdc_recommended_request_min).toLocaleString()}` : "?"}–${top.ifcdc_recommended_request_max != null ? `$${Number(top.ifcdc_recommended_request_max).toLocaleString()}` : "?"}. `
+          + `${top.addressable_explanation || ""} Official source: ${top.url}`,
+        records: [top],
+        metrics,
+      };
+    }
   }
 
   if (/unknown.?value|unpublished|unknown award|unknown amount/.test(q)) {
@@ -1070,7 +1284,9 @@ export async function answerFundingIntelligenceQuery(opts: {
     `SELECT id, title, funder, url, source_type, external_id, eligibility_result,
             qualification_score, enriched_final_score, preliminary_score, qualification_class,
             amount_max, award_ceiling, estimated_funding, funding_amount_status, funding_value_source,
-            best_program_slug, best_program_match_pct, deadline, division_slugs, program_match_json
+            best_program_slug, best_program_match_pct, deadline, division_slugs, program_match_json,
+            ifcdc_addressable_amount, addressable_status, application_readiness_score, readiness_class,
+            match_required, pilot_rank
      FROM grant_opportunities
      WHERE (duplicate_of_id IS NULL OR duplicate_of_id = '')`;
   const params: unknown[] = [];
@@ -1078,7 +1294,7 @@ export async function answerFundingIntelligenceQuery(opts: {
   if (/qualif|eligible|we qualify|best fit/.test(q)) {
     sql += ` AND eligibility_result IN ('eligible', 'possibly_eligible')`;
   }
-  if (/priority|highest|top|92|score|best fit/.test(q)) {
+  if (/priority|highest|top|92|score|best fit/.test(q) && !/top 3|pursue first|pilot/.test(q)) {
     sql += ` AND qualification_class IN ('priority', 'strong')`;
   }
   if (/deadline|due|upcoming/.test(q)) {
@@ -1147,13 +1363,12 @@ export async function answerFundingIntelligenceQuery(opts: {
   const reply = [
     `Found ${records.length} stored opportunit${records.length === 1 ? "y" : "ies"} matching your question.`,
     metrics.pipelineSummary + ".",
-    `Priority verified value: $${metrics.priorityPipelineValue.toLocaleString()} (${metrics.priorityCount} opportunities).`,
-    `Unknown-value qualified: ${metrics.unknownValueQualifiedCount}. Data confidence: ${metrics.dataConfidence}.`,
+    metrics.addressableSummary + ".",
+    `READY NOW: ${metrics.readyNowCount}. Data confidence: ${metrics.dataConfidence}.`,
     records[0]
       ? `Top result: ${records[0].title} · enriched ${records[0].enriched_final_score ?? records[0].qualification_score ?? "n/a"}`
-        + ` (prelim ${records[0].preliminary_score ?? "n/a"}) · ${records[0].eligibility_result}`
-        + ` · funding ${records[0].funding_amount_status || "unknown"}`
-        + ` · program ${records[0].best_program_slug || "n/a"}@${records[0].best_program_match_pct ?? "n/a"}%`
+        + ` · readiness ${records[0].application_readiness_score ?? "n/a"}/${records[0].readiness_class || "n/a"}`
+        + ` · addressable ${records[0].ifcdc_addressable_amount != null ? `$${Number(records[0].ifcdc_addressable_amount).toLocaleString()}` : "UNKNOWN"}`
         + ` · ${records[0].url}`
       : "No matching stored opportunities yet — run a Funding Intelligence scan.",
   ].join(" ");

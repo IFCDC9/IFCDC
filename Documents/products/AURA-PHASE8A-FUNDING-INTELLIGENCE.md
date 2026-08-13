@@ -15,7 +15,7 @@
 | Audit trail | `grant_activity` + new `grant_audit_events` |
 | Dashboard shell | `/hq/grants` overview + Foundation dashboard |
 
-**Added (8A.2):** Full opportunity enrichment, funding confidence (verified/partial/unknown/conflicting), `ifcdc_program_profiles`, preliminary vs enriched scores, verified pipeline metrics. See `AURA-PHASE8A2-GRANT-ENRICHMENT.md`.
+**Added (8A.3):** Awardability verification, IFCDC addressable funding (separated from total program funding), application readiness scores/classes, document gaps, pilot recommendation. See `AURA-PHASE8A3-AWARDABILITY.md`.
 
 ## Pipeline
 

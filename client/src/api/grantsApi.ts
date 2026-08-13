@@ -149,6 +149,11 @@ export const grantsApi = {
         totalPotentialFundingDiscovered: number;
         qualifiedIfcdcFunding: number;
         verifiedQualifiedPipelineValue?: number;
+        totalQualifiedProgramFunding?: number;
+        ifcdcAddressableFunding?: number;
+        highPriorityAddressablePipeline?: number;
+        applicationReadyFunding?: number;
+        unknownAddressableCount?: number;
         unknownValueQualifiedCount?: number;
         priorityPipelineValue: number;
         applicationsInPreparation: number;
@@ -157,15 +162,27 @@ export const grantsApi = {
         availableForAllocationValue: number;
         qualifiedCount: number;
         priorityCount: number;
+        readyNowCount?: number;
+        needsDocumentsCount?: number;
+        needsProgramDevelopmentCount?: number;
+        needsMatchingFundsCount?: number;
+        reviewRequiredCount?: number;
         upcomingDeadlines: number;
         needingFounderReview: number;
         dataConfidence: string;
         pipelineSummary?: string;
+        addressableSummary?: string;
       };
       priorityOpportunities: Record<string, unknown>[];
       upcomingDeadlines: Record<string, unknown>[];
+      applicationReadyOpportunities?: Record<string, unknown>[];
       sources: Record<string, unknown>[];
       programProfiles?: Record<string, unknown>[];
+      pilotRecommendation?: {
+        top3: Record<string, unknown>[];
+        recommendedPilot: Record<string, unknown> | null;
+        rationale: string;
+      };
     }>("/funding-intelligence/dashboard"),
   fundingIntelligenceScan: (body?: { providers?: string[]; limitQualify?: number }) =>
     apiFetch<Record<string, unknown>>("/funding-intelligence/scan", {
@@ -179,6 +196,13 @@ export const grantsApi = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body || { limit: 40, onlyUnenriched: true }),
+      timeoutMs: 300_000,
+    }),
+  fundingIntelligenceAwardability: (body?: { limit?: number; onlyQualified?: boolean }) =>
+    apiFetch<Record<string, unknown>>("/funding-intelligence/awardability", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || { limit: 40, onlyQualified: true }),
       timeoutMs: 300_000,
     }),
   fundingIntelligenceAsk: (question: string) =>

@@ -2087,6 +2087,30 @@ router.get("/funding-intelligence/program-profiles", async (_req, res) => {
   res.json({ profiles: await listIfcdcProgramProfiles() });
 });
 
+/** Phase 8A.3 — awardability + addressable funding verification for qualified opportunities. */
+router.post("/funding-intelligence/awardability", async (req: Request, res: Response) => {
+  try {
+    const { runAwardabilityVerificationBatch } = await import("../hq/auraFundingAwardabilityEngine");
+    const { buildFundingIntelligenceMetrics } = await import("../hq/auraFundingIntelligenceEngine");
+    const result = await runAwardabilityVerificationBatch({
+      limit: typeof req.body?.limit === "number" ? req.body.limit : 40,
+      actorEmail: req.hqUser?.email,
+      onlyQualified: req.body?.onlyQualified !== false,
+    });
+    const metrics = await buildFundingIntelligenceMetrics();
+    res.json({ ok: true, ...result, metrics, maySubmit: false });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Awardability verification failed";
+    console.error("Phase 8A.3 awardability error:", message);
+    res.status(502).json({ error: message });
+  }
+});
+
+router.get("/funding-intelligence/pilot", async (_req, res) => {
+  const { selectFirstPilotRecommendation } = await import("../hq/auraFundingAwardabilityEngine");
+  res.json(await selectFirstPilotRecommendation());
+});
+
 router.get("/funding-intelligence/opportunities/:id/explain", async (req, res) => {
   const { explainOpportunityScore } = await import("../hq/auraFundingIntelligenceEngine");
   const payload = await explainOpportunityScore(String(req.params.id));

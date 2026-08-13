@@ -131,6 +131,7 @@ export async function ensureGrantTables(): Promise<void> {
   await migrateGrantPhase10();
   await migrateGrantPhase8A();
   await migrateGrantPhase8A2();
+  await migrateGrantPhase8A3();
   if (!allowGrantDemoSeed()) {
     return;
   }
@@ -1083,6 +1084,70 @@ async function migrateGrantPhase8A2(): Promise<void> {
       now
     );
   }
+}
+
+/**
+ * Phase 8A.3 — Awardability, IFCDC addressable funding, application readiness.
+ * Total program funding is never treated as IFCDC-addressable by default.
+ */
+async function migrateGrantPhase8A3(): Promise<void> {
+  const db = await getDb();
+  const addCol = async (table: string, col: string, type: string) => {
+    try {
+      await db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+    } catch {
+      /* exists */
+    }
+  };
+
+  await addCol("grant_opportunities", "total_program_funding", "REAL");
+  await addCol("grant_opportunities", "max_individual_award", "REAL");
+  await addCol("grant_opportunities", "typical_individual_award", "REAL");
+  await addCol("grant_opportunities", "multiple_awards_expected", "INTEGER");
+  await addCol("grant_opportunities", "ifcdc_max_eligible_request", "REAL");
+  await addCol("grant_opportunities", "ifcdc_recommended_request_min", "REAL");
+  await addCol("grant_opportunities", "ifcdc_recommended_request_max", "REAL");
+  await addCol("grant_opportunities", "ifcdc_addressable_amount", "REAL");
+  await addCol("grant_opportunities", "addressable_status", "TEXT DEFAULT 'unknown'");
+  await addCol("grant_opportunities", "addressable_explanation", "TEXT");
+  await addCol("grant_opportunities", "match_required", "INTEGER DEFAULT 0");
+  await addCol("grant_opportunities", "match_type", "TEXT");
+  await addCol("grant_opportunities", "match_percentage", "TEXT");
+  await addCol("grant_opportunities", "match_amount", "REAL");
+  await addCol("grant_opportunities", "funding_period", "TEXT");
+  await addCol("grant_opportunities", "applicant_restrictions", "TEXT");
+  await addCol("grant_opportunities", "program_limitations", "TEXT");
+  await addCol("grant_opportunities", "can_ifcdc_apply", "TEXT");
+  await addCol("grant_opportunities", "org_requirements_met", "TEXT");
+  await addCol("grant_opportunities", "awardability_json", "TEXT");
+  await addCol("grant_opportunities", "application_readiness_score", "INTEGER");
+  await addCol("grant_opportunities", "readiness_class", "TEXT");
+  await addCol("grant_opportunities", "readiness_breakdown_json", "TEXT");
+  await addCol("grant_opportunities", "document_gaps_json", "TEXT");
+  await addCol("grant_opportunities", "missing_info_json", "TEXT");
+  await addCol("grant_opportunities", "is_realistic_to_pursue", "INTEGER");
+  await addCol("grant_opportunities", "pilot_rank", "INTEGER");
+  await addCol("grant_opportunities", "awardability_verified_at", "TEXT");
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS grant_awardability_checks (
+      id TEXT PRIMARY KEY,
+      opportunity_id TEXT NOT NULL,
+      can_apply TEXT,
+      best_program_slug TEXT,
+      addressable_amount REAL,
+      recommended_min REAL,
+      recommended_max REAL,
+      match_required INTEGER,
+      readiness_class TEXT,
+      readiness_score INTEGER,
+      missing_docs_json TEXT,
+      answers_json TEXT,
+      official_source_url TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_awardability_opp ON grant_awardability_checks(opportunity_id);
+  `);
 }
 
 export async function logGrantActivity(

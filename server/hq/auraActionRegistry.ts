@@ -226,7 +226,7 @@ const fundingIntelligenceScan: AuraAction = {
       status: "done",
       summary:
         `Funding Intelligence scan complete: ingested≈${result.ingested}, qualified ${result.qualified}, `
-        + `duplicates ${result.duplicatesMerged}. ${result.metrics.pipelineSummary}.`,
+        + `duplicates ${result.duplicatesMerged}. ${result.metrics.pipelineSummary}. ${result.metrics.addressableSummary}.`,
       data: result,
       navigation: { path: "/hq/grants", label: "Open Grant Center" },
     };
@@ -307,8 +307,38 @@ const fundingIntelligenceEnrich: AuraAction = {
       status: "done",
       summary:
         `Enriched ${results.length} opportunities (${verifiedFunding} with verified/partial amounts, `
-        + `${unknownFunding} UNKNOWN). ${metrics.pipelineSummary}.`,
+        + `${unknownFunding} UNKNOWN). ${metrics.pipelineSummary}. ${metrics.addressableSummary}.`,
       data: { enriched: results.length, unknownFunding, verifiedFunding, results, metrics },
+      navigation: { path: "/hq/grants", label: "Open Grant Center" },
+    };
+  },
+};
+
+const fundingIntelligenceAwardability: AuraAction = {
+  id: "funding_intelligence_awardability",
+  label: "Verify Awardability",
+  module: "grants",
+  kind: "prepare",
+  description:
+    "Phase 8A.3: calculate IFCDC addressable funding (not total program pots), application readiness scores/classes, document gaps, matching requirements, and recommend a first pilot. Does not submit.",
+  parameters: {
+    limit: { type: "number", description: "Max qualified opportunities to verify (default 40)." },
+  },
+  async run(args, ctx) {
+    const { runAwardabilityVerificationBatch } = await import("./auraFundingAwardabilityEngine");
+    const { buildFundingIntelligenceMetrics } = await import("./auraFundingIntelligenceEngine");
+    const result = await runAwardabilityVerificationBatch({
+      limit: typeof args.limit === "number" ? args.limit : 40,
+      actorEmail: ctx.actorEmail,
+      onlyQualified: true,
+    });
+    const metrics = await buildFundingIntelligenceMetrics();
+    return {
+      status: "done",
+      summary:
+        `Awardability verified for ${result.processed} opportunities. ${metrics.addressableSummary}. `
+        + `READY NOW: ${result.readyNow}. ${result.pilot.rationale}`,
+      data: { ...result, metrics },
       navigation: { path: "/hq/grants", label: "Open Grant Center" },
     };
   },
@@ -1807,6 +1837,7 @@ export const AURA_ACTIONS: AuraAction[] = [
   fundingIntelligenceScan,
   fundingIntelligenceAsk,
   fundingIntelligenceEnrich,
+  fundingIntelligenceAwardability,
   enterpriseFundingScan,
   matchProgram,
   syncGrants,
