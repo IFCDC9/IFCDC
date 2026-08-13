@@ -1995,4 +1995,45 @@ router.get("/funding-engine/v5/connectors", async (_req, res) => {
   res.json(buildDivisionConnectorManifest());
 });
 
+/** Phase 8A — AURA Funding Intelligence (search/ingest/qualify only; no auto-submit). */
+router.get("/funding-intelligence/dashboard", async (_req, res) => {
+  const { buildFundingIntelligenceDashboard } = await import("../hq/auraFundingIntelligenceEngine");
+  res.json(await buildFundingIntelligenceDashboard());
+});
+
+router.get("/funding-intelligence/metrics", async (_req, res) => {
+  const { buildFundingIntelligenceMetrics } = await import("../hq/auraFundingIntelligenceEngine");
+  res.json(await buildFundingIntelligenceMetrics());
+});
+
+router.post("/funding-intelligence/scan", async (req: Request, res: Response) => {
+  try {
+    const { runFundingIntelligenceScan } = await import("../hq/auraFundingIntelligenceEngine");
+    const result = await runFundingIntelligenceScan({
+      actorEmail: req.hqUser?.email,
+      providers: Array.isArray(req.body?.providers) ? req.body.providers : ["grants_gov"],
+      limitQualify: typeof req.body?.limitQualify === "number" ? req.body.limitQualify : 80,
+    });
+    res.json({ ok: true, ...result, maySubmit: false });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Funding intelligence scan failed";
+    console.error("Phase 8A scan error:", message);
+    res.status(502).json({ error: message });
+  }
+});
+
+router.post("/funding-intelligence/ask", async (req: Request, res: Response) => {
+  const question = String(req.body?.question || req.body?.q || "").trim();
+  if (!question) return res.status(400).json({ error: "question required" });
+  const { answerFundingIntelligenceQuery } = await import("../hq/auraFundingIntelligenceEngine");
+  res.json(await answerFundingIntelligenceQuery({ question, actorEmail: req.hqUser?.email }));
+});
+
+router.get("/funding-intelligence/opportunities/:id/explain", async (req, res) => {
+  const { explainOpportunityScore } = await import("../hq/auraFundingIntelligenceEngine");
+  const payload = await explainOpportunityScore(String(req.params.id));
+  if (!payload.opportunity) return res.status(404).json({ error: "Opportunity not found" });
+  res.json(payload);
+});
+
 export default router;

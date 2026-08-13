@@ -129,6 +129,7 @@ export async function ensureGrantTables(): Promise<void> {
   await migrateGrantPhase8();
   await migrateGrantPhase9();
   await migrateGrantPhase10();
+  await migrateGrantPhase8A();
   if (!allowGrantDemoSeed()) {
     return;
   }
@@ -674,6 +675,138 @@ async function migrateGrantPhase10(): Promise<void> {
   await db.run(`UPDATE grant_opportunities SET pipeline_stage = 'discovered' WHERE pipeline_stage IS NULL`);
   await db.run(`UPDATE grant_applications SET pipeline_stage = 'drafting' WHERE pipeline_stage IS NULL AND status = 'draft'`);
   await db.run(`UPDATE grant_applications SET founder_priority = 'medium' WHERE founder_priority IS NULL`);
+}
+
+/**
+ * Phase 8A — AURA Funding Intelligence (additive).
+ * Reuses grant_opportunities / applications / awards; adds sources, matches,
+ * eligibility checks, qualification scores, fingerprint, audit events.
+ */
+async function migrateGrantPhase8A(): Promise<void> {
+  const db = await getDb();
+  const addCol = async (table: string, col: string, type: string) => {
+    try {
+      await db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+    } catch {
+      /* exists */
+    }
+  };
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS grant_sources (
+      id TEXT PRIMARY KEY,
+      provider_key TEXT NOT NULL UNIQUE,
+      label TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'federal',
+      base_url TEXT,
+      api_url TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      schedule_hint TEXT,
+      notes TEXT,
+      last_sync_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS grant_eligibility_checks (
+      id TEXT PRIMARY KEY,
+      opportunity_id TEXT NOT NULL,
+      result TEXT NOT NULL,
+      reasons_json TEXT,
+      checked_at TEXT NOT NULL,
+      model TEXT NOT NULL DEFAULT 'ifcdc-eligibility-8a',
+      actor TEXT,
+      FOREIGN KEY (opportunity_id) REFERENCES grant_opportunities(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS grant_matches (
+      id TEXT PRIMARY KEY,
+      opportunity_id TEXT NOT NULL,
+      program_slug TEXT NOT NULL,
+      program_label TEXT,
+      match_score INTEGER NOT NULL DEFAULT 0,
+      rationale TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(opportunity_id, program_slug),
+      FOREIGN KEY (opportunity_id) REFERENCES grant_opportunities(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS grant_qualification_scores (
+      id TEXT PRIMARY KEY,
+      opportunity_id TEXT NOT NULL,
+      total_score INTEGER NOT NULL,
+      classification TEXT NOT NULL,
+      breakdown_json TEXT NOT NULL,
+      model TEXT NOT NULL DEFAULT 'ifcdc-qualification-8a-v1',
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (opportunity_id) REFERENCES grant_opportunities(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS grant_audit_events (
+      id TEXT PRIMARY KEY,
+      opportunity_id TEXT,
+      source TEXT,
+      action TEXT NOT NULL,
+      eligibility_result TEXT,
+      score INTEGER,
+      detail TEXT,
+      actor_email TEXT,
+      source_verified_at TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_grant_elig_opp ON grant_eligibility_checks(opportunity_id, checked_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_grant_match_opp ON grant_matches(opportunity_id);
+    CREATE INDEX IF NOT EXISTS idx_grant_qual_opp ON grant_qualification_scores(opportunity_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_grant_audit_created ON grant_audit_events(created_at DESC);
+  `);
+
+  await addCol("grant_opportunities", "fingerprint", "TEXT");
+  await addCol("grant_opportunities", "assistance_listing", "TEXT");
+  await addCol("grant_opportunities", "award_floor", "REAL");
+  await addCol("grant_opportunities", "award_ceiling", "REAL");
+  await addCol("grant_opportunities", "estimated_funding", "REAL");
+  await addCol("grant_opportunities", "anticipated_awards", "INTEGER");
+  await addCol("grant_opportunities", "eligible_applicant_types", "TEXT");
+  await addCol("grant_opportunities", "open_date", "TEXT");
+  await addCol("grant_opportunities", "eligibility_result", "TEXT");
+  await addCol("grant_opportunities", "qualification_score", "INTEGER");
+  await addCol("grant_opportunities", "qualification_class", "TEXT");
+  await addCol("grant_opportunities", "raw_source_json", "TEXT");
+  await addCol("grant_opportunities", "duplicate_of_id", "TEXT");
+  await addCol("grant_opportunities", "data_confidence", "TEXT DEFAULT 'medium'");
+
+  try {
+    await db.exec(`CREATE INDEX IF NOT EXISTS idx_grant_opp_fingerprint ON grant_opportunities(fingerprint)`);
+  } catch {
+    /* ignore */
+  }
+
+  const now = new Date().toISOString();
+  const sources = [
+    ["grants_gov", "Grants.gov", "federal", "https://www.grants.gov", "https://api.grants.gov/v1/api/search2"],
+    ["simpler_grants", "Simpler.Grants.gov", "federal", "https://simpler.grants.gov", null],
+    ["sam_gov", "SAM.gov Assistance Listings", "federal", "https://sam.gov", null],
+    ["nj_state", "New Jersey State Grants", "state", "https://www.nj.gov", null],
+    ["foundation_directory", "Foundation Directory (partial)", "foundation", null, null],
+    ["corporate_csr", "Corporate CSR (curated)", "corporate", null, null],
+  ] as const;
+  for (const [key, label, category, baseUrl, apiUrl] of sources) {
+    await db.run(
+      `INSERT INTO grant_sources (id, provider_key, label, category, base_url, api_url, status, schedule_hint, notes, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'active', 'on_demand', 'Phase 8A registry — connector may be partial', ?, ?)
+       ON CONFLICT(provider_key) DO UPDATE SET updated_at = excluded.updated_at, label = excluded.label`,
+      id(),
+      key,
+      label,
+      category,
+      baseUrl,
+      apiUrl,
+      now,
+      now
+    );
+  }
 }
 
 async function enrichSeedOpportunities(): Promise<void> {

@@ -138,6 +138,45 @@ export const grantsApi = {
   overview: () => apiFetch<GrantOverview>("/overview"),
   dashboard: () => apiFetch<GrantOverview>("/dashboard"),
   foundationDashboard: () => apiFetch<GrantFoundationDashboard>("/foundation/dashboard"),
+  fundingIntelligenceDashboard: () =>
+    apiFetch<{
+      generatedAt: string;
+      phase: string;
+      metrics: {
+        totalOpportunitiesDiscovered: number;
+        totalPotentialFundingDiscovered: number;
+        qualifiedIfcdcFunding: number;
+        priorityPipelineValue: number;
+        applicationsInPreparation: number;
+        submittedApplicationValue: number;
+        awardedValue: number;
+        availableForAllocationValue: number;
+        qualifiedCount: number;
+        priorityCount: number;
+        upcomingDeadlines: number;
+        needingFounderReview: number;
+        dataConfidence: string;
+      };
+      priorityOpportunities: Record<string, unknown>[];
+      upcomingDeadlines: Record<string, unknown>[];
+      sources: Record<string, unknown>[];
+    }>("/funding-intelligence/dashboard"),
+  fundingIntelligenceScan: (body?: { providers?: string[]; limitQualify?: number }) =>
+    apiFetch<Record<string, unknown>>("/funding-intelligence/scan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || { providers: ["grants_gov"] }),
+      timeoutMs: 180_000,
+    }),
+  fundingIntelligenceAsk: (question: string) =>
+    apiFetch<{ reply: string; records: Record<string, unknown>[]; metrics: Record<string, unknown> }>(
+      "/funding-intelligence/ask",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question }),
+      },
+    ),
   foundationPipeline: () =>
     apiFetch<{
       stages: { id: string; label: string; cards: Record<string, unknown>[] }[];

@@ -39,6 +39,13 @@ export const GrantFoundationDashboardPanel: React.FC<{
     retry: 0,
   });
 
+  const fundingIntel = useQuery({
+    queryKey: ["grant-funding-intelligence-8a"],
+    queryFn: grantsApi.fundingIntelligenceDashboard,
+    staleTime: 30_000,
+    retry: 0,
+  });
+
   if (foundation.isLoading) return <HqLoading message="Loading executive grant dashboard…" />;
 
   const d = foundation.data as GrantFoundationDashboard | undefined;
@@ -106,6 +113,73 @@ export const GrantFoundationDashboardPanel: React.FC<{
           </div>
         </div>
       </HqPanel>
+
+      {fundingIntel.data && (
+        <div style={{ marginTop: "1rem" }}>
+          <HqPanel
+            title="AURA Funding Intelligence (Phase 8A)"
+            subtitle={`Live HQ records · confidence ${fundingIntel.data.metrics.dataConfidence} · no auto-submit`}
+            headerExtra={
+              <button
+                type="button"
+                className="hq-btn hq-btn-sm hq-btn-ghost"
+                onClick={() => {
+                  void grantsApi.fundingIntelligenceScan({ providers: ["grants_gov"] }).then(() => {
+                    void fundingIntel.refetch();
+                  });
+                }}
+              >
+                Run live scan
+              </button>
+            }
+          >
+            <div className="hq-kpi-grid" style={{ marginBottom: "0.75rem" }}>
+              <KpiCard label="Discovered" value={fundingIntel.data.metrics.totalOpportunitiesDiscovered} />
+              <KpiCard label="Qualified $" value={fmt(fundingIntel.data.metrics.qualifiedIfcdcFunding)} variant="gold" />
+              <KpiCard label="Priority $" value={fmt(fundingIntel.data.metrics.priorityPipelineValue)} variant="success" />
+              <KpiCard label="Priority Opps" value={fundingIntel.data.metrics.priorityCount} />
+              <KpiCard label="Apps Preparing" value={fundingIntel.data.metrics.applicationsInPreparation} />
+              <KpiCard label="Submitted $" value={fmt(fundingIntel.data.metrics.submittedApplicationValue)} />
+              <KpiCard label="Awarded $" value={fmt(fundingIntel.data.metrics.awardedValue)} variant="gold" />
+              <KpiCard label="Allocatable $" value={fmt(fundingIntel.data.metrics.availableForAllocationValue)} />
+              <KpiCard label="Deadlines 30d" value={fundingIntel.data.metrics.upcomingDeadlines} variant="warning" />
+              <KpiCard label="Founder Review" value={fundingIntel.data.metrics.needingFounderReview} variant="warning" />
+            </div>
+            <div className="hq-grid-2">
+              <div>
+                <h4 style={{ fontSize: "0.8rem", color: "var(--hq-text-dim)", marginBottom: "0.5rem" }}>Priority opportunities</h4>
+                <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.78rem" }}>
+                  {(fundingIntel.data.priorityOpportunities || []).slice(0, 6).map((o) => (
+                    <li key={String(o.id)}>
+                      <a href={String(o.url || "#")} target="_blank" rel="noreferrer">
+                        {String(o.title || "Opportunity")}
+                      </a>
+                      {" · "}
+                      score {String(o.qualification_score ?? "n/a")} · {String(o.eligibility_result || "")}
+                    </li>
+                  ))}
+                  {!fundingIntel.data.priorityOpportunities?.length && (
+                    <li className="hq-muted-text">Run a live scan to populate priority opportunities.</li>
+                  )}
+                </ul>
+              </div>
+              <div>
+                <h4 style={{ fontSize: "0.8rem", color: "var(--hq-text-dim)", marginBottom: "0.5rem" }}>Upcoming deadlines</h4>
+                <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.78rem" }}>
+                  {(fundingIntel.data.upcomingDeadlines || []).slice(0, 6).map((o) => (
+                    <li key={String(o.id)}>
+                      {String(o.deadline)} — {String(o.title || "")}
+                    </li>
+                  ))}
+                  {!fundingIntel.data.upcomingDeadlines?.length && (
+                    <li className="hq-muted-text">No upcoming deadlines in the next 45 days.</li>
+                  )}
+                </ul>
+              </div>
+            </div>
+          </HqPanel>
+        </div>
+      )}
 
       <div style={{ marginTop: "1rem" }}>
         <HqPanel title="Grant Lifecycle Pipeline" subtitle="Opportunity Identified → Closed">

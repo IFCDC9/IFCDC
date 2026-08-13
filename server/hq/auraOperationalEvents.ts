@@ -13,6 +13,10 @@ export type AuraOperationalEventType =
   | "payment_completed"
   | "sms_send_failed"
   | "sms_delivery_failed"
+  | "grant_priority_discovered"
+  | "grant_opportunity_updated"
+  | "grant_deadline_approaching"
+  | "grant_eligibility_changed"
   | "system";
 
 export type AuraOperationalEvent = {
@@ -63,6 +67,11 @@ function mapDomain(type: AuraOperationalEventType): HqRealtimeDomain {
     case "sms_send_failed":
     case "sms_delivery_failed":
       return "communications";
+    case "grant_priority_discovered":
+    case "grant_opportunity_updated":
+    case "grant_deadline_approaching":
+    case "grant_eligibility_changed":
+      return "grants";
     default:
       return "notifications";
   }

@@ -200,6 +200,63 @@ const syncGrants: AuraAction = {
   },
 };
 
+const fundingIntelligenceScan: AuraAction = {
+  id: "funding_intelligence_scan",
+  label: "Funding Intelligence Scan",
+  module: "grants",
+  kind: "prepare",
+  description:
+    "Phase 8A: ingest live official funding sources, normalize into HQ grant records, evaluate IFCDC eligibility, match programs, score 0–100, and dedupe. Does not submit applications.",
+  parameters: {
+    providers: { type: "string", description: "Comma list: grants_gov (default). Optional." },
+    limitQualify: { type: "number", description: "Max opportunities to qualify this run (default 80)." },
+  },
+  async run(args, ctx) {
+    const { runFundingIntelligenceScan } = await import("./auraFundingIntelligenceEngine");
+    const providersRaw = str(args.providers);
+    const providers = providersRaw
+      ? (providersRaw.split(/[,\s]+/).filter(Boolean) as Array<"grants_gov" | "foundation_directory">)
+      : (["grants_gov"] as Array<"grants_gov">);
+    const result = await runFundingIntelligenceScan({
+      actorEmail: ctx.actorEmail,
+      providers,
+      limitQualify: typeof args.limitQualify === "number" ? args.limitQualify : 80,
+    });
+    return {
+      status: "done",
+      summary:
+        `Funding Intelligence scan complete: ingested≈${result.ingested}, qualified ${result.qualified}, `
+        + `duplicates ${result.duplicatesMerged}. Qualified pipeline $${result.metrics.qualifiedIfcdcFunding.toLocaleString()}.`,
+      data: result,
+      navigation: { path: "/hq/grants", label: "Open Grant Center" },
+    };
+  },
+};
+
+const fundingIntelligenceAsk: AuraAction = {
+  id: "funding_intelligence_ask",
+  label: "Ask Funding Intelligence",
+  module: "grants",
+  kind: "read",
+  description:
+    "Query stored Phase 8A HQ funding opportunities (qualified pipeline, deadlines, program fit, score explanations) with official source URLs.",
+  parameters: {
+    question: { type: "string", description: "Natural language funding question." },
+  },
+  async run(args, ctx) {
+    const question = str(args.question) ?? str(args.query);
+    if (!question) return { status: "error", summary: "What funding question should I answer?" };
+    const { answerFundingIntelligenceQuery } = await import("./auraFundingIntelligenceEngine");
+    const result = await answerFundingIntelligenceQuery({ question, actorEmail: ctx.actorEmail });
+    return {
+      status: "done",
+      summary: result.reply,
+      data: result,
+      navigation: { path: "/hq/grants", label: "Open Grant Center" },
+    };
+  },
+};
+
 const enterpriseFundingScan: AuraAction = {
   id: "enterprise_funding_scan",
   label: "Enterprise Funding Scan",
@@ -1690,6 +1747,8 @@ const seRequestFounderApproval: AuraAction = {
 
 export const AURA_ACTIONS: AuraAction[] = [
   findGrants,
+  fundingIntelligenceScan,
+  fundingIntelligenceAsk,
   enterpriseFundingScan,
   matchProgram,
   syncGrants,
