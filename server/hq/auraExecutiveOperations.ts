@@ -605,6 +605,19 @@ export async function executeSendEmail(
       auraGenerated: wantsAura,
     },
   }).catch(() => undefined);
+  void import("./auraUnifiedAudit").then(({ mirrorAuraUnifiedActionAsync }) =>
+    mirrorAuraUnifiedActionAsync({
+      source: "executive_ops",
+      channel: "hq_web",
+      kind: "execute",
+      actionId: "send_email",
+      command: "send_email",
+      result: `sent ${ok}/${results.length}`,
+      ok: ok > 0,
+      userEmail: ctx.actorEmail,
+      metadata: { recipients, messageIds: acceptedIds },
+    })
+  );
 
   if (!ok) {
     return {
@@ -674,6 +687,19 @@ export async function executeSendSms(
     detail: send.success ? "sent" : send.error || "failed",
     metadata: { to, actor: ctx.actorEmail, messageId: send.messageId },
   }).catch(() => undefined);
+  void import("./auraUnifiedAudit").then(({ mirrorAuraUnifiedActionAsync }) =>
+    mirrorAuraUnifiedActionAsync({
+      source: "executive_ops",
+      channel: "hq_web",
+      kind: "execute",
+      actionId: "send_sms",
+      command: "send_sms",
+      result: send.success ? `SMS sent to ${to}` : send.error || "SMS failed",
+      ok: Boolean(send.success && send.messageId),
+      userEmail: ctx.actorEmail,
+      metadata: { to, messageId: send.messageId },
+    })
+  );
 
   if (!send.success || !send.messageId) {
     return {
@@ -741,6 +767,19 @@ export async function executePlaceCall(
       detail: `call to ${to}`,
       metadata: { actor: ctx.actorEmail },
     }).catch(() => undefined);
+    void import("./auraUnifiedAudit").then(({ mirrorAuraUnifiedActionAsync }) =>
+      mirrorAuraUnifiedActionAsync({
+        source: "executive_ops",
+        channel: "hq_web",
+        kind: "execute",
+        actionId: "place_call",
+        command: "place_call",
+        result: `Calling ${to} (SID ${call.sid})`,
+        ok: true,
+        userEmail: ctx.actorEmail,
+        metadata: { to, callSid: call.sid },
+      })
+    );
     return {
       status: "done",
       summary: `Calling ${to} now via Twilio (SID ${call.sid}).`,
@@ -748,6 +787,19 @@ export async function executePlaceCall(
       navigation: { path: "/hq/communications", label: "Open Communications Center" },
     };
   } catch (err) {
+    void import("./auraUnifiedAudit").then(({ mirrorAuraUnifiedActionAsync }) =>
+      mirrorAuraUnifiedActionAsync({
+        source: "executive_ops",
+        channel: "hq_web",
+        kind: "execute",
+        actionId: "place_call",
+        command: "place_call",
+        result: err instanceof Error ? err.message : "Twilio error",
+        ok: false,
+        userEmail: ctx.actorEmail,
+        metadata: { to },
+      })
+    );
     return {
       status: "error",
       summary: `Call failed: ${err instanceof Error ? err.message : "Twilio error"}`,

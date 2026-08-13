@@ -148,6 +148,36 @@ export async function logAuraBrainV1Action(opts: {
     redactResult(opts.result),
     safeMeta
   );
+  // Phase 2: mirror into unified execute/audit stream (non-blocking).
+  void import("./auraUnifiedAudit")
+    .then(({ mirrorAuraUnifiedAction }) => {
+      const cmd = opts.command.toLowerCase();
+      const mode = String(opts.metadata?.mode || "");
+      const kind =
+        mode.includes("read") || cmd.includes(".read") || cmd.endsWith(".read")
+          ? "read"
+          : cmd.includes("action.") || opts.metadata?.confirmed === true
+            ? "execute"
+            : "system";
+      return mirrorAuraUnifiedAction({
+        source: "brain_v1",
+        channel: "hq_web",
+        kind,
+        actionId:
+          typeof opts.metadata?.actionId === "string"
+            ? opts.metadata.actionId
+            : typeof opts.metadata?.module === "string"
+              ? opts.metadata.module
+              : null,
+        command: opts.command,
+        result: opts.result,
+        ok: !/^error\b/i.test(opts.result),
+        userId: opts.userId,
+        userEmail: opts.userEmail,
+        metadata: { ...opts.metadata, brainV1LogId: id },
+      });
+    })
+    .catch(() => undefined);
   return id;
 }
 

@@ -1,6 +1,6 @@
 # AURA End-to-End Integration Audit & Connection Validation
 
-**Status:** AUDIT COMPLETE · Phase 1 (visibility) SHIPPED — read-only; no Twilio/SMS config changes; no feature rewrites  
+**Status:** AUDIT COMPLETE · Phase 1 (visibility) + Phase 2 (audit unification) SHIPPED — Twilio/SMS config untouched  
 **Date:** August 13, 2026  
 **Product:** IFCDC Headquarters / AURA  
 **Constraint:** Treat production Twilio/SMS as stable. No autonomous code/deploy authority for AURA.
@@ -242,7 +242,7 @@ Legend: 🟢 CONNECTED · 🟡 PARTIAL · 🔴 MISSING · ⚠️ UNSAFE/INCOMPLE
 | G7 | Outbound SMS statusCallback | Not in AURA `messages.create` | `auraExecutiveOperations` / `notifications.ts` | Twilio | Optional additive callback URL — **Founder approve; do not touch Console blindly** | Med | Low if additive |
 | G8 | Voice ≠ text tools/memory | Separate stacks | receptionist vs command layer | session tables | Unify | High | Medium |
 | G9 | Event bus incomplete | Bookings/payments/SMS fail weak | `hqRealtimeEvents`, webhooks | — | Emit notifyHqDataChange + AURA consumers | Med | Low |
-| G10 | Unified audit stream | Fragmented logs | `hqAuditLog`, Brain v1 log, tech/SE logs | multiple tables | Mirror all executes to one stream | Med | Low |
+| G10 | Unified audit stream | ✅ Phase 2 shipped | `auraUnifiedAudit.ts`, Brain v1 log, command/exec/receptionist mirrors | `aura_unified_action_log` | Keep extending remaining prepare paths as needed | Low | Low |
 | G11 | Org operational memory graph | Not assembled | memory + modules | — | Context builder for Brain | Med | Low |
 | G12 | Autocomplete diagnostics for all modules | Partial | enterprise health / monitoring | — | Extend probes | Low | Low |
 | G13 | Identity fallback owner | Latent | trust engine | — | Remove/hard-fail without hqUser | Med | Low |
@@ -264,7 +264,7 @@ Legend: 🟢 CONNECTED · 🟡 PARTIAL · 🔴 MISSING · ⚠️ UNSAFE/INCOMPLE
 ## Recommended phase order
 
 1. **Visibility** — ✅ **Shipped** — Unified AURA E2E diagnostics (`GET /api/hq/aura/diagnostics/e2e` · Brain v1 tab **9. E2E Diagnostics** · `server/hq/auraE2eDiagnosticsEngine.ts`). Twilio config untouched.  
-2. **Audit unification** — Mirror all execute paths into one stream (+ Brain v1).  
+2. **Audit unification** — ✅ **Shipped** — `aura_unified_action_log` mirrors Brain v1, command-layer prepare/execute/deny, executive ops (SMS/email/call), and receptionist exec (`GET /api/hq/aura/diagnostics/unified-audit` · Brain v1 tab **8**).  
 3. **Voice/text unification** — Receptionist adapter → `runAuraCommand` (Twilio URLs unchanged).  
 4. **Module tool expansion** — Read/prepare for HR, finance, projects, donations.  
 5. **Events** — Booking/payment/SMS-fail → `notifyHqDataChange` + AURA consumers.  
@@ -284,6 +284,7 @@ Legend: 🟢 CONNECTED · 🟡 PARTIAL · 🔴 MISSING · ⚠️ UNSAFE/INCOMPLE
 | Memory | `server/hq/auraMemory.ts`, `auraOrganizationalMemory.ts` |
 | Brain v1 | `server/hq/auraEnterpriseBrainV1.ts` |
 | E2E diagnostics (Phase 1) | `server/hq/auraE2eDiagnosticsEngine.ts` |
+| Unified audit (Phase 2) | `server/hq/auraUnifiedAudit.ts` |
 | Brain 2.0 | `server/hq/auraEnterpriseBrain.ts` |
 | Voice/SMS entry | `server/routes/twilioAura.routes.ts`, `auraReceptionistEngine.ts` |
 | Twilio log | `server/hq/twilioIntegrationEngine.ts` |

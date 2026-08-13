@@ -341,13 +341,28 @@ export async function buildAuraE2eDiagnostics(opts: {
     files: ["server/hq/hqAuditLog.ts"],
   });
 
+  const hasUnified = await withTimeout(tableExists("aura_unified_action_log"), 3_000, false);
+  probes.push({
+    id: "audit-unified",
+    area: "Audit",
+    label: "Unified AURA action stream (Phase 2)",
+    status: hasUnified ? "connected" : "partial",
+    detail: hasUnified
+      ? "aura_unified_action_log live — mirrors Brain v1, command prepare/execute, executive ops, receptionist"
+      : "Table created on first mirror — stream ready after first prepare/execute",
+    tables: ["aura_unified_action_log"],
+    route: "GET /api/hq/aura/diagnostics/unified-audit",
+    files: ["server/hq/auraUnifiedAudit.ts"],
+    risk: "low",
+  });
+
   probes.push({
     id: "audit-brain-v1",
     area: "Audit",
     label: "Brain v1 action log",
     status: hasBrainLog ? "connected" : "partial",
     detail: hasBrainLog
-      ? "Dedicated Brain v1 log live (not yet unified with all execute paths)"
+      ? "Dedicated Brain v1 log live and mirrored into unified stream"
       : "Brain v1 action log table not created yet",
     tables: ["aura_enterprise_brain_v1_action_log"],
     route: "GET /api/hq/aura/brain-v1/action-log",

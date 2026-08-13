@@ -493,6 +493,33 @@ export const hqApi = {
       publicBaseUrl: string;
       note: string;
     }>("/aura/diagnostics/e2e"),
+  auraUnifiedAudit: (limit = 50) =>
+    hqFetch<{
+      module: string;
+      version: string;
+      generatedAt: string;
+      mode: "read_only";
+      entries: Array<{
+        id: string;
+        createdAt: string;
+        source: string;
+        channel: string | null;
+        kind: string;
+        actionId: string | null;
+        command: string;
+        result: string;
+        ok: boolean;
+        userId: string | null;
+        userEmail: string | null;
+      }>;
+      summary: {
+        totalReturned: number;
+        bySource: Record<string, number>;
+        byKind: Record<string, number>;
+        failed: number;
+      };
+      note: string;
+    }>(`/aura/diagnostics/unified-audit?limit=${limit}`),
   auraEnterpriseBrain: (request: string) =>
     hqFetch<Record<string, unknown>>("/aura/brain", {
       method: "POST",

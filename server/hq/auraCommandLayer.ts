@@ -155,6 +155,20 @@ export async function runAuraAction(
 
   if (action.kind === "execute" && !identity.founderMode && !identity.isFounder) {
     const denied = `Execute action "${action.label}" requires Founder Mode.`;
+    void import("./auraUnifiedAudit").then(({ mirrorAuraUnifiedActionAsync }) =>
+      mirrorAuraUnifiedActionAsync({
+        source: "command_layer",
+        channel: "hq_web",
+        kind: "deny",
+        actionId: action.id,
+        command: action.label,
+        result: denied,
+        ok: false,
+        userId: identity.userId,
+        userEmail: identity.email || enrichedCtx.actorEmail,
+        metadata: { path: "runAuraAction" },
+      })
+    );
     return {
       reply: denied,
       actions: [],
@@ -186,6 +200,23 @@ export async function runAuraAction(
     detail: executed.summary.slice(0, 400),
     metadata: { status: executed.status, kind: action.kind },
   });
+
+  if (action.kind === "execute" || action.kind === "prepare") {
+    void import("./auraUnifiedAudit").then(({ mirrorAuraUnifiedActionAsync }) =>
+      mirrorAuraUnifiedActionAsync({
+        source: "command_layer",
+        channel: "hq_web",
+        kind: action.kind,
+        actionId: action.id,
+        command: action.label,
+        result: executed.summary,
+        ok: executed.status !== "error",
+        userId: identity.userId,
+        userEmail: identity.email || enrichedCtx.actorEmail,
+        metadata: { path: "runAuraAction", status: executed.status },
+      })
+    );
+  }
 
   return {
     reply: executed.summary,
@@ -748,6 +779,20 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
           status: "error",
           summary: `Denied: ${action.label} requires Founder Mode.`,
         });
+        void import("./auraUnifiedAudit").then(({ mirrorAuraUnifiedActionAsync }) =>
+          mirrorAuraUnifiedActionAsync({
+            source: "command_layer",
+            channel: "hq_web",
+            kind: "deny",
+            actionId: action.id,
+            command: action.label,
+            result: `Denied: ${action.label} requires Founder Mode.`,
+            ok: false,
+            userId: identity.userId,
+            userEmail: identity.email || ctx.actorEmail,
+            metadata: { path: "runAuraCommand.tools" },
+          })
+        );
         continue;
       }
       let args: Record<string, unknown> = {};
@@ -769,6 +814,22 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
       executed.push(ex);
       if (ex.navigation && !navigation) navigation = ex.navigation;
       if (ex.approval) approvalsCreated.push(ex.approval);
+      if (action.kind === "execute" || action.kind === "prepare") {
+        void import("./auraUnifiedAudit").then(({ mirrorAuraUnifiedActionAsync }) =>
+          mirrorAuraUnifiedActionAsync({
+            source: "command_layer",
+            channel: "hq_web",
+            kind: action.kind,
+            actionId: action.id,
+            command: action.label,
+            result: ex.summary,
+            ok: ex.status !== "error",
+            userId: identity.userId,
+            userEmail: identity.email || ctx.actorEmail,
+            metadata: { path: "runAuraCommand.tools", status: ex.status },
+          })
+        );
+      }
     }
 
     let reply = message?.content?.trim() ?? "";

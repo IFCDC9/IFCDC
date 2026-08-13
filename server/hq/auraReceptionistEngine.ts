@@ -347,6 +347,20 @@ export async function processReceptionistTurn(opts: {
         detail: exec.result.summary.slice(0, 240),
         metadata: { status: exec.result.status, channel },
       });
+      void import("./auraUnifiedAudit").then(({ mirrorAuraUnifiedActionAsync }) =>
+        mirrorAuraUnifiedActionAsync({
+          source: "receptionist",
+          channel,
+          kind: "execute",
+          actionId: exec.op || "executive_op",
+          command: `receptionist:${exec.op}`,
+          result: exec.result.summary,
+          ok: exec.result.status !== "error",
+          userId: identity.userId,
+          userEmail: identity.email,
+          metadata: { status: exec.result.status },
+        })
+      );
       const updated = await appendSessionTurn(session, "assistant", exec.result.summary);
       return {
         reply: exec.result.summary,

@@ -114,6 +114,15 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
     enabled: tab === "log",
   });
 
+  const unifiedQ = useQuery({
+    queryKey: ["aura-unified-audit"],
+    queryFn: () => hqApi.auraUnifiedAudit(50),
+    staleTime: 15_000,
+    refetchInterval: tab === "log" ? 60_000 : false,
+    enabled: tab === "log",
+    retry: 1,
+  });
+
   const diagQ = useQuery({
     queryKey: ["aura-e2e-diagnostics"],
     queryFn: hqApi.auraE2eDiagnostics,
@@ -142,6 +151,7 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
   const q = queue.data;
   const a = actionsQ.data;
   const log = logQ.data;
+  const unified = unifiedQ.data;
   const diag = diagQ.data;
   const roadmap = d?.moduleRoadmap ?? h?.moduleRoadmap ?? b?.moduleRoadmap ?? p?.moduleRoadmap ?? s?.moduleRoadmap ?? q?.moduleRoadmap ?? a?.moduleRoadmap ?? log?.moduleRoadmap ?? [];
 
@@ -154,6 +164,7 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
     if (tab === "queue") return queue.refetch();
     if (tab === "actions") return actionsQ.refetch();
     if (tab === "diagnostics") return diagQ.refetch();
+    if (tab === "log") return Promise.all([logQ.refetch(), unifiedQ.refetch()]);
     return logQ.refetch();
   };
   const fetching =
@@ -165,7 +176,8 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
               : tab === "queue" ? queue.isFetching
                 : tab === "actions" ? actionsQ.isFetching
                   : tab === "diagnostics" ? diagQ.isFetching
-                    : logQ.isFetching;
+                    : tab === "log" ? (logQ.isFetching || unifiedQ.isFetching)
+                      : logQ.isFetching;
 
   return (
     <HQLayout
@@ -751,12 +763,64 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
 
       {tab === "log" && (
         <>
-          {logQ.isPending && !log && <HqLoading message="Loading AURA Action Log…" />}
+          {unifiedQ.isPending && !unified && logQ.isPending && !log && (
+            <HqLoading message="Loading unified AURA audit…" />
+          )}
+          {unifiedQ.isError && (
+            <div className="hq-anomaly-alert hq-sev-medium" style={{ marginBottom: "1rem" }} role="status">
+              <AlertTriangle size={16} />
+              <div>
+                <strong>Unified audit unavailable</strong>
+                <span> {errorMessage(unifiedQ.error)}</span>
+              </div>
+            </div>
+          )}
+          {unified && (
+            <div className="hq-panel" style={{ marginBottom: "1rem" }}>
+              <div className="hq-panel-body">
+                <h4 style={{ color: "var(--hq-gold)", marginBottom: "0.5rem" }}>Unified AURA Action Stream</h4>
+                <p className="hq-muted-text" style={{ fontSize: "0.8rem", marginBottom: "0.5rem" }}>
+                  {unified.note}
+                </p>
+                <p className="hq-muted-text" style={{ fontSize: "0.8rem", marginBottom: "0.75rem" }}>
+                  {unified.summary.totalReturned} entries · {unified.summary.failed} failed
+                  {" · "}sources: {Object.entries(unified.summary.bySource).map(([k, v]) => `${k}=${v}`).join(", ") || "none"}
+                </p>
+                <table className="hq-table" style={{ fontSize: "0.8rem" }}>
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Source</th>
+                      <th>Kind</th>
+                      <th>Command</th>
+                      <th>Result</th>
+                      <th>OK</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {unified.entries.map((e) => (
+                      <tr key={e.id}>
+                        <td>{new Date(e.createdAt).toLocaleString()}</td>
+                        <td>{e.source}{e.channel ? ` · ${e.channel}` : ""}</td>
+                        <td>{e.kind}{e.actionId ? ` · ${e.actionId}` : ""}</td>
+                        <td>{e.command}</td>
+                        <td>{e.result}</td>
+                        <td><StatusBadge label={e.ok ? "ok" : "fail"} variant={e.ok ? "success" : "danger"} /></td>
+                      </tr>
+                    ))}
+                    {!unified.entries.length && (
+                      <tr><td colSpan={6} className="hq-muted-text">No unified audit entries yet — run a prepare/execute or open Brain modules.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
           {logQ.isError && (
             <div className="hq-anomaly-alert hq-sev-medium" style={{ marginBottom: "1rem" }} role="status">
               <AlertTriangle size={16} />
               <div>
-                <strong>Action Log unavailable</strong>
+                <strong>Brain v1 Action Log unavailable</strong>
                 <span> {errorMessage(logQ.error)}</span>
               </div>
             </div>
@@ -764,9 +828,9 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
           {log && (
             <div className="hq-panel" style={{ marginBottom: "1rem" }}>
               <div className="hq-panel-body">
-                <h4 style={{ color: "var(--hq-gold)", marginBottom: "0.5rem" }}>Secure AURA Action Log</h4>
+                <h4 style={{ color: "var(--hq-gold)", marginBottom: "0.5rem" }}>Secure AURA Action Log (Brain v1)</h4>
                 <p className="hq-muted-text" style={{ fontSize: "0.8rem", marginBottom: "0.75rem" }}>
-                  Showing {log.summary.totalReturned} recent entries · secrets redacted · Founder-only
+                  Showing {log.summary.totalReturned} recent Brain v1 entries · secrets redacted · Founder-only
                 </p>
                 <table className="hq-table" style={{ fontSize: "0.8rem" }}>
                   <thead>

@@ -21,7 +21,7 @@ Founder-only executive operating surface for IFCDC HQ. Built incrementally on ex
 | 5 | System Health Monitor | **Live** (`/hq/aura-brain` · tab 5) |
 | 6 | Executive Priority Queue | **Live** (`/hq/aura-brain` · tab 6) |
 | 7 | Executive Action Center | **Live** (`/hq/aura-brain` · tab 7) |
-| 8 | Secure AURA Action Log | **Live** (`/hq/aura-brain` · tab 8) |
+| 8 | Secure AURA Action Log + Unified Stream | **Live** (`/hq/aura-brain` · tab 8 · `GET /api/hq/aura/diagnostics/unified-audit`) |
 | 9 | E2E Connection Diagnostics | **Live** (`/hq/aura-brain` · tab 9 · `GET /api/hq/aura/diagnostics/e2e`) |
 
 ## Module 1 — Executive Command Center
