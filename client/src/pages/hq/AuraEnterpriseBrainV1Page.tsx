@@ -16,7 +16,14 @@ import { StatusBadge } from "../../components/hq/StatusBadge";
 import { HqLoading } from "../../components/hq/HqLoading";
 import { HqApiError } from "../../api/hqApiFetch";
 
-type BrainTab = "command" | "health" | "briefing" | "projects" | "systems" | "queue" | "actions" | "log";
+type BrainTab = "command" | "health" | "briefing" | "projects" | "systems" | "queue" | "actions" | "log" | "diagnostics";
+
+function probeVariant(status: string): "success" | "warning" | "danger" | "muted" {
+  if (status === "connected") return "success";
+  if (status === "partial") return "warning";
+  if (status === "missing" || status === "unsafe") return "danger";
+  return "muted";
+}
 
 function errorMessage(err: unknown): string {
   if (err instanceof HqApiError) {
@@ -107,6 +114,15 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
     enabled: tab === "log",
   });
 
+  const diagQ = useQuery({
+    queryKey: ["aura-e2e-diagnostics"],
+    queryFn: hqApi.auraE2eDiagnostics,
+    staleTime: 30_000,
+    refetchInterval: tab === "diagnostics" ? 120_000 : false,
+    enabled: tab === "diagnostics",
+    retry: 1,
+  });
+
   const [actionNote, setActionNote] = useState<string | null>(null);
   const execMutation = useMutation({
     mutationFn: ({ actionId, confirmed }: { actionId: string; confirmed: boolean }) =>
@@ -126,6 +142,7 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
   const q = queue.data;
   const a = actionsQ.data;
   const log = logQ.data;
+  const diag = diagQ.data;
   const roadmap = d?.moduleRoadmap ?? h?.moduleRoadmap ?? b?.moduleRoadmap ?? p?.moduleRoadmap ?? s?.moduleRoadmap ?? q?.moduleRoadmap ?? a?.moduleRoadmap ?? log?.moduleRoadmap ?? [];
 
   const refetchActive = () => {
@@ -136,6 +153,7 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
     if (tab === "systems") return systems.refetch();
     if (tab === "queue") return queue.refetch();
     if (tab === "actions") return actionsQ.refetch();
+    if (tab === "diagnostics") return diagQ.refetch();
     return logQ.refetch();
   };
   const fetching =
@@ -146,7 +164,8 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
             : tab === "systems" ? systems.isFetching
               : tab === "queue" ? queue.isFetching
                 : tab === "actions" ? actionsQ.isFetching
-                  : logQ.isFetching;
+                  : tab === "diagnostics" ? diagQ.isFetching
+                    : logQ.isFetching;
 
   return (
     <HQLayout
@@ -210,6 +229,13 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
           onClick={() => setTab("log")}
         >
           8. Action Log
+        </button>
+        <button
+          type="button"
+          className={`hq-btn hq-btn-sm ${tab === "diagnostics" ? "hq-btn-primary" : "hq-btn-secondary"}`}
+          onClick={() => setTab("diagnostics")}
+        >
+          9. E2E Diagnostics
         </button>
         <StatusBadge label="Read-only" variant="muted" />
         <button
@@ -767,6 +793,86 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
                 </table>
               </div>
             </div>
+          )}
+        </>
+      )}
+
+      {tab === "diagnostics" && (
+        <>
+          {diagQ.isPending && !diag && <HqLoading message="Probing AURA E2E connections…" />}
+          {diagQ.isError && (
+            <div className="hq-anomaly-alert hq-sev-medium" style={{ marginBottom: "1rem" }} role="status">
+              <AlertTriangle size={16} />
+              <div>
+                <strong>E2E diagnostics unavailable</strong>
+                <span> {errorMessage(diagQ.error)}</span>
+              </div>
+            </div>
+          )}
+          {diag && (
+            <>
+              <div className="hq-kpi-grid" style={{ marginBottom: "1rem" }}>
+                <KpiCard label="Connected" value={diag.summary.connected} icon={CheckCircle2} variant="success" />
+                <KpiCard label="Partial" value={diag.summary.partial} icon={Activity} variant="warning" />
+                <KpiCard label="Missing" value={diag.summary.missing} icon={AlertTriangle} variant={diag.summary.missing ? "danger" : "success"} />
+                <KpiCard
+                  label="Action catalog"
+                  value={diag.summary.actionCatalog.total}
+                  icon={Brain}
+                />
+              </div>
+              <div className="hq-panel" style={{ marginBottom: "1rem" }}>
+                <div className="hq-panel-body">
+                  <h4 style={{ color: "var(--hq-gold)", marginBottom: "0.5rem" }}>AURA E2E Connection Matrix</h4>
+                  <p className="hq-muted-text" style={{ fontSize: "0.8rem", marginBottom: "0.5rem" }}>
+                    {diag.note}
+                  </p>
+                  <p className="hq-muted-text" style={{ fontSize: "0.8rem", marginBottom: "0.75rem" }}>
+                    Twilio config untouched: {diag.twilioConfigUntouched ? "yes" : "no"}
+                    {" · "}Generated {new Date(diag.generatedAt).toLocaleString()}
+                    {" · "}Base {diag.publicBaseUrl || "(unset)"}
+                    {" · "}Actions {diag.summary.actionCatalog.read}r / {diag.summary.actionCatalog.prepare}p / {diag.summary.actionCatalog.execute}x
+                  </p>
+                  <table className="hq-table" style={{ fontSize: "0.8rem" }}>
+                    <thead>
+                      <tr>
+                        <th>Area</th>
+                        <th>Probe</th>
+                        <th>Status</th>
+                        <th>Detail</th>
+                        <th>Route</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {diag.probes.map((probe) => (
+                        <tr key={probe.id}>
+                          <td>{probe.area}</td>
+                          <td>{probe.label}</td>
+                          <td><StatusBadge label={probe.status} variant={probeVariant(probe.status)} /></td>
+                          <td>{probe.detail}</td>
+                          <td className="hq-muted-text">{probe.route || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div className="hq-panel">
+                <div className="hq-panel-body">
+                  <h4 style={{ color: "var(--hq-gold)", marginBottom: "0.5rem" }}>Webhook URL map (read-only)</h4>
+                  <table className="hq-table" style={{ fontSize: "0.8rem" }}>
+                    <tbody>
+                      {Object.entries(diag.webhookUrls).map(([key, url]) => (
+                        <tr key={key}>
+                          <td>{key}</td>
+                          <td className="hq-muted-text">{url || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
           )}
         </>
       )}

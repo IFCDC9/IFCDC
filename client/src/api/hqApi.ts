@@ -458,6 +458,41 @@ export const hqApi = {
       summary: { totalReturned: number };
       moduleRoadmap: Array<{ id: number; name: string; status: "live" | "planned" }>;
     }>(`/aura/brain-v1/action-log?limit=${limit}`),
+  auraE2eDiagnostics: () =>
+    hqFetch<{
+      generatedAt: string;
+      mode: "read_only";
+      twilioConfigUntouched: true;
+      summary: {
+        connected: number;
+        partial: number;
+        missing: number;
+        unsafe: number;
+        actionCatalog: { total: number; read: number; prepare: number; execute: number };
+      };
+      identity: {
+        founderMode: boolean;
+        isFounder: boolean;
+        email: string | null;
+        assurance: string | null;
+      };
+      probes: Array<{
+        id: string;
+        area: string;
+        label: string;
+        status: "connected" | "partial" | "missing" | "unsafe";
+        detail: string;
+        route?: string;
+        files?: string[];
+        env?: string[];
+        tables?: string[];
+        risk?: "low" | "medium" | "high";
+        touchesTwilioConfig?: boolean;
+      }>;
+      webhookUrls: Record<string, string>;
+      publicBaseUrl: string;
+      note: string;
+    }>("/aura/diagnostics/e2e"),
   auraEnterpriseBrain: (request: string) =>
     hqFetch<Record<string, unknown>>("/aura/brain", {
       method: "POST",

@@ -1328,6 +1328,35 @@ router.get("/aura/brain-v1/action-log", hqAuthRequired, requireHQModule("aura"),
   res.json(payload);
 });
 
+/** AURA E2E Diagnostics — Phase 1 connection matrix (Founder-only, read-only; Twilio config untouched). */
+router.get("/aura/diagnostics/e2e", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { buildAuraE2eDiagnostics } = await import("../hq/auraE2eDiagnosticsEngine");
+  const { logAuraBrainV1Action } = await import("../hq/auraEnterpriseBrainV1");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "AURA E2E diagnostics requires Founder access." });
+  }
+  const payload = await buildAuraE2eDiagnostics({
+    founderMode: identity.founderMode,
+    isFounder: identity.isFounder,
+    email: identity.email,
+    assurance: identity.assurance,
+  });
+  await logAuraBrainV1Action({
+    userId: identity.userId || req.hqUser?.id,
+    userEmail: identity.email || req.hqUser?.email,
+    command: "aura.diagnostics.e2e.read",
+    result: `ok connected=${payload.summary.connected} partial=${payload.summary.partial} missing=${payload.summary.missing}`,
+    metadata: { module: "e2e-diagnostics", mode: "read_only", twilioConfigUntouched: true },
+  });
+  res.json(payload);
+});
+
 /** AURA Enterprise Brain 2.0 */
 router.post("/aura/brain", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
   const { resolveIdentityFromHqUser, publicIdentitySummary } = await import("../hq/auraFounderTrustEngine");
