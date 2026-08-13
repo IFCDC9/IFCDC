@@ -802,6 +802,7 @@ async function handleIncomingSms(req: Request, res: Response): Promise<void> {
 }
 
 async function handleSmsStatus(req: Request, res: Response): Promise<void> {
+  const status = String(req.body.MessageStatus ?? req.body.SmsStatus ?? "unknown");
   void logTwilioCommunicationEvent({
     id: cryptoRandomId(),
     direction: "outbound",
@@ -809,9 +810,28 @@ async function handleSmsStatus(req: Request, res: Response): Promise<void> {
     fromNumber: normalizeE164(req.body.From),
     toNumber: normalizeE164(req.body.To),
     messageSid: req.body.MessageSid,
-    status: req.body.MessageStatus ?? req.body.SmsStatus ?? "unknown",
+    status,
     body: "sms_status",
   });
+  if (/^(failed|undelivered)$/i.test(status)) {
+    void import("../hq/auraOperationalEvents").then(({ emitAuraOperationalEventAsync }) =>
+      emitAuraOperationalEventAsync({
+        type: "sms_delivery_failed",
+        title: `SMS delivery ${status}`,
+        detail: `Outbound SMS ${req.body.MessageSid || "unknown"} marked ${status} by Twilio`,
+        entityType: "sms",
+        entityId: req.body.MessageSid || null,
+        severity: "high",
+        alertFounder: true,
+        metadata: {
+          status,
+          to: normalizeE164(req.body.To),
+          errorCode: req.body.ErrorCode || null,
+          twilioConfigUntouched: true,
+        },
+      })
+    );
+  }
   res.status(200).send("");
 }
 

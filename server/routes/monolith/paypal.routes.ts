@@ -128,6 +128,18 @@ export function createPaypalRouter(): Router {
         }),
       );
 
+      void import("../../hq/auraOperationalEvents").then(({ emitAuraOperationalEventAsync }) =>
+        emitAuraOperationalEventAsync({
+          type: "payment_completed",
+          title: `PayPal donation ${currency} ${amount}`,
+          detail: `PayPal transaction ${transactionId}`,
+          entityType: "funding_event",
+          entityId: String(transactionId),
+          severity: "info",
+          metadata: { source: "paypal", amount, currency, payerEmail },
+        })
+      );
+
       res.json({ logged: true });
     } catch (err) {
       console.error("PayPal webhook log error:", err);

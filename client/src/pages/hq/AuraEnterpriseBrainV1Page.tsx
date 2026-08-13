@@ -132,6 +132,15 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
     retry: 1,
   });
 
+  const eventsQ = useQuery({
+    queryKey: ["aura-operational-events"],
+    queryFn: () => hqApi.auraOperationalEvents(40),
+    staleTime: 15_000,
+    refetchInterval: tab === "diagnostics" ? 60_000 : false,
+    enabled: tab === "diagnostics",
+    retry: 1,
+  });
+
   const [actionNote, setActionNote] = useState<string | null>(null);
   const execMutation = useMutation({
     mutationFn: ({ actionId, confirmed }: { actionId: string; confirmed: boolean }) =>
@@ -153,6 +162,7 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
   const log = logQ.data;
   const unified = unifiedQ.data;
   const diag = diagQ.data;
+  const events = eventsQ.data;
   const roadmap = d?.moduleRoadmap ?? h?.moduleRoadmap ?? b?.moduleRoadmap ?? p?.moduleRoadmap ?? s?.moduleRoadmap ?? q?.moduleRoadmap ?? a?.moduleRoadmap ?? log?.moduleRoadmap ?? [];
 
   const refetchActive = () => {
@@ -163,7 +173,7 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
     if (tab === "systems") return systems.refetch();
     if (tab === "queue") return queue.refetch();
     if (tab === "actions") return actionsQ.refetch();
-    if (tab === "diagnostics") return diagQ.refetch();
+    if (tab === "diagnostics") return Promise.all([diagQ.refetch(), eventsQ.refetch()]);
     if (tab === "log") return Promise.all([logQ.refetch(), unifiedQ.refetch()]);
     return logQ.refetch();
   };
@@ -175,7 +185,7 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
             : tab === "systems" ? systems.isFetching
               : tab === "queue" ? queue.isFetching
                 : tab === "actions" ? actionsQ.isFetching
-                  : tab === "diagnostics" ? diagQ.isFetching
+                  : tab === "diagnostics" ? (diagQ.isFetching || eventsQ.isFetching)
                     : tab === "log" ? (logQ.isFetching || unifiedQ.isFetching)
                       : logQ.isFetching;
 
@@ -919,6 +929,51 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
                       ))}
                     </tbody>
                   </table>
+                </div>
+              </div>
+              <div className="hq-panel" style={{ marginBottom: "1rem" }}>
+                <div className="hq-panel-body">
+                  <h4 style={{ color: "var(--hq-gold)", marginBottom: "0.5rem" }}>Operational events (Phase 5)</h4>
+                  {eventsQ.isError && (
+                    <p className="hq-muted-text" style={{ fontSize: "0.8rem" }}>{errorMessage(eventsQ.error)}</p>
+                  )}
+                  {events && (
+                    <>
+                      <p className="hq-muted-text" style={{ fontSize: "0.8rem", marginBottom: "0.75rem" }}>
+                        {events.note} · {events.summary.totalReturned} shown · {events.summary.highSeverity} high
+                      </p>
+                      <table className="hq-table" style={{ fontSize: "0.8rem" }}>
+                        <thead>
+                          <tr>
+                            <th>Time</th>
+                            <th>Type</th>
+                            <th>Severity</th>
+                            <th>Title</th>
+                            <th>Detail</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {events.entries.map((e) => (
+                            <tr key={e.id}>
+                              <td>{new Date(e.createdAt).toLocaleString()}</td>
+                              <td>{e.type}</td>
+                              <td>
+                                <StatusBadge
+                                  label={e.severity}
+                                  variant={e.severity === "high" ? "danger" : e.severity === "watch" ? "warning" : "muted"}
+                                />
+                              </td>
+                              <td>{e.title}</td>
+                              <td className="hq-muted-text">{e.detail}</td>
+                            </tr>
+                          ))}
+                          {!events.entries.length && (
+                            <tr><td colSpan={5} className="hq-muted-text">No operational events yet.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </>
+                  )}
                 </div>
               </div>
               <div className="hq-panel">

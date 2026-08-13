@@ -520,6 +520,30 @@ export const hqApi = {
       };
       note: string;
     }>(`/aura/diagnostics/unified-audit?limit=${limit}`),
+  auraOperationalEvents: (limit = 50) =>
+    hqFetch<{
+      module: string;
+      version: string;
+      generatedAt: string;
+      mode: "read_only";
+      entries: Array<{
+        id: string;
+        createdAt: string;
+        type: string;
+        domain: string;
+        title: string;
+        detail: string;
+        entityType: string | null;
+        entityId: string | null;
+        severity: string;
+      }>;
+      summary: {
+        totalReturned: number;
+        byType: Record<string, number>;
+        highSeverity: number;
+      };
+      note: string;
+    }>(`/aura/diagnostics/operational-events?limit=${limit}`),
   auraEnterpriseBrain: (request: string) =>
     hqFetch<Record<string, unknown>>("/aura/brain", {
       method: "POST",

@@ -1,6 +1,6 @@
 # AURA End-to-End Integration Audit & Connection Validation
 
-**Status:** AUDIT COMPLETE · Phases 1–4 SHIPPED (visibility, audit, voice/text adapter, module tools) — Twilio/SMS config untouched  
+**Status:** AUDIT COMPLETE · Phases 1–5 SHIPPED — Twilio/SMS config untouched  
 **Date:** August 13, 2026  
 **Product:** IFCDC Headquarters / AURA  
 **Constraint:** Treat production Twilio/SMS as stable. No autonomous code/deploy authority for AURA.
@@ -178,10 +178,10 @@ Legend: 🟢 CONNECTED · 🟡 PARTIAL · 🔴 MISSING · ⚠️ UNSAFE/INCOMPLE
 | `hqRealtimeEvents` + WS `/api/hq/ws` | 🟢 |
 | Grants / finance mutation push | 🟢 / 🟡 |
 | Notification queue | 🟢 |
-| Booking created/canceled → AURA | 🔴 |
-| Payment completed → AURA bus | 🟡 (webhooks → DB; weak realtime) |
+| Booking created/canceled → AURA | 🟢 Phase 5 booking_created / booking_failed |
+| Payment completed → AURA bus | 🟢 Phase 5 payment_completed (Stripe/PayPal) |
 | Grant deadline / compliance due | 🟡 (trackers/alerts; not full event bus) |
-| SMS failed → AURA awareness | 🟡 |
+| SMS failed → AURA awareness | 🟢 Phase 5 sms_send_failed + sms_delivery_failed |
 | System failure events | 🟡 (monitoring/anomalies) |
 | Redis/Bull external queue | 🔴 |
 
@@ -243,7 +243,7 @@ Legend: 🟢 CONNECTED · 🟡 PARTIAL · 🔴 MISSING · ⚠️ UNSAFE/INCOMPLE
 | G5 | Module tool coverage | ✅ Phase 4 HR/finance/projects/donations read+prepare shipped | `auraModuleToolsEngine.ts`, `auraActionRegistry.ts` | Module tables | Optional deeper mutate tools later (Founder-gated) | Low | Low |
 | G6 | Barbers/bookings | Only receptionist path | `auraReceptionistActions.ts` | `clients`, `appointments` | Registry tools + events | Med | Low |
 | G7 | Outbound SMS statusCallback | Not in AURA `messages.create` | `auraExecutiveOperations` / `notifications.ts` | Twilio | Optional additive callback URL — **Founder approve; do not touch Console blindly** | Med | Low if additive |
-| G9 | Event bus incomplete | Bookings/payments/SMS fail weak | `hqRealtimeEvents`, webhooks | — | Emit notifyHqDataChange + AURA consumers | Med | Low |
+| G9 | Event bus incomplete | ✅ Phase 5 booking/payment/SMS-fail wired | `auraOperationalEvents.ts`, realtime domains | `aura_operational_events` | Optional cancel-booking + more payment providers | Low | Low |
 | G10 | Unified audit stream | ✅ Phase 2 shipped | `auraUnifiedAudit.ts`, Brain v1 log, command/exec/receptionist mirrors | `aura_unified_action_log` | Keep extending remaining prepare paths as needed | Low | Low |
 | G11 | Org operational memory graph | Not assembled | memory + modules | — | Context builder for Brain | Med | Low |
 | G12 | Autocomplete diagnostics for all modules | Partial | enterprise health / monitoring | — | Extend probes | Low | Low |
@@ -269,7 +269,7 @@ Legend: 🟢 CONNECTED · 🟡 PARTIAL · 🔴 MISSING · ⚠️ UNSAFE/INCOMPLE
 2. **Audit unification** — ✅ **Shipped** — `aura_unified_action_log` mirrors Brain v1, command-layer prepare/execute/deny, executive ops (SMS/email/call), and receptionist exec (`GET /api/hq/aura/diagnostics/unified-audit` · Brain v1 tab **8**).  
 3. **Voice/text unification** — ✅ **Shipped** — Founder voice/SMS → `auraReceptionistCommandAdapter` → `runAuraCommand` (Twilio URLs/credentials untouched; public booking path unchanged).  
 4. **Module tool expansion** — ✅ **Shipped** — HR/finance/projects/donations read+prepare tools via `auraModuleToolsEngine` + action registry (no Stripe/PayPal mutate; no Twilio changes).  
-5. **Events** — Booking/payment/SMS-fail → `notifyHqDataChange` + AURA consumers.  
+5. **Events** — ✅ **Shipped** — `auraOperationalEvents` emits booking/payment/SMS-fail → `notifyHqDataChange` + leadership alerts + Brain diagnostics / `list_operational_events` tool. Twilio config untouched.  
 6. **Optional SMS statusCallback** — Additive only; Founder-approved; no credential reset.  
 7. **Deprecate or harden :4101** — Auth or remove from prod exposure.
 
@@ -289,6 +289,7 @@ Legend: 🟢 CONNECTED · 🟡 PARTIAL · 🔴 MISSING · ⚠️ UNSAFE/INCOMPLE
 | Unified audit (Phase 2) | `server/hq/auraUnifiedAudit.ts` |
 | Voice/SMS command adapter (Phase 3) | `server/hq/auraReceptionistCommandAdapter.ts` |
 | Module tools (Phase 4) | `server/hq/auraModuleToolsEngine.ts` |
+| Operational events (Phase 5) | `server/hq/auraOperationalEvents.ts` |
 | Brain 2.0 | `server/hq/auraEnterpriseBrain.ts` |
 | Voice/SMS entry | `server/routes/twilioAura.routes.ts`, `auraReceptionistEngine.ts` |
 | Twilio log | `server/hq/twilioIntegrationEngine.ts` |

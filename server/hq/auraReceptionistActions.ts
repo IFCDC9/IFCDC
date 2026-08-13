@@ -176,12 +176,35 @@ export async function bookBarbershopAppointment(booking: PendingBooking): Promis
       day: "numeric",
     });
 
+    void import("./auraOperationalEvents").then(({ emitAuraOperationalEventAsync }) =>
+      emitAuraOperationalEventAsync({
+        type: "booking_created",
+        title: `Barbershop booking: ${service.name}`,
+        detail: `${fullName} booked ${service.name} on ${formattedDate} at ${time}`,
+        entityType: "appointment",
+        entityId: appointmentId,
+        severity: "info",
+        metadata: { clientId: client.id, service: serviceId, date, time },
+      })
+    );
+
     return {
       ok: true,
       message: `You're booked for a ${service.name} on ${formattedDate} at ${time}. We'll confirm by text shortly.`,
     };
   } catch (err) {
     console.error("AURA barbershop booking error:", err);
+    void import("./auraOperationalEvents").then(({ emitAuraOperationalEventAsync }) =>
+      emitAuraOperationalEventAsync({
+        type: "booking_failed",
+        title: "Barbershop booking failed",
+        detail: err instanceof Error ? err.message : "Booking insert failed",
+        entityType: "appointment",
+        severity: "high",
+        alertFounder: true,
+        metadata: { service: booking.service, date: booking.date, time: booking.time },
+      })
+    );
     return { ok: false, message: "I couldn't complete the booking just now — I'll have our team call you back." };
   }
 }

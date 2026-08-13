@@ -317,12 +317,17 @@ export async function buildAuraE2eDiagnostics(opts: {
   probes.push({
     id: "events-realtime",
     area: "Events",
-    label: "HQ realtime event bus",
-    status: "partial",
-    detail: "hqRealtimeEvents + WS /api/hq/ws — grants/finance strong; bookings/SMS-fail weaker",
-    route: "WS /api/hq/ws",
-    files: ["server/hq/hqRealtimeEvents.ts", "server/hq/hqRealtimeHub.ts"],
-    risk: "medium",
+    label: "HQ realtime + AURA operational event bus",
+    status: "connected",
+    detail: "Phase 5: booking/payment/SMS-fail emit notifyHqDataChange + aura_operational_events (+ leadership alerts on fail)",
+    route: "WS /api/hq/ws · GET /api/hq/aura/diagnostics/operational-events",
+    files: [
+      "server/hq/hqRealtimeEvents.ts",
+      "server/hq/auraOperationalEvents.ts",
+      "server/hq/hqRealtimeHub.ts",
+    ],
+    tables: ["aura_operational_events"],
+    risk: "low",
   });
 
   probes.push({

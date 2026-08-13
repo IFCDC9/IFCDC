@@ -14,6 +14,9 @@ export type HqRealtimeDomain =
   | "software"
   | "workflows"
   | "security"
+  | "bookings"
+  | "donations"
+  | "communications"
   | "all";
 
 type PushHandler = (domain: HqRealtimeDomain) => Promise<void>;
@@ -57,6 +60,11 @@ export function inferHqDomain(path: string): HqRealtimeDomain | null {
   if (path.startsWith("/security")) return "security";
   if (path.startsWith("/documents")) return "operations";
   if (path.startsWith("/integrations")) return "software";
+  if (path.startsWith("/clients") || path.startsWith("/appointments") || path.startsWith("/bookings")) {
+    return "bookings";
+  }
+  if (path.startsWith("/donations") || path.startsWith("/donate")) return "donations";
+  if (path.startsWith("/communications")) return "communications";
   return null;
 }
 

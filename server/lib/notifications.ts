@@ -425,28 +425,34 @@ export async function sendFounderSecuritySms(opts: {
   ).trim();
 
   if (!sid || !token) {
-    return {
+    const failResult: HqDeliveryResult = {
       success: false,
       error: "Twilio credentials missing (TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN)",
       providerCode: "missing_twilio_credentials",
     };
+    emitSmsSendFailed(opts.to.trim(), failResult);
+    return failResult;
   }
   if (!messagingServiceSid && !from) {
-    return {
+    const failResult: HqDeliveryResult = {
       success: false,
       error: "Twilio from number missing (TWILIO_PHONE_NUMBER or TWILIO_MESSAGING_SERVICE_SID)",
       providerCode: "missing_from_number",
     };
+    emitSmsSendFailed(opts.to.trim(), failResult);
+    return failResult;
   }
 
   const to = opts.to.trim();
   if (!/^\+[1-9]\d{7,14}$/.test(to)) {
-    return {
+    const failResult: HqDeliveryResult = {
       success: false,
       error: `Invalid E.164 destination: ${to}`,
       providerCode: "invalid_e164",
       providerResponse: { to },
     };
+    emitSmsSendFailed(to, failResult);
+    return failResult;
   }
 
   try {
@@ -469,7 +475,7 @@ export async function sendFounderSecuritySms(opts: {
         `[sms] Twilio accepted with error sid=${message.sid} status=${message.status}`
         + ` errorCode=${message.errorCode} errorMessage=${message.errorMessage || ""}`
       );
-      return {
+      const failResult: HqDeliveryResult = {
         success: false,
         error: message.errorMessage || `Twilio error ${message.errorCode}`,
         messageId: message.sid,
@@ -484,6 +490,8 @@ export async function sendFounderSecuritySms(opts: {
           errorMessage: message.errorMessage,
         },
       };
+      emitSmsSendFailed(to, failResult);
+      return failResult;
     }
     console.log(`[sms] Twilio ok sid=${message.sid} status=${message.status}`);
     return {
@@ -505,7 +513,7 @@ export async function sendFounderSecuritySms(opts: {
       `[sms] Twilio failed code=${detail.code ?? "n/a"} status=${detail.status ?? "n/a"}: ${detail.message}`
       + (detail.moreInfo ? ` moreInfo=${detail.moreInfo}` : "")
     );
-    return {
+    const failResult: HqDeliveryResult = {
       success: false,
       error: detail.message,
       providerCode: detail.code,
@@ -517,7 +525,29 @@ export async function sendFounderSecuritySms(opts: {
         message: detail.message,
       },
     };
+    emitSmsSendFailed(to, failResult);
+    return failResult;
   }
+}
+
+function emitSmsSendFailed(to: string, result: HqDeliveryResult): void {
+  void import("../hq/auraOperationalEvents").then(({ emitAuraOperationalEventAsync }) =>
+    emitAuraOperationalEventAsync({
+      type: "sms_send_failed",
+      title: "AURA SMS send failed",
+      detail: result.error || "Twilio send failed",
+      entityType: "sms",
+      entityId: result.messageId || null,
+      severity: "high",
+      alertFounder: true,
+      metadata: {
+        to,
+        providerCode: result.providerCode ?? null,
+        providerStatus: result.providerStatus ?? null,
+        twilioConfigUntouched: true,
+      },
+    })
+  );
 }
 
 /** Probe Resend sender/domain authorization without sending email. */

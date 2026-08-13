@@ -87,6 +87,17 @@ router.post(
         `, "stripe", "donation", session.amount_total, session.currency || "usd", session.id, JSON.stringify(session));
 
         console.log("Stripe donation logged:", session.id);
+        void import("../hq/auraOperationalEvents").then(({ emitAuraOperationalEventAsync }) =>
+          emitAuraOperationalEventAsync({
+            type: "payment_completed",
+            title: `Stripe donation ${session.currency || "usd"} ${((session.amount_total || 0) / 100).toFixed(2)}`,
+            detail: `Checkout session completed · ${session.id}`,
+            entityType: "funding_event",
+            entityId: session.id,
+            severity: "info",
+            metadata: { source: "stripe", amountCents: session.amount_total, currency: session.currency },
+          })
+        );
       }
 
       res.json({ received: true });

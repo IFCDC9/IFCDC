@@ -1323,6 +1323,38 @@ const prepareOpsProjectAction: AuraAction = {
   },
 };
 
+const listOperationalEventsAction: AuraAction = {
+  id: "list_operational_events",
+  label: "List Operational Events",
+  module: "executive",
+  kind: "read",
+  description:
+    "List recent AURA operational events (bookings, payments, SMS failures) from the Phase 5 event bus.",
+  parameters: {
+    type: {
+      type: "string",
+      description:
+        "Optional filter: booking_created, booking_failed, payment_completed, sms_send_failed, sms_delivery_failed.",
+    },
+    limit: { type: "number", description: "Max rows (default 25)." },
+  },
+  async run(args) {
+    const { listAuraOperationalEvents } = await import("./auraOperationalEvents");
+    const entries = await listAuraOperationalEvents({
+      type: str(args.type),
+      limit: typeof args.limit === "number" ? args.limit : 25,
+    });
+    return {
+      status: "done",
+      summary: `Found ${entries.length} operational event${entries.length === 1 ? "" : "s"}${
+        str(args.type) ? ` of type ${str(args.type)}` : ""
+      }.`,
+      data: { count: entries.length, entries },
+      navigation: { path: "/hq/aura-brain", label: "Open AURA Brain" },
+    };
+  },
+};
+
 const complianceReport: AuraAction = {
   id: "generate_compliance_report",
   label: "Generate Compliance Report",
@@ -1707,6 +1739,7 @@ export const AURA_ACTIONS: AuraAction[] = [
   listRecentDonationsAction,
   listOpsProjectsAction,
   prepareOpsProjectAction,
+  listOperationalEventsAction,
   complianceReport,
   queueGrantSubmission,
   runLiveGrantWorkflow,
