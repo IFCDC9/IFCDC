@@ -38,6 +38,7 @@ import enterpriseOps5Router from "./enterpriseOps5.routes";
 import enterpriseReadinessRouter from "./enterpriseReadiness.routes";
 import enterpriseHealthRouter from "./enterpriseHealth.routes";
 import autonomousOpsRouter from "./auraAutonomousOps.routes";
+import auraOpsVerifyRouter from "./auraOpsVerify.routes";
 import {
   detectOperationalAnomalies,
   predictFinancialRisk,
@@ -109,6 +110,7 @@ router.use("/aura/os5", enterpriseOps5Router);
 router.use("/enterprise-readiness", enterpriseReadinessRouter);
 router.use("/enterprise-health", enterpriseHealthRouter);
 router.use("/aura/autonomous", autonomousOpsRouter);
+router.use("/aura/ops", auraOpsVerifyRouter);
 
 router.get("/health", (_req: Request, res: Response) => {
   res.json({

@@ -24,6 +24,8 @@ HQ AURA is a **large in-process OS** (command layer + action registry + multiple
 
 **SMS pipeline:** Credentials and Console number webhooks unchanged. Phase 6 only adds an additive `statusCallback` on AURA `messages.create` when a public HTTPS base is available.
 
+**Phase 6 production acceptance auth:** verification uses Founder HQ JWT (`HQ_TOKEN`), optional `AURA_OPS_VERIFY_TOKEN`, or Founder phone OTP session mint (`/api/hq/aura/ops/founder-session/*`). Founder production password is **not** used by the verify script.
+
 ---
 
 ## Flow map (current)

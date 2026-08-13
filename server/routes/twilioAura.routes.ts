@@ -803,13 +803,14 @@ async function handleIncomingSms(req: Request, res: Response): Promise<void> {
 
 async function handleSmsStatus(req: Request, res: Response): Promise<void> {
   const status = String(req.body.MessageStatus ?? req.body.SmsStatus ?? "unknown");
+  const messageSid = String(req.body.MessageSid ?? "");
   void logTwilioCommunicationEvent({
     id: cryptoRandomId(),
     direction: "outbound",
     channel: "sms",
     fromNumber: normalizeE164(req.body.From),
     toNumber: normalizeE164(req.body.To),
-    messageSid: req.body.MessageSid,
+    messageSid,
     status,
     body: "sms_status",
   });
@@ -818,15 +819,35 @@ async function handleSmsStatus(req: Request, res: Response): Promise<void> {
       emitAuraOperationalEventAsync({
         type: "sms_delivery_failed",
         title: `SMS delivery ${status}`,
-        detail: `Outbound SMS ${req.body.MessageSid || "unknown"} marked ${status} by Twilio`,
+        detail: `Outbound SMS ${messageSid || "unknown"} marked ${status} by Twilio`,
         entityType: "sms",
-        entityId: req.body.MessageSid || null,
+        entityId: messageSid || null,
         severity: "high",
         alertFounder: true,
         metadata: {
           status,
           to: normalizeE164(req.body.To),
           errorCode: req.body.ErrorCode || null,
+          twilioConfigUntouched: true,
+        },
+      })
+    );
+  } else if (/^(delivered|sent|queued|sending|receiving|received|accepted|scheduled)$/i.test(status)) {
+    // Phase 6 acceptance: mirror successful statusCallback into operational events (info, no Founder alert)
+    void import("../hq/auraOperationalEvents").then(({ emitAuraOperationalEventAsync }) =>
+      emitAuraOperationalEventAsync({
+        type: "system",
+        title: `SMS statusCallback ${status}`,
+        detail: `Outbound SMS ${messageSid || "unknown"} statusCallback → ${status}`,
+        entityType: "sms",
+        entityId: messageSid || null,
+        severity: "info",
+        alertFounder: false,
+        metadata: {
+          status,
+          to: normalizeE164(req.body.To),
+          statusCallback: true,
+          route: "/api/twilio/aura/sms/status",
           twilioConfigUntouched: true,
         },
       })
