@@ -275,7 +275,7 @@ Legend: 🟢 CONNECTED · 🟡 PARTIAL · 🔴 MISSING · ⚠️ UNSAFE/INCOMPLE
 4. **Module tool expansion** — ✅ **Shipped** — HR/finance/projects/donations read+prepare tools via `auraModuleToolsEngine` + action registry (no Stripe/PayPal mutate; no Twilio changes).  
 5. **Events** — ✅ **Shipped** — `auraOperationalEvents` emits booking/payment/SMS-fail → `notifyHqDataChange` + leadership alerts + Brain diagnostics / `list_operational_events` tool. Twilio config untouched.  
 6. **Optional SMS statusCallback** — ✅ **Shipped** — AURA `sendFounderSecuritySms` attaches per-message `statusCallback` to existing `/api/twilio/aura/sms/status` when public HTTPS base is available. **No Twilio Console / credential changes.** Opt-out: `AURA_SMS_STATUS_CALLBACK=false`.  
-7. **Deprecate or harden :4101** — Auth or remove from prod exposure. (**Not started** — awaiting Founder approval.)
+7. **Deprecate or harden :4101** — ✅ **Shipped (Phase 7)** — HQ production path confirmed as in-process OpenAI + `/api/hq/aura/*`. Legacy `:4101` probe skipped by default; `aura-ai-core` refuses to bind unless `AURA_LEGACY_4101_ENABLED=true`. Observability: `GET /api/hq/aura/diagnostics/legacy-4101`. Implementation retained for rollback. Twilio untouched.
 
 ---
 

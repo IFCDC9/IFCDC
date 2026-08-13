@@ -124,17 +124,29 @@ export async function buildAuraE2eDiagnostics(opts: {
   });
 
   const auraSvc = services.aura === true;
+  const { getLegacy4101Summary, shouldProbeLegacy4101 } = await import("./auraLegacy4101");
+  const legacy = getLegacy4101Summary();
   probes.push({
     id: "core-port-4101",
     area: "AURA Core",
-    label: "Central aura-ai microservice (:4101)",
-    status: auraSvc ? "partial" : "missing",
-    detail: auraSvc
-      ? "Health OK — HQ executive path still uses in-process OpenAI, not this service"
-      : "Not reachable / not used by HQ command path (health-only dependency)",
-    route: "GET /api/hq/aura/status",
-    files: ["Shared/ifcdc-services.ts", "Backend/ifcdc-services/aura-ai-core"],
-    env: ["IFCDC_AURA_URL"],
+    label: "Legacy aura-ai microservice (:4101) — Phase 7 deprecated",
+    status: shouldProbeLegacy4101()
+      ? auraSvc
+        ? "partial"
+        : "missing"
+      : "connected",
+    detail: shouldProbeLegacy4101()
+      ? auraSvc
+        ? "Probe enabled — health OK; HQ executive path still uses in-process OpenAI (not this service)"
+        : "Probe enabled — not reachable (optional; not required for HQ production)"
+      : `Phase 7: probe skipped by default · production path=${legacy.productionPath} · rollback=${legacy.rollback}`,
+    route: "GET /api/hq/aura/diagnostics/legacy-4101",
+    files: [
+      "server/hq/auraLegacy4101.ts",
+      "Shared/ifcdc-services.ts",
+      "Backend/ifcdc-services/aura-ai-core",
+    ],
+    env: ["IFCDC_AURA_URL", "AURA_LEGACY_4101_PROBE", "AURA_LEGACY_4101_ENABLED"],
     risk: "low",
   });
 
@@ -425,6 +437,7 @@ export async function buildAuraE2eDiagnostics(opts: {
     probes,
     webhookUrls: webhooks,
     publicBaseUrl: publicBase || "",
-    note: "Phase 1 visibility only. Twilio credentials and webhook sync were not modified. Do not treat microservice :4101 as the executive brain until wired.",
+    note:
+      "Phases 1–7: Twilio credentials/webhooks untouched. Production AURA is HQ in-process OpenAI + /api/hq/aura/* — legacy :4101 is deprecated (probe off by default).",
   };
 }

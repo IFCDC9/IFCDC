@@ -73,15 +73,59 @@ export const ifcdc = {
 
 export const IFCDC_SERVICE_URLS = {
   auth: process.env.IFCDC_AUTH_URL || "http://localhost:4100",
+  /** @deprecated Phase 7 — HQ production AURA does not use :4101. Kept for observability/rollback. */
   aura: process.env.IFCDC_AURA_URL || "http://localhost:4101",
   notifications: process.env.IFCDC_NOTIFICATIONS_URL || "http://localhost:4102",
   payments: process.env.IFCDC_PAYMENTS_URL || "http://localhost:4103",
   database: process.env.IFCDC_DATABASE_URL || "http://localhost:4104",
 };
 
+/**
+ * Health of optional sidecar microservices.
+ * Phase 7: legacy AURA :4101 is skipped by default (not required for production HQ).
+ * Set AURA_LEGACY_4101_PROBE=true to resume probing and log access.
+ */
 export async function checkIfcdcServices(): Promise<Record<string, boolean>> {
+  const { shouldProbeLegacy4101, recordLegacy4101Access, getLegacyAuraUrl } = await import(
+    "../hq/auraLegacy4101"
+  );
   const results: Record<string, boolean> = {};
   for (const [name, url] of Object.entries(IFCDC_SERVICE_URLS)) {
+    if (name === "aura") {
+      if (!shouldProbeLegacy4101()) {
+        recordLegacy4101Access({
+          source: "checkIfcdcServices",
+          route: "GET /health",
+          result: "skipped",
+          detail: "Phase 7 default — legacy :4101 not required; HQ uses in-process OpenAI",
+          url: getLegacyAuraUrl(),
+        });
+        // false = sidecar not relied upon (not a production outage)
+        results.aura = false;
+        continue;
+      }
+      try {
+        const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(5000) });
+        results.aura = res.ok;
+        recordLegacy4101Access({
+          source: "checkIfcdcServices",
+          route: "GET /health",
+          result: res.ok ? "ok" : "fail",
+          detail: `HTTP ${res.status}`,
+          url,
+        });
+      } catch (err) {
+        results.aura = false;
+        recordLegacy4101Access({
+          source: "checkIfcdcServices",
+          route: "GET /health",
+          result: "fail",
+          detail: err instanceof Error ? err.message : "probe failed",
+          url,
+        });
+      }
+      continue;
+    }
     try {
       const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(5000) });
       results[name] = res.ok;
@@ -90,6 +134,22 @@ export async function checkIfcdcServices(): Promise<Record<string, boolean>> {
     }
   }
   return results;
+}
+
+/** Production AURA readiness — in-process OpenAI path (not :4101). */
+export function getAuraProductionCoreStatus(): {
+  ready: boolean;
+  path: "hq_in_process_openai";
+  model: string;
+  legacy4101Required: false;
+} {
+  const creds = resolveOpenAiCredentials();
+  return {
+    ready: Boolean(creds?.apiKey),
+    path: "hq_in_process_openai",
+    model: process.env.AURA_MODEL || "gpt-4o-mini",
+    legacy4101Required: false,
+  };
 }
 
 export async function auraExecutiveChat(prompt: string, context?: string): Promise<string> {

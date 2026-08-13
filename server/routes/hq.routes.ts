@@ -7,7 +7,7 @@ import { toHQRole, HQ_MODULE_PERMISSIONS } from "../hq/enterpriseRoles";
 import peopleRouter from "./people.routes";
 import clientsHqRouter from "./clients-hq.routes";
 import enterpriseAuthRouter from "./enterpriseAuth.routes";
-import { checkIfcdcServices, auraExecutiveChat } from "../lib/ifcdc";
+import { checkIfcdcServices, auraExecutiveChat, getAuraProductionCoreStatus } from "../lib/ifcdc";
 import { sendHqNotification, getEmailDeliveryStatus, resolveResendFromEmail } from "../lib/notifications";
 import { getOrganizationMetrics, getRecentActivity, getMonthlyTrend } from "../hq/metrics";
 import grantsRouter from "./grants.routes";
@@ -775,10 +775,17 @@ router.post("/aura/briefing", hqAuthRequired, requireHQModule("aura"), async (re
 });
 
 router.get("/aura/status", hqAuthRequired, async (_req, res) => {
+  const core = getAuraProductionCoreStatus();
   const services = await checkIfcdcServices();
+  const { getLegacy4101Summary } = await import("../hq/auraLegacy4101");
   res.json({
-    auraCore: services.aura ?? false,
-    model: process.env.AURA_MODEL || "gpt-4o-mini",
+    /** Production AURA readiness — in-process OpenAI (Phase 7). Not :4101. */
+    auraCore: core.ready,
+    productionPath: core.path,
+    legacy4101: getLegacy4101Summary(),
+    /** Sidecar health bit — false when Phase 7 skips probing (expected). */
+    legacySidecarReachable: services.aura === true,
+    model: core.model,
     capabilities: [
       "executive_reports",
       "organization_qa",
@@ -1407,6 +1414,27 @@ router.get("/aura/diagnostics/operational-events", hqAuthRequired, requireHQModu
     metadata: { module: "operational-events", mode: "read_only", limit },
   });
   res.json(payload);
+});
+
+/** Phase 7 — legacy :4101 access log (Founder-only). */
+router.get("/aura/diagnostics/legacy-4101", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { resolveIdentityFromHqUser } = await import("../hq/auraFounderTrustEngine");
+  const { getLegacy4101Summary, listLegacy4101Access } = await import("../hq/auraLegacy4101");
+  const identity = resolveIdentityFromHqUser({
+    user: req.hqUser,
+    channel: "hq_web",
+    sessionKey: req.hqUser?.email || req.hqUser?.id || "hq",
+  });
+  if (!identity.founderMode && !identity.isFounder) {
+    return res.status(403).json({ error: "Legacy :4101 diagnostics require Founder access." });
+  }
+  const limit = Math.min(parseInt(String(req.query.limit ?? "50"), 10) || 50, 200);
+  res.json({
+    summary: getLegacy4101Summary(),
+    entries: listLegacy4101Access(limit),
+    twilioConfigUntouched: true,
+    phase7: true,
+  });
 });
 
 /** AURA Enterprise Brain 2.0 */
