@@ -2096,6 +2096,7 @@ router.post("/funding-intelligence/awardability", async (req: Request, res: Resp
       limit: typeof req.body?.limit === "number" ? req.body.limit : 40,
       actorEmail: req.hqUser?.email,
       onlyQualified: req.body?.onlyQualified !== false,
+      requalifyIfEmpty: req.body?.requalifyIfEmpty !== false,
     });
     const metrics = await buildFundingIntelligenceMetrics();
     res.json({ ok: true, ...result, metrics, maySubmit: false });

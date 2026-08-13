@@ -77,14 +77,25 @@ async function main() {
   if (health.ok) pass("health", `commit=${health.json?.commit || "n/a"}`);
   else fail("health", `HTTP ${health.status}`);
 
+  // Ensure eligibility-tagged rows exist (production disk may not retain prior Phase 8A qualify state)
+  const scan = await api("/api/hq/grants/funding-intelligence/scan", {
+    method: "POST",
+    body: { providers: ["grants_gov"], limitQualify: 30 },
+  });
+  if (scan.ok && (scan.json?.qualified > 0 || scan.json?.sample?.length > 0)) {
+    pass("pre-scan qualify", `qualified=${scan.json.qualified} ingested≈${scan.json.ingested}`);
+  } else {
+    fail("pre-scan qualify", `HTTP ${scan.status} ${JSON.stringify(scan.json).slice(0, 220)}`);
+  }
+
   const award = await api("/api/hq/grants/funding-intelligence/awardability", {
     method: "POST",
-    body: { limit: 40, onlyQualified: true },
+    body: { limit: 40, onlyQualified: true, requalifyIfEmpty: true },
   });
   if (award.ok && award.json?.processed > 0) {
     pass(
       "awardability on qualified opps",
-      `processed=${award.json.processed} addressableKnown=${award.json.addressableKnown} unknown=${award.json.addressableUnknown} readyNow=${award.json.readyNow}`
+      `processed=${award.json.processed} addressableKnown=${award.json.addressableKnown} unknown=${award.json.addressableUnknown} readyNow=${award.json.readyNow} requalified=${award.json.requalified ?? 0}`
     );
   } else {
     fail("awardability on qualified opps", `HTTP ${award.status} ${JSON.stringify(award.json).slice(0, 280)}`);

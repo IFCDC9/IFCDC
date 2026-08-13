@@ -746,11 +746,13 @@ export async function runAwardabilityVerificationBatch(opts?: {
   limit?: number;
   actorEmail?: string;
   onlyQualified?: boolean;
+  requalifyIfEmpty?: boolean;
 }): Promise<{
   processed: number;
   addressableKnown: number;
   addressableUnknown: number;
   readyNow: number;
+  requalified: number;
   results: Array<Record<string, unknown>>;
   pilot: Awaited<ReturnType<typeof selectFirstPilotRecommendation>>;
 }> {
@@ -758,7 +760,9 @@ export async function runAwardabilityVerificationBatch(opts?: {
   const db = await getDb();
   const limit = opts?.limit ?? 40;
   const onlyQualified = opts?.onlyQualified !== false;
-  const rows = await db.all<{ id: string }>(
+  let requalified = 0;
+
+  let rows = await db.all<{ id: string }>(
     onlyQualified
       ? `SELECT id FROM grant_opportunities
          WHERE eligibility_result IN ('eligible', 'possibly_eligible')
@@ -771,12 +775,43 @@ export async function runAwardabilityVerificationBatch(opts?: {
     limit
   );
 
+  // Production may lose Phase 8A qualification fields after redeploy — re-qualify recent live rows.
+  if (onlyQualified && rows.length === 0 && opts?.requalifyIfEmpty !== false) {
+    const { enrichAndQualifyOpportunity } = await import("./auraFundingIntelligenceEngine");
+    const candidates = await db.all<{ id: string }>(
+      `SELECT id FROM grant_opportunities
+       WHERE (duplicate_of_id IS NULL OR duplicate_of_id = '')
+         AND (is_live = 1 OR source_type = 'grants_gov')
+       ORDER BY datetime(updated_at) DESC
+       LIMIT ?`,
+      limit
+    );
+    for (const c of candidates) {
+      await enrichAndQualifyOpportunity(c.id, {
+        actorEmail: opts?.actorEmail,
+        emitEvents: false,
+      });
+      requalified++;
+      await new Promise((r) => setTimeout(r, 120));
+    }
+    rows = await db.all<{ id: string }>(
+      `SELECT id FROM grant_opportunities
+       WHERE eligibility_result IN ('eligible', 'possibly_eligible')
+         AND (duplicate_of_id IS NULL OR duplicate_of_id = '')
+       ORDER BY COALESCE(enriched_final_score, qualification_score, 0) DESC
+       LIMIT ?`,
+      limit
+    );
+  }
+
   const results: Array<Record<string, unknown>> = [];
   let addressableKnown = 0;
   let addressableUnknown = 0;
   let readyNow = 0;
 
   for (const row of rows) {
+    // If we just requalified via enrichAndQualify, awardability already ran inside that path.
+    // Re-run verify to ensure 8A.3 fields are current even when eligibility already existed.
     const r = await verifyOpportunityAwardability(row.id, { actorEmail: opts?.actorEmail });
     results.push(r);
     const addr = r.addressable as { addressableAmount: number | null } | undefined;
@@ -786,7 +821,15 @@ export async function runAwardabilityVerificationBatch(opts?: {
   }
 
   const pilot = await selectFirstPilotRecommendation();
-  return { processed: results.length, addressableKnown, addressableUnknown, readyNow, results, pilot };
+  return {
+    processed: results.length,
+    addressableKnown,
+    addressableUnknown,
+    readyNow,
+    requalified,
+    results,
+    pilot,
+  };
 }
 
 export async function selectFirstPilotRecommendation(): Promise<{
