@@ -165,6 +165,21 @@ export function getTwilioWebhookUrls() {
   };
 }
 
+/**
+ * Phase 6 — additive per-message SMS statusCallback for AURA sends.
+ * Uses the existing HQ route only. Never mutates Twilio Console number config.
+ * Disabled when public HTTPS base is missing, URL looks temporary, or
+ * AURA_SMS_STATUS_CALLBACK=false.
+ */
+export function resolveAuraSmsStatusCallbackUrl(): string | null {
+  const flag = (process.env.AURA_SMS_STATUS_CALLBACK || "true").trim().toLowerCase();
+  if (flag === "0" || flag === "false" || flag === "off" || flag === "no") return null;
+  const url = getTwilioWebhookUrls().smsStatus;
+  if (!url || !url.startsWith("https://")) return null;
+  if (isTemporaryWebhookUrl(url)) return null;
+  return url;
+}
+
 async function getTwilioClient() {
   const sid = (process.env.TWILIO_ACCOUNT_SID || "").trim();
   const token = (process.env.TWILIO_AUTH_TOKEN || "").trim();

@@ -288,12 +288,17 @@ export async function buildAuraE2eDiagnostics(opts: {
     id: "sms-status",
     area: "SMS",
     label: "SMS delivery status capture",
-    status: hasTwilioEvents ? (twilioEvents24h != null && twilioEvents24h > 0 ? "connected" : "partial") : "missing",
-    detail: hasTwilioEvents
-      ? `Table live · ${twilioEvents24h ?? 0} events in last 24h · outbound AURA statusCallback optional (not changed)`
-      : "twilio_communication_events table missing",
+    status: publicBase && webhooks.smsStatus.startsWith("https://")
+      ? (hasTwilioEvents ? "connected" : "partial")
+      : "partial",
+    detail: publicBase && webhooks.smsStatus.startsWith("https://")
+      ? `Phase 6: AURA outbound SMS attaches statusCallback=${webhooks.smsStatus} (per-message; Console untouched)${
+          hasTwilioEvents ? ` · ${twilioEvents24h ?? 0} events/24h` : ""
+        }`
+      : "Public HTTPS base missing — statusCallback omitted until RENDER_EXTERNAL_URL/PUBLIC_APP_URL is set",
     route: "POST /api/twilio/aura/sms/status",
     tables: ["twilio_communication_events"],
+    env: ["AURA_SMS_STATUS_CALLBACK"],
     touchesTwilioConfig: false,
     risk: "low",
   });

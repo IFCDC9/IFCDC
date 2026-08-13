@@ -1,6 +1,6 @@
 # AURA End-to-End Integration Audit & Connection Validation
 
-**Status:** AUDIT COMPLETE · Phases 1–5 SHIPPED — Twilio/SMS config untouched  
+**Status:** AUDIT COMPLETE · Phases 1–6 SHIPPED — Twilio Console/credentials untouched (Phase 7 not started)  
 **Date:** August 13, 2026  
 **Product:** IFCDC Headquarters / AURA  
 **Constraint:** Treat production Twilio/SMS as stable. No autonomous code/deploy authority for AURA.
@@ -20,9 +20,9 @@ HQ AURA is a **large in-process OS** (command layer + action registry + multiple
 | Voice/SMS receptionist shares Founder trust + executive ops | Founder Mode voice/SMS now routes through `runAuraCommand` via Phase 3 adapter; public booking stays on receptionist |
 | Multiple parallel surfaces (Brain v1, Brain 2.0, EDI, OS4/OS5, AO) | Competing keyword short-circuits; consolidate later |
 | Module DB = HQ SQLite (`ifcdc.db`) | Not centralized `:4104` database microservice |
-| SMS send works; inbound status logged | Outbound AURA SMS **does not set** `statusCallback` in code (do not change Twilio Console in this audit) |
+| SMS send works; inbound + delivery status logged | Phase 6 attaches **per-message** `statusCallback` only — Twilio Console/credentials untouched |
 
-**SMS pipeline:** Do not modify. Working send + inbound webhooks are production-stable. Gaps below are documentation-only until you approve a non-disruptive enhancement.
+**SMS pipeline:** Credentials and Console number webhooks unchanged. Phase 6 only adds an additive `statusCallback` on AURA `messages.create` when a public HTTPS base is available.
 
 ---
 
@@ -37,8 +37,9 @@ AURA UI (/hq/aura, Brain v1, chat widgets)
             → DB: SQLite getDb() → module tables
             → HQ modules (grants, people, finance, … via engines)
             → Communications: send_sms / send_email / notifications
-                → Twilio messages.create  (SMS — DO NOT CHANGE CONFIG)
+                → Twilio messages.create (+ Phase 6 per-message statusCallback → /api/twilio/aura/sms/status)
                 → Inbound: POST /api/twilio/aura/sms + /sms/status
+                → Console credentials/number webhooks: NOT modified
             → Logs: hq_audit_log + aura_unified_action_log + Brain v1 action log
             → Response back to UI / TwiML
     → Public/booking voice/SMS still via auraReceptionistEngine (non-Founder)
@@ -143,11 +144,12 @@ Legend: 🟢 CONNECTED · 🟡 PARTIAL · 🔴 MISSING · ⚠️ UNSAFE/INCOMPLE
 | Recipient delivery | 🟢 | User-confirmed production-operational |
 | Inbound SMS → AURA | 🟢 | `POST /api/twilio/aura/sms` → receptionist |
 | Status webhook route | 🟢 | `POST /api/twilio/aura/sms/status` → `twilio_communication_events` |
-| Outbound AURA SMS `statusCallback` | 🟡 | Not set in AURA send codepath (Messaging Service may supply outside app) |
-| Surface queued/sent/delivered/failed in AURA UI | 🟡 | Logged to DB; not fully unified in Brain Action Log / UI |
-| Config mutation in this phase | 🟢 | **None** — left untouched |
+| Outbound AURA SMS `statusCallback` | 🟢 | Phase 6: per-message `statusCallback` → `/api/twilio/aura/sms/status` when public HTTPS base is set |
+| Surface queued/sent/delivered/failed in AURA UI | 🟢 | Phase 5 events + status webhook → operational events / leadership alerts |
+| Config mutation in this phase | 🟢 | **None** — Console credentials/number webhooks left untouched; additive message field only |
 
 **Env (read-only inventory):** `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_MESSAGING_SERVICE_SID` or `TWILIO_PHONE_NUMBER` / `HQ_PHONE_NUMBER` / `TWILIO_SMS_FROM` / `TWILIO_FROM_NUMBER`  
+**Opt-out:** `AURA_SMS_STATUS_CALLBACK=false` disables per-message statusCallback  
 **Table:** `twilio_communication_events`  
 **Audit:** `hq_audit_log` action `aura_exec_send_sms`
 
@@ -242,7 +244,7 @@ Legend: 🟢 CONNECTED · 🟡 PARTIAL · 🔴 MISSING · ⚠️ UNSAFE/INCOMPLE
 | G4 | Web Founder Mode without OTP | Weaker than voice | `auraFounderTrustEngine` | `MASTER_OWNER_EMAIL` | Optional step-up MFA for execute | Med | Low if Founder-only |
 | G5 | Module tool coverage | ✅ Phase 4 HR/finance/projects/donations read+prepare shipped | `auraModuleToolsEngine.ts`, `auraActionRegistry.ts` | Module tables | Optional deeper mutate tools later (Founder-gated) | Low | Low |
 | G6 | Barbers/bookings | Only receptionist path | `auraReceptionistActions.ts` | `clients`, `appointments` | Registry tools + events | Med | Low |
-| G7 | Outbound SMS statusCallback | Not in AURA `messages.create` | `auraExecutiveOperations` / `notifications.ts` | Twilio | Optional additive callback URL — **Founder approve; do not touch Console blindly** | Med | Low if additive |
+| G7 | Outbound SMS statusCallback | ✅ Phase 6 shipped (per-message; Console untouched) | `notifications.ts` `sendFounderSecuritySms`, `resolveAuraSmsStatusCallbackUrl` | `AURA_SMS_STATUS_CALLBACK` | Set `=false` to opt out | Low | Low |
 | G9 | Event bus incomplete | ✅ Phase 5 booking/payment/SMS-fail wired | `auraOperationalEvents.ts`, realtime domains | `aura_operational_events` | Optional cancel-booking + more payment providers | Low | Low |
 | G10 | Unified audit stream | ✅ Phase 2 shipped | `auraUnifiedAudit.ts`, Brain v1 log, command/exec/receptionist mirrors | `aura_unified_action_log` | Keep extending remaining prepare paths as needed | Low | Low |
 | G11 | Org operational memory graph | Not assembled | memory + modules | — | Context builder for Brain | Med | Low |
@@ -270,8 +272,8 @@ Legend: 🟢 CONNECTED · 🟡 PARTIAL · 🔴 MISSING · ⚠️ UNSAFE/INCOMPLE
 3. **Voice/text unification** — ✅ **Shipped** — Founder voice/SMS → `auraReceptionistCommandAdapter` → `runAuraCommand` (Twilio URLs/credentials untouched; public booking path unchanged).  
 4. **Module tool expansion** — ✅ **Shipped** — HR/finance/projects/donations read+prepare tools via `auraModuleToolsEngine` + action registry (no Stripe/PayPal mutate; no Twilio changes).  
 5. **Events** — ✅ **Shipped** — `auraOperationalEvents` emits booking/payment/SMS-fail → `notifyHqDataChange` + leadership alerts + Brain diagnostics / `list_operational_events` tool. Twilio config untouched.  
-6. **Optional SMS statusCallback** — Additive only; Founder-approved; no credential reset.  
-7. **Deprecate or harden :4101** — Auth or remove from prod exposure.
+6. **Optional SMS statusCallback** — ✅ **Shipped** — AURA `sendFounderSecuritySms` attaches per-message `statusCallback` to existing `/api/twilio/aura/sms/status` when public HTTPS base is available. **No Twilio Console / credential changes.** Opt-out: `AURA_SMS_STATUS_CALLBACK=false`.  
+7. **Deprecate or harden :4101** — Auth or remove from prod exposure. (**Not started** — awaiting Founder approval.)
 
 ---
 

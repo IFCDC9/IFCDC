@@ -458,17 +458,34 @@ export async function sendFounderSecuritySms(opts: {
   try {
     const twilio = await import("twilio");
     const client = twilio.default(sid, token);
+    const { resolveAuraSmsStatusCallbackUrl } = await import("../hq/twilioIntegrationEngine");
+    const statusCallback = resolveAuraSmsStatusCallbackUrl();
     if (messagingServiceSid) {
-      console.log(`[sms] Twilio send → to=${to} messagingServiceSid=${messagingServiceSid}`);
+      console.log(
+        `[sms] Twilio send → to=${to} messagingServiceSid=${messagingServiceSid}`
+        + (statusCallback ? ` statusCallback=${statusCallback}` : " statusCallback=omitted")
+      );
     } else {
       const fromE164 = from.startsWith("+") ? from : `+${from.replace(/\D/g, "")}`;
-      console.log(`[sms] Twilio send → to=${to} from=${fromE164}`);
+      console.log(
+        `[sms] Twilio send → to=${to} from=${fromE164}`
+        + (statusCallback ? ` statusCallback=${statusCallback}` : " statusCallback=omitted")
+      );
     }
+
+    const statusFields = statusCallback
+      ? { statusCallback, statusCallbackMethod: "POST" as const }
+      : {};
 
     const message = await client.messages.create(
       messagingServiceSid
-        ? { to, body: opts.body, messagingServiceSid }
-        : { to, body: opts.body, from: from.startsWith("+") ? from : `+${from.replace(/\D/g, "")}` }
+        ? { to, body: opts.body, messagingServiceSid, ...statusFields }
+        : {
+            to,
+            body: opts.body,
+            from: from.startsWith("+") ? from : `+${from.replace(/\D/g, "")}`,
+            ...statusFields,
+          }
     );
     if (message.errorCode) {
       console.error(
