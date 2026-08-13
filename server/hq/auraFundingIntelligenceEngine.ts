@@ -270,17 +270,24 @@ function scoreOpportunity8A(opts: {
     ? SCORE_WEIGHTS.geographicFit
     : Math.round(SCORE_WEIGHTS.geographicFit * 0.4);
 
-  const ceiling = Number(opts.opp.award_ceiling ?? opts.opp.amount_max ?? 0) || 0;
+  const fundingStatus = String(opts.opp.funding_amount_status || "unknown");
+  const valueSource = String(opts.opp.funding_value_source || "");
+  const ceiling =
+    valueSource === "estimated_total_funding"
+      ? Number(opts.opp.estimated_funding ?? opts.opp.amount_max ?? 0) || 0
+      : valueSource === "award_floor"
+        ? Number(opts.opp.award_floor ?? opts.opp.amount_min ?? 0) || 0
+        : Number(opts.opp.award_ceiling ?? opts.opp.amount_max ?? 0) || 0;
   const awardPotential =
-    ceiling >= 1_000_000
-      ? SCORE_WEIGHTS.awardPotential
-      : ceiling >= 250_000
-        ? Math.round(SCORE_WEIGHTS.awardPotential * 0.8)
-        : ceiling >= 50_000
-          ? Math.round(SCORE_WEIGHTS.awardPotential * 0.55)
-          : ceiling > 0
-            ? Math.round(SCORE_WEIGHTS.awardPotential * 0.35)
-            : Math.round(SCORE_WEIGHTS.awardPotential * 0.2);
+    fundingStatus === "unknown" || fundingStatus === "conflicting" || !ceiling
+      ? Math.round(SCORE_WEIGHTS.awardPotential * 0.35) // unknown ≠ zero dollars; neutral-low points only
+      : ceiling >= 1_000_000
+        ? SCORE_WEIGHTS.awardPotential
+        : ceiling >= 250_000
+          ? Math.round(SCORE_WEIGHTS.awardPotential * 0.8)
+          : ceiling >= 50_000
+            ? Math.round(SCORE_WEIGHTS.awardPotential * 0.55)
+            : Math.round(SCORE_WEIGHTS.awardPotential * 0.4);
 
   const deadline = String(opts.opp.deadline || opts.opp.close_date || "");
   let deadlineFeasibility = Math.round(SCORE_WEIGHTS.deadlineFeasibility * 0.5);
@@ -333,7 +340,12 @@ function scoreOpportunity8A(opts: {
     awardPotential: {
       points: awardPotential,
       max: SCORE_WEIGHTS.awardPotential,
-      note: ceiling ? `Ceiling $${ceiling.toLocaleString()}` : "Award size unknown",
+      note:
+        fundingStatus === "unknown"
+          ? "Funding Amount = UNKNOWN (not scored as $0)"
+          : ceiling
+            ? `Ceiling $${ceiling.toLocaleString()} (${fundingStatus}/${opts.opp.funding_value_source || "n/a"})`
+            : `Funding status ${fundingStatus}`,
     },
     deadlineFeasibility: {
       points: deadlineFeasibility,
@@ -380,17 +392,80 @@ async function findDuplicate(opts: {
   return null;
 }
 
-async function enrichAndQualifyOpportunity(
+export async function enrichAndQualifyOpportunity(
   opportunityId: string,
-  opts?: { actorEmail?: string; emitEvents?: boolean }
+  opts?: { actorEmail?: string; emitEvents?: boolean; stage?: "preliminary" | "enriched" }
 ): Promise<{
   opportunityId: string;
   eligibility: EligibilityResult;
   score: number;
   classification: QualificationClass;
   programs: string[];
+  fundingAmountStatus?: string;
+  pipelineValue?: number | null;
 }> {
   const db = await getDb();
+
+  // Phase 8A.2: capture preliminary Search2 score before official enrichment
+  const oppPre = await db.get<Record<string, unknown>>(
+    "SELECT * FROM grant_opportunities WHERE id = ?",
+    opportunityId
+  );
+  if (!oppPre) throw new Error(`Opportunity not found: ${opportunityId}`);
+
+  if (oppPre.preliminary_score == null) {
+    const preElig = evaluateIfcdcEligibility({
+      title: String(oppPre.title || ""),
+      description: String(oppPre.description || ""),
+      eligibility: String(oppPre.eligibility || ""),
+      eligible_applicant_types: String(oppPre.eligible_applicant_types || ""),
+      geography: String(oppPre.geography || ""),
+      funder_type: String(oppPre.funder_type || ""),
+    });
+    const prePrograms = matchPrograms({
+      title: String(oppPre.title || ""),
+      description: String(oppPre.description || ""),
+      program_areas: String(oppPre.program_areas || ""),
+      division_slugs: String(oppPre.division_slugs || ""),
+      match_tags: String(oppPre.match_tags || ""),
+    });
+    const preScored = scoreOpportunity8A({
+      opp: { ...oppPre, funding_amount_status: oppPre.funding_amount_status || "unknown" },
+      eligibility: preElig.result,
+      programMatches: prePrograms,
+    });
+    await db.run(
+      `UPDATE grant_opportunities SET preliminary_score = ?, updated_at = ? WHERE id = ?`,
+      preScored.total,
+      new Date().toISOString(),
+      opportunityId
+    );
+    await db.run(
+      `INSERT INTO grant_qualification_scores (id, opportunity_id, total_score, classification, breakdown_json, model, created_at)
+       VALUES (?, ?, ?, ?, ?, 'ifcdc-qualification-8a-preliminary', ?)`,
+      crypto.randomUUID(),
+      opportunityId,
+      preScored.total,
+      preScored.classification,
+      JSON.stringify(preScored.breakdown),
+      new Date().toISOString()
+    );
+  }
+
+  // Full official opportunity enrichment → then rescore
+  let enrichmentMeta: Awaited<ReturnType<typeof import("./auraFundingEnrichmentEngine").enrichOpportunityFromOfficialSource>> | null = null;
+  try {
+    const { enrichOpportunityFromOfficialSource } = await import("./auraFundingEnrichmentEngine");
+    enrichmentMeta = await enrichOpportunityFromOfficialSource(opportunityId, {
+      actorEmail: opts?.actorEmail,
+    });
+  } catch (err) {
+    console.warn(
+      "[funding-intel] enrichment skipped:",
+      err instanceof Error ? err.message : err
+    );
+  }
+
   const opp = await db.get<Record<string, unknown>>(
     "SELECT * FROM grant_opportunities WHERE id = ?",
     opportunityId
@@ -406,13 +481,22 @@ async function enrichAndQualifyOpportunity(
     funder_type: String(opp.funder_type || ""),
   });
 
-  const programs = matchPrograms({
-    title: String(opp.title || ""),
-    description: String(opp.description || ""),
-    program_areas: String(opp.program_areas || ""),
-    division_slugs: String(opp.division_slugs || ""),
-    match_tags: String(opp.match_tags || ""),
-  });
+  const programsFromEnrichment = enrichmentMeta?.programMatches?.length
+    ? enrichmentMeta.programMatches.map((m) => ({
+        slug: m.slug,
+        label: m.label,
+        matchScore: m.matchPct,
+        rationale: m.rationale,
+      }))
+    : matchPrograms({
+        title: String(opp.title || ""),
+        description: String(opp.description || ""),
+        program_areas: String(opp.program_areas || ""),
+        division_slugs: String(opp.division_slugs || ""),
+        match_tags: String(opp.match_tags || ""),
+      });
+
+  const programs = programsFromEnrichment;
 
   const scored = scoreOpportunity8A({
     opp,
@@ -442,10 +526,11 @@ async function enrichAndQualifyOpportunity(
 
   for (const m of programs) {
     await db.run(
-      `INSERT INTO grant_matches (id, opportunity_id, program_slug, program_label, match_score, rationale, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO grant_matches (id, opportunity_id, program_slug, program_label, match_score, match_pct, rationale, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(opportunity_id, program_slug) DO UPDATE SET
          match_score = excluded.match_score,
+         match_pct = COALESCE(excluded.match_pct, grant_matches.match_pct),
          rationale = excluded.rationale,
          program_label = excluded.program_label,
          updated_at = excluded.updated_at`,
@@ -453,6 +538,7 @@ async function enrichAndQualifyOpportunity(
       opportunityId,
       m.slug,
       m.label,
+      m.matchScore,
       m.matchScore,
       m.rationale,
       now,
@@ -462,7 +548,7 @@ async function enrichAndQualifyOpportunity(
 
   await db.run(
     `INSERT INTO grant_qualification_scores (id, opportunity_id, total_score, classification, breakdown_json, model, created_at)
-     VALUES (?, ?, ?, ?, ?, 'ifcdc-qualification-8a-v1', ?)`,
+     VALUES (?, ?, ?, ?, ?, 'ifcdc-qualification-8a2-enriched', ?)`,
     crypto.randomUUID(),
     opportunityId,
     scored.total,
@@ -481,12 +567,10 @@ async function enrichAndQualifyOpportunity(
        eligibility_result = ?,
        qualification_score = ?,
        qualification_class = ?,
+       enriched_final_score = ?,
        division_slugs = CASE WHEN ? != '[]' THEN ? ELSE division_slugs END,
        program_areas = CASE WHEN ? != '[]' THEN ? ELSE program_areas END,
-       award_floor = COALESCE(award_floor, amount_min),
-       award_ceiling = COALESCE(award_ceiling, amount_max),
        last_verified_at = ?,
-       data_confidence = ?,
        pipeline_stage = CASE
          WHEN ? = 'not_eligible' THEN 'archived'
          WHEN ? = 'priority' THEN 'priority_review'
@@ -499,12 +583,12 @@ async function enrichAndQualifyOpportunity(
     eligibility.result,
     scored.total,
     scored.classification,
+    scored.total,
     divisionSlugs,
     divisionSlugs,
     programAreas,
     programAreas,
     now,
-    opp.is_live ? "high" : "medium",
     eligibility.result,
     scored.classification,
     now,
@@ -514,10 +598,12 @@ async function enrichAndQualifyOpportunity(
   await writeAudit({
     opportunityId,
     source: String(opp.source_type || ""),
-    action: "qualify_8a",
+    action: opts?.stage === "preliminary" ? "qualify_8a_preliminary" : "qualify_8a2_enriched",
     eligibilityResult: eligibility.result,
     score: scored.total,
-    detail: `${scored.classification} · ${eligibility.result} · programs=${programs.map((p) => p.slug).join(",") || "none"}`,
+    detail:
+      `${scored.classification} · ${eligibility.result} · funding=${opp.funding_amount_status || enrichmentMeta?.fundingAmountStatus || "n/a"}`
+      + ` · value=${enrichmentMeta?.pipelineValue ?? "UNKNOWN"} · programs=${programs.map((p) => p.slug).join(",") || "none"}`,
     actorEmail: opts?.actorEmail ?? "aura",
     sourceVerifiedAt: now,
   });
@@ -525,8 +611,8 @@ async function enrichAndQualifyOpportunity(
   await logGrantActivity(
     "opportunity",
     opportunityId,
-    "funding_intelligence_8a",
-    `score=${scored.total} class=${scored.classification} eligibility=${eligibility.result}`,
+    "funding_intelligence_8a2",
+    `score=${scored.total} class=${scored.classification} eligibility=${eligibility.result} funding=${opp.funding_amount_status || "n/a"}`,
     opts?.actorEmail
   );
 
@@ -558,6 +644,8 @@ async function enrichAndQualifyOpportunity(
     score: scored.total,
     classification: scored.classification,
     programs: programs.map((p) => p.slug),
+    fundingAmountStatus: String(opp.funding_amount_status || enrichmentMeta?.fundingAmountStatus || "unknown"),
+    pipelineValue: enrichmentMeta?.pipelineValue ?? null,
   };
 }
 
@@ -649,7 +737,9 @@ export async function runFundingIntelligenceScan(opts?: {
     if (sample.length < 12) {
       const refreshed = await db.get<Record<string, unknown>>(
         `SELECT id, title, funder, url, source_type, external_id, eligibility_result,
-                qualification_score, qualification_class, amount_max, award_ceiling, deadline, fingerprint
+                qualification_score, qualification_class, preliminary_score, enriched_final_score,
+                amount_max, award_ceiling, estimated_funding, funding_amount_status, funding_value_source,
+                best_program_slug, best_program_match_pct, deadline, fingerprint, enrichment_status
          FROM grant_opportunities WHERE id = ?`,
         result.opportunityId
       );
@@ -657,6 +747,8 @@ export async function runFundingIntelligenceScan(opts?: {
         sample.push({
           ...refreshed,
           programs: result.programs,
+          fundingAmountStatus: result.fundingAmountStatus,
+          pipelineValue: result.pipelineValue,
           officialSourceUrl: refreshed.url,
           sourceOpportunityId: refreshed.external_id,
         });
@@ -687,8 +779,13 @@ export async function runFundingIntelligenceScan(opts?: {
 
 export async function buildFundingIntelligenceMetrics(): Promise<{
   totalOpportunitiesDiscovered: number;
+  potentiallyEligibleCount: number;
+  fullyQualifiedCount: number;
   totalPotentialFundingDiscovered: number;
+  /** Verified/partial numeric award values only — never treats UNKNOWN as $0 */
   qualifiedIfcdcFunding: number;
+  verifiedQualifiedPipelineValue: number;
+  unknownValueQualifiedCount: number;
   priorityPipelineValue: number;
   applicationsInPreparation: number;
   submittedApplicationValue: number;
@@ -699,28 +796,66 @@ export async function buildFundingIntelligenceMetrics(): Promise<{
   upcomingDeadlines: number;
   needingFounderReview: number;
   dataConfidence: "high" | "medium" | "low";
+  pipelineSummary: string;
 }> {
   await ensureGrantTables();
   const db = await getDb();
 
+  /** Only sum published numeric award fields when funding status is verified or partial. */
+  const verifiedSumExpr = `
+    CASE
+      WHEN COALESCE(funding_amount_status, 'unknown') IN ('verified', 'partial') THEN
+        CASE
+          WHEN funding_value_source = 'estimated_total_funding' AND estimated_funding IS NOT NULL AND estimated_funding > 0
+            THEN estimated_funding
+          WHEN funding_value_source = 'award_floor' AND COALESCE(award_floor, amount_min) IS NOT NULL AND COALESCE(award_floor, amount_min) > 0
+            THEN COALESCE(award_floor, amount_min)
+          WHEN COALESCE(award_ceiling, amount_max) IS NOT NULL AND COALESCE(award_ceiling, amount_max) > 0
+            THEN COALESCE(award_ceiling, amount_max)
+          WHEN estimated_funding IS NOT NULL AND estimated_funding > 0 THEN estimated_funding
+          ELSE 0
+        END
+      ELSE 0
+    END`;
+
   const total = await db.get<{ c: number; pot: number }>(
     `SELECT COUNT(*) as c,
-            COALESCE(SUM(COALESCE(award_ceiling, amount_max, 0)), 0) as pot
+            COALESCE(SUM(${verifiedSumExpr}), 0) as pot
      FROM grant_opportunities
      WHERE (duplicate_of_id IS NULL OR duplicate_of_id = '')`
   );
 
-  const qualified = await db.get<{ c: number; pot: number }>(
+  const qualified = await db.get<{ c: number; pot: number; unknown_c: number }>(
     `SELECT COUNT(*) as c,
-            COALESCE(SUM(COALESCE(award_ceiling, amount_max, 0)), 0) as pot
+            COALESCE(SUM(${verifiedSumExpr}), 0) as pot,
+            SUM(CASE
+              WHEN COALESCE(funding_amount_status, 'unknown') IN ('unknown', 'conflicting')
+                OR (
+                  COALESCE(funding_amount_status, 'unknown') NOT IN ('verified', 'partial')
+                  AND COALESCE(award_ceiling, amount_max, estimated_funding) IS NULL
+                )
+              THEN 1 ELSE 0
+            END) as unknown_c
      FROM grant_opportunities
      WHERE eligibility_result IN ('eligible', 'possibly_eligible')
        AND (duplicate_of_id IS NULL OR duplicate_of_id = '')`
   );
 
+  const potentiallyEligible = await db.get<{ c: number }>(
+    `SELECT COUNT(*) as c FROM grant_opportunities
+     WHERE eligibility_result = 'possibly_eligible'
+       AND (duplicate_of_id IS NULL OR duplicate_of_id = '')`
+  );
+
+  const fullyQualified = await db.get<{ c: number }>(
+    `SELECT COUNT(*) as c FROM grant_opportunities
+     WHERE eligibility_result = 'eligible'
+       AND (duplicate_of_id IS NULL OR duplicate_of_id = '')`
+  );
+
   const priority = await db.get<{ c: number; pot: number }>(
     `SELECT COUNT(*) as c,
-            COALESCE(SUM(COALESCE(award_ceiling, amount_max, 0)), 0) as pot
+            COALESCE(SUM(${verifiedSumExpr}), 0) as pot
      FROM grant_opportunities
      WHERE qualification_class = 'priority'
        AND eligibility_result != 'not_eligible'
@@ -761,22 +896,36 @@ export async function buildFundingIntelligenceMetrics(): Promise<{
        AND (duplicate_of_id IS NULL OR duplicate_of_id = '')`
   );
 
-  const liveShare = await db.get<{ live: number; all_count: number }>(
+  const liveShare = await db.get<{ live: number; all_count: number; enriched: number }>(
     `SELECT
        SUM(CASE WHEN is_live = 1 THEN 1 ELSE 0 END) as live,
-       COUNT(*) as all_count
+       COUNT(*) as all_count,
+       SUM(CASE WHEN enrichment_status = 'enriched_official' THEN 1 ELSE 0 END) as enriched
      FROM grant_opportunities
      WHERE (duplicate_of_id IS NULL OR duplicate_of_id = '')`
   );
 
   const liveRatio = (liveShare?.all_count || 0) > 0 ? (liveShare?.live || 0) / (liveShare?.all_count || 1) : 0;
+  const enrichRatio = (liveShare?.all_count || 0) > 0 ? (liveShare?.enriched || 0) / (liveShare?.all_count || 1) : 0;
   const dataConfidence: "high" | "medium" | "low" =
-    liveRatio >= 0.5 ? "high" : liveRatio >= 0.15 ? "medium" : "low";
+    enrichRatio >= 0.4 || liveRatio >= 0.5 ? "high" : liveRatio >= 0.15 || enrichRatio >= 0.15 ? "medium" : "low";
+
+  const verifiedQualified = Math.round(qualified?.pot ?? 0);
+  const unknownQualified = Math.round(qualified?.unknown_c ?? 0);
+  const pipelineSummary =
+    `Qualified Pipeline: $${verifiedQualified.toLocaleString()} verified`
+    + (unknownQualified > 0
+      ? ` + ${unknownQualified} qualified opportunities with unpublished award values`
+      : "");
 
   return {
     totalOpportunitiesDiscovered: total?.c ?? 0,
+    potentiallyEligibleCount: potentiallyEligible?.c ?? 0,
+    fullyQualifiedCount: fullyQualified?.c ?? 0,
     totalPotentialFundingDiscovered: Math.round(total?.pot ?? 0),
-    qualifiedIfcdcFunding: Math.round(qualified?.pot ?? 0),
+    qualifiedIfcdcFunding: verifiedQualified,
+    verifiedQualifiedPipelineValue: verifiedQualified,
+    unknownValueQualifiedCount: unknownQualified,
     priorityPipelineValue: Math.round(priority?.pot ?? 0),
     applicationsInPreparation: appsPrep?.c ?? 0,
     submittedApplicationValue: Math.round(submitted?.pot ?? 0),
@@ -787,6 +936,7 @@ export async function buildFundingIntelligenceMetrics(): Promise<{
     upcomingDeadlines: upcoming?.c ?? 0,
     needingFounderReview: review?.c ?? 0,
     dataConfidence,
+    pipelineSummary,
   };
 }
 
@@ -799,16 +949,19 @@ export async function buildFundingIntelligenceDashboard() {
   );
   const priority = await db.all(
     `SELECT id, title, funder, url, source_type, external_id, eligibility_result,
-            qualification_score, qualification_class, amount_max, award_ceiling, deadline
+            qualification_score, qualification_class, preliminary_score, enriched_final_score,
+            amount_max, award_ceiling, estimated_funding, funding_amount_status, funding_value_source,
+            best_program_slug, best_program_match_pct, deadline
      FROM grant_opportunities
      WHERE qualification_class = 'priority'
        AND eligibility_result != 'not_eligible'
        AND (duplicate_of_id IS NULL OR duplicate_of_id = '')
-     ORDER BY qualification_score DESC
+     ORDER BY COALESCE(enriched_final_score, qualification_score) DESC
      LIMIT 25`
   );
   const upcoming = await db.all(
-    `SELECT id, title, funder, url, deadline, qualification_score, eligibility_result, source_type, external_id
+    `SELECT id, title, funder, url, deadline, qualification_score, eligibility_result, source_type, external_id,
+            funding_amount_status, best_program_slug, best_program_match_pct
      FROM grant_opportunities
      WHERE deadline IS NOT NULL
        AND date(deadline) >= date('now')
@@ -817,13 +970,21 @@ export async function buildFundingIntelligenceDashboard() {
      ORDER BY date(deadline) ASC
      LIMIT 25`
   );
+  let programProfiles: Array<Record<string, unknown>> = [];
+  try {
+    const { listIfcdcProgramProfiles } = await import("./auraFundingEnrichmentEngine");
+    programProfiles = await listIfcdcProgramProfiles();
+  } catch {
+    programProfiles = [];
+  }
   return {
     generatedAt: new Date().toISOString(),
-    phase: "8A",
+    phase: "8A.2",
     metrics,
     sources,
     priorityOpportunities: priority,
     upcomingDeadlines: upcoming,
+    programProfiles,
     securityBoundary: {
       maySubmit: false,
       maySignCertifications: false,
@@ -844,39 +1005,126 @@ export async function answerFundingIntelligenceQuery(opts: {
   const q = opts.question.toLowerCase();
   const db = await getDb();
   const metrics = await buildFundingIntelligenceMetrics();
+
+  if (/how much verified|verified funding|pipeline value|verified \$/.test(q)) {
+    return {
+      reply:
+        `${metrics.pipelineSummary}. `
+        + `Priority verified value: $${metrics.priorityPipelineValue.toLocaleString()} `
+        + `(${metrics.priorityCount} priority). Unknown-value qualified: ${metrics.unknownValueQualifiedCount}. `
+        + `Missing award amounts are stored as UNKNOWN — never counted as $0.`,
+      records: [],
+      metrics,
+    };
+  }
+
+  if (/unknown.?value|unpublished|unknown award|unknown amount/.test(q)) {
+    const unknownRows = await db.all<Record<string, unknown>>(
+      `SELECT id, title, funder, url, source_type, external_id, eligibility_result,
+              qualification_score, funding_amount_status, best_program_slug, best_program_match_pct
+       FROM grant_opportunities
+       WHERE eligibility_result IN ('eligible', 'possibly_eligible')
+         AND COALESCE(funding_amount_status, 'unknown') IN ('unknown', 'conflicting')
+         AND (duplicate_of_id IS NULL OR duplicate_of_id = '')
+       ORDER BY COALESCE(enriched_final_score, qualification_score, 0) DESC
+       LIMIT 25`
+    );
+    return {
+      reply:
+        `${metrics.unknownValueQualifiedCount} qualified opportunities have unpublished award amounts (Funding Amount = UNKNOWN). `
+        + `Verified qualified pipeline remains $${metrics.verifiedQualifiedPipelineValue.toLocaleString()}.`,
+      records: unknownRows,
+      metrics,
+    };
+  }
+
+  if (/official evidence|source evidence|traceabilit|why is this grant|why.*strong match|explain.*match/.test(q)) {
+    const top = await db.get<Record<string, unknown>>(
+      `SELECT id, title, url, source_type, external_id, eligibility_result,
+              qualification_score, enriched_final_score, preliminary_score,
+              funding_amount_status, funding_value_source, award_ceiling, estimated_funding,
+              best_program_slug, best_program_match_pct, program_match_json, enrichment_status
+       FROM grant_opportunities
+       WHERE eligibility_result IN ('eligible', 'possibly_eligible')
+         AND (duplicate_of_id IS NULL OR duplicate_of_id = '')
+       ORDER BY COALESCE(enriched_final_score, qualification_score, 0) DESC
+       LIMIT 1`
+    );
+    if (top) {
+      const explained = await explainOpportunityScore(String(top.id));
+      return {
+        reply:
+          `"${top.title}" · enriched score ${top.enriched_final_score ?? top.qualification_score} `
+          + `(preliminary ${top.preliminary_score ?? "n/a"}) · funding ${top.funding_amount_status}`
+          + (top.funding_value_source ? ` from ${top.funding_value_source}` : "")
+          + ` · best program ${top.best_program_slug || "n/a"} @ ${top.best_program_match_pct ?? "n/a"}%. `
+          + `Official source: ${top.url} (${top.source_type}/${top.external_id}). `
+          + `Enrichment: ${top.enrichment_status}. Matches: ${JSON.stringify(explained.matches).slice(0, 400)}.`,
+        records: [{ ...top, ...explained }],
+        metrics,
+      };
+    }
+  }
+
   let sql =
     `SELECT id, title, funder, url, source_type, external_id, eligibility_result,
-            qualification_score, qualification_class, amount_max, award_ceiling, deadline, division_slugs
+            qualification_score, enriched_final_score, preliminary_score, qualification_class,
+            amount_max, award_ceiling, estimated_funding, funding_amount_status, funding_value_source,
+            best_program_slug, best_program_match_pct, deadline, division_slugs, program_match_json
      FROM grant_opportunities
      WHERE (duplicate_of_id IS NULL OR duplicate_of_id = '')`;
   const params: unknown[] = [];
 
-  if (/qualif|eligible|we qualify/.test(q)) {
+  if (/qualif|eligible|we qualify|best fit/.test(q)) {
     sql += ` AND eligibility_result IN ('eligible', 'possibly_eligible')`;
   }
-  if (/priority|highest|top|92|score/.test(q)) {
+  if (/priority|highest|top|92|score|best fit/.test(q)) {
     sql += ` AND qualification_class IN ('priority', 'strong')`;
   }
   if (/deadline|due|upcoming/.test(q)) {
     sql += ` AND deadline IS NOT NULL AND date(deadline) >= date('now') AND date(deadline) <= date('now', '+60 days')`;
   }
   if (/anti.?gang|violence/.test(q)) {
-    sql += ` AND (division_slugs LIKE ? OR title LIKE ? OR description LIKE ?)`;
-    params.push("%anti_gang%", "%violence%", "%gang%");
+    sql += ` AND (best_program_slug = 'anti_gang' OR division_slugs LIKE ? OR title LIKE ? OR description LIKE ? OR program_match_json LIKE ?)`;
+    params.push("%anti_gang%", "%violence%", "%gang%", "%anti_gang%");
+  }
+  if (/youth/.test(q) && !/anti.?gang/.test(q)) {
+    sql += ` AND (best_program_slug IN ('youth_development', 'tapis') OR division_slugs LIKE ? OR program_match_json LIKE ?)`;
+    params.push("%youth%", "%youth%");
+  }
+  if (/housing|transitional/.test(q)) {
+    sql += ` AND (best_program_slug = 'housing' OR division_slugs LIKE ? OR program_match_json LIKE ?)`;
+    params.push("%housing%", "%housing%");
+  }
+  if (/mentor|tapis/.test(q)) {
+    sql += ` AND (best_program_slug = 'tapis' OR division_slugs LIKE ? OR program_match_json LIKE ?)`;
+    params.push("%tapis%", "%mentor%");
+  }
+  if (/500,?000|\$500|over \$500|>=\s*500/.test(q)) {
+    sql += ` AND eligibility_result IN ('eligible', 'possibly_eligible')`;
+    sql += ` AND COALESCE(funding_amount_status, 'unknown') IN ('verified', 'partial')`;
+    sql += ` AND COALESCE(
+      CASE WHEN funding_value_source = 'estimated_total_funding' THEN estimated_funding ELSE NULL END,
+      award_ceiling, amount_max, 0
+    ) >= 500000`;
   }
   if (/5\s*million|\$5|5000000/.test(q)) {
-    sql += ` AND COALESCE(award_ceiling, amount_max, 0) >= 100000`;
+    sql += ` AND COALESCE(funding_amount_status, 'unknown') IN ('verified', 'partial')`;
+    sql += ` AND COALESCE(award_ceiling, amount_max, estimated_funding, 0) >= 100000`;
     sql += ` AND eligibility_result IN ('eligible', 'possibly_eligible')`;
   }
 
-  sql += ` ORDER BY COALESCE(qualification_score, 0) DESC, COALESCE(award_ceiling, amount_max, 0) DESC LIMIT 20`;
+  sql += ` ORDER BY COALESCE(enriched_final_score, qualification_score, 0) DESC,
+                    CASE WHEN funding_amount_status IN ('verified','partial') THEN COALESCE(award_ceiling, amount_max, estimated_funding, 0) ELSE 0 END DESC
+           LIMIT 20`;
   const records = await db.all<Record<string, unknown>>(sql, ...params);
 
   const whyMatch = q.match(/why.*score.*?(\d{2,3})|score.*?(\d{2,3})/i);
   if (whyMatch) {
     const target = Number(whyMatch[1] || whyMatch[2]);
     const scored = await db.get<Record<string, unknown>>(
-      `SELECT o.id, o.title, o.url, o.source_type, o.external_id, q.total_score, q.classification, q.breakdown_json
+      `SELECT o.id, o.title, o.url, o.source_type, o.external_id, o.funding_amount_status, o.funding_value_source,
+              o.best_program_slug, o.best_program_match_pct, q.total_score, q.classification, q.breakdown_json, q.model
        FROM grant_qualification_scores q
        JOIN grant_opportunities o ON o.id = q.opportunity_id
        WHERE q.total_score = ?
@@ -886,7 +1134,9 @@ export async function answerFundingIntelligenceQuery(opts: {
     if (scored) {
       return {
         reply:
-          `Opportunity "${scored.title}" scored ${scored.total_score} (${scored.classification}). `
+          `Opportunity "${scored.title}" scored ${scored.total_score} (${scored.classification}, model ${scored.model}). `
+          + `Program match: ${scored.best_program_slug || "n/a"} @ ${scored.best_program_match_pct ?? "n/a"}%. `
+          + `Funding: ${scored.funding_amount_status}${scored.funding_value_source ? ` (${scored.funding_value_source})` : ""}. `
           + `Breakdown: ${scored.breakdown_json}. Official source: ${scored.url} (${scored.source_type}/${scored.external_id}).`,
         records: [scored],
         metrics,
@@ -896,11 +1146,15 @@ export async function answerFundingIntelligenceQuery(opts: {
 
   const reply = [
     `Found ${records.length} stored opportunit${records.length === 1 ? "y" : "ies"} matching your question.`,
-    `Qualified pipeline value (eligible/possibly): $${metrics.qualifiedIfcdcFunding.toLocaleString()}.`,
-    `Priority pipeline value: $${metrics.priorityPipelineValue.toLocaleString()} (${metrics.priorityCount} opportunities).`,
-    `Data confidence: ${metrics.dataConfidence} (from live HQ records only).`,
+    metrics.pipelineSummary + ".",
+    `Priority verified value: $${metrics.priorityPipelineValue.toLocaleString()} (${metrics.priorityCount} opportunities).`,
+    `Unknown-value qualified: ${metrics.unknownValueQualifiedCount}. Data confidence: ${metrics.dataConfidence}.`,
     records[0]
-      ? `Top result: ${records[0].title} · score ${records[0].qualification_score ?? "n/a"} · ${records[0].eligibility_result} · ${records[0].url}`
+      ? `Top result: ${records[0].title} · enriched ${records[0].enriched_final_score ?? records[0].qualification_score ?? "n/a"}`
+        + ` (prelim ${records[0].preliminary_score ?? "n/a"}) · ${records[0].eligibility_result}`
+        + ` · funding ${records[0].funding_amount_status || "unknown"}`
+        + ` · program ${records[0].best_program_slug || "n/a"}@${records[0].best_program_match_pct ?? "n/a"}%`
+        + ` · ${records[0].url}`
       : "No matching stored opportunities yet — run a Funding Intelligence scan.",
   ].join(" ");
 
@@ -911,7 +1165,10 @@ export async function explainOpportunityScore(opportunityId: string) {
   const db = await getDb();
   const opp = await db.get(
     `SELECT id, title, funder, url, source_type, external_id, eligibility_result,
-            qualification_score, qualification_class, fingerprint
+            qualification_score, qualification_class, preliminary_score, enriched_final_score,
+            funding_amount_status, funding_value_source, award_ceiling, award_floor, estimated_funding,
+            best_program_slug, best_program_match_pct, program_match_json, enrichment_status,
+            last_verified_at, fingerprint
      FROM grant_opportunities WHERE id = ?`,
     opportunityId
   );
@@ -919,15 +1176,39 @@ export async function explainOpportunityScore(opportunityId: string) {
     `SELECT * FROM grant_qualification_scores WHERE opportunity_id = ? ORDER BY created_at DESC LIMIT 1`,
     opportunityId
   );
+  const preliminaryScore = await db.get(
+    `SELECT * FROM grant_qualification_scores
+     WHERE opportunity_id = ? AND model LIKE '%preliminary%'
+     ORDER BY created_at DESC LIMIT 1`,
+    opportunityId
+  );
   const eligibility = await db.get(
     `SELECT * FROM grant_eligibility_checks WHERE opportunity_id = ? ORDER BY checked_at DESC LIMIT 1`,
     opportunityId
   );
   const matches = await db.all(
-    `SELECT program_slug, program_label, match_score, rationale FROM grant_matches WHERE opportunity_id = ? ORDER BY match_score DESC`,
+    `SELECT program_slug, program_label, match_score, match_pct, rationale, eligibility_concerns, program_gaps
+     FROM grant_matches WHERE opportunity_id = ? ORDER BY COALESCE(match_pct, match_score) DESC`,
     opportunityId
   );
-  return { opportunity: opp, score, eligibility, matches };
+  return {
+    opportunity: opp,
+    score,
+    preliminaryScore,
+    eligibility,
+    matches,
+    officialSource: opp
+      ? {
+          url: (opp as { url?: string }).url,
+          sourceType: (opp as { source_type?: string }).source_type,
+          externalId: (opp as { external_id?: string }).external_id,
+          lastVerifiedAt: (opp as { last_verified_at?: string }).last_verified_at,
+          enrichmentStatus: (opp as { enrichment_status?: string }).enrichment_status,
+          fundingAmountStatus: (opp as { funding_amount_status?: string }).funding_amount_status,
+          fundingValueSource: (opp as { funding_value_source?: string }).funding_value_source,
+        }
+      : null,
+  };
 }
 
 /** Exported for unit-style reuse / tests */

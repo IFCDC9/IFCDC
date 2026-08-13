@@ -15,7 +15,7 @@
 | Audit trail | `grant_activity` + new `grant_audit_events` |
 | Dashboard shell | `/hq/grants` overview + Foundation dashboard |
 
-**Added (8A):** `grant_sources`, `grant_eligibility_checks`, `grant_matches`, `grant_qualification_scores`, `grant_audit_events`, opportunity fingerprint / eligibility_result / qualification_* columns.
+**Added (8A.2):** Full opportunity enrichment, funding confidence (verified/partial/unknown/conflicting), `ifcdc_program_profiles`, preliminary vs enriched scores, verified pipeline metrics. See `AURA-PHASE8A2-GRANT-ENRICHMENT.md`.
 
 ## Pipeline
 

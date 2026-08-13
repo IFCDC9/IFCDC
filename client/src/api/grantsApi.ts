@@ -144,8 +144,12 @@ export const grantsApi = {
       phase: string;
       metrics: {
         totalOpportunitiesDiscovered: number;
+        potentiallyEligibleCount?: number;
+        fullyQualifiedCount?: number;
         totalPotentialFundingDiscovered: number;
         qualifiedIfcdcFunding: number;
+        verifiedQualifiedPipelineValue?: number;
+        unknownValueQualifiedCount?: number;
         priorityPipelineValue: number;
         applicationsInPreparation: number;
         submittedApplicationValue: number;
@@ -156,10 +160,12 @@ export const grantsApi = {
         upcomingDeadlines: number;
         needingFounderReview: number;
         dataConfidence: string;
+        pipelineSummary?: string;
       };
       priorityOpportunities: Record<string, unknown>[];
       upcomingDeadlines: Record<string, unknown>[];
       sources: Record<string, unknown>[];
+      programProfiles?: Record<string, unknown>[];
     }>("/funding-intelligence/dashboard"),
   fundingIntelligenceScan: (body?: { providers?: string[]; limitQualify?: number }) =>
     apiFetch<Record<string, unknown>>("/funding-intelligence/scan", {
@@ -167,6 +173,13 @@ export const grantsApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body || { providers: ["grants_gov"] }),
       timeoutMs: 180_000,
+    }),
+  fundingIntelligenceEnrich: (body?: { limit?: number; onlyUnenriched?: boolean }) =>
+    apiFetch<Record<string, unknown>>("/funding-intelligence/enrich", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || { limit: 40, onlyUnenriched: true }),
+      timeoutMs: 300_000,
     }),
   fundingIntelligenceAsk: (question: string) =>
     apiFetch<{ reply: string; records: Record<string, unknown>[]; metrics: Record<string, unknown> }>(

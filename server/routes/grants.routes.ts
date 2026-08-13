@@ -2029,6 +2029,64 @@ router.post("/funding-intelligence/ask", async (req: Request, res: Response) => 
   res.json(await answerFundingIntelligenceQuery({ question, actorEmail: req.hqUser?.email }));
 });
 
+/** Phase 8A.2 — enrich existing opportunities from full official records + program match + rescore. */
+router.post("/funding-intelligence/enrich", async (req: Request, res: Response) => {
+  try {
+    const { getDb } = await import("../db");
+    const { ensureGrantTables } = await import("../hq/grantsSchema");
+    const { enrichAndQualifyOpportunity, buildFundingIntelligenceMetrics } = await import(
+      "../hq/auraFundingIntelligenceEngine"
+    );
+    await ensureGrantTables();
+    const db = await getDb();
+    const limit = typeof req.body?.limit === "number" ? req.body.limit : 40;
+    const onlyUnenriched = req.body?.onlyUnenriched !== false;
+    const rows = await db.all<{ id: string }>(
+      onlyUnenriched
+        ? `SELECT id FROM grant_opportunities
+           WHERE (duplicate_of_id IS NULL OR duplicate_of_id = '')
+             AND (enrichment_status IS NULL OR enrichment_status IN ('pending', 'fetch_failed', 'partial_local'))
+           ORDER BY datetime(updated_at) DESC LIMIT ?`
+        : `SELECT id FROM grant_opportunities
+           WHERE (duplicate_of_id IS NULL OR duplicate_of_id = '')
+           ORDER BY datetime(updated_at) DESC LIMIT ?`,
+      limit
+    );
+    const results: Array<Record<string, unknown>> = [];
+    let unknownFunding = 0;
+    let verifiedFunding = 0;
+    for (const row of rows) {
+      const r = await enrichAndQualifyOpportunity(row.id, {
+        actorEmail: req.hqUser?.email,
+        emitEvents: false,
+      });
+      if (r.fundingAmountStatus === "unknown") unknownFunding++;
+      if (r.fundingAmountStatus === "verified" || r.fundingAmountStatus === "partial") verifiedFunding++;
+      results.push(r);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+    const metrics = await buildFundingIntelligenceMetrics();
+    res.json({
+      ok: true,
+      enriched: results.length,
+      unknownFunding,
+      verifiedFunding,
+      results,
+      metrics,
+      maySubmit: false,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Funding enrichment failed";
+    console.error("Phase 8A.2 enrich error:", message);
+    res.status(502).json({ error: message });
+  }
+});
+
+router.get("/funding-intelligence/program-profiles", async (_req, res) => {
+  const { listIfcdcProgramProfiles } = await import("../hq/auraFundingEnrichmentEngine");
+  res.json({ profiles: await listIfcdcProgramProfiles() });
+});
+
 router.get("/funding-intelligence/opportunities/:id/explain", async (req, res) => {
   const { explainOpportunityScore } = await import("../hq/auraFundingIntelligenceEngine");
   const payload = await explainOpportunityScore(String(req.params.id));

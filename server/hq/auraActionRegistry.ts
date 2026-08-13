@@ -206,7 +206,7 @@ const fundingIntelligenceScan: AuraAction = {
   module: "grants",
   kind: "prepare",
   description:
-    "Phase 8A: ingest live official funding sources, normalize into HQ grant records, evaluate IFCDC eligibility, match programs, score 0–100, and dedupe. Does not submit applications.",
+    "Phase 8A.2: ingest live official funding sources, enrich full opportunity records, evaluate IFCDC eligibility, match program profiles, score preliminary + enriched final, and dedupe. Missing award amounts stay UNKNOWN (never $0). Does not submit applications.",
   parameters: {
     providers: { type: "string", description: "Comma list: grants_gov (default). Optional." },
     limitQualify: { type: "number", description: "Max opportunities to qualify this run (default 80)." },
@@ -226,7 +226,7 @@ const fundingIntelligenceScan: AuraAction = {
       status: "done",
       summary:
         `Funding Intelligence scan complete: ingested≈${result.ingested}, qualified ${result.qualified}, `
-        + `duplicates ${result.duplicatesMerged}. Qualified pipeline $${result.metrics.qualifiedIfcdcFunding.toLocaleString()}.`,
+        + `duplicates ${result.duplicatesMerged}. ${result.metrics.pipelineSummary}.`,
       data: result,
       navigation: { path: "/hq/grants", label: "Open Grant Center" },
     };
@@ -239,7 +239,7 @@ const fundingIntelligenceAsk: AuraAction = {
   module: "grants",
   kind: "read",
   description:
-    "Query stored Phase 8A HQ funding opportunities (qualified pipeline, deadlines, program fit, score explanations) with official source URLs.",
+    "Query Phase 8A.2 HQ funding opportunities (verified pipeline, unknown-value counts, program fit, score explanations, official source evidence).",
   parameters: {
     question: { type: "string", description: "Natural language funding question." },
   },
@@ -252,6 +252,63 @@ const fundingIntelligenceAsk: AuraAction = {
       status: "done",
       summary: result.reply,
       data: result,
+      navigation: { path: "/hq/grants", label: "Open Grant Center" },
+    };
+  },
+};
+
+const fundingIntelligenceEnrich: AuraAction = {
+  id: "funding_intelligence_enrich",
+  label: "Enrich Grant Opportunities",
+  module: "grants",
+  kind: "prepare",
+  description:
+    "Phase 8A.2: fetch full official opportunity records, set funding confidence (verified/partial/unknown), match IFCDC program profiles, and rescore. Does not submit applications.",
+  parameters: {
+    limit: { type: "number", description: "Max opportunities to enrich (default 40)." },
+    onlyUnenriched: { type: "boolean", description: "Only enrich pending/failed rows (default true)." },
+  },
+  async run(args, ctx) {
+    const { getDb } = await import("../db");
+    const { ensureGrantTables } = await import("./grantsSchema");
+    const { enrichAndQualifyOpportunity, buildFundingIntelligenceMetrics } = await import(
+      "./auraFundingIntelligenceEngine"
+    );
+    await ensureGrantTables();
+    const db = await getDb();
+    const limit = typeof args.limit === "number" ? args.limit : 40;
+    const onlyUnenriched = args.onlyUnenriched !== false;
+    const rows = await db.all<{ id: string }>(
+      onlyUnenriched
+        ? `SELECT id FROM grant_opportunities
+           WHERE (duplicate_of_id IS NULL OR duplicate_of_id = '')
+             AND (enrichment_status IS NULL OR enrichment_status IN ('pending', 'fetch_failed', 'partial_local'))
+           ORDER BY datetime(updated_at) DESC LIMIT ?`
+        : `SELECT id FROM grant_opportunities
+           WHERE (duplicate_of_id IS NULL OR duplicate_of_id = '')
+           ORDER BY datetime(updated_at) DESC LIMIT ?`,
+      limit
+    );
+    let unknownFunding = 0;
+    let verifiedFunding = 0;
+    const results = [];
+    for (const row of rows) {
+      const r = await enrichAndQualifyOpportunity(row.id, {
+        actorEmail: ctx.actorEmail,
+        emitEvents: false,
+      });
+      if (r.fundingAmountStatus === "unknown") unknownFunding++;
+      if (r.fundingAmountStatus === "verified" || r.fundingAmountStatus === "partial") verifiedFunding++;
+      results.push(r);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+    const metrics = await buildFundingIntelligenceMetrics();
+    return {
+      status: "done",
+      summary:
+        `Enriched ${results.length} opportunities (${verifiedFunding} with verified/partial amounts, `
+        + `${unknownFunding} UNKNOWN). ${metrics.pipelineSummary}.`,
+      data: { enriched: results.length, unknownFunding, verifiedFunding, results, metrics },
       navigation: { path: "/hq/grants", label: "Open Grant Center" },
     };
   },
@@ -1749,6 +1806,7 @@ export const AURA_ACTIONS: AuraAction[] = [
   findGrants,
   fundingIntelligenceScan,
   fundingIntelligenceAsk,
+  fundingIntelligenceEnrich,
   enterpriseFundingScan,
   matchProgram,
   syncGrants,

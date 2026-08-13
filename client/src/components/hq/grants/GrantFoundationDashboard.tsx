@@ -117,31 +117,57 @@ export const GrantFoundationDashboardPanel: React.FC<{
       {fundingIntel.data && (
         <div style={{ marginTop: "1rem" }}>
           <HqPanel
-            title="AURA Funding Intelligence (Phase 8A)"
-            subtitle={`Live HQ records · confidence ${fundingIntel.data.metrics.dataConfidence} · no auto-submit`}
+            title="AURA Funding Intelligence (Phase 8A.2)"
+            subtitle={
+              fundingIntel.data.metrics.pipelineSummary
+              || `Live HQ records · confidence ${fundingIntel.data.metrics.dataConfidence} · no auto-submit`
+            }
             headerExtra={
-              <button
-                type="button"
-                className="hq-btn hq-btn-sm hq-btn-ghost"
-                onClick={() => {
-                  void grantsApi.fundingIntelligenceScan({ providers: ["grants_gov"] }).then(() => {
-                    void fundingIntel.refetch();
-                  });
-                }}
-              >
-                Run live scan
-              </button>
+              <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="hq-btn hq-btn-sm hq-btn-ghost"
+                  onClick={() => {
+                    void grantsApi.fundingIntelligenceScan({ providers: ["grants_gov"] }).then(() => {
+                      void fundingIntel.refetch();
+                    });
+                  }}
+                >
+                  Run live scan
+                </button>
+                <button
+                  type="button"
+                  className="hq-btn hq-btn-sm hq-btn-ghost"
+                  onClick={() => {
+                    void grantsApi.fundingIntelligenceEnrich({ limit: 40, onlyUnenriched: true }).then(() => {
+                      void fundingIntel.refetch();
+                    });
+                  }}
+                >
+                  Enrich records
+                </button>
+              </div>
             }
           >
             <div className="hq-kpi-grid" style={{ marginBottom: "0.75rem" }}>
               <KpiCard label="Discovered" value={fundingIntel.data.metrics.totalOpportunitiesDiscovered} />
-              <KpiCard label="Qualified $" value={fmt(fundingIntel.data.metrics.qualifiedIfcdcFunding)} variant="gold" />
+              <KpiCard label="Potentially eligible" value={fundingIntel.data.metrics.potentiallyEligibleCount ?? 0} />
+              <KpiCard label="Fully qualified" value={fundingIntel.data.metrics.fullyQualifiedCount ?? 0} />
+              <KpiCard
+                label="Verified qualified $"
+                value={fmt(fundingIntel.data.metrics.verifiedQualifiedPipelineValue ?? fundingIntel.data.metrics.qualifiedIfcdcFunding)}
+                variant="gold"
+              />
+              <KpiCard
+                label="Unknown-value qualified"
+                value={fundingIntel.data.metrics.unknownValueQualifiedCount ?? 0}
+                variant="warning"
+              />
               <KpiCard label="Priority $" value={fmt(fundingIntel.data.metrics.priorityPipelineValue)} variant="success" />
               <KpiCard label="Priority Opps" value={fundingIntel.data.metrics.priorityCount} />
               <KpiCard label="Apps Preparing" value={fundingIntel.data.metrics.applicationsInPreparation} />
               <KpiCard label="Submitted $" value={fmt(fundingIntel.data.metrics.submittedApplicationValue)} />
               <KpiCard label="Awarded $" value={fmt(fundingIntel.data.metrics.awardedValue)} variant="gold" />
-              <KpiCard label="Allocatable $" value={fmt(fundingIntel.data.metrics.availableForAllocationValue)} />
               <KpiCard label="Deadlines 30d" value={fundingIntel.data.metrics.upcomingDeadlines} variant="warning" />
               <KpiCard label="Founder Review" value={fundingIntel.data.metrics.needingFounderReview} variant="warning" />
             </div>
@@ -155,7 +181,13 @@ export const GrantFoundationDashboardPanel: React.FC<{
                         {String(o.title || "Opportunity")}
                       </a>
                       {" · "}
-                      score {String(o.qualification_score ?? "n/a")} · {String(o.eligibility_result || "")}
+                      score {String(o.enriched_final_score ?? o.qualification_score ?? "n/a")}
+                      {o.funding_amount_status ? ` · ${String(o.funding_amount_status)}` : ""}
+                      {o.best_program_slug
+                        ? ` · ${String(o.best_program_slug)}@${String(o.best_program_match_pct ?? "?")}%`
+                        : ""}
+                      {" · "}
+                      {String(o.eligibility_result || "")}
                     </li>
                   ))}
                   {!fundingIntel.data.priorityOpportunities?.length && (

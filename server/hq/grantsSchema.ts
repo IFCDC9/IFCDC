@@ -130,6 +130,7 @@ export async function ensureGrantTables(): Promise<void> {
   await migrateGrantPhase9();
   await migrateGrantPhase10();
   await migrateGrantPhase8A();
+  await migrateGrantPhase8A2();
   if (!allowGrantDemoSeed()) {
     return;
   }
@@ -874,6 +875,212 @@ async function seedGrantCompliance(): Promise<void> {
       `INSERT INTO grant_compliance (id, award_id, report_type, due_date, status, notes, created_at)
        VALUES (?, ?, 'Quarterly Progress Report', ?, 'pending', 'Auto-scheduled compliance report', ?)`,
       id(), aw.id, due.toISOString().slice(0, 10), now
+    );
+  }
+}
+
+/**
+ * Phase 8A.2 — Enrichment fields, funding confidence, IFCDC program profiles.
+ * Missing award amounts stay UNKNOWN (never coerced to $0 in pipeline totals).
+ */
+async function migrateGrantPhase8A2(): Promise<void> {
+  const db = await getDb();
+  const addCol = async (table: string, col: string, type: string) => {
+    try {
+      await db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+    } catch {
+      /* exists */
+    }
+  };
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS ifcdc_program_profiles (
+      slug TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      mission_purpose TEXT,
+      population_served TEXT,
+      age_groups TEXT,
+      geography TEXT,
+      services_provided TEXT,
+      funding_needs TEXT,
+      eligible_spending_categories TEXT,
+      keywords_json TEXT,
+      outcomes TEXT,
+      current_funding_priorities TEXT,
+      organizational_capabilities TEXT,
+      founder_completion_needed_json TEXT,
+      source_note TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+
+  await addCol("grant_opportunities", "funding_amount_status", "TEXT DEFAULT 'unknown'");
+  await addCol("grant_opportunities", "funding_value_source", "TEXT");
+  await addCol("grant_opportunities", "funding_instrument", "TEXT");
+  await addCol("grant_opportunities", "cost_share_required", "TEXT");
+  await addCol("grant_opportunities", "application_instructions", "TEXT");
+  await addCol("grant_opportunities", "required_documents_json", "TEXT");
+  await addCol("grant_opportunities", "attachments_json", "TEXT");
+  await addCol("grant_opportunities", "enrichment_status", "TEXT DEFAULT 'pending'");
+  await addCol("grant_opportunities", "enriched_at", "TEXT");
+  await addCol("grant_opportunities", "preliminary_score", "INTEGER");
+  await addCol("grant_opportunities", "enriched_final_score", "INTEGER");
+  await addCol("grant_opportunities", "best_program_slug", "TEXT");
+  await addCol("grant_opportunities", "best_program_match_pct", "INTEGER");
+  await addCol("grant_opportunities", "program_match_json", "TEXT");
+  await addCol("grant_matches", "match_pct", "INTEGER");
+  await addCol("grant_matches", "eligibility_concerns", "TEXT");
+  await addCol("grant_matches", "program_gaps", "TEXT");
+
+  const now = new Date().toISOString();
+  /** Known HQ facts only — missing fields flagged for Founder completion (no fabrication). */
+  const profiles: Array<{
+    slug: string;
+    label: string;
+    mission: string | null;
+    population: string | null;
+    ages: string | null;
+    geography: string;
+    services: string | null;
+    keywords: string[];
+    outcomes: string | null;
+    priorities: string | null;
+    capabilities: string | null;
+    missing: string[];
+  }> = [
+    {
+      slug: "anti_gang",
+      label: "Anti-Gang Program",
+      mission: "Community violence prevention and anti-gang / community safety programming under IFCDC community development.",
+      population: "Community residents in IFCDC service area facing gang and community violence risk",
+      ages: null,
+      geography: "Asbury Park / Monmouth County, New Jersey",
+      services: "Violence prevention, community safety, anti-gang programming",
+      keywords: ["anti_gang", "violence_prevention", "community_safety", "gang", "prevention"],
+      outcomes: null,
+      priorities: null,
+      capabilities: "IFCDC 501(c)(3) CDC with Grant Center + community programs capacity",
+      missing: ["age_groups", "outcomes", "current_funding_priorities", "eligible_spending_categories", "funding_needs"],
+    },
+    {
+      slug: "housing",
+      label: "Transitional Housing",
+      mission: "Housing stability and transitional housing supports as part of IFCDC community development.",
+      population: "Individuals and families needing transitional housing / housing stability",
+      ages: null,
+      geography: "Asbury Park / Monmouth County, New Jersey",
+      services: "Transitional housing, housing stability supports",
+      keywords: ["transitional_housing", "housing", "shelter", "homeless_services"],
+      outcomes: null,
+      priorities: null,
+      capabilities: "IFCDC housing-related program division in Grant Center catalog",
+      missing: ["age_groups", "outcomes", "current_funding_priorities", "eligible_spending_categories", "funding_needs"],
+    },
+    {
+      slug: "youth_development",
+      label: "Youth Programs",
+      mission: "Youth development programming within IFCDC's community development ecosystem.",
+      population: "Youth and young adults in IFCDC service area",
+      ages: null,
+      geography: "Asbury Park / Monmouth County, New Jersey",
+      services: "Youth development programming",
+      keywords: ["youth", "young_adults", "teen", "youth_development"],
+      outcomes: null,
+      priorities: null,
+      capabilities: "IFCDC youth division listed in funding catalog",
+      missing: ["age_groups", "outcomes", "current_funding_priorities", "eligible_spending_categories", "funding_needs", "services_provided_detail"],
+    },
+    {
+      slug: "tapis",
+      label: "Mentorship (TAPIS)",
+      mission: "Mentorship services (TAPIS) supporting youth and community development.",
+      population: "Mentees / youth engaged in mentorship",
+      ages: null,
+      geography: "Asbury Park / Monmouth County, New Jersey",
+      services: "Mentorship",
+      keywords: ["mentorship", "youth_mentorship", "tapis", "mentor"],
+      outcomes: null,
+      priorities: null,
+      capabilities: "TAPIS Mentorship division in IFCDC Grant Center",
+      missing: ["age_groups", "outcomes", "current_funding_priorities", "eligible_spending_categories", "funding_needs"],
+    },
+    {
+      slug: "economic_development",
+      label: "Economic Development",
+      mission: "Economic empowerment and community economic development through IFCDC programs.",
+      population: "Residents and community stakeholders seeking economic opportunity",
+      ages: null,
+      geography: "Asbury Park / Monmouth County, New Jersey",
+      services: "Economic development, community economic empowerment",
+      keywords: ["economic_development", "community_development", "economic_growth", "workforce"],
+      outcomes: null,
+      priorities: null,
+      capabilities: "Economic Development division + workforce-related programs",
+      missing: ["age_groups", "outcomes", "current_funding_priorities", "eligible_spending_categories", "funding_needs"],
+    },
+    {
+      slug: "community_programs",
+      label: "Community Programs",
+      mission: "Community outreach and neighborhood services under IFCDC CDC mission.",
+      population: "General community / neighborhood residents",
+      ages: null,
+      geography: "Asbury Park / Monmouth County, New Jersey",
+      services: "Community programs, outreach",
+      keywords: ["community", "outreach", "neighborhood_services", "community_programs"],
+      outcomes: null,
+      priorities: null,
+      capabilities: "Community Programs division in Grant Center",
+      missing: ["age_groups", "outcomes", "current_funding_priorities", "eligible_spending_categories", "funding_needs"],
+    },
+    {
+      slug: "scholarships",
+      label: "Scholarship Program",
+      mission: "Scholarship and education support within IFCDC program catalog.",
+      population: "Students / scholarship recipients",
+      ages: null,
+      geography: "Asbury Park / Monmouth County, New Jersey",
+      services: "Scholarships, education support",
+      keywords: ["scholarships", "education", "tuition_assistance"],
+      outcomes: null,
+      priorities: null,
+      capabilities: "Scholarships division in IFCDC funding catalog",
+      missing: ["age_groups", "outcomes", "current_funding_priorities", "eligible_spending_categories", "funding_needs", "population_detail"],
+    },
+  ];
+
+  for (const p of profiles) {
+    await db.run(
+      `INSERT INTO ifcdc_program_profiles (
+         slug, label, mission_purpose, population_served, age_groups, geography, services_provided,
+         funding_needs, eligible_spending_categories, keywords_json, outcomes, current_funding_priorities,
+         organizational_capabilities, founder_completion_needed_json, source_note, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(slug) DO UPDATE SET
+         label = excluded.label,
+         mission_purpose = excluded.mission_purpose,
+         population_served = excluded.population_served,
+         geography = excluded.geography,
+         services_provided = excluded.services_provided,
+         keywords_json = excluded.keywords_json,
+         organizational_capabilities = excluded.organizational_capabilities,
+         founder_completion_needed_json = excluded.founder_completion_needed_json,
+         updated_at = excluded.updated_at`,
+      p.slug,
+      p.label,
+      p.mission,
+      p.population,
+      p.ages,
+      p.geography,
+      p.services,
+      JSON.stringify(p.keywords),
+      p.outcomes,
+      p.priorities,
+      p.capabilities,
+      JSON.stringify(p.missing),
+      "Seeded from IFCDC_FUNDING_DIVISIONS + IFCDC_ORG_PROFILE known HQ facts; missing fields await Founder completion",
+      now,
+      now
     );
   }
 }
