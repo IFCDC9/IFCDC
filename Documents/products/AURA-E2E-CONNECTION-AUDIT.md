@@ -1,6 +1,6 @@
 # AURA End-to-End Integration Audit & Connection Validation
 
-**Status:** AUDIT COMPLETE · Phases 1–3 SHIPPED (visibility, audit unification, voice/text command adapter) — Twilio/SMS config untouched  
+**Status:** AUDIT COMPLETE · Phases 1–4 SHIPPED (visibility, audit, voice/text adapter, module tools) — Twilio/SMS config untouched  
 **Date:** August 13, 2026  
 **Product:** IFCDC Headquarters / AURA  
 **Constraint:** Treat production Twilio/SMS as stable. No autonomous code/deploy authority for AURA.
@@ -103,11 +103,11 @@ Legend: 🟢 CONNECTED · 🟡 PARTIAL · 🔴 MISSING · ⚠️ UNSAFE/INCOMPLE
 | Grants | 🟢 | Full registry tools + engines |
 | Communications | 🟢 | send_email/sms/notification/broadcast tools |
 | Programs / ops | 🟡 | Via ops/analytics; limited dedicated tools |
-| Employees / HR | 🟡 | Payroll prepare + people metrics; no full HR CRUD tools |
-| Finance | 🟡 | Reports/EO5/analytics; no finance CRUD tools |
-| Donations | 🟡 | Read `funding_events`; Stripe/PayPal write outside AURA tools |
+| Employees / HR | 🟢 | Phase 4: workforce summary, list people/applicants, prepare applicant review + payroll prepare |
+| Finance | 🟢 | Phase 4: finance overview, pending expenses, prepare finance brief |
+| Donations | 🟢 | Phase 4: donation summary + list recent (Stripe/PayPal write still outside AURA) |
 | Compliance | 🟡 | `generate_compliance_report` + trackers |
-| Projects | 🟡 | Listed in AO/ops; no project CRUD tools |
+| Projects | 🟢 | Phase 4: list_ops_projects, prepare_ops_project (planning drafts) |
 | Barbers / bookings | 🟡 | Receptionist booking only → `clients`/`appointments` |
 | Future divisions | 🔴 | No generic division connector in AURA tools |
 | Central DB :4104 | 🔴 | HQ uses SQLite `ifcdc.db` |
@@ -240,7 +240,7 @@ Legend: 🟢 CONNECTED · 🟡 PARTIAL · 🔴 MISSING · ⚠️ UNSAFE/INCOMPLE
 | G2 | Central :4101 unused | HQ doesn't call microservice | `Backend/ifcdc-services/aura-ai-core`, `Shared/ifcdc-services.ts` | `IFCDC_AURA_URL` | Either wire securely or deprecate for HQ OS | Med | Low if deprecate only |
 | G3 | Unauthenticated aura-ai-core | No auth on `/api/aura/*` | aura-ai-core | `CORS_ORIGIN` | Add auth or bind localhost | High if public | Low if not exposed |
 | G4 | Web Founder Mode without OTP | Weaker than voice | `auraFounderTrustEngine` | `MASTER_OWNER_EMAIL` | Optional step-up MFA for execute | Med | Low if Founder-only |
-| G5 | Module tool coverage | HR/finance/projects/donations thin | `auraActionRegistry.ts` | Module tables | Add read/prepare tools; Founder for mutate | Med | Low (additive) |
+| G5 | Module tool coverage | ✅ Phase 4 HR/finance/projects/donations read+prepare shipped | `auraModuleToolsEngine.ts`, `auraActionRegistry.ts` | Module tables | Optional deeper mutate tools later (Founder-gated) | Low | Low |
 | G6 | Barbers/bookings | Only receptionist path | `auraReceptionistActions.ts` | `clients`, `appointments` | Registry tools + events | Med | Low |
 | G7 | Outbound SMS statusCallback | Not in AURA `messages.create` | `auraExecutiveOperations` / `notifications.ts` | Twilio | Optional additive callback URL — **Founder approve; do not touch Console blindly** | Med | Low if additive |
 | G9 | Event bus incomplete | Bookings/payments/SMS fail weak | `hqRealtimeEvents`, webhooks | — | Emit notifyHqDataChange + AURA consumers | Med | Low |
@@ -268,7 +268,7 @@ Legend: 🟢 CONNECTED · 🟡 PARTIAL · 🔴 MISSING · ⚠️ UNSAFE/INCOMPLE
 1. **Visibility** — ✅ **Shipped** — Unified AURA E2E diagnostics (`GET /api/hq/aura/diagnostics/e2e` · Brain v1 tab **9. E2E Diagnostics** · `server/hq/auraE2eDiagnosticsEngine.ts`). Twilio config untouched.  
 2. **Audit unification** — ✅ **Shipped** — `aura_unified_action_log` mirrors Brain v1, command-layer prepare/execute/deny, executive ops (SMS/email/call), and receptionist exec (`GET /api/hq/aura/diagnostics/unified-audit` · Brain v1 tab **8**).  
 3. **Voice/text unification** — ✅ **Shipped** — Founder voice/SMS → `auraReceptionistCommandAdapter` → `runAuraCommand` (Twilio URLs/credentials untouched; public booking path unchanged).  
-4. **Module tool expansion** — Read/prepare for HR, finance, projects, donations.  
+4. **Module tool expansion** — ✅ **Shipped** — HR/finance/projects/donations read+prepare tools via `auraModuleToolsEngine` + action registry (no Stripe/PayPal mutate; no Twilio changes).  
 5. **Events** — Booking/payment/SMS-fail → `notifyHqDataChange` + AURA consumers.  
 6. **Optional SMS statusCallback** — Additive only; Founder-approved; no credential reset.  
 7. **Deprecate or harden :4101** — Auth or remove from prod exposure.
@@ -288,6 +288,7 @@ Legend: 🟢 CONNECTED · 🟡 PARTIAL · 🔴 MISSING · ⚠️ UNSAFE/INCOMPLE
 | E2E diagnostics (Phase 1) | `server/hq/auraE2eDiagnosticsEngine.ts` |
 | Unified audit (Phase 2) | `server/hq/auraUnifiedAudit.ts` |
 | Voice/SMS command adapter (Phase 3) | `server/hq/auraReceptionistCommandAdapter.ts` |
+| Module tools (Phase 4) | `server/hq/auraModuleToolsEngine.ts` |
 | Brain 2.0 | `server/hq/auraEnterpriseBrain.ts` |
 | Voice/SMS entry | `server/routes/twilioAura.routes.ts`, `auraReceptionistEngine.ts` |
 | Twilio log | `server/hq/twilioIntegrationEngine.ts` |

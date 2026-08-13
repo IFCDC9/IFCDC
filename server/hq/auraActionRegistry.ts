@@ -1121,6 +1121,208 @@ const preparePayroll: AuraAction = {
   },
 };
 
+/** Phase 4 — HR / Finance / Projects / Donations read + prepare tools */
+const hrWorkforceSummaryAction: AuraAction = {
+  id: "hr_workforce_summary",
+  label: "HR Workforce Summary",
+  module: "hr",
+  kind: "read",
+  description: "Summarize active workforce by person type, department, recent hires, and volunteer hours.",
+  parameters: {},
+  async run() {
+    const { hrWorkforceSummary } = await import("./auraModuleToolsEngine");
+    const result = await hrWorkforceSummary();
+    return { status: "done", ...result };
+  },
+};
+
+const listPeopleAction: AuraAction = {
+  id: "list_people",
+  label: "List People",
+  module: "hr",
+  kind: "read",
+  description: "List people by type (employee, volunteer, board_member, contractor). Read-only.",
+  parameters: {
+    personType: {
+      type: "string",
+      enum: ["employee", "volunteer", "board_member", "contractor"],
+      description: "Person type. Default employee.",
+    },
+    limit: { type: "number", description: "Max rows (default 25, max 100)." },
+  },
+  async run(args) {
+    const { hrListPeople } = await import("./auraModuleToolsEngine");
+    const result = await hrListPeople({
+      personType: str(args.personType),
+      limit: typeof args.limit === "number" ? args.limit : undefined,
+    });
+    return { status: "done", ...result };
+  },
+};
+
+const listJobApplicantsAction: AuraAction = {
+  id: "list_job_applicants",
+  label: "List Job Applicants",
+  module: "hr",
+  kind: "read",
+  description: "List job applicants, optionally filtered by status. Read-only.",
+  parameters: {
+    status: { type: "string", description: "Optional status filter (new, reviewing, interview, hired, rejected)." },
+    limit: { type: "number", description: "Max rows (default 25)." },
+  },
+  async run(args) {
+    const { hrListApplicants } = await import("./auraModuleToolsEngine");
+    const result = await hrListApplicants({
+      status: str(args.status),
+      limit: typeof args.limit === "number" ? args.limit : undefined,
+    });
+    return { status: "done", ...result };
+  },
+};
+
+const prepareApplicantReviewAction: AuraAction = {
+  id: "prepare_applicant_review",
+  label: "Prepare Applicant Review",
+  module: "hr",
+  kind: "prepare",
+  description:
+    "Stage an applicant review workflow for HR/Founder. Does not hire or change employment status.",
+  parameters: {
+    applicantId: { type: "string", description: "Applicant id. Optional — defaults to newest open applicant." },
+    note: { type: "string", description: "Optional review note." },
+  },
+  async run(args, ctx) {
+    const { hrPrepareApplicantReview } = await import("./auraModuleToolsEngine");
+    return hrPrepareApplicantReview({
+      applicantId: str(args.applicantId),
+      note: str(args.note),
+      actorEmail: ctx.actorEmail,
+    });
+  },
+};
+
+const financeOverviewAction: AuraAction = {
+  id: "finance_overview",
+  label: "Finance Overview",
+  module: "finance",
+  kind: "read",
+  description: "Read live finance dashboard: donations, expenses, cash, health score, projected cash flow.",
+  parameters: {},
+  async run() {
+    const { financeOverview } = await import("./auraModuleToolsEngine");
+    const result = await financeOverview();
+    return { status: "done", ...result };
+  },
+};
+
+const listPendingExpensesAction: AuraAction = {
+  id: "list_pending_expenses",
+  label: "List Pending Expenses",
+  module: "finance",
+  kind: "read",
+  description: "List finance expenses awaiting approval. Read-only — does not approve or pay.",
+  parameters: {
+    limit: { type: "number", description: "Max rows (default 25)." },
+  },
+  async run(args) {
+    const { financeListPendingExpenses } = await import("./auraModuleToolsEngine");
+    const result = await financeListPendingExpenses(typeof args.limit === "number" ? args.limit : 25);
+    return { status: "done", ...result };
+  },
+};
+
+const prepareFinanceBriefAction: AuraAction = {
+  id: "prepare_finance_brief",
+  label: "Prepare Finance Brief",
+  module: "finance",
+  kind: "prepare",
+  description:
+    "Prepare a finance brief (overview + pending expenses) and stage for workflow review. Does not issue payments.",
+  parameters: {
+    focus: { type: "string", description: "Optional focus area for the brief." },
+  },
+  async run(args, ctx) {
+    const { financePrepareBrief } = await import("./auraModuleToolsEngine");
+    return financePrepareBrief({ actorEmail: ctx.actorEmail, focus: str(args.focus) });
+  },
+};
+
+const donationSummaryAction: AuraAction = {
+  id: "donation_summary",
+  label: "Donation Summary",
+  module: "finance",
+  kind: "read",
+  description: "Summarize donation totals by source and recent monthly trend. Read-only.",
+  parameters: {},
+  async run() {
+    const { donationSummary } = await import("./auraModuleToolsEngine");
+    const result = await donationSummary();
+    return { status: "done", ...result };
+  },
+};
+
+const listRecentDonationsAction: AuraAction = {
+  id: "list_recent_donations",
+  label: "List Recent Donations",
+  module: "finance",
+  kind: "read",
+  description: "List recent donation funding events. Read-only — does not charge cards or mutate Stripe/PayPal.",
+  parameters: {
+    limit: { type: "number", description: "Max rows (default 25)." },
+  },
+  async run(args) {
+    const { listRecentDonations } = await import("./auraModuleToolsEngine");
+    const result = await listRecentDonations(typeof args.limit === "number" ? args.limit : 25);
+    return { status: "done", ...result };
+  },
+};
+
+const listOpsProjectsAction: AuraAction = {
+  id: "list_ops_projects",
+  label: "List Ops Projects",
+  module: "executive",
+  kind: "read",
+  description: "List operations projects with status, priority, tasks, and milestones. Read-only.",
+  parameters: {
+    status: { type: "string", description: "Optional status filter (planning, active, completed, on_hold)." },
+    limit: { type: "number", description: "Max rows (default 25)." },
+  },
+  async run(args) {
+    const { projectsList } = await import("./auraModuleToolsEngine");
+    const result = await projectsList({
+      status: str(args.status),
+      limit: typeof args.limit === "number" ? args.limit : undefined,
+    });
+    return { status: "done", ...result };
+  },
+};
+
+const prepareOpsProjectAction: AuraAction = {
+  id: "prepare_ops_project",
+  label: "Prepare Ops Project",
+  module: "executive",
+  kind: "prepare",
+  description:
+    "Create an ops project draft in planning status for review. Does not activate production workstreams.",
+  parameters: {
+    title: { type: "string", description: "Project title (required)." },
+    description: { type: "string", description: "Optional description." },
+    priority: { type: "string", enum: ["critical", "high", "normal", "low"], description: "Priority. Default normal." },
+    dueDate: { type: "string", description: "Optional due date YYYY-MM-DD." },
+  },
+  required: ["title"],
+  async run(args, ctx) {
+    const { projectsPrepareDraft } = await import("./auraModuleToolsEngine");
+    return projectsPrepareDraft({
+      title: str(args.title) || "",
+      description: str(args.description),
+      priority: str(args.priority),
+      dueDate: str(args.dueDate),
+      actorEmail: ctx.actorEmail,
+    });
+  },
+};
+
 const complianceReport: AuraAction = {
   id: "generate_compliance_report",
   label: "Generate Compliance Report",
@@ -1494,6 +1696,17 @@ export const AURA_ACTIONS: AuraAction[] = [
   generateExecutiveReport,
   enterpriseDiagnostics,
   preparePayroll,
+  hrWorkforceSummaryAction,
+  listPeopleAction,
+  listJobApplicantsAction,
+  prepareApplicantReviewAction,
+  financeOverviewAction,
+  listPendingExpensesAction,
+  prepareFinanceBriefAction,
+  donationSummaryAction,
+  listRecentDonationsAction,
+  listOpsProjectsAction,
+  prepareOpsProjectAction,
   complianceReport,
   queueGrantSubmission,
   runLiveGrantWorkflow,

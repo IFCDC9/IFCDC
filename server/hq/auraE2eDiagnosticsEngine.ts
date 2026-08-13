@@ -203,22 +203,22 @@ export async function buildAuraE2eDiagnostics(opts: {
     {
       id: "db-hr",
       label: "HR / People",
-      status: "partial",
-      detail: "Payroll prepare + metrics; no full HR CRUD tools",
-      tables: ["people"],
+      status: "connected",
+      detail: "Phase 4: hr_workforce_summary, list_people, list_job_applicants, prepare_applicant_review + payroll prepare",
+      tables: ["people", "job_applicants"],
     },
     {
       id: "db-finance",
       label: "Finance",
-      status: "partial",
-      detail: "Reports/analytics; limited finance mutate tools",
+      status: "connected",
+      detail: "Phase 4: finance_overview, list_pending_expenses, prepare_finance_brief",
       tables: ["finance_expenses", "finance_accounts"],
     },
     {
       id: "db-donations",
       label: "Donations",
-      status: "partial",
-      detail: "Read funding_events; Stripe/PayPal outside AURA tools",
+      status: "connected",
+      detail: "Phase 4: donation_summary, list_recent_donations (Stripe/PayPal mutate still outside AURA)",
       tables: ["funding_events"],
     },
     {
@@ -231,8 +231,8 @@ export async function buildAuraE2eDiagnostics(opts: {
     {
       id: "db-projects",
       label: "Projects / ops",
-      status: "partial",
-      detail: "Listed in AO/ops; no dedicated project CRUD tools",
+      status: "connected",
+      detail: "Phase 4: list_ops_projects, prepare_ops_project (planning drafts)",
       tables: ["ops_projects"],
     },
     {
