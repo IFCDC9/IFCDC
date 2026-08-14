@@ -430,7 +430,19 @@ export async function buildFounderEvidenceActionQueue(opts?: {
     a.status === "missing"
     || a.status === "unavailable"
     || a.status === "needs_update"
-  );
+  ).filter((a) => {
+    // Federal registration evidence is owned by HQ integrations — never ask Founder
+    // for screenshots/uploads when SAM.gov UEI is configured in HQ.
+    if (
+      (a.evidenceType === "sam_registration" || a.evidenceType === "uei" || a.evidenceType === "cage")
+      && IFCDC_ORG_PROFILE.samUei
+    ) {
+      return false;
+    }
+    // Grants.gov connectivity is integration-only.
+    if (a.evidenceType === "grants_gov_account") return false;
+    return true;
+  });
 
   const queue: FounderQueueItem[] = [];
   for (const item of actionable) {
@@ -1573,6 +1585,18 @@ export async function syncFederalIntegrationEvidence(opts?: {
     });
   }
 
+  // Optional short retry when SAM throttles (common on shared public keys).
+  if (samProbe && !samProbe.ok && /throttl/i.test(samProbe.message || "")) {
+    await new Promise((r) => setTimeout(r, 2500));
+    try {
+      const { probeSamGovEntityLive } = await import("./grantFeedConnectors");
+      const retry = await probeSamGovEntityLive();
+      if (retry.ok) samProbe = retry;
+    } catch {
+      /* keep first probe */
+    }
+  }
+
   let recordsUpserted = 0;
   let ueiVerified = false;
   let cageVerified = false;
@@ -1655,9 +1679,25 @@ export async function syncFederalIntegrationEvidence(opts?: {
         verifiedTypes.push("cage");
       }
     } else {
+      // Do not Founder-queue CAGE — SAM.gov owns this field. Record pending refresh.
+      await upsertReusableIntegrationEvidence({
+        evidenceType: "cage",
+        title: "CAGE — pending SAM.gov refresh",
+        verificationStatus: "needs_update",
+        source: "sam_gov_integration",
+        notes: JSON.stringify({
+          sourceAttribution: sourceNote,
+          pending: true,
+          reason: "SAM.gov entity response did not include cageCode on this probe",
+          uei: samProbe.ueiSAM || samProbe.uei,
+          probedAt: nowIso(),
+        }),
+        auraConfidence: 0.5,
+      });
+      recordsUpserted++;
       skipped.push({
         evidenceType: "cage",
-        reason: "SAM.gov entity response did not include cageCode",
+        reason: "SAM.gov entity response did not include cageCode — retry via integration (not a Founder upload)",
       });
     }
   } else if (samProbe && !samProbe.ok) {
@@ -1688,6 +1728,26 @@ export async function syncFederalIntegrationEvidence(opts?: {
         if (key === "uei") ueiVerified = true;
         if (key === "sam_registration") samRegistrationVerified = true;
       }
+      // CAGE owned by SAM — mark pending, never Founder-upload
+      await upsertReusableIntegrationEvidence({
+        evidenceType: "cage",
+        title: "CAGE — pending SAM.gov live probe",
+        verificationStatus: "needs_update",
+        source: "sam_gov_integration",
+        notes: JSON.stringify({
+          sourceAttribution: "Source: SAM.gov via IFCDC HQ integration",
+          pending: true,
+          reason: samProbe.message || "SAM.gov throttled/unavailable",
+          uei: IFCDC_ORG_PROFILE.samUei,
+          probedAt: nowIso(),
+        }),
+        auraConfidence: 0.4,
+      });
+      recordsUpserted++;
+      skipped.push({
+        evidenceType: "cage",
+        reason: `${samProbe.message || "SAM.gov unavailable"} — CAGE will be filled on next successful SAM probe (not a Founder upload)`,
+      });
     }
   }
 
