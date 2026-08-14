@@ -554,6 +554,36 @@ export async function buildIfcdcOrganizationalGrantProfile(opts?: {
     unknownFields.push("samUei");
   }
 
+  // Tax-exempt fields only when IRS determination is verified in the vault (never invented).
+  if (verifiedEvidenceTypes.includes("irs_501c3")) {
+    setVerified("organizationType", "nonprofit");
+    setVerified("taxExemptStatus", "501(c)(3)");
+    const metaRow = vault.find((v) => v.evidence_type === "irs_501c3" && v.verification_status === "verified");
+    let meta: Record<string, unknown> = {};
+    try {
+      const raw = (metaRow as { notes?: string | null } | undefined)?.notes;
+      if (raw && raw.trim().startsWith("{")) meta = JSON.parse(raw);
+    } catch {
+      meta = {};
+    }
+    if (meta.publicCharityStatus) setVerified("publicCharityStatus", meta.publicCharityStatus);
+    else {
+      profile.publicCharityStatus = null;
+      unknownFields.push("publicCharityStatus");
+    }
+    if (meta.determinationDate) setVerified("irsDeterminationDate", meta.determinationDate);
+    if (meta.effectiveDateOfExemption) setVerified("exemptionEffectiveDate", meta.effectiveDateOfExemption);
+    if (meta.ein && /^\d{2}-?\d{7}$/.test(String(meta.ein))) setVerified("ein", String(meta.ein));
+    else if (einLooksReal) {
+      /* already set above */
+    }
+  } else {
+    profile.organizationType = null;
+    profile.taxExemptStatus = null;
+    profile.publicCharityStatus = null;
+    unknownFields.push("organizationType", "taxExemptStatus", "publicCharityStatus");
+  }
+
   // Evidence status map — banking is present/missing only.
   const evidenceStatus: Record<string, string> = {};
   for (const cat of EVIDENCE_TYPE_CATALOG) {
@@ -833,6 +863,306 @@ export async function verifyEvidenceRecord(opts: {
     evidenceType,
     reason: ueiOk ? "Verified via SAM UEI env" : "Verified via linked hq_document file_url",
     rematch,
+  };
+}
+
+/**
+ * Reuse-first org evidence: locate existing HQ Document Center file → verify into
+ * Evidence Vault → rematch grants. Upload only when genuinely absent from HQ and
+ * the Founder supplied the file bytes for this call.
+ */
+export async function locateOrIngestVerifiedOrgEvidence(opts: {
+  evidenceType: string;
+  title?: string;
+  actorEmail?: string;
+  founderApproved?: boolean;
+  effectiveDate?: string;
+  expirationDate?: string;
+  fileName?: string;
+  base64?: string;
+  mimeType?: string;
+  metadata?: Record<string, unknown>;
+}): Promise<Record<string, unknown>> {
+  await ensureGrantTables();
+  const { ensureDocumentTables, docId } = await import("./documentsSchema");
+  await ensureDocumentTables();
+
+  const evidenceType = opts.evidenceType;
+  const cat = catalogEntry(evidenceType);
+  if (!cat) {
+    return { ok: false, error: `Unknown evidence type: ${evidenceType}` };
+  }
+
+  const title = opts.title || cat.label;
+  const db = await getDb();
+  const now = nowIso();
+
+  // Snapshot readiness before rematch for unlock reporting
+  const beforeRows = await safeAll<{
+    id: string;
+    title: string;
+    readiness_class: string | null;
+    application_readiness_score: number | null;
+    ifcdc_addressable_amount: number | null;
+  }>(
+    `SELECT DISTINCT o.id, o.title, o.readiness_class, o.application_readiness_score, o.ifcdc_addressable_amount
+     FROM grant_opportunity_requirements r
+     JOIN grant_opportunities o ON o.id = r.opportunity_id
+     WHERE (
+       r.requirement_key LIKE ?
+       OR r.requirement_key IN (?, ?, ?)
+       OR r.label LIKE ?
+     )
+     AND o.eligibility_result IN ('eligible', 'possibly_eligible')
+     AND (o.duplicate_of_id IS NULL OR o.duplicate_of_id = '')`,
+    `%${evidenceType}%`,
+    `baseline_${evidenceType}`,
+    `opp_${evidenceType}`,
+    `req_${evidenceType}`,
+    `%${cat.label.slice(0, 32)}%`
+  );
+  const beforeMap = new Map(beforeRows.map((r) => [r.id, r]));
+
+  // 1) Locate existing HQ document (no duplicate upload)
+  const hqDocs = await safeAll<{
+    id: string;
+    title: string;
+    category: string | null;
+    file_url: string | null;
+    evidence_type: string | null;
+    file_name: string | null;
+    verification_status: string | null;
+  }>(
+    `SELECT id, title, category, file_url, evidence_type, file_name, verification_status
+     FROM hq_documents
+     WHERE COALESCE(lifecycle_status, 'active') != 'archived'
+     ORDER BY datetime(updated_at) DESC LIMIT 800`
+  );
+
+  let located = hqDocs.find(
+    (d) => d.evidence_type === evidenceType && hasFileUrl(d.file_url)
+  );
+  if (!located) {
+    located = hqDocs.find((d) => {
+      if (!hasFileUrl(d.file_url)) return false;
+      const blob = `${d.title || ""} ${d.category || ""} ${d.file_name || ""} ${d.evidence_type || ""}`;
+      return cat.patterns.some((p) => p.test(blob));
+    });
+  }
+
+  let hqDocumentId = located?.id || null;
+  let action: "reused_existing_hq_document" | "uploaded_new_hq_document" | "missing" =
+    located ? "reused_existing_hq_document" : "missing";
+
+  // 2) Upload only if genuinely absent and Founder supplied file bytes
+  if (!hqDocumentId && opts.base64 && opts.fileName) {
+    const { validateHqDocumentUpload } = await import("./grantDocumentUpload");
+    const { saveHqFileBase64 } = await import("./hqFileStorage");
+    const validated = validateHqDocumentUpload(
+      String(opts.fileName),
+      String(opts.base64),
+      opts.mimeType ? String(opts.mimeType) : undefined
+    );
+    if (!validated.ok) {
+      return { ok: false, error: validated.error, action: "missing" };
+    }
+    const saved = await saveHqFileBase64(
+      String(opts.fileName),
+      String(opts.base64),
+      validated.mime,
+      opts.actorEmail || "",
+      "confidential"
+    );
+    hqDocumentId = docId();
+    const metaJson = JSON.stringify({
+      ...(opts.metadata || {}),
+      evidenceType,
+      phase8a5: true,
+      reuseFirst: true,
+    });
+    await db.run(
+      `INSERT INTO hq_documents (
+         id, title, category, file_url, version, access_level, approval_status,
+         submitted_by, created_at, updated_at, mime_type, file_type, owner_email,
+         visibility, source_module, file_name, file_size_bytes, evidence_type,
+         verification_status, effective_date, custom_metadata_json
+       ) VALUES (?, ?, 'legal', ?, 1, 'confidential', 'approved', ?, ?, ?, ?, 'pdf', ?, 'organization', 'grants_evidence', ?, ?, ?, 'verified', ?, ?)`,
+      hqDocumentId,
+      title,
+      saved.url,
+      opts.actorEmail || null,
+      now,
+      now,
+      validated.mime,
+      opts.actorEmail || null,
+      String(opts.fileName),
+      validated.sizeBytes,
+      evidenceType,
+      opts.effectiveDate || null,
+      metaJson
+    );
+    action = "uploaded_new_hq_document";
+    emitPhase8A5Event({
+      title: "Evidence uploaded to Document Center",
+      detail: `${title} (${evidenceType}) stored once — reuse-first path`,
+      grantDocEvent: "evidence_uploaded",
+      metadata: { evidenceType, hqDocumentId },
+    });
+  }
+
+  if (!hqDocumentId) {
+    return {
+      ok: false,
+      action: "missing",
+      evidenceType,
+      label: cat.label,
+      error:
+        "Document not found in HQ Document Center and no file bytes were provided. Founder upload required once.",
+      founderMustUpload: true,
+    };
+  }
+
+  // Tag existing doc with evidence_type / verified without duplicating the file
+  await safeRun(
+    `UPDATE hq_documents SET
+       evidence_type = COALESCE(evidence_type, ?),
+       verification_status = 'verified',
+       effective_date = COALESCE(?, effective_date),
+       updated_at = ?
+     WHERE id = ?`,
+    evidenceType,
+    opts.effectiveDate || null,
+    now,
+    hqDocumentId
+  );
+
+  const notes = JSON.stringify({
+    ...(opts.metadata || {}),
+    verifiedAt: now,
+    sourceDocumentTitle: title,
+  });
+
+  const verify = await verifyEvidenceRecord({
+    evidenceType,
+    hqDocumentId,
+    actorEmail: opts.actorEmail,
+    founderApproved: opts.founderApproved !== false,
+  });
+
+  // Stamp dates / notes / reusable on vault row
+  await safeRun(
+    `UPDATE grant_evidence_records SET
+       title = ?,
+       effective_date = COALESCE(?, effective_date),
+       expiration_date = COALESCE(?, expiration_date),
+       notes = ?,
+       reusable = 1,
+       founder_approved = 1,
+       verification_status = 'verified',
+       updated_at = ?
+     WHERE evidence_type = ? AND hq_document_id = ?`,
+    title,
+    opts.effectiveDate || null,
+    opts.expirationDate || null,
+    notes,
+    now,
+    evidenceType,
+    hqDocumentId
+  );
+
+  const orgProfile = await buildIfcdcOrganizationalGrantProfile({
+    actorEmail: opts.actorEmail,
+  });
+
+  // After rematch, compute unlocked / score increases
+  const afterRows =
+    beforeRows.length === 0
+      ? []
+      : await safeAll<{
+        id: string;
+        title: string;
+        readiness_class: string | null;
+        application_readiness_score: number | null;
+        ifcdc_addressable_amount: number | null;
+      }>(
+        `SELECT id, title, readiness_class, application_readiness_score, ifcdc_addressable_amount
+         FROM grant_opportunities WHERE id IN (${beforeRows.map(() => "?").join(",")})`,
+        ...beforeRows.map((r) => r.id)
+      );
+
+  const readinessIncreased: Array<Record<string, unknown>> = [];
+  const unlocked: Array<Record<string, unknown>> = [];
+  for (const after of afterRows) {
+    const before = beforeMap.get(after.id);
+    if (!before) continue;
+    const beforeScore = Number(before.application_readiness_score || 0);
+    const afterScore = Number(after.application_readiness_score || 0);
+    if (afterScore > beforeScore) {
+      readinessIncreased.push({
+        id: after.id,
+        title: after.title,
+        scoreBefore: beforeScore,
+        scoreAfter: afterScore,
+        classBefore: before.readiness_class,
+        classAfter: after.readiness_class,
+        addressable: after.ifcdc_addressable_amount,
+      });
+    }
+    if (
+      before.readiness_class !== after.readiness_class
+      && (after.readiness_class === "ready_now" || after.readiness_class === "nearly_ready")
+    ) {
+      unlocked.push({
+        id: after.id,
+        title: after.title,
+        classBefore: before.readiness_class,
+        classAfter: after.readiness_class,
+        addressable: after.ifcdc_addressable_amount,
+      });
+    }
+  }
+
+  const founderQueue = await buildFounderEvidenceActionQueue();
+  const stillMissing = founderQueue.some((q) => q.evidenceType === evidenceType);
+
+  emitPhase8A5Event({
+    title: "Organizational evidence verified (reuse-first)",
+    detail: `${cat.label}: ${action}; rematched ${verify.rematch?.recalculated ?? 0}; unlocked ${unlocked.length}; score↑ ${readinessIncreased.length}`,
+    grantDocEvent: "evidence_verified",
+    metadata: {
+      evidenceType,
+      hqDocumentId,
+      action,
+      unlockedCount: unlocked.length,
+      readinessIncreasedCount: readinessIncreased.length,
+    },
+  });
+
+  return {
+    ok: true,
+    phase: "8A.5",
+    maySubmit: false,
+    action,
+    evidenceType,
+    label: cat.label,
+    verificationStatus: "verified",
+    hqDocumentId,
+    reusedExisting: action === "reused_existing_hq_document",
+    uploadedNew: action === "uploaded_new_hq_document",
+    verify,
+    orgProfileSummary: {
+      verifiedFieldCount: orgProfile.verifiedFields.length,
+      unknownFieldCount: orgProfile.unknownFields.length,
+      taxExemptStatus: (orgProfile.profile as Record<string, unknown>).taxExemptStatus ?? null,
+      publicCharityStatus: (orgProfile.profile as Record<string, unknown>).publicCharityStatus ?? null,
+      ein: (orgProfile.profile as Record<string, unknown>).ein ?? null,
+    },
+    rematch: verify.rematch,
+    unlockedOpportunities: unlocked,
+    readinessIncreased,
+    founderQueueStillListsItem: stillMissing,
+    nextFounderQueueItem: founderQueue[0] || null,
+    founderQueueTop5: founderQueue.slice(0, 5),
   };
 }
 

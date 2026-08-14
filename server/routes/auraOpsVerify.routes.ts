@@ -657,4 +657,44 @@ router.post("/phase8a5/acceptance", auraOpsVerifyAuth, requireHQModule("aura"), 
   }
 });
 
+/**
+ * Phase 8A.5 reuse-first: locate HQ document → verify Evidence Vault → rematch.
+ * Uploads only when the document is genuinely absent and file bytes are supplied.
+ * No Founder password. No grant submission.
+ */
+router.post("/phase8a5/verify-org-evidence", auraOpsVerifyAuth, requireHQModule("aura"), async (req, res) => {
+  try {
+    const { locateOrIngestVerifiedOrgEvidence } = await import("../hq/auraGrantEvidencePopulationEngine");
+    const evidenceType = String(req.body?.evidenceType || "").trim();
+    if (!evidenceType) {
+      return res.status(400).json({ error: "evidenceType is required" });
+    }
+    const result = await locateOrIngestVerifiedOrgEvidence({
+      evidenceType,
+      title: typeof req.body?.title === "string" ? req.body.title : undefined,
+      actorEmail: req.hqUser?.email || getFounderEmail(),
+      founderApproved: req.body?.founderApproved !== false,
+      effectiveDate: typeof req.body?.effectiveDate === "string" ? req.body.effectiveDate : undefined,
+      expirationDate: typeof req.body?.expirationDate === "string" ? req.body.expirationDate : undefined,
+      fileName: typeof req.body?.fileName === "string" ? req.body.fileName : undefined,
+      base64: typeof req.body?.base64 === "string" ? req.body.base64 : undefined,
+      mimeType: typeof req.body?.mimeType === "string" ? req.body.mimeType : undefined,
+      metadata:
+        req.body?.metadata && typeof req.body.metadata === "object"
+          ? (req.body.metadata as Record<string, unknown>)
+          : undefined,
+    });
+    const status = result.ok ? 200 : result.action === "missing" ? 404 : 400;
+    return res.status(status).json({
+      ...result,
+      authMethod: (req as { auraOpsTokenAuth?: boolean }).auraOpsTokenAuth ? "ops_token" : "founder_jwt",
+      maySubmit: false,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "verify-org-evidence failed";
+    console.error("Phase 8A.5 verify-org-evidence error:", message);
+    return res.status(502).json({ error: message, maySubmit: false });
+  }
+});
+
 export default router;

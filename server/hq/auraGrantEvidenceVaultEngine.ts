@@ -47,8 +47,8 @@ type EvidenceCatalogEntry = {
 };
 
 export const EVIDENCE_TYPE_CATALOG: EvidenceCatalogEntry[] = [
-  { key: "irs_501c3", label: "IRS 501(c)(3) determination letter", category: "registration", patterns: [/501\s*\(c\)\s*\(3\)/, /irs\s*determination/, /tax.?exempt/, /determination\s*letter/], federalBaseline: true },
-  { key: "state_incorporation", label: "State nonprofit incorporation documents", category: "registration", patterns: [/incorporation/, /articles\s*of\s*incorporation/, /certificate\s*of\s*incorporation/, /state\s*nonprofit/], federalBaseline: true },
+  { key: "irs_501c3", label: "IRS 501(c)(3) determination letter", category: "registration", patterns: [/501\s*\(c\)\s*\(3\)/, /irs\s*determination/, /tax.?exempt/, /determination\s*letter/, /letter\s*947/, /public\s*charity/, /509\s*\(a\)/], federalBaseline: true },
+  { key: "state_incorporation", label: "State nonprofit incorporation documents", category: "registration", patterns: [/incorporation/, /articles\s*of\s*incorporation/, /certificate\s*of\s*incorporation/, /state\s*nonprofit/, /cert\s*of\s*incor/], federalBaseline: true },
   { key: "sam_registration", label: "SAM.gov registration", category: "registration", patterns: [/sam\.?gov/, /sam\s*registration/, /system\s*for\s*award/], federalBaseline: true, envUei: true },
   { key: "uei", label: "UEI", category: "registration", patterns: [/\buei\b/, /unique\s*entity\s*identifier/], federalBaseline: true, envUei: true },
   { key: "cage", label: "CAGE information", category: "registration", patterns: [/\bcage\b/, /commercial\s*and\s*government\s*entity/], federalBaseline: true },
