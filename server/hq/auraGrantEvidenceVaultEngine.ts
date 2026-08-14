@@ -1062,9 +1062,18 @@ export async function runDocumentReadinessBatch(opts?: {
     if (hb > 0) withHardBlockers++;
   }
 
-  const pilotAudit = await deepAuditFirstPilot({
-    actorEmail: opts?.actorEmail || "aura",
-  });
+  let pilotAudit: Record<string, unknown> = {};
+  try {
+    pilotAudit = await deepAuditFirstPilot({
+      actorEmail: opts?.actorEmail || "aura",
+    });
+  } catch (err) {
+    pilotAudit = {
+      skipped: true,
+      error: err instanceof Error ? err.message : "pilot audit failed",
+      maySubmit: false,
+    };
+  }
 
   await logGrantActivity(
     "system",
@@ -1118,7 +1127,16 @@ export async function deepAuditFirstPilot(opts: {
        LIMIT 1`
     );
   }
-  if (!opp) throw new Error("No opportunity available for pilot audit");
+  if (!opp) {
+    return {
+      skipped: true,
+      recommendation: "founder_review",
+      rationale:
+        "No eligible non-Lead-Safe / non-do_not_pursue opportunity available for pilot audit. "
+        + "Run funding scan/awardability or selectNextPilotCandidates.",
+      maySubmit: false,
+    };
+  }
 
   const opportunityId = String(opp.id);
   const title = String(opp.title || "");

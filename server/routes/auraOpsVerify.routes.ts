@@ -437,6 +437,39 @@ router.post("/phase8a5/acceptance", auraOpsVerifyAuth, requireHQModule("aura"), 
     );
     const { getDb } = await import("../db");
 
+    // Ensure a qualified set exists before population (no inventing — live scan only).
+    const dbPre = await getDb();
+    const qualifiedCount = Number(
+      (
+        await dbPre.get<{ c: number }>(
+          `SELECT COUNT(*) as c FROM grant_opportunities
+           WHERE eligibility_result IN ('eligible', 'possibly_eligible')
+             AND (duplicate_of_id IS NULL OR duplicate_of_id = '')`
+        )
+      )?.c || 0
+    );
+    if (qualifiedCount < 5) {
+      try {
+        const { runFundingIntelligenceScan } = await import("../hq/auraFundingIntelligenceEngine");
+        await runFundingIntelligenceScan({
+          providers: ["grants_gov"],
+          limitQualify: 30,
+          actorEmail,
+        });
+      } catch (scanErr) {
+        console.warn(
+          "Phase 8A.5 pre-scan warning:",
+          scanErr instanceof Error ? scanErr.message : scanErr
+        );
+      }
+      try {
+        const { runAwardabilityVerificationBatch } = await import("../hq/auraFundingAwardabilityEngine");
+        await runAwardabilityVerificationBatch({ limit: 30, onlyQualified: true, actorEmail });
+      } catch {
+        /* optional */
+      }
+    }
+
     const cycle = await runPhase8A5PopulationCycle({ actorEmail, limit });
     const metrics = await buildFundingIntelligenceMetrics();
     const audit = await auditExistingHqEvidence({ actorEmail });
