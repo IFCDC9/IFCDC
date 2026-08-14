@@ -38,7 +38,9 @@ const GRANTS_OPERATOR = {
 };
 
 // Lightweight middleware + health only — bind PORT before heavy route imports (Render stability).
-app.use(express.json());
+// Document Center and evidence ingest send base64 PDFs — default 100kb is too small.
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || "55mb" }));
+app.use(express.urlencoded({ extended: true, limit: process.env.JSON_BODY_LIMIT || "55mb" }));
 registerHealthRoutes(app);
 
 declare global {
