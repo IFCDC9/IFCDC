@@ -70,8 +70,17 @@ Operating flow:
 
 ## Acceptance
 
+Uses the Phase 6 ops auth pattern (no Founder password):
+
 ```bash
-HQ_TOKEN=… node script/phase8a5-evidence-population-verify.mjs
+# Preferred — same AURA_OPS_VERIFY_TOKEN configured on Render
+AURA_OPS_VERIFY_TOKEN=… node script/phase8a5-evidence-population-verify.mjs
+
+# Or Founder phone OTP (no password)
+node script/phase8a5-evidence-population-verify.mjs --start-otp
+FOUNDER_OTP_CODE=###### node script/phase8a5-evidence-population-verify.mjs
 ```
+
+Ops endpoint: `POST /api/hq/aura/ops/phase8a5/acceptance` (Founder JWT or `X-IFCDC-Ops-Token`).
 
 Phase 8A.5 is complete when audit + Founder queue exist, readiness recalculated for qualified set, Lead-Safe is not first pilot, Top 5 + recommended pilot returned, and AURA can explain highest-unlock evidence. **No submissions.**

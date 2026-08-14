@@ -396,4 +396,232 @@ router.get("/auth-check", auraOpsVerifyAuth, requireHQModule("aura"), async (req
   });
 });
 
+const PHASE8A5_CORE_EVIDENCE = [
+  "irs_501c3",
+  "state_incorporation",
+  "sam_registration",
+  "uei",
+  "cage",
+  "bylaws",
+  "board_info",
+  "org_budget",
+  "financial_statements",
+  "insurance",
+  "org_chart",
+  "conflict_of_interest",
+  "procurement_policy",
+  "financial_controls",
+  "program_description",
+  "staffing_plan",
+  "past_performance",
+] as const;
+
+/**
+ * Phase 8A.5 production acceptance — Evidence Vault population & readiness.
+ * Auth: Founder JWT or AURA_OPS_VERIFY_TOKEN (same Phase 6 pattern). No Founder password.
+ * Does not submit grants, touch Twilio, or invent documents.
+ */
+router.post("/phase8a5/acceptance", auraOpsVerifyAuth, requireHQModule("aura"), async (req, res) => {
+  try {
+    const actorEmail = req.hqUser?.email || getFounderEmail();
+    const limit = typeof req.body?.limit === "number" ? req.body.limit : 30;
+
+    const {
+      runPhase8A5PopulationCycle,
+      buildFounderEvidenceActionQueue,
+      auditExistingHqEvidence,
+      scanEvidenceExpirations,
+    } = await import("../hq/auraGrantEvidencePopulationEngine");
+    const { buildFundingIntelligenceMetrics, answerFundingIntelligenceQuery } = await import(
+      "../hq/auraFundingIntelligenceEngine"
+    );
+    const { getDb } = await import("../db");
+
+    const cycle = await runPhase8A5PopulationCycle({ actorEmail, limit });
+    const metrics = await buildFundingIntelligenceMetrics();
+    const audit = await auditExistingHqEvidence({ actorEmail });
+    const queue = await buildFounderEvidenceActionQueue({ audit: audit.items });
+    const expirations = await scanEvidenceExpirations();
+
+    const auditByType = new Map(audit.items.map((i) => [i.evidenceType, i]));
+    const founderQueue = queue.map((q, idx) => {
+      const a = auditByType.get(q.evidenceType);
+      return {
+        rank: idx + 1,
+        evidenceType: q.evidenceType,
+        label: q.label,
+        status: a?.status || "missing",
+        whyNeeded: q.whyNeeded,
+        opportunitiesBlocked: q.opportunitiesBlocked,
+        addressableValueBlocked: q.addressableValueBlocked,
+        existsElsewhereInHq: q.existsElsewhereInHq,
+        canAuraGenerate: q.canAuraGenerate,
+        founderMustUpload: q.founderMustUpload,
+        thirdPartyRequired: q.thirdPartyRequired,
+        priority: q.priority,
+      };
+    });
+
+    const coreDocumentStatus = PHASE8A5_CORE_EVIDENCE.map((key) => {
+      const a = auditByType.get(key);
+      const q = founderQueue.find((x) => x.evidenceType === key);
+      return {
+        evidenceType: key,
+        label: a?.label || key,
+        status: a?.status || "missing",
+        existsElsewhereInHq: a?.existsElsewhereInHq ?? false,
+        canAuraGenerate: a?.canAuraGenerate ?? false,
+        thirdPartyRequired: a?.thirdPartyRequired ?? false,
+        opportunitiesBlocked: q?.opportunitiesBlocked ?? 0,
+        addressableValueBlocked: q?.addressableValueBlocked ?? 0,
+        priority: q?.priority ?? null,
+        hqDocumentHits: (a?.hqDocuments || []).map((d) => ({ id: d.id, title: d.title, category: d.category })),
+      };
+    });
+
+    const pilots = (cycle.pilots || {}) as {
+      top5?: Array<Record<string, unknown>>;
+      recommendedPilot?: Record<string, unknown> | null;
+      rationale?: string;
+      rejectedPriorPilot?: Record<string, unknown> | null;
+    };
+
+    const db = await getDb();
+    const enrichedTop5 = [];
+    for (const p of pilots.top5 || []) {
+      const missing = ((await db.all(
+        `SELECT label, match_status, gap_bucket, hard_blocker
+         FROM grant_opportunity_requirements
+         WHERE opportunity_id = ?
+           AND (match_status IN ('missing', 'unavailable', 'needs_update') OR hard_blocker = 1)
+         ORDER BY hard_blocker DESC, label LIMIT 12`,
+        String(p.id)
+      )) || []) as Array<Record<string, unknown>>;
+      enrichedTop5.push({
+        id: p.id,
+        title: p.title,
+        officialSource: p.url,
+        matchingProgram: p.best_program_slug,
+        ifcdcAddressableAmount: p.ifcdc_addressable_amount,
+        opportunityMatchScore: p.enriched_final_score ?? p.qualification_score,
+        applicationReadinessScore: p.application_readiness_score,
+        readinessClass: p.readiness_class,
+        deadline: p.deadline,
+        hardBlockerCount: p.hard_blocker_count,
+        missingEvidence: missing.map((m) => String(m.label)),
+        majorBlockers: missing.filter((m) => Number(m.hard_blocker) === 1).map((m) => String(m.label)),
+        pilotScore: p.pilotScore,
+        pilotRank: p.pilot_rank,
+        recommendation: p.pilot_rank === 1 ? "recommended_first_pilot" : "top5_candidate",
+      });
+    }
+
+    const closestToReady = ((await db.all(
+      `SELECT id, title, url, readiness_class, application_readiness_score,
+              ifcdc_addressable_amount, best_program_slug, hard_blocker_count, deadline
+       FROM grant_opportunities
+       WHERE eligibility_result IN ('eligible', 'possibly_eligible')
+         AND (duplicate_of_id IS NULL OR duplicate_of_id = '')
+         AND COALESCE(pilot_audit_recommendation, '') != 'do_not_pursue'
+         AND title NOT LIKE '%Lead-Safe%'
+         AND title NOT LIKE '%Healthy Homes Financ%'
+         AND readiness_class IN ('nearly_ready', 'needs_documents', 'ready_now')
+       ORDER BY
+         CASE readiness_class WHEN 'ready_now' THEN 0 WHEN 'nearly_ready' THEN 1 ELSE 2 END,
+         COALESCE(application_readiness_score, 0) DESC,
+         COALESCE(ifcdc_addressable_amount, 0) DESC
+       LIMIT 8`
+    )) || []) as Array<Record<string, unknown>>;
+
+    const askQuestions = [
+      "What IFCDC documents are still missing?",
+      "What document should I upload next?",
+      "Which document unlocks the most grant money?",
+      "How much application-ready funding do we have?",
+      "What is our next best pilot and why did you reject the previous pilot?",
+      "Which IFCDC program should we fund first?",
+    ];
+    const asks: Array<{ question: string; reply: string }> = [];
+    for (const question of askQuestions) {
+      try {
+        const ans = await answerFundingIntelligenceQuery({ question, actorEmail });
+        asks.push({ question, reply: ans.reply });
+      } catch (err) {
+        asks.push({
+          question,
+          reply: err instanceof Error ? err.message : "ask failed",
+        });
+      }
+    }
+
+    const recommended = enrichedTop5[0] || null;
+    const leadSafeExcluded = !(
+      recommended
+      && /lead[- ]?safe|healthy\s*homes\s*financ/i.test(String(recommended.title || ""))
+    );
+
+    return res.json({
+      ok: true,
+      phase: "8A.5",
+      maySubmit: false,
+      authMethod: (req as { auraOpsTokenAuth?: boolean }).auraOpsTokenAuth ? "ops_token" : "founder_jwt",
+      twilioUntouched: true,
+      founderPasswordUsed: false,
+      completionPercent: cycle.completionPercent,
+      completion: cycle.completion,
+      auditSummary: cycle.auditSummary,
+      existingEvidenceDiscovery: {
+        itemCount: audit.items.length,
+        byStatus: cycle.auditSummary,
+        verifiedOrPresent: audit.items.filter((i) =>
+          i.status === "verified" || i.status === "needs_update" || i.existsElsewhereInHq
+        ).length,
+      },
+      founderQueue,
+      handleFirst: founderQueue[0] || null,
+      coreDocumentStatus,
+      orgGrantProfile: cycle.orgProfile,
+      expirations,
+      evidenceVerificationRematch: {
+        note: "verifyEvidenceRecord rematches affected opportunities; cycle recalculated all qualified",
+        documentReadinessBatch: cycle.documentReadinessBatch,
+        readinessMovement: cycle.readinessMovement,
+      },
+      readiness: {
+        readyNowCount: metrics.readyNowCount,
+        readyNowFunding: metrics.applicationReadyFunding,
+        nearlyReadyCount: metrics.nearlyReadyCount,
+        nearlyReadyFunding: metrics.nearlyReadyFunding,
+        needsDocumentsCount: metrics.needsDocumentsCount,
+        reviewRequiredCount: metrics.reviewRequiredCount,
+        hardBlockerOpportunities: metrics.opportunitiesWithHardBlockers,
+        applicationReadyFunding: metrics.applicationReadyFunding,
+        closestToReady,
+      },
+      pilots: {
+        top5: enrichedTop5,
+        recommendedFirstPilot: recommended,
+        rationale: pilots.rationale || null,
+        rejectedPriorPilot: pilots.rejectedPriorPilot || null,
+        leadSafeExcluded,
+      },
+      programFundingReadiness: cycle.programFundingReadiness,
+      asks,
+      vaultMetrics: cycle.vaultMetrics,
+      securityBoundary: {
+        maySubmit: false,
+        maySignCertifications: false,
+        mayAcceptAwards: false,
+        mayMoveFunds: false,
+        mayInitiatePayroll: false,
+        mayMakeFinancialCommitments: false,
+      },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Phase 8A.5 acceptance failed";
+    console.error("Phase 8A.5 ops acceptance error:", message);
+    return res.status(502).json({ error: message, phase: "8A.5" });
+  }
+});
+
 export default router;
