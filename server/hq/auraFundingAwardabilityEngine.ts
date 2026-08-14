@@ -840,33 +840,38 @@ export async function selectFirstPilotRecommendation(): Promise<{
 }> {
   await ensureGrantTables();
   const db = await getDb();
-  const rows = await db.all<Record<string, unknown>>(
+  const leadSafeRe = /lead[- ]?safe|healthy\s*homes\s*financ/i;
+  const rows = ((await db.all(
     `SELECT id, title, funder, url, source_type, external_id, eligibility_result,
             qualification_score, enriched_final_score, best_program_slug, best_program_match_pct,
             ifcdc_addressable_amount, addressable_status, addressable_explanation,
             application_readiness_score, readiness_class, match_required, deadline,
-            can_ifcdc_apply, is_realistic_to_pursue, awardability_json
+            can_ifcdc_apply, is_realistic_to_pursue, awardability_json, pilot_audit_recommendation
      FROM grant_opportunities
      WHERE eligibility_result IN ('eligible', 'possibly_eligible')
        AND (duplicate_of_id IS NULL OR duplicate_of_id = '')
        AND COALESCE(readiness_class, '') != 'not_ready'
+       AND COALESCE(pilot_audit_recommendation, '') != 'do_not_pursue'
      ORDER BY
        CASE readiness_class
          WHEN 'ready_now' THEN 0
-         WHEN 'needs_documents' THEN 1
-         WHEN 'needs_program_development' THEN 2
-         WHEN 'needs_matching_funds' THEN 3
-         WHEN 'review_required' THEN 4
-         ELSE 5
+         WHEN 'nearly_ready' THEN 1
+         WHEN 'needs_documents' THEN 2
+         WHEN 'needs_program_development' THEN 3
+         WHEN 'needs_matching_funds' THEN 4
+         WHEN 'review_required' THEN 5
+         ELSE 6
        END,
        COALESCE(application_readiness_score, 0) DESC,
        COALESCE(best_program_match_pct, 0) DESC,
        COALESCE(ifcdc_addressable_amount, 0) DESC,
        COALESCE(enriched_final_score, qualification_score, 0) DESC
-     LIMIT 25`
-  );
+     LIMIT 40`
+  )) || []) as Array<Record<string, unknown>>;
 
-  const scored = rows.map((r) => {
+  const scored = rows
+    .filter((r) => !leadSafeRe.test(String(r.title || "")))
+    .map((r) => {
     const elig =
       r.eligibility_result === "eligible" ? 30 : r.eligibility_result === "possibly_eligible" ? 18 : 0;
     const fit = Math.min(25, Number(r.best_program_match_pct || 0) * 0.25);
@@ -907,8 +912,8 @@ export async function selectFirstPilotRecommendation(): Promise<{
           : "UNKNOWN"
       }, `
       + `eligibility ${recommendedPilot.eligibility_result}. Official source: ${recommendedPilot.url}. `
-      + `No submission — Founder approval required before Application Factory.`
-    : "No qualified opportunities available for pilot recommendation.";
+      + `Lead-Safe / do_not_pursue opportunities excluded. No submission — Founder approval required.`
+    : "No qualified opportunities available for pilot recommendation (Lead-Safe / do_not_pursue excluded).";
 
   return { top3, recommendedPilot, rationale };
 }

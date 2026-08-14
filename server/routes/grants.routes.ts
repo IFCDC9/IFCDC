@@ -2139,7 +2139,9 @@ router.get("/funding-intelligence/evidence-vault", async (req, res) => {
     await syncGrantEvidenceVault({ actorEmail: req.hqUser?.email });
   }
   res.json({
-    records: await listEvidenceVault({ status: typeof req.query.status === "string" ? req.query.status : undefined }),
+    records: await listEvidenceVault({
+      verificationStatus: typeof req.query.status === "string" ? req.query.status : undefined,
+    }),
     metrics: await buildEvidenceVaultMetrics(),
   });
 });
@@ -2165,6 +2167,93 @@ router.post("/funding-intelligence/pilot-audit", async (req: Request, res: Respo
     const message = err instanceof Error ? err.message : "Pilot audit failed";
     res.status(502).json({ error: message });
   }
+});
+
+/** Phase 8A.5 — Evidence Vault population, Founder queue, org profile, next pilots. */
+router.post("/funding-intelligence/evidence-population", async (req: Request, res: Response) => {
+  try {
+    const { runPhase8A5PopulationCycle } = await import("../hq/auraGrantEvidencePopulationEngine");
+    const { buildFundingIntelligenceMetrics } = await import("../hq/auraFundingIntelligenceEngine");
+    const result = await runPhase8A5PopulationCycle({
+      actorEmail: req.hqUser?.email,
+      limit: typeof req.body?.limit === "number" ? req.body.limit : 40,
+    });
+    const metrics = await buildFundingIntelligenceMetrics();
+    res.json({ ok: true, ...result, metrics, maySubmit: false });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Evidence population failed";
+    console.error("Phase 8A.5 evidence population error:", message);
+    res.status(502).json({ error: message });
+  }
+});
+
+router.get("/funding-intelligence/evidence-audit", async (_req, res) => {
+  const { auditExistingHqEvidence, buildFounderEvidenceActionQueue, getEvidenceCompletionPercent } =
+    await import("../hq/auraGrantEvidencePopulationEngine");
+  const audit = await auditExistingHqEvidence();
+  const founderQueue = await buildFounderEvidenceActionQueue({ audit: audit.items });
+  res.json({
+    completion: await getEvidenceCompletionPercent(),
+    audit,
+    founderQueue,
+  });
+});
+
+router.get("/funding-intelligence/founder-evidence-queue", async (_req, res) => {
+  const { buildFounderEvidenceActionQueue } = await import("../hq/auraGrantEvidencePopulationEngine");
+  res.json({ queue: await buildFounderEvidenceActionQueue() });
+});
+
+router.get("/funding-intelligence/org-grant-profile", async (req, res) => {
+  const { buildIfcdcOrganizationalGrantProfile } = await import("../hq/auraGrantEvidencePopulationEngine");
+  const refresh = req.query.refresh === "1";
+  const profile = refresh
+    ? await buildIfcdcOrganizationalGrantProfile({ actorEmail: req.hqUser?.email })
+    : await buildIfcdcOrganizationalGrantProfile({ actorEmail: req.hqUser?.email });
+  res.json(profile);
+});
+
+router.post("/funding-intelligence/evidence/verify", async (req: Request, res: Response) => {
+  try {
+    const { verifyEvidenceRecord } = await import("../hq/auraGrantEvidencePopulationEngine");
+    const result = await verifyEvidenceRecord({
+      evidenceRecordId: typeof req.body?.evidenceRecordId === "string" ? req.body.evidenceRecordId : undefined,
+      evidenceType: typeof req.body?.evidenceType === "string" ? req.body.evidenceType : undefined,
+      hqDocumentId: typeof req.body?.hqDocumentId === "string" ? req.body.hqDocumentId : undefined,
+      actorEmail: req.hqUser?.email,
+      founderApproved: req.body?.founderApproved === true,
+    });
+    res.json({ ok: true, ...result, maySubmit: false });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Evidence verify failed";
+    res.status(502).json({ error: message });
+  }
+});
+
+router.post("/funding-intelligence/select-next-pilots", async (req: Request, res: Response) => {
+  try {
+    const { selectNextPilotCandidates, recalculateAllQualifiedReadiness } = await import(
+      "../hq/auraGrantEvidencePopulationEngine"
+    );
+    if (req.body?.recalculate === true) {
+      const readiness = await recalculateAllQualifiedReadiness({
+        limit: typeof req.body?.limit === "number" ? req.body.limit : 40,
+        actorEmail: req.hqUser?.email,
+      });
+      res.json({ ok: true, ...readiness.pilots, readinessMovement: readiness.readinessMovement, maySubmit: false });
+      return;
+    }
+    const pilots = await selectNextPilotCandidates();
+    res.json({ ok: true, ...pilots, maySubmit: false });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Next pilot selection failed";
+    res.status(502).json({ error: message });
+  }
+});
+
+router.get("/funding-intelligence/program-readiness", async (_req, res) => {
+  const { buildProgramFundingReadinessView } = await import("../hq/auraGrantEvidencePopulationEngine");
+  res.json({ programs: await buildProgramFundingReadinessView() });
 });
 
 router.get("/funding-intelligence/opportunities/:id/explain", async (req, res) => {

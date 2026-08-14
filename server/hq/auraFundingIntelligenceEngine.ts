@@ -1111,10 +1111,32 @@ export async function buildFundingIntelligenceDashboard() {
   } catch {
     programProfiles = [];
   }
-  let pilot: Awaited<ReturnType<typeof import("./auraFundingAwardabilityEngine").selectFirstPilotRecommendation>> | null = null;
+  let pilot: {
+    top3: Array<Record<string, unknown>>;
+    recommendedPilot: Record<string, unknown> | null;
+    rationale: string;
+  } | null = null;
   try {
-    const { selectFirstPilotRecommendation } = await import("./auraFundingAwardabilityEngine");
-    pilot = await selectFirstPilotRecommendation();
+    const top3 = (await db.all(
+      `SELECT id, title, funder, url, readiness_class, application_readiness_score,
+              ifcdc_addressable_amount, best_program_slug, best_program_match_pct,
+              pilot_rank, pilot_audit_recommendation, eligibility_result
+       FROM grant_opportunities
+       WHERE pilot_rank IS NOT NULL AND pilot_rank BETWEEN 1 AND 5
+         AND COALESCE(pilot_audit_recommendation, '') != 'do_not_pursue'
+         AND title NOT LIKE '%Lead-Safe%'
+         AND title NOT LIKE '%Healthy Homes Financ%'
+       ORDER BY pilot_rank ASC
+       LIMIT 5`
+    )) as Array<Record<string, unknown>>;
+    const recommendedPilot = top3[0] || null;
+    pilot = {
+      top3: top3.slice(0, 3),
+      recommendedPilot,
+      rationale: recommendedPilot
+        ? `Current first pilot (Phase 8A.5 ranks): "${recommendedPilot.title}" · readiness ${recommendedPilot.readiness_class} · score ${recommendedPilot.application_readiness_score}. Lead-Safe / do_not_pursue excluded. No auto-submit.`
+        : "No pilot ranks yet — run Evidence Vault population (Phase 8A.5).",
+    };
   } catch {
     pilot = null;
   }
@@ -1125,9 +1147,63 @@ export async function buildFundingIntelligenceDashboard() {
   } catch {
     evidenceVault = null;
   }
+  let evidencePopulation: Record<string, unknown> | null = null;
+  try {
+    const {
+      buildFounderEvidenceActionQueue,
+      getEvidenceCompletionPercent,
+      buildProgramFundingReadinessView,
+      buildIfcdcOrganizationalGrantProfile,
+    } = await import("./auraGrantEvidencePopulationEngine");
+    const [completion, founderQueue, programReadiness, orgProfile, top5Pilots, rejectedLeadSafe] =
+      await Promise.all([
+        getEvidenceCompletionPercent(),
+        buildFounderEvidenceActionQueue(),
+        buildProgramFundingReadinessView(),
+        buildIfcdcOrganizationalGrantProfile(),
+        db.all(
+          `SELECT id, title, funder, url, readiness_class, application_readiness_score,
+                  ifcdc_addressable_amount, best_program_slug, pilot_rank, pilot_audit_recommendation
+           FROM grant_opportunities
+           WHERE pilot_rank IS NOT NULL AND pilot_rank BETWEEN 1 AND 5
+           ORDER BY pilot_rank ASC`
+        ),
+        db.get(
+          `SELECT id, title, pilot_audit_recommendation, readiness_class
+           FROM grant_opportunities
+           WHERE pilot_audit_recommendation = 'do_not_pursue'
+              OR title LIKE '%Lead-Safe%'
+              OR title LIKE '%Healthy Homes Financ%'
+           ORDER BY datetime(updated_at) DESC LIMIT 1`
+        ),
+      ]);
+    const recommended = (top5Pilots as Array<Record<string, unknown>>)[0] || null;
+    evidencePopulation = {
+      completionPercent: completion.percent,
+      completion,
+      founderQueue: founderQueue.slice(0, 15),
+      topBlockingDocuments: founderQueue.slice(0, 8),
+      nextPilots: {
+        top5: top5Pilots,
+        recommendedPilot: recommended,
+        rejectedPriorPilot: rejectedLeadSafe || null,
+      },
+      programReadiness,
+      orgProfileSummary: {
+        verifiedFieldCount: Array.isArray((orgProfile as { verifiedFields?: unknown[] }).verifiedFields)
+          ? (orgProfile as { verifiedFields: unknown[] }).verifiedFields.length
+          : 0,
+        unknownFieldCount: Array.isArray((orgProfile as { unknownFields?: unknown[] }).unknownFields)
+          ? (orgProfile as { unknownFields: unknown[] }).unknownFields.length
+          : 0,
+      },
+    };
+  } catch {
+    evidencePopulation = null;
+  }
   return {
     generatedAt: new Date().toISOString(),
-    phase: "8A.4",
+    phase: "8A.5",
     metrics,
     sources,
     priorityOpportunities: priority,
@@ -1136,6 +1212,7 @@ export async function buildFundingIntelligenceDashboard() {
     programProfiles,
     pilotRecommendation: pilot,
     evidenceVault,
+    evidencePopulation,
     securityBoundary: {
       maySubmit: false,
       maySignCertifications: false,
@@ -1181,7 +1258,29 @@ export async function answerFundingIntelligenceQuery(opts: {
     };
   }
 
-  if (/documents? (are )?missing|missing for this grant|what.*(blocking|preventing)/.test(q)) {
+  if (/documents? (are )?missing|missing for this grant|what.*(blocking|preventing)|what ifcdc documents are still missing|still missing/.test(q)) {
+    try {
+      const { buildFounderEvidenceActionQueue } = await import("./auraGrantEvidencePopulationEngine");
+      const queue = await buildFounderEvidenceActionQueue();
+      if (queue.length) {
+        return {
+          reply:
+            `${queue.length} Founder evidence actions prioritized. Top: `
+            + queue
+              .slice(0, 5)
+              .map(
+                (i) =>
+                  `${i.label} (${i.priority}) — blocks ${i.opportunitiesBlocked} opps / $${i.addressableValueBlocked.toLocaleString()}`
+              )
+              .join("; ")
+            + ".",
+          records: queue.slice(0, 20) as unknown as Array<Record<string, unknown>>,
+          metrics,
+        };
+      }
+    } catch {
+      /* fall through */
+    }
     const rows = (await db.all(
       `SELECT o.id, o.title, o.url, r.label, r.match_status, r.gap_bucket, r.hard_blocker, r.notes
        FROM grant_opportunity_requirements r
@@ -1197,6 +1296,82 @@ export async function answerFundingIntelligenceQuery(opts: {
         + `Hard-blocker opportunities: ${metrics.opportunitiesWithHardBlockers}. `
         + (rows[0] ? `Example: ${rows[0].title} — ${rows[0].label} (${rows[0].match_status}).` : "Run document readiness first."),
       records: rows,
+      metrics,
+    };
+  }
+
+  if (/upload next|what document should i upload|which document.*next/.test(q)) {
+    const { buildFounderEvidenceActionQueue } = await import("./auraGrantEvidencePopulationEngine");
+    const queue = await buildFounderEvidenceActionQueue();
+    const next = queue.find((i) => i.founderMustUpload) || queue[0];
+    return {
+      reply: next
+        ? `Upload next: ${next.label} (${next.priority}). Blocks ${next.opportunitiesBlocked} opportunities / $${next.addressableValueBlocked.toLocaleString()}. ${next.whyNeeded}`
+        : "No Founder upload actions queued — run evidence population.",
+      records: next ? [next as unknown as Record<string, unknown>] : [],
+      metrics,
+    };
+  }
+
+  if (/unlocks the most|unlock the most grant|which document unlocks|become ready if i upload/.test(q)) {
+    const { buildFounderEvidenceActionQueue } = await import("./auraGrantEvidencePopulationEngine");
+    const queue = await buildFounderEvidenceActionQueue();
+    const top = [...queue].sort((a, b) => b.addressableValueBlocked - a.addressableValueBlocked)[0];
+    return {
+      reply: top
+        ? `${top.label} unlocks the most addressable funding currently blocked: $${top.addressableValueBlocked.toLocaleString()} across ${top.opportunitiesBlocked} opportunities. Upload/verify that evidence, then readiness recalculates automatically.`
+        : "No blocking evidence ranked yet — run evidence population.",
+      records: top ? [top as unknown as Record<string, unknown>] : [],
+      metrics,
+    };
+  }
+
+  if (/next best pilot|next.?best.?pilot|recommended first pilot|why did you reject|rejected.*pilot|previous pilot/.test(q)) {
+    const pilots = (await db.all(
+      `SELECT id, title, readiness_class, application_readiness_score, ifcdc_addressable_amount,
+              pilot_rank, pilot_audit_recommendation, url, best_program_slug
+       FROM grant_opportunities
+       WHERE pilot_rank IS NOT NULL AND pilot_rank BETWEEN 1 AND 5
+       ORDER BY pilot_rank ASC`
+    )) as Array<Record<string, unknown>>;
+    const rejected = (await db.get(
+      `SELECT id, title, pilot_audit_recommendation, readiness_class FROM grant_opportunities
+       WHERE pilot_audit_recommendation = 'do_not_pursue'
+          OR title LIKE '%Lead-Safe%' OR title LIKE '%Healthy Homes Financ%'
+       ORDER BY datetime(updated_at) DESC LIMIT 1`
+    )) as Record<string, unknown> | undefined;
+    const first = pilots[0];
+    return {
+      reply:
+        (rejected
+          ? `Previous Lead-Safe / Healthy Homes pilot rejected (${rejected.pilot_audit_recommendation || "do_not_pursue"}): "${rejected.title}". `
+          : "")
+        + (first
+          ? `Recommended first pilot now: "${first.title}" (rank ${first.pilot_rank}, ${first.readiness_class}, score ${first.application_readiness_score}). Top 5 ranked; no auto-submit.`
+          : "No next pilot ranked yet — run evidence population (Phase 8A.5)."),
+      records: pilots,
+      metrics,
+    };
+  }
+
+  if (/which ifcdc program|program.*grant-ready|program.*addressable|fund first/.test(q)) {
+    const { buildProgramFundingReadinessView } = await import("./auraGrantEvidencePopulationEngine");
+    const programs = await buildProgramFundingReadinessView();
+    const byReady = [...programs].sort(
+      (a, b) => b.readyNow + b.nearlyReady - (a.readyNow + a.nearlyReady) || b.addressableSum - a.addressableSum
+    );
+    const byFunding = [...programs].sort((a, b) => b.addressableSum - a.addressableSum);
+    const closest = byReady[0];
+    const richest = byFunding[0];
+    return {
+      reply:
+        (closest
+          ? `Closest to grant-ready: ${closest.programLabel} (${closest.readyNow} READY NOW, ${closest.nearlyReady} NEARLY READY, $${closest.addressableSum.toLocaleString()} addressable). `
+          : "")
+        + (richest
+          ? `Most addressable funding: ${richest.programLabel} ($${richest.addressableSum.toLocaleString()} across ${richest.qualifiedCount} qualified).`
+          : "Run evidence population for program readiness view."),
+      records: programs as unknown as Array<Record<string, unknown>>,
       metrics,
     };
   }

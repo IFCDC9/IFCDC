@@ -133,6 +133,7 @@ export async function ensureGrantTables(): Promise<void> {
   await migrateGrantPhase8A2();
   await migrateGrantPhase8A3();
   await migrateGrantPhase8A4();
+  await migrateGrantPhase8A5();
   if (!allowGrantDemoSeed()) {
     return;
   }
@@ -1279,6 +1280,47 @@ async function migrateGrantPhase8A4(): Promise<void> {
   await addCol("hq_documents", "effective_date", "TEXT");
   await addCol("hq_documents", "expiration_date", "TEXT");
   await addCol("hq_documents", "verification_status", "TEXT");
+}
+
+/**
+ * Phase 8A.5 — Evidence population, org grant profile snapshot, unlock events.
+ * Does not invent documents; banking evidence stays status-only in API consumers.
+ */
+async function migrateGrantPhase8A5(): Promise<void> {
+  const db = await getDb();
+  const addCol = async (table: string, col: string, type: string) => {
+    try {
+      await db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+    } catch {
+      /* exists */
+    }
+  };
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS ifcdc_org_grant_profiles (
+      id TEXT PRIMARY KEY,
+      profile_json TEXT NOT NULL,
+      verified_fields_json TEXT,
+      unknown_fields_json TEXT,
+      source_note TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS grant_evidence_unlock_events (
+      id TEXT PRIMARY KEY,
+      evidence_type TEXT NOT NULL,
+      opportunity_id TEXT,
+      addressable_amount REAL,
+      readiness_class_before TEXT,
+      readiness_class_after TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_unlock_evidence ON grant_evidence_unlock_events(evidence_type, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_unlock_opp ON grant_evidence_unlock_events(opportunity_id);
+  `);
+
+  await addCol("grant_evidence_records", "associated_opportunity_ids_json", "TEXT");
 }
 
 export async function logGrantActivity(

@@ -117,11 +117,14 @@ export const GrantFoundationDashboardPanel: React.FC<{
       {fundingIntel.data && (
         <div style={{ marginTop: "1rem" }}>
           <HqPanel
-            title="AURA Funding Intelligence (Phase 8A.4)"
+            title="AURA Funding Intelligence (Phase 8A.5)"
             subtitle={
               [
                 fundingIntel.data.metrics.pipelineSummary,
                 fundingIntel.data.metrics.addressableSummary,
+                fundingIntel.data.evidencePopulation?.completionPercent != null
+                  ? `Evidence vault ${fundingIntel.data.evidencePopulation.completionPercent}%`
+                  : null,
               ].filter(Boolean).join(" · ")
               || `Live HQ records · confidence ${fundingIntel.data.metrics.dataConfidence} · no auto-submit`
             }
@@ -149,6 +152,17 @@ export const GrantFoundationDashboardPanel: React.FC<{
                 >
                   Document readiness
                 </button>
+                <button
+                  type="button"
+                  className="hq-btn hq-btn-sm hq-btn-ghost"
+                  onClick={() => {
+                    void grantsApi.fundingIntelligenceEvidencePopulation({ limit: 40 }).then(() => {
+                      void fundingIntel.refetch();
+                    });
+                  }}
+                >
+                  Populate evidence vault
+                </button>
               </div>
             }
           >
@@ -173,11 +187,27 @@ export const GrantFoundationDashboardPanel: React.FC<{
               <KpiCard label="NEARLY READY" value={fundingIntel.data.metrics.nearlyReadyCount ?? 0} />
               <KpiCard label="Needs documents" value={fundingIntel.data.metrics.needsDocumentsCount ?? 0} variant="warning" />
               <KpiCard label="Hard blockers" value={fundingIntel.data.metrics.opportunitiesWithHardBlockers ?? 0} variant="warning" />
+              <KpiCard
+                label="Evidence vault %"
+                value={`${fundingIntel.data.evidencePopulation?.completionPercent ?? fundingIntel.data.evidenceVault?.completionPercent ?? 0}%`}
+              />
               <KpiCard label="Deadlines 30d" value={fundingIntel.data.metrics.upcomingDeadlines} variant="warning" />
             </div>
             <div className="hq-grid-2">
               <div>
-                <h4 style={{ fontSize: "0.8rem", color: "var(--hq-text-dim)", marginBottom: "0.5rem" }}>Highest-value application-ready</h4>
+                <h4 style={{ fontSize: "0.8rem", color: "var(--hq-text-dim)", marginBottom: "0.5rem" }}>Top blocking documents</h4>
+                <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.78rem" }}>
+                  {(fundingIntel.data.evidencePopulation?.topBlockingDocuments || []).slice(0, 6).map((d: Record<string, unknown>, i: number) => (
+                    <li key={String(d.evidenceType || i)}>
+                      {String(d.label || d.evidenceType)} · {String(d.priority || "")} · blocks {String(d.opportunitiesBlocked ?? 0)} ·{" "}
+                      {fmt(Number(d.addressableValueBlocked) || 0)}
+                    </li>
+                  ))}
+                  {!fundingIntel.data.evidencePopulation?.topBlockingDocuments?.length && (
+                    <li className="hq-muted-text">Run Populate evidence vault for the Founder action queue.</li>
+                  )}
+                </ul>
+                <h4 style={{ fontSize: "0.8rem", color: "var(--hq-text-dim)", margin: "0.75rem 0 0.5rem" }}>Highest-value application-ready</h4>
                 <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.78rem" }}>
                   {(fundingIntel.data.applicationReadyOpportunities || fundingIntel.data.priorityOpportunities || []).slice(0, 6).map((o) => (
                     <li key={String(o.id)}>
@@ -197,31 +227,69 @@ export const GrantFoundationDashboardPanel: React.FC<{
                 </ul>
               </div>
               <div>
-                <h4 style={{ fontSize: "0.8rem", color: "var(--hq-text-dim)", marginBottom: "0.5rem" }}>First pilot recommendation</h4>
-                {fundingIntel.data.pilotRecommendation?.recommendedPilot ? (
+                <h4 style={{ fontSize: "0.8rem", color: "var(--hq-text-dim)", marginBottom: "0.5rem" }}>Recommended first pilot (Lead-Safe excluded)</h4>
+                {fundingIntel.data.evidencePopulation?.nextPilots?.recommendedPilot || fundingIntel.data.pilotRecommendation?.recommendedPilot ? (
                   <div style={{ fontSize: "0.78rem" }}>
                     <a
-                      href={String(fundingIntel.data.pilotRecommendation.recommendedPilot.url || "#")}
+                      href={String(
+                        (fundingIntel.data.evidencePopulation?.nextPilots?.recommendedPilot ||
+                          fundingIntel.data.pilotRecommendation?.recommendedPilot)?.url || "#"
+                      )}
                       target="_blank"
                       rel="noreferrer"
                     >
-                      {String(fundingIntel.data.pilotRecommendation.recommendedPilot.title || "Pilot")}
+                      {String(
+                        (fundingIntel.data.evidencePopulation?.nextPilots?.recommendedPilot ||
+                          fundingIntel.data.pilotRecommendation?.recommendedPilot)?.title || "Pilot"
+                      )}
                     </a>
                     <p className="hq-muted-text" style={{ marginTop: "0.35rem" }}>
-                      {fundingIntel.data.pilotRecommendation.rationale}
+                      {fundingIntel.data.pilotRecommendation?.rationale}
                     </p>
-                    <p style={{ marginTop: "0.35rem" }}>Top 3:</p>
+                    <p style={{ marginTop: "0.35rem" }}>Top 5 candidates:</p>
                     <ol style={{ margin: 0, paddingLeft: "1.1rem" }}>
-                      {(fundingIntel.data.pilotRecommendation.top3 || []).map((o) => (
-                        <li key={String(o.id)}>{String(o.title)} · composite {String(o.pilotComposite ?? "")}</li>
+                      {(
+                        fundingIntel.data.evidencePopulation?.nextPilots?.top5 ||
+                        fundingIntel.data.pilotRecommendation?.top3 ||
+                        []
+                      ).map((o: Record<string, unknown>) => (
+                        <li key={String(o.id)}>
+                          {String(o.title)} · {String(o.readiness_class || "")} ·{" "}
+                          {o.ifcdc_addressable_amount != null ? fmt(Number(o.ifcdc_addressable_amount)) : "UNKNOWN"}
+                        </li>
                       ))}
                     </ol>
+                    {fundingIntel.data.evidencePopulation?.nextPilots?.rejectedPriorPilot ? (
+                      <p className="hq-muted-text" style={{ marginTop: "0.5rem" }}>
+                        Prior pilot rejected:{" "}
+                        {String((fundingIntel.data.evidencePopulation.nextPilots.rejectedPriorPilot as Record<string, unknown>).title || "")}
+                      </p>
+                    ) : null}
                   </div>
                 ) : (
                   <p className="hq-muted-text" style={{ fontSize: "0.78rem" }}>
-                    Verify awardability to generate a Founder pilot recommendation (no auto-submit).
+                    Populate the Evidence Vault to generate the next pilot recommendation (no auto-submit).
                   </p>
                 )}
+                <h4 style={{ fontSize: "0.8rem", color: "var(--hq-text-dim)", margin: "0.75rem 0 0.5rem" }}>Program readiness</h4>
+                <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.78rem" }}>
+                  {(fundingIntel.data.evidencePopulation?.programReadiness || [])
+                    .slice()
+                    .sort(
+                      (a: Record<string, unknown>, b: Record<string, unknown>) =>
+                        Number(b.addressableSum || 0) - Number(a.addressableSum || 0)
+                    )
+                    .slice(0, 6)
+                    .map((p: Record<string, unknown>) => (
+                      <li key={String(p.programSlug)}>
+                        {String(p.programLabel)} · {fmt(Number(p.addressableSum) || 0)} · READY {String(p.readyNow ?? 0)} · NEARLY{" "}
+                        {String(p.nearlyReady ?? 0)}
+                      </li>
+                    ))}
+                  {!fundingIntel.data.evidencePopulation?.programReadiness?.length && (
+                    <li className="hq-muted-text">Program-by-program view appears after evidence population.</li>
+                  )}
+                </ul>
               </div>
             </div>
           </HqPanel>

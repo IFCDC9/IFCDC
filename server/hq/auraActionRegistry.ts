@@ -377,6 +377,39 @@ const fundingIntelligenceDocumentReadiness: AuraAction = {
   },
 };
 
+const fundingIntelligenceEvidencePopulation: AuraAction = {
+  id: "funding_intelligence_evidence_population",
+  label: "Evidence Vault Population",
+  module: "grants",
+  kind: "prepare",
+  description:
+    "Phase 8A.5: audit HQ evidence, build Founder action queue, snapshot verified org grant profile, recalculate readiness, and select next Top-5 pilots (Lead-Safe excluded). Does not invent documents or submit.",
+  parameters: {
+    limit: { type: "number", description: "Max qualified opportunities to recalculate (default 40)." },
+  },
+  async run(args, ctx) {
+    const { runPhase8A5PopulationCycle } = await import("./auraGrantEvidencePopulationEngine");
+    const { buildFundingIntelligenceMetrics } = await import("./auraFundingIntelligenceEngine");
+    const result = await runPhase8A5PopulationCycle({
+      limit: typeof args.limit === "number" ? args.limit : 40,
+      actorEmail: ctx.actorEmail || "aura",
+    });
+    const metrics = await buildFundingIntelligenceMetrics();
+    const pilot = (result.pilots as { recommendedPilot?: { title?: string }; top5?: unknown[] })?.recommendedPilot;
+    const queue = (result.founderQueue as unknown[]) || [];
+    return {
+      status: "done",
+      summary:
+        `Evidence population ${result.completionPercent}% complete. Founder queue ${queue.length}. `
+        + `READY NOW ${metrics.readyNowCount}, NEARLY READY ${metrics.nearlyReadyCount}. `
+        + `App-ready $${metrics.applicationReadyFunding.toLocaleString()}. `
+        + `Next pilot: ${pilot?.title || "none"} (Lead-Safe excluded). No submit.`,
+      data: { ...result, metrics },
+      navigation: { path: "/hq/grants", label: "Open Grant Center" },
+    };
+  },
+};
+
 const enterpriseFundingScan: AuraAction = {
   id: "enterprise_funding_scan",
   label: "Enterprise Funding Scan",
@@ -1872,6 +1905,7 @@ export const AURA_ACTIONS: AuraAction[] = [
   fundingIntelligenceEnrich,
   fundingIntelligenceAwardability,
   fundingIntelligenceDocumentReadiness,
+  fundingIntelligenceEvidencePopulation,
   enterpriseFundingScan,
   matchProgram,
   syncGrants,

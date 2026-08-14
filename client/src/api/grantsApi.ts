@@ -186,6 +186,20 @@ export const grantsApi = {
         recommendedPilot: Record<string, unknown> | null;
         rationale: string;
       };
+      evidenceVault?: Record<string, unknown> | null;
+      evidencePopulation?: {
+        completionPercent?: number;
+        completion?: Record<string, unknown>;
+        founderQueue?: Record<string, unknown>[];
+        topBlockingDocuments?: Record<string, unknown>[];
+        nextPilots?: {
+          top5?: Record<string, unknown>[];
+          recommendedPilot?: Record<string, unknown> | null;
+          rejectedPriorPilot?: Record<string, unknown> | null;
+        };
+        programReadiness?: Record<string, unknown>[];
+        orgProfileSummary?: Record<string, unknown>;
+      } | null;
     }>("/funding-intelligence/dashboard"),
   fundingIntelligenceScan: (body?: { providers?: string[]; limitQualify?: number }) =>
     apiFetch<Record<string, unknown>>("/funding-intelligence/scan", {
@@ -215,6 +229,17 @@ export const grantsApi = {
       body: JSON.stringify(body || { limit: 40, onlyQualified: true }),
       timeoutMs: 300_000,
     }),
+  fundingIntelligenceEvidencePopulation: (body?: { limit?: number }) =>
+    apiFetch<Record<string, unknown>>("/funding-intelligence/evidence-population", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || { limit: 40 }),
+      timeoutMs: 360_000,
+    }),
+  fundingIntelligenceFounderQueue: () =>
+    apiFetch<{ queue: Record<string, unknown>[] }>("/funding-intelligence/founder-evidence-queue"),
+  fundingIntelligenceProgramReadiness: () =>
+    apiFetch<{ programs: Record<string, unknown>[] }>("/funding-intelligence/program-readiness"),
   fundingIntelligenceAsk: (question: string) =>
     apiFetch<{ reply: string; records: Record<string, unknown>[]; metrics: Record<string, unknown> }>(
       "/funding-intelligence/ask",

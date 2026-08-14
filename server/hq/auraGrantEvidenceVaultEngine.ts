@@ -1108,6 +1108,9 @@ export async function deepAuditFirstPilot(opts: {
       `SELECT * FROM grant_opportunities
        WHERE eligibility_result IN ('eligible', 'possibly_eligible')
          AND (duplicate_of_id IS NULL OR duplicate_of_id = '')
+         AND COALESCE(pilot_audit_recommendation, '') != 'do_not_pursue'
+         AND title NOT LIKE '%Lead-Safe%'
+         AND title NOT LIKE '%Healthy Homes Financ%'
        ORDER BY
          CASE WHEN pilot_rank IS NOT NULL THEN pilot_rank ELSE 999 END,
          COALESCE(application_readiness_score, 0) DESC,
