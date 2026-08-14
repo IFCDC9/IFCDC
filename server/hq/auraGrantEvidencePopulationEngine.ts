@@ -1557,6 +1557,14 @@ const KB_SOURCE_TO_EVIDENCE: Record<string, string[]> = {
   registration: [], // federal integrations own SAM/UEI/IRS; do not duplicate
 };
 
+function evidenceTypesForKnowledgeDoc(sourceType: string, title: string): string[] {
+  // Never credit insurance renewal notices as board_info / org_profile governance.
+  if (/hiscox|professional\s*liability|insurance\s*renewal|\bcoi\b|certificate\s*of\s*liability/i.test(title)) {
+    return sourceType === "registration" ? [] : ["insurance"];
+  }
+  return KB_SOURCE_TO_EVIDENCE[sourceType] || [];
+}
+
 /**
  * Bridge AURA Knowledge Base → Document Center → Evidence Vault.
  * Fixes the pipeline break where org budgets/programs lived in KB but never
@@ -1582,7 +1590,7 @@ export async function syncKnowledgeBaseIntoEvidenceVault(opts?: {
     const sourceType = String(row.source_type || "");
     const title = String(row.title || "Knowledge document");
     const id = String(row.id || "");
-    const evidenceTypes = KB_SOURCE_TO_EVIDENCE[sourceType];
+    const evidenceTypes = evidenceTypesForKnowledgeDoc(sourceType, title);
 
     const entry: Record<string, unknown> = {
       knowledgeDocumentId: id,
@@ -1726,6 +1734,23 @@ export async function syncKnowledgeBaseIntoEvidenceVault(opts?: {
     metadata: { hqDocsCreated, vaultUpserts, mapped },
   });
 
+  // Repair: Hiscox/insurance titles must never remain as board_info.
+  const badBoard = await safeAll<{ id: string; title: string; hq_document_id: string | null }>(
+    `SELECT id, title, hq_document_id FROM grant_evidence_records
+     WHERE evidence_type = 'board_info'
+       AND (title LIKE '%Hiscox%' OR title LIKE '%Professional Liability%' OR title LIKE '%Insurance Renewal%')`
+  );
+  for (const row of badBoard) {
+    await safeRun(`DELETE FROM grant_evidence_records WHERE id = ?`, row.id);
+    if (row.hq_document_id) {
+      await safeRun(
+        `UPDATE hq_documents SET evidence_type = 'insurance', updated_at = ? WHERE id = ? AND (title LIKE '%Hiscox%' OR title LIKE '%Insurance%')`,
+        nowIso(),
+        row.hq_document_id
+      );
+    }
+  }
+
   return {
     ok: true,
     knowledgeDocumentsScanned: listed.length,
@@ -1734,6 +1759,7 @@ export async function syncKnowledgeBaseIntoEvidenceVault(opts?: {
     mappedEvidenceTypes: Array.from(new Set(mapped)),
     skipped,
     inventory,
+    repairedMisMappedBoardInfo: badBoard.length,
   };
 }
 
@@ -1842,7 +1868,7 @@ export async function ingestHiscoxProfessionalLiabilityEvidence(opts?: {
 
   // AURA organizational knowledge
   await ingestKnowledgeDocument({
-    sourceType: "org_profile",
+    sourceType: "document",
     sourceKey: "insurance:hiscox-professional-liability",
     title,
     content: body,
