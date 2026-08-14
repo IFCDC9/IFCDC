@@ -344,6 +344,39 @@ const fundingIntelligenceAwardability: AuraAction = {
   },
 };
 
+const fundingIntelligenceDocumentReadiness: AuraAction = {
+  id: "funding_intelligence_document_readiness",
+  label: "Grant Document Readiness",
+  module: "grants",
+  kind: "prepare",
+  description:
+    "Phase 8A.4: sync Evidence Vault, extract official requirements, match IFCDC evidence (no invented docs), recalculate readiness including NEARLY READY/READY NOW, and deep-audit the first pilot. Does not submit.",
+  parameters: {
+    limit: { type: "number", description: "Max qualified opportunities (default 40)." },
+  },
+  async run(args, ctx) {
+    const { runDocumentReadinessBatch } = await import("./auraGrantEvidenceVaultEngine");
+    const { buildFundingIntelligenceMetrics } = await import("./auraFundingIntelligenceEngine");
+    const result = await runDocumentReadinessBatch({
+      limit: typeof args.limit === "number" ? args.limit : 40,
+      actorEmail: ctx.actorEmail || "aura",
+      onlyQualified: true,
+    });
+    const metrics = await buildFundingIntelligenceMetrics();
+    const audit = result.pilotAudit as { recommendation?: string; rationale?: string; title?: string } | undefined;
+    return {
+      status: "done",
+      summary:
+        `Document readiness for ${result.processed} opportunities. READY NOW ${result.readyNow}, NEARLY READY ${result.nearlyReady}, `
+        + `needs docs ${result.needsDocuments}, hard blockers on ${result.withHardBlockers}. `
+        + `App-ready $${metrics.applicationReadyFunding.toLocaleString()}. `
+        + (audit?.rationale || ""),
+      data: { ...result, metrics },
+      navigation: { path: "/hq/grants", label: "Open Grant Center" },
+    };
+  },
+};
+
 const enterpriseFundingScan: AuraAction = {
   id: "enterprise_funding_scan",
   label: "Enterprise Funding Scan",
@@ -1838,6 +1871,7 @@ export const AURA_ACTIONS: AuraAction[] = [
   fundingIntelligenceAsk,
   fundingIntelligenceEnrich,
   fundingIntelligenceAwardability,
+  fundingIntelligenceDocumentReadiness,
   enterpriseFundingScan,
   matchProgram,
   syncGrants,

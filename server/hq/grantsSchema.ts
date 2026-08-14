@@ -132,6 +132,7 @@ export async function ensureGrantTables(): Promise<void> {
   await migrateGrantPhase8A();
   await migrateGrantPhase8A2();
   await migrateGrantPhase8A3();
+  await migrateGrantPhase8A4();
   if (!allowGrantDemoSeed()) {
     return;
   }
@@ -1148,6 +1149,136 @@ async function migrateGrantPhase8A3(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_awardability_opp ON grant_awardability_checks(opportunity_id);
   `);
+}
+
+/**
+ * Phase 8A.4 — Grant Evidence Vault index + opportunity requirement checklists.
+ * Extends hq_documents / grant_documents; does not invent files.
+ */
+async function migrateGrantPhase8A4(): Promise<void> {
+  const db = await getDb();
+  const addCol = async (table: string, col: string, type: string) => {
+    try {
+      await db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+    } catch {
+      /* exists */
+    }
+  };
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS grant_evidence_records (
+      id TEXT PRIMARY KEY,
+      evidence_type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      hq_document_id TEXT,
+      grant_document_id TEXT,
+      file_url TEXT,
+      effective_date TEXT,
+      expiration_date TEXT,
+      verification_status TEXT NOT NULL DEFAULT 'missing',
+      source TEXT,
+      program_slug TEXT,
+      opportunity_id TEXT,
+      last_reviewed_at TEXT,
+      aura_confidence REAL DEFAULT 0,
+      founder_approved INTEGER DEFAULT 0,
+      notes TEXT,
+      reusable INTEGER DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_evidence_type ON grant_evidence_records(evidence_type);
+    CREATE INDEX IF NOT EXISTS idx_evidence_status ON grant_evidence_records(verification_status);
+    CREATE INDEX IF NOT EXISTS idx_evidence_hq_doc ON grant_evidence_records(hq_document_id);
+
+    CREATE TABLE IF NOT EXISTS grant_opportunity_requirements (
+      id TEXT PRIMARY KEY,
+      opportunity_id TEXT NOT NULL,
+      requirement_key TEXT NOT NULL,
+      label TEXT NOT NULL,
+      category TEXT NOT NULL,
+      mandatory INTEGER DEFAULT 1,
+      source_excerpt TEXT,
+      extraction_source TEXT,
+      page_limit TEXT,
+      file_format TEXT,
+      match_status TEXT DEFAULT 'missing',
+      evidence_record_id TEXT,
+      gap_bucket TEXT,
+      hard_blocker INTEGER DEFAULT 0,
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(opportunity_id, requirement_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_req_opp ON grant_opportunity_requirements(opportunity_id);
+
+    CREATE TABLE IF NOT EXISTS grant_requirement_evidence_links (
+      id TEXT PRIMARY KEY,
+      requirement_id TEXT NOT NULL,
+      evidence_record_id TEXT NOT NULL,
+      opportunity_id TEXT NOT NULL,
+      link_note TEXT,
+      created_at TEXT NOT NULL,
+      UNIQUE(requirement_id, evidence_record_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS grant_readiness_gap_reports (
+      id TEXT PRIMARY KEY,
+      opportunity_id TEXT NOT NULL,
+      available_json TEXT,
+      needs_update_json TEXT,
+      can_generate_json TEXT,
+      founder_input_json TEXT,
+      third_party_json TEXT,
+      hard_blockers_json TEXT,
+      summary_json TEXT,
+      readiness_class TEXT,
+      readiness_score INTEGER,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_gap_opp ON grant_readiness_gap_reports(opportunity_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS grant_pilot_capacity_audits (
+      id TEXT PRIMARY KEY,
+      opportunity_id TEXT NOT NULL,
+      recommendation TEXT NOT NULL,
+      findings_json TEXT NOT NULL,
+      risk_factors_json TEXT,
+      official_source_url TEXT,
+      actor_email TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_pilot_audit_opp ON grant_pilot_capacity_audits(opportunity_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS grant_document_versions (
+      id TEXT PRIMARY KEY,
+      grant_document_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      name TEXT,
+      file_url TEXT,
+      change_notes TEXT,
+      uploaded_by TEXT,
+      application_id TEXT,
+      opportunity_id TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_grant_doc_versions ON grant_document_versions(grant_document_id);
+  `);
+
+  await addCol("grant_opportunities", "gap_report_json", "TEXT");
+  await addCol("grant_opportunities", "hard_blocker_count", "INTEGER DEFAULT 0");
+  await addCol("grant_opportunities", "requirement_count", "INTEGER DEFAULT 0");
+  await addCol("grant_opportunities", "requirements_met_count", "INTEGER DEFAULT 0");
+  await addCol("grant_opportunities", "evidence_readiness_at", "TEXT");
+  await addCol("grant_opportunities", "pilot_audit_recommendation", "TEXT");
+  await addCol("grant_documents", "version", "INTEGER DEFAULT 1");
+  await addCol("grant_documents", "effective_date", "TEXT");
+  await addCol("grant_documents", "expiration_date", "TEXT");
+  await addCol("hq_documents", "evidence_type", "TEXT");
+  await addCol("hq_documents", "effective_date", "TEXT");
+  await addCol("hq_documents", "expiration_date", "TEXT");
+  await addCol("hq_documents", "verification_status", "TEXT");
 }
 
 export async function logGrantActivity(

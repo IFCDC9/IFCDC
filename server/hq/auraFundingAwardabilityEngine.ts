@@ -18,6 +18,7 @@ export type AddressableStatus =
 
 export type ReadinessClass =
   | "ready_now"
+  | "nearly_ready"
   | "needs_documents"
   | "needs_program_development"
   | "needs_matching_funds"

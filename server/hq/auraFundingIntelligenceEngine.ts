@@ -403,6 +403,9 @@ export async function enrichAndQualifyOpportunity(
   programs: string[];
   fundingAmountStatus?: string;
   pipelineValue?: number | null;
+  addressableAmount?: number | null;
+  readinessClass?: string;
+  applicationReadinessScore?: number;
 }> {
   const db = await getDb();
 
@@ -827,11 +830,14 @@ export async function buildFundingIntelligenceMetrics(): Promise<{
   qualifiedCount: number;
   priorityCount: number;
   readyNowCount: number;
+  nearlyReadyCount: number;
   needsDocumentsCount: number;
   needsProgramDevelopmentCount: number;
   needsMatchingFundsCount: number;
   reviewRequiredCount: number;
   notReadyCount: number;
+  opportunitiesWithHardBlockers: number;
+  nearlyReadyFunding: number;
   upcomingDeadlines: number;
   needingFounderReview: number;
   dataConfidence: "high" | "medium" | "low";
@@ -916,21 +922,33 @@ export async function buildFundingIntelligenceMetrics(): Promise<{
        AND (duplicate_of_id IS NULL OR duplicate_of_id = '')`
   );
 
+  const nearlyReadyFunding = await db.get<{ pot: number }>(
+    `SELECT COALESCE(SUM(${addressableSumExpr}), 0) as pot
+     FROM grant_opportunities
+     WHERE readiness_class = 'nearly_ready'
+       AND eligibility_result IN ('eligible', 'possibly_eligible')
+       AND (duplicate_of_id IS NULL OR duplicate_of_id = '')`
+  );
+
   const readinessCounts = await db.get<{
     ready_now: number;
+    nearly_ready: number;
     needs_documents: number;
     needs_program_development: number;
     needs_matching_funds: number;
     review_required: number;
     not_ready: number;
+    hard_blocker_opps: number;
   }>(
     `SELECT
        SUM(CASE WHEN readiness_class = 'ready_now' THEN 1 ELSE 0 END) as ready_now,
+       SUM(CASE WHEN readiness_class = 'nearly_ready' THEN 1 ELSE 0 END) as nearly_ready,
        SUM(CASE WHEN readiness_class = 'needs_documents' THEN 1 ELSE 0 END) as needs_documents,
        SUM(CASE WHEN readiness_class = 'needs_program_development' THEN 1 ELSE 0 END) as needs_program_development,
        SUM(CASE WHEN readiness_class = 'needs_matching_funds' THEN 1 ELSE 0 END) as needs_matching_funds,
        SUM(CASE WHEN readiness_class = 'review_required' THEN 1 ELSE 0 END) as review_required,
-       SUM(CASE WHEN readiness_class = 'not_ready' THEN 1 ELSE 0 END) as not_ready
+       SUM(CASE WHEN readiness_class = 'not_ready' THEN 1 ELSE 0 END) as not_ready,
+       SUM(CASE WHEN COALESCE(hard_blocker_count, 0) > 0 THEN 1 ELSE 0 END) as hard_blocker_opps
      FROM grant_opportunities
      WHERE eligibility_result IN ('eligible', 'possibly_eligible')
        AND (duplicate_of_id IS NULL OR duplicate_of_id = '')`
@@ -990,6 +1008,7 @@ export async function buildFundingIntelligenceMetrics(): Promise<{
   const unknownAddressable = Math.round(qualified?.addr_unknown ?? 0);
   const highPriorityAddr = Math.round(priority?.addr ?? 0);
   const appReadyFunding = Math.round(appReady?.pot ?? 0);
+  const nearlyReadyVal = Math.round(nearlyReadyFunding?.pot ?? 0);
 
   const pipelineSummary =
     `Total Qualified Program Funding: $${totalQualifiedProgram.toLocaleString()}`
@@ -999,6 +1018,7 @@ export async function buildFundingIntelligenceMetrics(): Promise<{
     `IFCDC Addressable Funding: $${addressable.toLocaleString()}`
     + ` · High-priority addressable: $${highPriorityAddr.toLocaleString()}`
     + ` · Application-ready: $${appReadyFunding.toLocaleString()}`
+    + ` · Nearly-ready: $${nearlyReadyVal.toLocaleString()}`
     + (unknownAddressable > 0 ? ` · ${unknownAddressable} qualified with UNKNOWN addressable` : "");
 
   return {
@@ -1012,6 +1032,7 @@ export async function buildFundingIntelligenceMetrics(): Promise<{
     ifcdcAddressableFunding: addressable,
     highPriorityAddressablePipeline: highPriorityAddr,
     applicationReadyFunding: appReadyFunding,
+    nearlyReadyFunding: nearlyReadyVal,
     unknownAddressableCount: unknownAddressable,
     unknownValueQualifiedCount: unknownQualified,
     priorityPipelineValue: Math.round(priority?.pot ?? 0),
@@ -1022,11 +1043,13 @@ export async function buildFundingIntelligenceMetrics(): Promise<{
     qualifiedCount: qualified?.c ?? 0,
     priorityCount: priority?.c ?? 0,
     readyNowCount: readinessCounts?.ready_now ?? 0,
+    nearlyReadyCount: readinessCounts?.nearly_ready ?? 0,
     needsDocumentsCount: readinessCounts?.needs_documents ?? 0,
     needsProgramDevelopmentCount: readinessCounts?.needs_program_development ?? 0,
     needsMatchingFundsCount: readinessCounts?.needs_matching_funds ?? 0,
     reviewRequiredCount: readinessCounts?.review_required ?? 0,
     notReadyCount: readinessCounts?.not_ready ?? 0,
+    opportunitiesWithHardBlockers: readinessCounts?.hard_blocker_opps ?? 0,
     upcomingDeadlines: upcoming?.c ?? 0,
     needingFounderReview: review?.c ?? 0,
     dataConfidence,
@@ -1048,7 +1071,7 @@ export async function buildFundingIntelligenceDashboard() {
             amount_max, award_ceiling, estimated_funding, funding_amount_status, funding_value_source,
             best_program_slug, best_program_match_pct, deadline,
             ifcdc_addressable_amount, addressable_status, application_readiness_score, readiness_class,
-            match_required, pilot_rank
+            match_required, pilot_rank, hard_blocker_count, pilot_audit_recommendation
      FROM grant_opportunities
      WHERE qualification_class = 'priority'
        AND eligibility_result != 'not_eligible'
@@ -1071,12 +1094,14 @@ export async function buildFundingIntelligenceDashboard() {
   const applicationReady = await db.all(
     `SELECT id, title, funder, url, source_type, external_id, eligibility_result,
             ifcdc_addressable_amount, addressable_status, application_readiness_score, readiness_class,
-            best_program_slug, best_program_match_pct, deadline, enriched_final_score, pilot_rank
+            best_program_slug, best_program_match_pct, deadline, enriched_final_score, pilot_rank,
+            hard_blocker_count
      FROM grant_opportunities
-     WHERE readiness_class = 'ready_now'
+     WHERE readiness_class IN ('ready_now', 'nearly_ready')
        AND eligibility_result IN ('eligible', 'possibly_eligible')
        AND (duplicate_of_id IS NULL OR duplicate_of_id = '')
-     ORDER BY COALESCE(ifcdc_addressable_amount, 0) DESC, application_readiness_score DESC
+     ORDER BY CASE readiness_class WHEN 'ready_now' THEN 0 ELSE 1 END,
+              COALESCE(ifcdc_addressable_amount, 0) DESC, application_readiness_score DESC
      LIMIT 15`
   );
   let programProfiles: Array<Record<string, unknown>> = [];
@@ -1093,9 +1118,16 @@ export async function buildFundingIntelligenceDashboard() {
   } catch {
     pilot = null;
   }
+  let evidenceVault: Record<string, unknown> | null = null;
+  try {
+    const { buildEvidenceVaultMetrics } = await import("./auraGrantEvidenceVaultEngine");
+    evidenceVault = await buildEvidenceVaultMetrics();
+  } catch {
+    evidenceVault = null;
+  }
   return {
     generatedAt: new Date().toISOString(),
-    phase: "8A.3",
+    phase: "8A.4",
     metrics,
     sources,
     priorityOpportunities: priority,
@@ -1103,6 +1135,7 @@ export async function buildFundingIntelligenceDashboard() {
     applicationReadyOpportunities: applicationReady,
     programProfiles,
     pilotRecommendation: pilot,
+    evidenceVault,
     securityBoundary: {
       maySubmit: false,
       maySignCertifications: false,
@@ -1148,7 +1181,119 @@ export async function answerFundingIntelligenceQuery(opts: {
     };
   }
 
-  if (/ready now|application-ready|application ready/.test(q)) {
+  if (/documents? (are )?missing|missing for this grant|what.*(blocking|preventing)/.test(q)) {
+    const rows = (await db.all(
+      `SELECT o.id, o.title, o.url, r.label, r.match_status, r.gap_bucket, r.hard_blocker, r.notes
+       FROM grant_opportunity_requirements r
+       JOIN grant_opportunities o ON o.id = r.opportunity_id
+       WHERE r.match_status IN ('missing', 'unavailable', 'needs_update')
+         AND (o.duplicate_of_id IS NULL OR o.duplicate_of_id = '')
+       ORDER BY r.hard_blocker DESC, o.pilot_rank ASC, o.title
+       LIMIT 40`
+    )) as unknown as Array<Record<string, unknown>>;
+    return {
+      reply:
+        `Found ${rows.length} missing/unavailable/needs-update requirement rows. `
+        + `Hard-blocker opportunities: ${metrics.opportunitiesWithHardBlockers}. `
+        + (rows[0] ? `Example: ${rows[0].title} — ${rows[0].label} (${rows[0].match_status}).` : "Run document readiness first."),
+      records: rows,
+      metrics,
+    };
+  }
+
+  if (/application-ready funding|how much application.?ready/.test(q)) {
+    return {
+      reply:
+        `Application-ready funding: $${metrics.applicationReadyFunding.toLocaleString()} (${metrics.readyNowCount} READY NOW). `
+        + `Nearly-ready: $${metrics.nearlyReadyFunding.toLocaleString()} (${metrics.nearlyReadyCount}). `
+        + `Needs-documents value still in pipeline: see needs_documents class (${metrics.needsDocumentsCount}).`,
+      records: [],
+      metrics,
+    };
+  }
+
+  if (/blocking the most|most common blocker|common missing/.test(q)) {
+    const blockers = (await db.all(
+      `SELECT label, COUNT(*) as c FROM grant_opportunity_requirements
+       WHERE hard_blocker = 1 OR match_status IN ('missing', 'unavailable')
+       GROUP BY label ORDER BY c DESC LIMIT 10`
+    )) as unknown as Array<{ label: string; c: number }>;
+    return {
+      reply:
+        blockers.length
+          ? `Top blockers: ${blockers.map((b) => `${b.label} (${b.c})`).join("; ")}.`
+          : "No requirement blockers indexed yet — run document readiness.",
+      records: blockers as unknown as Array<Record<string, unknown>>,
+      metrics,
+    };
+  }
+
+  if (/can you create|can.*generate|which documents can you/.test(q)) {
+    const rows = (await db.all(
+      `SELECT o.title, r.label, r.notes, o.url FROM grant_opportunity_requirements r
+       JOIN grant_opportunities o ON o.id = r.opportunity_id
+       WHERE r.match_status = 'can_generate' OR r.gap_bucket = 'can_be_generated'
+       ORDER BY o.pilot_rank ASC LIMIT 25`
+    )) as unknown as Array<Record<string, unknown>>;
+    return {
+      reply: `${rows.length} requirement items marked can-be-generated from verified HQ data via Application Factory (drafts only — no submit).`,
+      records: rows,
+      metrics,
+    };
+  }
+
+  if (/require my input|founder input|founder action/.test(q)) {
+    const rows = (await db.all(
+      `SELECT o.title, r.label, r.notes, o.url FROM grant_opportunity_requirements r
+       JOIN grant_opportunities o ON o.id = r.opportunity_id
+       WHERE r.gap_bucket = 'founder_input_required'
+       ORDER BY o.pilot_rank ASC LIMIT 25`
+    )) as unknown as Array<Record<string, unknown>>;
+    return {
+      reply: `${rows.length} items require Founder input/upload (not inventable by AURA).`,
+      records: rows,
+      metrics,
+    };
+  }
+
+  if (/expired|about to expire|expir/.test(q)) {
+    const rows = (await db.all(
+      `SELECT title, evidence_type, expiration_date, verification_status, file_url
+       FROM grant_evidence_records
+       WHERE expiration_date IS NOT NULL AND date(expiration_date) <= date('now', '+90 days')
+       ORDER BY date(expiration_date) ASC LIMIT 20`
+    )) as unknown as Array<Record<string, unknown>>;
+    return {
+      reply: `${rows.length} evidence records expiring within 90 days (only listed if expiration_date is set on vault records).`,
+      records: rows,
+      metrics,
+    };
+  }
+
+  if (/everything needed for the first pilot|first pilot|show me.*pilot/.test(q)) {
+    const pilot = await db.get<Record<string, unknown>>(
+      `SELECT id, title, url, readiness_class, application_readiness_score, ifcdc_addressable_amount,
+              hard_blocker_count, pilot_audit_recommendation, gap_report_json
+       FROM grant_opportunities WHERE pilot_rank = 1 LIMIT 1`
+    );
+    if (pilot) {
+      const checklist = (await db.all(
+        `SELECT label, match_status, gap_bucket, hard_blocker, notes FROM grant_opportunity_requirements
+         WHERE opportunity_id = ? ORDER BY hard_blocker DESC, label`,
+        pilot.id
+      )) as unknown as Array<Record<string, unknown>>;
+      return {
+        reply:
+          `First pilot: "${pilot.title}" · ${pilot.readiness_class} · score ${pilot.application_readiness_score} · `
+          + `addressable ${pilot.ifcdc_addressable_amount != null ? `$${Number(pilot.ifcdc_addressable_amount).toLocaleString()}` : "UNKNOWN"} · `
+          + `audit ${pilot.pilot_audit_recommendation || "pending"} · ${checklist.length} checklist items. Official: ${pilot.url}`,
+        records: [{ ...pilot, checklist }],
+        metrics,
+      };
+    }
+  }
+
+  if (/ready now|application-ready|application ready|apply for right now/.test(q)) {
     const rows = await db.all<Record<string, unknown>>(
       `SELECT id, title, funder, url, source_type, external_id, ifcdc_addressable_amount, addressable_status,
               application_readiness_score, readiness_class, best_program_slug, best_program_match_pct, deadline

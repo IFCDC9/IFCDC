@@ -117,7 +117,7 @@ export const GrantFoundationDashboardPanel: React.FC<{
       {fundingIntel.data && (
         <div style={{ marginTop: "1rem" }}>
           <HqPanel
-            title="AURA Funding Intelligence (Phase 8A.3)"
+            title="AURA Funding Intelligence (Phase 8A.4)"
             subtitle={
               [
                 fundingIntel.data.metrics.pipelineSummary,
@@ -142,12 +142,12 @@ export const GrantFoundationDashboardPanel: React.FC<{
                   type="button"
                   className="hq-btn hq-btn-sm hq-btn-ghost"
                   onClick={() => {
-                    void grantsApi.fundingIntelligenceAwardability({ limit: 40 }).then(() => {
+                    void grantsApi.fundingIntelligenceDocumentReadiness({ limit: 40 }).then(() => {
                       void fundingIntel.refetch();
                     });
                   }}
                 >
-                  Verify awardability
+                  Document readiness
                 </button>
               </div>
             }
@@ -155,30 +155,24 @@ export const GrantFoundationDashboardPanel: React.FC<{
             <div className="hq-kpi-grid" style={{ marginBottom: "0.75rem" }}>
               <KpiCard label="Discovered" value={fundingIntel.data.metrics.totalOpportunitiesDiscovered} />
               <KpiCard
-                label="Total qualified program $"
-                value={fmt(fundingIntel.data.metrics.totalQualifiedProgramFunding ?? fundingIntel.data.metrics.qualifiedIfcdcFunding)}
-              />
-              <KpiCard
                 label="IFCDC addressable $"
                 value={fmt(fundingIntel.data.metrics.ifcdcAddressableFunding ?? 0)}
                 variant="gold"
-              />
-              <KpiCard
-                label="High-priority addressable $"
-                value={fmt(fundingIntel.data.metrics.highPriorityAddressablePipeline ?? 0)}
-                variant="success"
               />
               <KpiCard
                 label="Application-ready $"
                 value={fmt(fundingIntel.data.metrics.applicationReadyFunding ?? 0)}
                 variant="gold"
               />
+              <KpiCard
+                label="Nearly-ready $"
+                value={fmt(fundingIntel.data.metrics.nearlyReadyFunding ?? 0)}
+                variant="success"
+              />
               <KpiCard label="READY NOW" value={fundingIntel.data.metrics.readyNowCount ?? 0} variant="success" />
+              <KpiCard label="NEARLY READY" value={fundingIntel.data.metrics.nearlyReadyCount ?? 0} />
               <KpiCard label="Needs documents" value={fundingIntel.data.metrics.needsDocumentsCount ?? 0} variant="warning" />
-              <KpiCard label="Needs program dev" value={fundingIntel.data.metrics.needsProgramDevelopmentCount ?? 0} />
-              <KpiCard label="Needs matching $" value={fundingIntel.data.metrics.needsMatchingFundsCount ?? 0} variant="warning" />
-              <KpiCard label="Review required" value={fundingIntel.data.metrics.reviewRequiredCount ?? 0} variant="warning" />
-              <KpiCard label="Unknown addressable" value={fundingIntel.data.metrics.unknownAddressableCount ?? 0} variant="warning" />
+              <KpiCard label="Hard blockers" value={fundingIntel.data.metrics.opportunitiesWithHardBlockers ?? 0} variant="warning" />
               <KpiCard label="Deadlines 30d" value={fundingIntel.data.metrics.upcomingDeadlines} variant="warning" />
             </div>
             <div className="hq-grid-2">

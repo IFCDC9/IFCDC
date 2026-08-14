@@ -163,10 +163,13 @@ export const grantsApi = {
         qualifiedCount: number;
         priorityCount: number;
         readyNowCount?: number;
+        nearlyReadyCount?: number;
         needsDocumentsCount?: number;
         needsProgramDevelopmentCount?: number;
         needsMatchingFundsCount?: number;
         reviewRequiredCount?: number;
+        opportunitiesWithHardBlockers?: number;
+        nearlyReadyFunding?: number;
         upcomingDeadlines: number;
         needingFounderReview: number;
         dataConfidence: string;
@@ -200,6 +203,13 @@ export const grantsApi = {
     }),
   fundingIntelligenceAwardability: (body?: { limit?: number; onlyQualified?: boolean }) =>
     apiFetch<Record<string, unknown>>("/funding-intelligence/awardability", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || { limit: 40, onlyQualified: true }),
+      timeoutMs: 300_000,
+    }),
+  fundingIntelligenceDocumentReadiness: (body?: { limit?: number; onlyQualified?: boolean }) =>
+    apiFetch<Record<string, unknown>>("/funding-intelligence/document-readiness", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body || { limit: 40, onlyQualified: true }),

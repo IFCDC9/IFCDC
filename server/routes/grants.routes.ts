@@ -2112,6 +2112,61 @@ router.get("/funding-intelligence/pilot", async (_req, res) => {
   res.json(await selectFirstPilotRecommendation());
 });
 
+/** Phase 8A.4 — Evidence Vault sync + document readiness for qualified opportunities. */
+router.post("/funding-intelligence/document-readiness", async (req: Request, res: Response) => {
+  try {
+    const { runDocumentReadinessBatch } = await import("../hq/auraGrantEvidenceVaultEngine");
+    const { buildFundingIntelligenceMetrics } = await import("../hq/auraFundingIntelligenceEngine");
+    const result = await runDocumentReadinessBatch({
+      limit: typeof req.body?.limit === "number" ? req.body.limit : 40,
+      actorEmail: req.hqUser?.email,
+      onlyQualified: req.body?.onlyQualified !== false,
+    });
+    const metrics = await buildFundingIntelligenceMetrics();
+    res.json({ ok: true, ...result, metrics, maySubmit: false });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Document readiness failed";
+    console.error("Phase 8A.4 document readiness error:", message);
+    res.status(502).json({ error: message });
+  }
+});
+
+router.get("/funding-intelligence/evidence-vault", async (req, res) => {
+  const { listEvidenceVault, buildEvidenceVaultMetrics, syncGrantEvidenceVault } = await import(
+    "../hq/auraGrantEvidenceVaultEngine"
+  );
+  if (req.query.sync === "1") {
+    await syncGrantEvidenceVault({ actorEmail: req.hqUser?.email });
+  }
+  res.json({
+    records: await listEvidenceVault({ status: typeof req.query.status === "string" ? req.query.status : undefined }),
+    metrics: await buildEvidenceVaultMetrics(),
+  });
+});
+
+router.get("/funding-intelligence/opportunities/:id/requirements", async (req, res) => {
+  const { getOpportunityRequirementChecklist } = await import("../hq/auraGrantEvidenceVaultEngine");
+  const payload = await getOpportunityRequirementChecklist(String(req.params.id));
+  if (!payload.opportunity && !(payload as { opportunityId?: string }).opportunityId) {
+    // engine may return { opportunityId, requirements, gapReport }
+  }
+  res.json(payload);
+});
+
+router.post("/funding-intelligence/pilot-audit", async (req: Request, res: Response) => {
+  try {
+    const { deepAuditFirstPilot } = await import("../hq/auraGrantEvidenceVaultEngine");
+    const result = await deepAuditFirstPilot({
+      actorEmail: req.hqUser?.email || "aura",
+      opportunityId: typeof req.body?.opportunityId === "string" ? req.body.opportunityId : undefined,
+    });
+    res.json({ ok: true, ...result, maySubmit: false });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Pilot audit failed";
+    res.status(502).json({ error: message });
+  }
+});
+
 router.get("/funding-intelligence/opportunities/:id/explain", async (req, res) => {
   const { explainOpportunityScore } = await import("../hq/auraFundingIntelligenceEngine");
   const payload = await explainOpportunityScore(String(req.params.id));

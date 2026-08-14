@@ -15,7 +15,7 @@
 | Audit trail | `grant_activity` + new `grant_audit_events` |
 | Dashboard shell | `/hq/grants` overview + Foundation dashboard |
 
-**Added (8A.3):** Awardability verification, IFCDC addressable funding (separated from total program funding), application readiness scores/classes, document gaps, pilot recommendation. See `AURA-PHASE8A3-AWARDABILITY.md`.
+**Added (8A.4):** Grant Evidence Vault index, requirement checklists, document matching, NEARLY READY readiness, pilot capacity audit. See `AURA-PHASE8A4-EVIDENCE-VAULT.md`.
 
 ## Pipeline
 
