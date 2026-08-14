@@ -221,18 +221,28 @@ function isIntegrationVerifiedSource(source: unknown): boolean {
   );
 }
 
+/** Authoritative HQ sources that may verify without a PDF file_url. */
+function isAuthoritativeNonFileSource(source: unknown): boolean {
+  return (
+    isIntegrationVerifiedSource(source)
+    || source === "knowledge_base"
+    || source === "founder_verified_structured"
+    || source === "hq_structured"
+  );
+}
+
 function classifyEvidenceRow(
   row: Pick<VaultRow, "file_url" | "expiration_date" | "verification_status" | "evidence_type" | "source">
 ): EvidenceMatchStatus {
   const cat = catalogByKey(row.evidence_type);
-  if (isIntegrationVerifiedSource(row.source) && row.verification_status === "verified") {
+  if (isAuthoritativeNonFileSource(row.source) && row.verification_status === "verified") {
     if (isExpired(row.expiration_date)) return "needs_update";
     return "verified";
   }
   if (cat?.envUei && IFCDC_ORG_PROFILE.samUei && row.source === "env_uei") {
     return "verified";
   }
-  if (!hasFileUrl(row.file_url) && !isIntegrationVerifiedSource(row.source)) {
+  if (!hasFileUrl(row.file_url) && !isAuthoritativeNonFileSource(row.source)) {
     return "missing";
   }
   if (isExpired(row.expiration_date)) return "needs_update";
@@ -273,11 +283,17 @@ async function upsertEvidence(record: {
     record.source === "env_uei"
     || record.source === "sam_gov_integration"
     || record.source === "grants_gov_integration"
+    || record.source === "knowledge_base"
+    || record.source === "founder_verified_structured"
+    || record.source === "hq_structured"
   ) {
     existing = await db.get<{ id: string }>(
       `SELECT id FROM grant_evidence_records
        WHERE evidence_type = ?
-         AND source IN ('env_uei', 'sam_gov_integration', 'grants_gov_integration')
+         AND source IN (
+           'env_uei', 'sam_gov_integration', 'grants_gov_integration',
+           'knowledge_base', 'founder_verified_structured', 'hq_structured'
+         )
        ORDER BY datetime(updated_at) DESC LIMIT 1`,
       record.evidenceType
     );
@@ -366,6 +382,34 @@ export async function upsertReusableIntegrationEvidence(record: {
     expirationDate: record.expirationDate,
     notes: record.notes,
     auraConfidence: record.auraConfidence ?? 0.97,
+    reusable: true,
+  });
+}
+
+/** Upsert authoritative org evidence from Knowledge Base / Founder-verified structured facts. */
+export async function upsertAuthoritativeOrgEvidence(record: {
+  evidenceType: string;
+  title: string;
+  verificationStatus: EvidenceMatchStatus;
+  source: "knowledge_base" | "founder_verified_structured" | "hq_structured";
+  hqDocumentId?: string | null;
+  fileUrl?: string | null;
+  effectiveDate?: string | null;
+  expirationDate?: string | null;
+  notes?: string | null;
+  auraConfidence?: number;
+}): Promise<string> {
+  return upsertEvidence({
+    evidenceType: record.evidenceType,
+    title: record.title,
+    hqDocumentId: record.hqDocumentId,
+    fileUrl: record.fileUrl,
+    verificationStatus: record.verificationStatus,
+    source: record.source,
+    effectiveDate: record.effectiveDate,
+    expirationDate: record.expirationDate,
+    notes: record.notes,
+    auraConfidence: record.auraConfidence ?? 0.92,
     reusable: true,
   });
 }

@@ -742,4 +742,30 @@ router.post("/phase8a5/sync-federal-integrations", auraOpsVerifyAuth, requireHQM
   }
 });
 
+/**
+ * Phase 8A.5 — full readiness repair:
+ * Knowledge Base → Document Center → Evidence Vault → federal → Hiscox → rematch.
+ * Auth: Founder JWT or AURA_OPS_VERIFY_TOKEN. Does not touch Twilio/SMS.
+ */
+router.post("/phase8a5/readiness-repair", auraOpsVerifyAuth, requireHQModule("aura"), async (req, res) => {
+  try {
+    const { runPhase8A5ReadinessRepair } = await import("../hq/auraGrantEvidencePopulationEngine");
+    const result = await runPhase8A5ReadinessRepair({
+      actorEmail: req.hqUser?.email || getFounderEmail(),
+      limit: typeof req.body?.limit === "number" ? req.body.limit : 40,
+      ingestHiscox: req.body?.ingestHiscox !== false,
+    });
+    return res.json({
+      ...result,
+      ok: true,
+      maySubmit: false,
+      authMethod: (req as { auraOpsTokenAuth?: boolean }).auraOpsTokenAuth ? "ops_token" : "founder_jwt",
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Phase 8A.5 readiness repair failed";
+    console.error("Phase 8A.5 readiness-repair error:", message);
+    return res.status(502).json({ error: message, maySubmit: false });
+  }
+});
+
 export default router;
