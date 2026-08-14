@@ -3,8 +3,12 @@ import path from "path";
 import crypto from "crypto";
 import { getDb } from "../db";
 import { hasPermission, toHQRole } from "./enterpriseRoles";
+import { getDataDir } from "../config/dataPaths";
 
-const UPLOAD_ROOT = path.join(process.cwd(), "server", "uploads", "hq");
+function uploadRoot(): string {
+  // Persist on IFCDC_DATA_DIR (Render disk). App src tree is not writable in production.
+  return path.join(getDataDir(), "uploads", "hq");
+}
 
 export interface SavedHqFile {
   id: string;
@@ -34,6 +38,7 @@ export async function saveHqFileBase64(
   uploadedBy?: string,
   accessLevel = "internal"
 ): Promise<SavedHqFile> {
+  const UPLOAD_ROOT = uploadRoot();
   await fs.mkdir(UPLOAD_ROOT, { recursive: true });
   const id = crypto.randomUUID();
   const ext = path.extname(originalName) || mimeToExt(mimeType);
@@ -92,7 +97,7 @@ export async function verifyHqFileAccess(storedName: string, role: string, userE
 export function resolveHqFilePath(storedName: string): string | null {
   const safe = path.basename(storedName);
   if (!safe || safe !== storedName) return null;
-  return path.join(UPLOAD_ROOT, safe);
+  return path.join(uploadRoot(), safe);
 }
 
 function mimeToExt(mime: string): string {
@@ -106,5 +111,5 @@ function mimeToExt(mime: string): string {
 }
 
 export function getHqUploadRoot(): string {
-  return UPLOAD_ROOT;
+  return uploadRoot();
 }

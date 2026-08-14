@@ -134,6 +134,10 @@ async function main() {
   }
 
   console.log(`HTTP ${result.status}`);
+  if (!result.ok || !result.json?.ok) {
+    console.error(JSON.stringify(result.json, null, 2).slice(0, 2500));
+    process.exit(1);
+  }
   console.log(JSON.stringify({
     ok: result.json?.ok,
     action: result.json?.action,
@@ -151,8 +155,6 @@ async function main() {
     readinessIncreased: (result.json?.readinessIncreased || []).slice(0, 15),
     founderQueueTop5: result.json?.founderQueueTop5,
   }, null, 2));
-
-  if (!result.ok || !result.json?.ok) process.exit(1);
   if (result.json.founderQueueStillListsItem) {
     console.error("WARN: IRS item still on Founder queue after verify");
     process.exit(2);
