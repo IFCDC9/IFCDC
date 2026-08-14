@@ -52,6 +52,7 @@ export const EVIDENCE_TYPE_CATALOG: EvidenceCatalogEntry[] = [
   { key: "sam_registration", label: "SAM.gov registration", category: "registration", patterns: [/sam\.?gov/, /sam\s*registration/, /system\s*for\s*award/], federalBaseline: true, envUei: true },
   { key: "uei", label: "UEI", category: "registration", patterns: [/\buei\b/, /unique\s*entity\s*identifier/], federalBaseline: true, envUei: true },
   { key: "cage", label: "CAGE information", category: "registration", patterns: [/\bcage\b/, /commercial\s*and\s*government\s*entity/], federalBaseline: true },
+  { key: "grants_gov_account", label: "Grants.gov organization connectivity", category: "registration", patterns: [/grants\.gov/, /grants\s*gov\s*(account|workspace|registration)/], federalBaseline: false },
   { key: "bylaws", label: "Organizational bylaws", category: "governance", patterns: [/bylaws/, /by-laws/], federalBaseline: true },
   { key: "board_info", label: "Board information", category: "governance", patterns: [/board\s*(list|roster|members|of\s*directors)/], federalBaseline: true },
   { key: "org_chart", label: "Organizational chart", category: "governance", patterns: [/org(anizational)?\s*chart/], federalBaseline: true, generatable: true },
@@ -212,14 +213,26 @@ function matchStatusToGap(
   return "hard_blocker";
 }
 
+function isIntegrationVerifiedSource(source: unknown): boolean {
+  return (
+    source === "env_uei"
+    || source === "sam_gov_integration"
+    || source === "grants_gov_integration"
+  );
+}
+
 function classifyEvidenceRow(
   row: Pick<VaultRow, "file_url" | "expiration_date" | "verification_status" | "evidence_type" | "source">
 ): EvidenceMatchStatus {
   const cat = catalogByKey(row.evidence_type);
+  if (isIntegrationVerifiedSource(row.source) && row.verification_status === "verified") {
+    if (isExpired(row.expiration_date)) return "needs_update";
+    return "verified";
+  }
   if (cat?.envUei && IFCDC_ORG_PROFILE.samUei && row.source === "env_uei") {
     return "verified";
   }
-  if (!hasFileUrl(row.file_url) && !(cat?.envUei && IFCDC_ORG_PROFILE.samUei && row.source === "env_uei")) {
+  if (!hasFileUrl(row.file_url) && !isIntegrationVerifiedSource(row.source)) {
     return "missing";
   }
   if (isExpired(row.expiration_date)) return "needs_update";
@@ -256,11 +269,25 @@ async function upsertEvidence(record: {
       `SELECT id FROM grant_evidence_records WHERE grant_document_id = ?`,
       record.grantDocumentId
     );
-  } else if (record.source === "env_uei") {
+  } else if (
+    record.source === "env_uei"
+    || record.source === "sam_gov_integration"
+    || record.source === "grants_gov_integration"
+  ) {
     existing = await db.get<{ id: string }>(
-      `SELECT id FROM grant_evidence_records WHERE source = 'env_uei' AND evidence_type = ?`,
+      `SELECT id FROM grant_evidence_records
+       WHERE evidence_type = ?
+         AND source IN ('env_uei', 'sam_gov_integration', 'grants_gov_integration')
+       ORDER BY datetime(updated_at) DESC LIMIT 1`,
       record.evidenceType
     );
+    if (!existing) {
+      existing = await db.get<{ id: string }>(
+        `SELECT id FROM grant_evidence_records WHERE evidence_type = ? AND reusable = 1
+         ORDER BY datetime(updated_at) DESC LIMIT 1`,
+        record.evidenceType
+      );
+    }
   }
 
   const id = existing?.id || newId();
@@ -317,6 +344,30 @@ async function upsertEvidence(record: {
     );
   }
   return id;
+}
+
+/** Public upsert for integration-sourced reusable evidence (SAM.gov / Grants.gov). */
+export async function upsertReusableIntegrationEvidence(record: {
+  evidenceType: string;
+  title: string;
+  verificationStatus: EvidenceMatchStatus;
+  source: "sam_gov_integration" | "grants_gov_integration" | "env_uei";
+  effectiveDate?: string | null;
+  expirationDate?: string | null;
+  notes?: string | null;
+  auraConfidence?: number;
+}): Promise<string> {
+  return upsertEvidence({
+    evidenceType: record.evidenceType,
+    title: record.title,
+    verificationStatus: record.verificationStatus,
+    source: record.source,
+    effectiveDate: record.effectiveDate,
+    expirationDate: record.expirationDate,
+    notes: record.notes,
+    auraConfidence: record.auraConfidence ?? 0.97,
+    reusable: true,
+  });
 }
 
 /** Sync Evidence Vault from hq_documents + grant_documents + SAM UEI env. Never invents files. */

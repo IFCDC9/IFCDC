@@ -339,7 +339,7 @@ async function fetchCorporateCsrFeed(): Promise<NormalizedGrantOpportunity[]> {
 
 /** SAM.gov entity verification status (org readiness, not opportunities) */
 async function syncSamGovStatus(): Promise<FeedSyncResult> {
-  const uei = process.env.SAM_GOV_UEI ?? process.env.IFCDC_SAM_UEI;
+  const uei = (process.env.SAM_GOV_UEI ?? process.env.IFCDC_SAM_UEI ?? "").trim();
   const syncedAt = new Date().toISOString();
   if (!uei) {
     const result = { status: "skipped" as const, imported: 0, updated: 0, error: "SAM_GOV_UEI not configured" };
@@ -347,23 +347,12 @@ async function syncSamGovStatus(): Promise<FeedSyncResult> {
     return { provider: "sam_gov", ...result, syncedAt };
   }
   try {
-    const apiKey = process.env.SAM_GOV_API_KEY;
-    if (!apiKey) {
-      const result = { status: "skipped" as const, imported: 0, updated: 0, error: "SAM_GOV_API_KEY not configured" };
-      await recordFeedSync("sam_gov", result);
-      return { provider: "sam_gov", ...result, syncedAt };
-    }
-    const url = `https://api.sam.gov/entity-information/v3/entities?ueiSAM=${encodeURIComponent(uei)}`;
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(15000),
-      headers: { "X-Api-Key": apiKey },
-    });
-    const ok = res.ok;
+    const live = await probeSamGovEntityLive(uei);
     const result = {
-      status: ok ? ("connected" as const) : ("error" as const),
-      imported: ok ? 1 : 0,
+      status: live.ok ? ("connected" as const) : ("error" as const),
+      imported: live.ok ? 1 : 0,
       updated: 0,
-      error: ok ? undefined : `SAM.gov API ${res.status}`,
+      error: live.ok ? undefined : live.message,
     };
     await recordFeedSync("sam_gov", result);
     return { provider: "sam_gov", ...result, syncedAt };
@@ -376,6 +365,159 @@ async function syncSamGovStatus(): Promise<FeedSyncResult> {
     };
     await recordFeedSync("sam_gov", result);
     return { provider: "sam_gov", ...result, syncedAt };
+  }
+}
+
+/** Live SAM.gov entity API probe (Integrations Hub + Evidence Vault). */
+export async function probeSamGovEntityLive(ueiOverride?: string): Promise<{
+  ok: boolean;
+  message: string;
+  latencyMs: number;
+  uei: string | null;
+  apiKeySet: boolean;
+  httpStatus?: number;
+  legalBusinessName?: string;
+  cageCode?: string | null;
+  registrationStatus?: string | null;
+  registrationExpirationDate?: string | null;
+  ueiSAM?: string | null;
+  entityType?: string | null;
+  purposeOfRegistrationCode?: string | null;
+  registrationDate?: string | null;
+  rawEntityRegistration?: Record<string, unknown> | null;
+}> {
+  const uei = (ueiOverride || process.env.SAM_GOV_UEI || process.env.IFCDC_SAM_UEI || "").trim();
+  const apiKey = (process.env.SAM_GOV_API_KEY || "").trim();
+  const t0 = Date.now();
+  if (!uei) {
+    return { ok: false, message: "SAM_GOV_UEI not configured on Render", latencyMs: 0, uei: null, apiKeySet: Boolean(apiKey) };
+  }
+  if (!apiKey) {
+    return { ok: false, message: "SAM_GOV_API_KEY not configured on Render", latencyMs: 0, uei, apiKeySet: false };
+  }
+
+  // SAM.gov Entity Management API accepts api_key as query param (preferred) and X-Api-Key header.
+  const url =
+    `https://api.sam.gov/entity-information/v3/entities`
+    + `?api_key=${encodeURIComponent(apiKey)}`
+    + `&ueiSAM=${encodeURIComponent(uei)}`
+    + `&includeSections=entityRegistration,coreData`;
+
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(15_000),
+      headers: {
+        Accept: "application/json",
+        "X-Api-Key": apiKey,
+      },
+    });
+    const latencyMs = Date.now() - t0;
+    const data = (await res.json().catch(() => ({}))) as {
+      entityData?: Array<{
+        entityRegistration?: Record<string, unknown>;
+        coreData?: Record<string, unknown>;
+      }>;
+      totalRecords?: number;
+      message?: string;
+      error?: { message?: string };
+    };
+
+    if (res.status === 401 || res.status === 403) {
+      return {
+        ok: false,
+        message: `SAM.gov auth failed (${res.status}) — check SAM_GOV_API_KEY permissions for Entity Management API`,
+        latencyMs,
+        uei,
+        apiKeySet: true,
+        httpStatus: res.status,
+      };
+    }
+    if (!res.ok) {
+      return {
+        ok: false,
+        message: data.message || data.error?.message || `SAM.gov API ${res.status}`,
+        latencyMs,
+        uei,
+        apiKeySet: true,
+        httpStatus: res.status,
+      };
+    }
+
+    const entity = data.entityData?.[0]?.entityRegistration || null;
+    const name = entity?.legalBusinessName ? String(entity.legalBusinessName) : undefined;
+    const total = Number(data.totalRecords ?? data.entityData?.length ?? 0);
+    if (total < 1 && !name && !entity) {
+      return {
+        ok: false,
+        message: `SAM.gov returned no entity for UEI ${uei}`,
+        latencyMs,
+        uei,
+        apiKeySet: true,
+        httpStatus: res.status,
+      };
+    }
+
+    const cage =
+      entity?.cageCode != null && String(entity.cageCode).trim()
+        ? String(entity.cageCode).trim()
+        : null;
+    const registrationStatus =
+      entity?.registrationStatus != null ? String(entity.registrationStatus) : null;
+    const registrationExpirationDate =
+      entity?.registrationExpirationDate != null
+        ? String(entity.registrationExpirationDate)
+        : entity?.expirationDate != null
+          ? String(entity.expirationDate)
+          : null;
+    const ueiSAM =
+      entity?.ueiSAM != null ? String(entity.ueiSAM) : uei;
+    const entityType =
+      entity?.entityType != null
+        ? String(entity.entityType)
+        : entity?.entityStructureDesc != null
+          ? String(entity.entityStructureDesc)
+          : null;
+    const purposeOfRegistrationCode =
+      entity?.purposeOfRegistrationCode != null
+        ? String(entity.purposeOfRegistrationCode)
+        : null;
+    const registrationDate =
+      entity?.registrationDate != null ? String(entity.registrationDate) : null;
+
+    const active =
+      !registrationStatus
+      || /active/i.test(registrationStatus)
+      || registrationStatus === "A";
+
+    return {
+      ok: true,
+      message: name
+        ? `SAM.gov entity OK — ${name}${cage ? ` · CAGE ${cage}` : ""}${registrationStatus ? ` · ${registrationStatus}` : ""}`
+        : `SAM.gov entity OK for UEI ${uei}`,
+      latencyMs,
+      uei,
+      apiKeySet: true,
+      httpStatus: res.status,
+      legalBusinessName: name,
+      cageCode: cage,
+      registrationStatus,
+      registrationExpirationDate,
+      ueiSAM,
+      entityType,
+      purposeOfRegistrationCode,
+      registrationDate,
+      rawEntityRegistration: entity,
+      // expose active hint via message; callers check registrationStatus
+      ...(active ? {} : {}),
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error ? err.message : "SAM.gov probe failed",
+      latencyMs: Date.now() - t0,
+      uei,
+      apiKeySet: true,
+    };
   }
 }
 

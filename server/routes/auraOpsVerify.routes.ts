@@ -697,4 +697,49 @@ router.post("/phase8a5/verify-org-evidence", auraOpsVerifyAuth, requireHQModule(
   }
 });
 
+/**
+ * Phase 8A.5 — sync SAM.gov + Grants.gov into Evidence Vault (reuse-first).
+ * Auth: Founder JWT or AURA_OPS_VERIFY_TOKEN. No Founder password. No submissions.
+ */
+router.post("/phase8a5/sync-federal-integrations", auraOpsVerifyAuth, requireHQModule("aura"), async (req, res) => {
+  try {
+    const { syncFederalIntegrationEvidence, buildFounderEvidenceActionQueue, selectNextPilotCandidates } =
+      await import("../hq/auraGrantEvidencePopulationEngine");
+    const { buildFundingIntelligenceMetrics } = await import("../hq/auraFundingIntelligenceEngine");
+    const sync = await syncFederalIntegrationEvidence({
+      actorEmail: req.hqUser?.email || getFounderEmail(),
+      rematch: req.body?.rematch !== false,
+    });
+    const metrics = await buildFundingIntelligenceMetrics();
+    const founderQueue = await buildFounderEvidenceActionQueue();
+    const pilots = await selectNextPilotCandidates();
+    return res.json({
+      ok: true,
+      maySubmit: false,
+      authMethod: (req as { auraOpsTokenAuth?: boolean }).auraOpsTokenAuth ? "ops_token" : "founder_jwt",
+      sync,
+      readiness: {
+        readyNowCount: metrics.readyNowCount,
+        nearlyReadyCount: metrics.nearlyReadyCount,
+        needsDocumentsCount: metrics.needsDocumentsCount,
+        applicationReadyFunding: metrics.applicationReadyFunding,
+        nearlyReadyFunding: metrics.nearlyReadyFunding,
+        opportunitiesWithHardBlockers: metrics.opportunitiesWithHardBlockers,
+      },
+      founderQueueTop10: founderQueue.slice(0, 10),
+      handleFirst: founderQueue[0] || null,
+      pilots: {
+        top5: pilots.top5,
+        recommendedFirstPilot: pilots.recommendedPilot,
+        rationale: pilots.rationale,
+        rejectedPriorPilot: pilots.rejectedPriorPilot,
+      },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Federal integration sync failed";
+    console.error("Phase 8A.5 federal sync error:", message);
+    return res.status(502).json({ error: message, maySubmit: false });
+  }
+});
+
 export default router;

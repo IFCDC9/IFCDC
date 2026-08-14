@@ -20,6 +20,7 @@ import {
   runDocumentReadinessBatch,
   listEvidenceVault,
   buildEvidenceVaultMetrics,
+  upsertReusableIntegrationEvidence,
   type EvidenceMatchStatus,
 } from "./auraGrantEvidenceVaultEngine";
 
@@ -217,10 +218,15 @@ function classifyCatalogStatus(opts: {
   if (catalog.envUei && IFCDC_ORG_PROFILE.samUei) return "verified";
   if (vault) {
     const status = String(vault.verification_status || "");
+    const source = String(vault.source || "");
+    const integrationOk =
+      source === "env_uei"
+      || source === "sam_gov_integration"
+      || source === "grants_gov_integration";
     if (status === "needs_update" || isExpired(vault.expiration_date as string | null)) {
       return "needs_update";
     }
-    if (status === "verified" && (hasFileUrl(vault.file_url) || vault.source === "env_uei")) {
+    if (status === "verified" && (hasFileUrl(vault.file_url) || integrationOk)) {
       return "verified";
     }
     if (hasFileUrl(vault.file_url) && isExpired(vault.expiration_date as string | null)) {
@@ -320,7 +326,12 @@ export async function getEvidenceCompletionPercent(): Promise<{
     if (
       row
       && row.verification_status === "verified"
-      && (hasFileUrl(row.file_url) || row.source === "env_uei")
+      && (
+        hasFileUrl(row.file_url)
+        || row.source === "env_uei"
+        || row.source === "sam_gov_integration"
+        || row.source === "grants_gov_integration"
+      )
       && !isExpired(row.expiration_date)
     ) {
       verifiedBaseline++;
@@ -510,7 +521,12 @@ export async function buildIfcdcOrganizationalGrantProfile(opts?: {
     .filter(
       (v) =>
         v.verification_status === "verified"
-        && (hasFileUrl(v.file_url) || v.source === "env_uei")
+        && (
+          hasFileUrl(v.file_url)
+          || v.source === "env_uei"
+          || v.source === "sam_gov_integration"
+          || v.source === "grants_gov_integration"
+        )
         && !isExpired(v.expiration_date)
     )
     .map((v) => v.evidence_type);
@@ -1520,12 +1536,364 @@ export async function buildProgramFundingReadinessView(opts?: {
   return views;
 }
 
+/**
+ * Phase 8A.5 — pull SAM.gov + Grants.gov via existing HQ integrations into Evidence Vault
+ * before asking Founder. No invented documents; source-attributed reusable records only.
+ */
+export async function syncFederalIntegrationEvidence(opts?: {
+  actorEmail?: string;
+  rematch?: boolean;
+}): Promise<Record<string, unknown>> {
+  await ensureGrantTables();
+  const rematch = opts?.rematch !== false;
+  const verifiedTypes: string[] = [];
+  const skipped: Array<{ evidenceType: string; reason: string }> = [];
+  const readinessBefore = await safeAll<{
+    id: string;
+    readiness_class: string | null;
+    application_readiness_score: number | null;
+  }>(
+    `SELECT id, readiness_class, application_readiness_score FROM grant_opportunities
+     WHERE eligibility_result IN ('eligible', 'possibly_eligible')
+       AND (duplicate_of_id IS NULL OR duplicate_of_id = '')`
+  );
+  const beforeMap = new Map(
+    readinessBefore.map((r) => [r.id, r])
+  );
+
+  let samProbe: Awaited<ReturnType<typeof import("./grantFeedConnectors").probeSamGovEntityLive>> | null =
+    null;
+  try {
+    const { probeSamGovEntityLive } = await import("./grantFeedConnectors");
+    samProbe = await probeSamGovEntityLive();
+  } catch (err) {
+    skipped.push({
+      evidenceType: "sam_registration",
+      reason: err instanceof Error ? err.message : "SAM.gov probe failed",
+    });
+  }
+
+  let recordsUpserted = 0;
+  let ueiVerified = false;
+  let cageVerified = false;
+  let samRegistrationVerified = false;
+
+  if (samProbe?.ok && samProbe.uei) {
+    const statusRaw = String(samProbe.registrationStatus || "Active");
+    const active =
+      /active/i.test(statusRaw) || statusRaw === "A" || !samProbe.registrationStatus;
+    const exp = samProbe.registrationExpirationDate || null;
+    const expired = exp ? isExpired(exp) : false;
+    const verificationStatus =
+      !active || expired ? ("needs_update" as const) : ("verified" as const);
+    const sourceNote = "Source: SAM.gov via IFCDC HQ integration";
+
+    await upsertReusableIntegrationEvidence({
+      evidenceType: "sam_registration",
+      title: `SAM.gov registration — ${samProbe.legalBusinessName || "IFCDC"} (${statusRaw})`,
+      verificationStatus,
+      source: "sam_gov_integration",
+      effectiveDate: samProbe.registrationDate || null,
+      expirationDate: exp,
+      notes: JSON.stringify({
+        sourceAttribution: sourceNote,
+        uei: samProbe.ueiSAM || samProbe.uei,
+        cageCode: samProbe.cageCode || null,
+        registrationStatus: statusRaw,
+        legalBusinessName: samProbe.legalBusinessName || null,
+        entityType: samProbe.entityType || null,
+        purposeOfRegistrationCode: samProbe.purposeOfRegistrationCode || null,
+        probedAt: nowIso(),
+      }),
+      auraConfidence: 0.98,
+    });
+    recordsUpserted++;
+    if (verificationStatus === "verified") {
+      samRegistrationVerified = true;
+      verifiedTypes.push("sam_registration");
+    }
+
+    await upsertReusableIntegrationEvidence({
+      evidenceType: "uei",
+      title: `UEI ${samProbe.ueiSAM || samProbe.uei}`,
+      verificationStatus,
+      source: "sam_gov_integration",
+      effectiveDate: samProbe.registrationDate || null,
+      expirationDate: exp,
+      notes: JSON.stringify({
+        sourceAttribution: sourceNote,
+        uei: samProbe.ueiSAM || samProbe.uei,
+        probedAt: nowIso(),
+      }),
+      auraConfidence: 0.99,
+    });
+    recordsUpserted++;
+    if (verificationStatus === "verified") {
+      ueiVerified = true;
+      verifiedTypes.push("uei");
+    }
+
+    if (samProbe.cageCode) {
+      await upsertReusableIntegrationEvidence({
+        evidenceType: "cage",
+        title: `CAGE ${samProbe.cageCode}`,
+        verificationStatus,
+        source: "sam_gov_integration",
+        effectiveDate: samProbe.registrationDate || null,
+        expirationDate: exp,
+        notes: JSON.stringify({
+          sourceAttribution: sourceNote,
+          cageCode: samProbe.cageCode,
+          uei: samProbe.ueiSAM || samProbe.uei,
+          probedAt: nowIso(),
+        }),
+        auraConfidence: 0.98,
+      });
+      recordsUpserted++;
+      if (verificationStatus === "verified") {
+        cageVerified = true;
+        verifiedTypes.push("cage");
+      }
+    } else {
+      skipped.push({
+        evidenceType: "cage",
+        reason: "SAM.gov entity response did not include cageCode",
+      });
+    }
+  } else if (samProbe && !samProbe.ok) {
+    skipped.push({
+      evidenceType: "sam_registration",
+      reason: samProbe.message || "SAM.gov entity not verified",
+    });
+    // Fall back: env UEI alone still counts for uei/sam when configured
+    if (IFCDC_ORG_PROFILE.samUei) {
+      for (const key of ["sam_registration", "uei"] as const) {
+        await upsertReusableIntegrationEvidence({
+          evidenceType: key,
+          title:
+            key === "uei"
+              ? `SAM.gov UEI ${IFCDC_ORG_PROFILE.samUei}`
+              : `SAM.gov registration (UEI ${IFCDC_ORG_PROFILE.samUei})`,
+          verificationStatus: "verified",
+          source: "env_uei",
+          notes: JSON.stringify({
+            sourceAttribution: "Source: SAM.gov UEI configured in IFCDC HQ env",
+            uei: IFCDC_ORG_PROFILE.samUei,
+            note: "Live SAM.gov entity probe failed; UEI env retained as provisional verification",
+            probeMessage: samProbe.message,
+          }),
+        });
+        recordsUpserted++;
+        verifiedTypes.push(key);
+        if (key === "uei") ueiVerified = true;
+        if (key === "sam_registration") samRegistrationVerified = true;
+      }
+    }
+  }
+
+  let grantsGov: {
+    healthy: boolean;
+    apiReachable: boolean;
+    recordCount: number;
+    message: string;
+    source?: string;
+  } | null = null;
+  try {
+    const { probeGrantsGovApi } = await import("./grantsGovIntegrationEngine");
+    grantsGov = await probeGrantsGovApi();
+  } catch (err) {
+    skipped.push({
+      evidenceType: "grants_gov_account",
+      reason: err instanceof Error ? err.message : "Grants.gov probe failed",
+    });
+  }
+
+  let grantsGovVerified = false;
+  if (grantsGov?.apiReachable) {
+    const status = grantsGov.healthy ? ("verified" as const) : ("needs_update" as const);
+    await upsertReusableIntegrationEvidence({
+      evidenceType: "grants_gov_account",
+      title: "Grants.gov organization connectivity (HQ Search2 integration)",
+      verificationStatus: status,
+      source: "grants_gov_integration",
+      notes: JSON.stringify({
+        sourceAttribution: "Source: Grants.gov via IFCDC HQ integration",
+        apiReachable: grantsGov.apiReachable,
+        healthy: grantsGov.healthy,
+        recordCount: grantsGov.recordCount,
+        probeSource: grantsGov.source || "search2",
+        message: grantsGov.message,
+        note:
+          "Public Applicant API connectivity verified. Workspace-login credentials are not required for opportunity discovery.",
+        probedAt: nowIso(),
+      }),
+      auraConfidence: grantsGov.healthy ? 0.95 : 0.7,
+    });
+    recordsUpserted++;
+    if (status === "verified") {
+      grantsGovVerified = true;
+      verifiedTypes.push("grants_gov_account");
+    }
+  } else if (grantsGov) {
+    skipped.push({
+      evidenceType: "grants_gov_account",
+      reason: grantsGov.message || "Grants.gov API not reachable",
+    });
+  }
+
+  const orgProfile = await buildIfcdcOrganizationalGrantProfile({
+    actorEmail: opts?.actorEmail,
+  });
+
+  // Enrich org profile with SAM fields when verified
+  if (samProbe?.ok) {
+    try {
+      const db = await getDb();
+      const row = await safeGet<{ profile_json: string }>(
+        `SELECT profile_json FROM ifcdc_org_grant_profiles WHERE id = ?`,
+        ORG_PROFILE_ROW_ID
+      );
+      const profile = row?.profile_json ? JSON.parse(row.profile_json) : { ...orgProfile.profile };
+      if (samProbe.legalBusinessName) profile.legalNameFromSam = samProbe.legalBusinessName;
+      if (samProbe.ueiSAM || samProbe.uei) profile.samUei = samProbe.ueiSAM || samProbe.uei;
+      if (samProbe.cageCode) profile.cageCode = samProbe.cageCode;
+      if (samProbe.registrationStatus) profile.samRegistrationStatus = samProbe.registrationStatus;
+      if (samProbe.registrationExpirationDate) {
+        profile.samRegistrationExpirationDate = samProbe.registrationExpirationDate;
+      }
+      if (samProbe.entityType) profile.samEntityType = samProbe.entityType;
+      profile.grantsGovConnectivity = grantsGovVerified ? "verified" : grantsGov?.apiReachable ? "degraded" : "missing";
+      await db.run(
+        `UPDATE ifcdc_org_grant_profiles SET profile_json = ?, updated_at = ? WHERE id = ?`,
+        JSON.stringify(profile),
+        nowIso(),
+        ORG_PROFILE_ROW_ID
+      );
+    } catch {
+      /* profile enrich best-effort */
+    }
+  }
+
+  const rematchResults: Record<string, { recalculated: number; unlockedOpportunityIds: string[] }> = {};
+  if (rematch) {
+    for (const t of ["sam_registration", "uei", "cage", "grants_gov_account"]) {
+      if (!verifiedTypes.includes(t) && t !== "grants_gov_account") continue;
+      if (t === "grants_gov_account" && !grantsGovVerified) continue;
+      rematchResults[t] = await rematchOpportunitiesForEvidence(t);
+    }
+    // Full qualified recalc so requirement match_status flips for baseline_* keys
+    await recalculateAllQualifiedReadiness({
+      limit: 40,
+      actorEmail: opts?.actorEmail,
+    });
+  }
+
+  const readinessAfter = await safeAll<{
+    id: string;
+    title: string;
+    readiness_class: string | null;
+    application_readiness_score: number | null;
+    ifcdc_addressable_amount: number | null;
+  }>(
+    `SELECT id, title, readiness_class, application_readiness_score, ifcdc_addressable_amount
+     FROM grant_opportunities
+     WHERE eligibility_result IN ('eligible', 'possibly_eligible')
+       AND (duplicate_of_id IS NULL OR duplicate_of_id = '')`
+  );
+  const readinessIncreased = readinessAfter.filter((a) => {
+    const b = beforeMap.get(a.id);
+    if (!b) return false;
+    return Number(a.application_readiness_score || 0) > Number(b.application_readiness_score || 0);
+  });
+  const classImproved = readinessAfter.filter((a) => {
+    const b = beforeMap.get(a.id);
+    if (!b) return false;
+    return b.readiness_class !== a.readiness_class;
+  });
+
+  const founderQueue = await buildFounderEvidenceActionQueue();
+  const removedFromQueue = ["sam_registration", "uei", "cage", "grants_gov_account"].filter(
+    (t) => verifiedTypes.includes(t) && !founderQueue.some((q) => q.evidenceType === t)
+  );
+
+  emitPhase8A5Event({
+    title: "Federal integration evidence synced",
+    detail:
+      `SAM registration=${samRegistrationVerified} UEI=${ueiVerified} CAGE=${cageVerified} `
+      + `Grants.gov=${grantsGovVerified}; readiness↑ ${readinessIncreased.length}; queue removed ${removedFromQueue.join(",") || "none"}`,
+    grantDocEvent: "evidence_verified",
+    metadata: {
+      verifiedTypes,
+      removedFromQueue,
+      readinessIncreasedCount: readinessIncreased.length,
+      samLegalName: samProbe?.legalBusinessName || null,
+      cageCode: samProbe?.cageCode || null,
+    },
+  });
+
+  await logGrantActivity(
+    "evidence",
+    "federal_integrations",
+    "sync_federal_integration_evidence_8a5",
+    `verified=${verifiedTypes.join(",")} upserted=${recordsUpserted}`,
+    opts?.actorEmail
+  );
+
+  return {
+    ok: true,
+    phase: "8A.5",
+    maySubmit: false,
+    sam: {
+      ok: Boolean(samProbe?.ok),
+      message: samProbe?.message || null,
+      legalBusinessName: samProbe?.legalBusinessName || null,
+      uei: samProbe?.ueiSAM || samProbe?.uei || IFCDC_ORG_PROFILE.samUei || null,
+      cageCode: samProbe?.cageCode || null,
+      registrationStatus: samProbe?.registrationStatus || null,
+      registrationExpirationDate: samProbe?.registrationExpirationDate || null,
+      samRegistrationVerified,
+      ueiVerified,
+      cageVerified,
+    },
+    grantsGov: {
+      apiReachable: Boolean(grantsGov?.apiReachable),
+      healthy: Boolean(grantsGov?.healthy),
+      verified: grantsGovVerified,
+      message: grantsGov?.message || null,
+      recordCount: grantsGov?.recordCount ?? 0,
+    },
+    verifiedTypes,
+    removedFromQueue,
+    skipped,
+    recordsUpserted,
+    rematchResults,
+    readinessIncreasedCount: readinessIncreased.length,
+    readinessClassChanges: classImproved.length,
+    readinessIncreased: readinessIncreased.slice(0, 20).map((r) => ({
+      id: r.id,
+      title: r.title,
+      score: r.application_readiness_score,
+      class: r.readiness_class,
+      addressable: r.ifcdc_addressable_amount,
+    })),
+    founderQueueTop5: founderQueue.slice(0, 5),
+    nextFounderQueueItem: founderQueue[0] || null,
+  };
+}
+
 export async function runPhase8A5PopulationCycle(opts?: {
   actorEmail?: string;
   limit?: number;
 }): Promise<Record<string, unknown>> {
   await ensureGrantTables();
   const actorEmail = opts?.actorEmail;
+
+  // Priority: HQ structured data / docs / SAM.gov / Grants.gov before Founder queue.
+  // Rematch is deferred to recalculateAllQualifiedReadiness below (single pass).
+  const federalSync = await syncFederalIntegrationEvidence({
+    actorEmail,
+    rematch: false,
+  });
 
   const audit = await auditExistingHqEvidence({ actorEmail });
   const founderQueue = await buildFounderEvidenceActionQueue({ audit: audit.items });
@@ -1544,6 +1912,7 @@ export async function runPhase8A5PopulationCycle(opts?: {
     generatedAt: nowIso(),
     completionPercent: completion.percent,
     completion,
+    federalIntegrationSync: federalSync,
     auditSummary: {
       synced: audit.synced,
       byStatus: audit.items.reduce(
@@ -1576,6 +1945,7 @@ export async function runPhase8A5PopulationCycle(opts?: {
       "No Twilio/SMS",
       "Lead-Safe / Healthy Homes Financing excluded from pilot promotion",
       "Banking evidence status-only",
+      "SAM.gov / Grants.gov checked before Founder queue",
     ],
   };
 
@@ -1583,7 +1953,7 @@ export async function runPhase8A5PopulationCycle(opts?: {
     "system",
     "evidence_population",
     "phase8a5_population_cycle",
-    `queue=${founderQueue.length} completion=${completion.percent}% pilots=${readiness.pilots.top5.length}`,
+    `queue=${founderQueue.length} completion=${completion.percent}% pilots=${readiness.pilots.top5.length} federal=${(federalSync.verifiedTypes as string[] || []).join(",")}`,
     actorEmail
   );
 
@@ -1595,6 +1965,7 @@ export async function runPhase8A5PopulationCycle(opts?: {
     metadata: {
       completionPercent: completion.percent,
       queueLength: founderQueue.length,
+      federalVerified: federalSync.verifiedTypes,
     },
   });
 
