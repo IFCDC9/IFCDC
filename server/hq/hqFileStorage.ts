@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { getDb } from "../db";
 import { hasPermission, toHQRole } from "./enterpriseRoles";
 import { getDataDir } from "../config/dataPaths";
+import { canonicalUploadDir, findPhysicalFile } from "./documentPersistenceEngine";
 
 function uploadRoot(): string {
   // Persist on IFCDC_DATA_DIR (Render disk). App src tree is not writable in production.
@@ -97,7 +98,7 @@ export async function verifyHqFileAccess(storedName: string, role: string, userE
 export function resolveHqFilePath(storedName: string): string | null {
   const safe = path.basename(storedName);
   if (!safe || safe !== storedName) return null;
-  return path.join(uploadRoot(), safe);
+  return findPhysicalFile(safe) || path.join(canonicalUploadDir(), safe);
 }
 
 function mimeToExt(mime: string): string {

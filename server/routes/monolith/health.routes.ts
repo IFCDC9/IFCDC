@@ -38,6 +38,23 @@ export function registerHealthRoutes(app: Express): void {
       founderReadiness = null;
     }
 
+    let storage: Record<string, unknown> | null = null;
+    try {
+      const { probeDocumentPersistence } = await import("../../hq/documentPersistenceEngine");
+      const probe = await probeDocumentPersistence();
+      storage = {
+        dataDir: probe.resolvedDataDir,
+        envSet: Boolean(probe.envIfcdcDataDir),
+        persistentStorageConfigured: probe.persistentStorageConfigured,
+        persistentDiskDetected: probe.persistentDiskDetected,
+        writable: probe.writable,
+        dbExists: Boolean((probe.db as { exists?: boolean } | undefined)?.exists),
+        physicalFileCount: probe.physicalFileCount,
+      };
+    } catch {
+      storage = null;
+    }
+
     let knowledgeBase: {
       total: number;
       embedded: number;
@@ -90,6 +107,7 @@ export function registerHealthRoutes(app: Express): void {
         reportUrl: "/api/hq/grants/qa/report",
       },
       knowledgeBase,
+      storage,
       credentials: {
         superAdminEmail: getSuperAdminEmail(),
         grantsOperatorEmail: getGrantsOperatorEmail(),

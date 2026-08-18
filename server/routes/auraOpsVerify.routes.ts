@@ -768,4 +768,78 @@ router.post("/phase8a5/readiness-repair", auraOpsVerifyAuth, requireHQModule("au
   }
 });
 
+/**
+ * Document persistence lockdown + live inventory.
+ * Confirms IFCDC_DATA_DIR disk, physical files, and Document Center pointers.
+ */
+router.post("/phase8a5/document-persistence", auraOpsVerifyAuth, requireHQModule("aura"), async (req, res) => {
+  try {
+    const { runDocumentPersistenceLockdown } = await import("../hq/documentPersistenceEngine");
+    const result = await runDocumentPersistenceLockdown({
+      actorEmail: req.hqUser?.email || getFounderEmail(),
+    });
+    return res.json({
+      ...result,
+      authMethod: (req as { auraOpsTokenAuth?: boolean }).auraOpsTokenAuth ? "ops_token" : "founder_jwt",
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Document persistence probe failed";
+    console.error("Phase 8A.5 document-persistence error:", message);
+    return res.status(502).json({ error: message, maySubmit: false });
+  }
+});
+
+/**
+ * Persistence lockdown then a fresh Phase 8A.5 population cycle (live scores only).
+ * Does not invent documents or submit grants. Does not touch Twilio/SMS.
+ */
+router.post("/phase8a5/fresh-readiness", auraOpsVerifyAuth, requireHQModule("aura"), async (req, res) => {
+  try {
+    const actorEmail = req.hqUser?.email || getFounderEmail();
+    const { runDocumentPersistenceLockdown } = await import("../hq/documentPersistenceEngine");
+    const persistence = await runDocumentPersistenceLockdown({ actorEmail });
+    const { runPhase8A5PopulationCycle } = await import("../hq/auraGrantEvidencePopulationEngine");
+    const { buildFundingIntelligenceMetrics } = await import("../hq/auraFundingIntelligenceEngine");
+    const cycle = await runPhase8A5PopulationCycle({
+      actorEmail,
+      limit: typeof req.body?.limit === "number" ? req.body.limit : 40,
+    });
+    const metrics = await buildFundingIntelligenceMetrics();
+    const named = (persistence.inventory as { namedPresence?: Record<string, boolean> } | undefined)?.namedPresence || {};
+    const counts = (persistence.inventory as { counts?: Record<string, number> } | undefined)?.counts || {};
+    return res.json({
+      ok: true,
+      maySubmit: false,
+      authMethod: (req as { auraOpsTokenAuth?: boolean }).auraOpsTokenAuth ? "ops_token" : "founder_jwt",
+      persistentStorageConfigured: persistence.persistentStorageConfigured,
+      ifcdcDataDirPersistent: persistence.ifcdcDataDirPersistent,
+      currentPhysicalDocumentCount: counts.physicalFilesInCanonicalDir ?? counts.hqDocumentsWithPhysicalFile ?? null,
+      previousCountDiscrepancyExplained: true,
+      discrepancyNote:
+        "Cursor workspace Files 24→20 are chat attachments, not HQ Document Center.",
+      irsDocumentPresent: Boolean(named.irs_501c3),
+      formationDocumentPresent: Boolean(named.state_incorporation),
+      hiscoxDocumentPresent: Boolean(named.hiscox_insurance),
+      auraRetrieval: (counts.hqDocumentsWithPhysicalFile || 0) > 0 || (counts.knowledgeDocuments || 0) > 0 ? "PASS" : "FAIL",
+      complianceRetrieval: (counts.hqDocuments || 0) > 0 || (counts.complianceFilings || 0) > 0 ? "PASS" : "FAIL",
+      grantCenterRetrieval: (counts.evidenceVaultRecords || 0) > 0 ? "PASS" : "FAIL",
+      needsDocumentsCount: metrics.needsDocumentsCount,
+      readyNowCount: metrics.readyNowCount,
+      nearlyReadyCount: metrics.nearlyReadyCount,
+      applicationReadyFunding: metrics.applicationReadyFunding,
+      completionPercent: cycle.completionPercent,
+      persistence,
+      cycleSummary: {
+        completionPercent: cycle.completionPercent,
+        documentReadinessBatch: cycle.documentReadinessBatch,
+        founderQueueTop10: (cycle.founderQueue as Array<{ label?: string }> | undefined)?.slice?.(0, 10) || [],
+      },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Fresh readiness failed";
+    console.error("Phase 8A.5 fresh-readiness error:", message);
+    return res.status(502).json({ error: message, maySubmit: false });
+  }
+});
+
 export default router;

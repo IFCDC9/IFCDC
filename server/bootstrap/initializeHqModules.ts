@@ -59,6 +59,15 @@ export async function initializeHqModules(founder: FounderSeedConfig): Promise<v
   await ensureCommunicationsTables();
   await ensureDocumentTables();
   await ensureHqFileRegistry();
+  try {
+    const { runDocumentPersistenceLockdown } = await import("../hq/documentPersistenceEngine");
+    const persist = await runDocumentPersistenceLockdown({ actorEmail: "system@ifcdc.org" });
+    console.log(
+      `Document persistence: configured=${String(persist.persistentStorageConfigured)} disk=${String(persist.ifcdcDataDirPersistent)}`
+    );
+  } catch (e) {
+    console.warn("Document persistence lockdown skipped:", (e as Error)?.message);
+  }
   await ensureBackupTables();
   await ensureSecuritySessionTables();
   await ensureAuraMemoryTables();

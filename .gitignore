@@ -12,5 +12,7 @@ vite.config.ts.*
 .credentials/
 data/*.db
 data/backups/
+data/uploads/
+data/hq-uploads/
 .local/
 .config/
