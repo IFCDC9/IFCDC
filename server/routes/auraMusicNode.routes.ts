@@ -101,8 +101,44 @@ router.post("/node/claim", async (req, res) => {
   }
 });
 
-/** Mac agent heartbeat (Bearer node token). */
-router.post("/node/heartbeat", async (req, res) => {
+/** Mac agent can read back the snapshot HQ stored for this node (no session cookie). */
+router.get("/node/snapshot", async (req, res) => {
+  try {
+    const auth = await authenticateAuraMusicNode(req);
+    if (!auth) return res.status(401).json({ error: "Unauthorized production node" });
+    const snap = await getPrimaryAuraMusicNodeSnapshot();
+    if (!snap || snap.nodeId !== auth.nodeId) {
+      return res.status(404).json({ error: "Snapshot not found for this node" });
+    }
+    res.json({ ok: true, online: snap.online, timedOut: snap.timedOut, ...snap });
+  } catch (error) {
+    console.error("GET /aura/music/node/snapshot error:", error);
+    res.status(500).json({ error: "Snapshot unavailable" });
+  }
+});
+
+/**
+ * Node self-test: enqueue an allowlisted command for this node and return id.
+ * Used for remote acceptance without a browser session. Founder UI uses /commands.
+ */
+router.post("/node/self-command", async (req, res) => {
+  try {
+    const auth = await authenticateAuraMusicNode(req);
+    if (!auth) return res.status(401).json({ error: "Unauthorized production node" });
+    const command = String(req.body?.command || "read_session").trim();
+    const enqueued = await enqueueAuraMusicCommand({
+      nodeId: auth.nodeId,
+      command,
+      args: (req.body?.args as Record<string, unknown>) || {},
+      requestedBy: `node:${auth.nodeId}`,
+      replayKey: req.body?.replayKey ? String(req.body.replayKey) : undefined,
+    });
+    res.status(201).json({ ok: true, ...enqueued, allowlist: AURA_MUSIC_COMMAND_ALLOWLIST });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    res.status(400).json({ error: msg });
+  }
+});
   try {
     const auth = await authenticateAuraMusicNode(req);
     if (!auth) return res.status(401).json({ error: "Unauthorized production node" });
