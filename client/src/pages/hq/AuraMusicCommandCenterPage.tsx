@@ -83,6 +83,159 @@ function FoundationPlaceholder({ title, note }: { title: string; note?: string }
   );
 }
 
+const REMOTE_COMMANDS: { id: string; label: string }[] = [
+  { id: "read_session", label: "Read Live Set / session" },
+  { id: "read_tracks", label: "Read track list" },
+  { id: "read_status", label: "Read bridge status" },
+  { id: "transport_play", label: "Start playback" },
+  { id: "transport_stop", label: "Stop playback" },
+];
+
+function RemoteCommandPanel({ onDone }: { onDone: () => void }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [lastResult, setLastResult] = useState<string>("");
+  const [enrollInfo, setEnrollInfo] = useState<string>("");
+  const nodeStatus = useQuery({
+    queryKey: ["hq-aura-music-node-status"],
+    queryFn: () => hqApi.auraMusicNodeStatus(),
+    refetchInterval: 10_000,
+    retry: 0,
+  });
+
+  async function enroll() {
+    setBusy("enroll");
+    setEnrollInfo("");
+    try {
+      const res = await hqApi.auraMusicEnrollNode({ label: "Founder Mac Production Node" });
+      setEnrollInfo(
+        [
+          "Node enrolled. Save this token on the Mac (shown once):",
+          `AURA_MUSIC_HQ_BASE_URL=${res.hqBaseUrl || "https://ifcdc-hq-wst6.onrender.com"}`,
+          `AURA_MUSIC_NODE_ID=${res.nodeId}`,
+          `AURA_MUSIC_NODE_TOKEN=${res.token}`,
+          "",
+          "Write ~/Music/IFCDC-MUSIC/secrets/production-node.json then ensure LaunchAgent com.ifcdc.aura-music-production-node is running.",
+        ].join("\n")
+      );
+      await nodeStatus.refetch();
+      onDone();
+    } catch (e) {
+      setEnrollInfo(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function runCommand(command: string) {
+    setBusy(command);
+    setLastResult("");
+    try {
+      const enq = await hqApi.auraMusicEnqueueCommand(command);
+      const started = Date.now();
+      let finalStatus = enq.status;
+      let result: unknown = null;
+      let error: string | null = null;
+      while (Date.now() - started < 45_000) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const look = await hqApi.auraMusicGetCommand(enq.id);
+        finalStatus = look.command.status;
+        result = look.command.result;
+        error = look.command.error ?? null;
+        if (finalStatus === "succeeded" || finalStatus === "failed") break;
+      }
+      setLastResult(
+        JSON.stringify(
+          {
+            id: enq.id,
+            command,
+            status: finalStatus,
+            error,
+            result,
+          },
+          null,
+          2
+        )
+      );
+      await nodeStatus.refetch();
+      onDone();
+    } catch (e) {
+      setLastResult(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const node = nodeStatus.data?.node;
+
+  return (
+    <HqPanel
+      title="Remote production commands"
+      subtitle="Allowlisted Ableton reads/transport via Mac outbound agent — no public ports"
+    >
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginBottom: "0.75rem", alignItems: "center" }}>
+        <StatusBadge
+          label={node?.online ? "NODE ONLINE" : "NODE OFFLINE"}
+          variant={node?.online ? "success" : "danger"}
+          pulse={Boolean(node?.online)}
+        />
+        {node?.nodeId ? <span className="hq-kpi-meta">Node {node.nodeId}</span> : null}
+        {node?.lastSeenAt ? (
+          <span className="hq-kpi-meta">Last seen {new Date(node.lastSeenAt).toLocaleString()}</span>
+        ) : null}
+        <button type="button" className="hq-btn hq-btn-secondary hq-btn-sm" disabled={busy === "enroll"} onClick={() => void enroll()}>
+          Enroll Mac node
+        </button>
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginBottom: "0.75rem" }}>
+        {REMOTE_COMMANDS.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            className="hq-btn hq-btn-secondary hq-btn-sm"
+            disabled={Boolean(busy) || !node?.online}
+            onClick={() => void runCommand(c.id)}
+          >
+            {busy === c.id ? "Running…" : c.label}
+          </button>
+        ))}
+      </div>
+      {enrollInfo ? (
+        <pre
+          style={{
+            whiteSpace: "pre-wrap",
+            fontSize: "0.72rem",
+            background: "rgba(0,0,0,0.35)",
+            padding: "0.75rem",
+            borderRadius: 8,
+            overflow: "auto",
+          }}
+        >
+          {enrollInfo}
+        </pre>
+      ) : null}
+      {lastResult ? (
+        <pre
+          style={{
+            whiteSpace: "pre-wrap",
+            fontSize: "0.72rem",
+            background: "rgba(0,0,0,0.35)",
+            padding: "0.75rem",
+            borderRadius: 8,
+            overflow: "auto",
+            maxHeight: 280,
+          }}
+        >
+          {lastResult}
+        </pre>
+      ) : (
+        <p className="hq-kpi-meta" style={{ margin: 0 }}>
+          Harmless remote tests: session name, tracks, play/stop. Destructive commands are not allowlisted.
+        </p>
+      )}
+    </HqPanel>
+  );
+}
+
 const AuraMusicCommandCenterPage: React.FC = () => {
   const [tab, setTab] = useState<TabId>("dashboard");
 
@@ -261,9 +414,14 @@ const AuraMusicCommandCenterPage: React.FC = () => {
                 </p>
                 <p className="hq-kpi-meta" style={{ marginTop: "0.75rem" }}>
                   Ports 4177 / 4178 remain private on the Founder Mac. Authorized devices use IFCDC HQ only.
-                  {data.statusGeneratedAt ? ` · Status file ${new Date(data.statusGeneratedAt).toLocaleString()}` : ""}
+                  {data.mode === "remote_production_node" ? ` · Linked node ${data.nodeId ?? ""}` : ""}
+                  {data.statusGeneratedAt ? ` · Status ${new Date(data.statusGeneratedAt).toLocaleString()}` : ""}
                 </p>
               </HqPanel>
+            </div>
+
+            <div style={{ marginTop: "1rem" }}>
+              <RemoteCommandPanel onDone={() => query.refetch()} />
             </div>
           </>
         )}

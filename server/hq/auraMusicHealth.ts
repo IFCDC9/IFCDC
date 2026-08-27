@@ -34,7 +34,7 @@ export type AuraMusicServiceState =
 export interface AuraMusicCommandCenter {
   ok: boolean;
   configured: boolean;
-  mode: "local_status_file" | "local_live_probe" | "cloud_hq" | "local_offline";
+  mode: "local_status_file" | "local_live_probe" | "cloud_hq" | "local_offline" | "remote_production_node";
   auraMusicReady: boolean;
   publicExposure: false;
   architecture: string;
@@ -62,6 +62,8 @@ export interface AuraMusicCommandCenter {
   recentExports: AuraMusicExport[];
   sections: { id: string; label: string; available: boolean; note?: string }[];
   summary: Record<string, string>;
+  nodeId?: string;
+  nodeLabel?: string;
 }
 
 export interface AuraMusicJob {
@@ -164,7 +166,7 @@ function cloudPayload(): AuraMusicCommandCenter {
     publicExposure: false,
     architecture: ARCHITECTURE,
     message:
-      "AURA MUSIC production node runs on the Founder Mac (localhost only). This HQ instance is not attached to that node. Ports 4177/4178 are never exposed publicly.",
+      "AURA MUSIC production node is not linked. Enroll the Founder Mac agent so it can push authenticated heartbeats to HQ. Ports 4177/4178 stay private.",
     generatedAt,
     statusGeneratedAt: null,
     currentPhase: "2 (hardened) — production node offline from this HQ host",
@@ -190,6 +192,94 @@ function cloudPayload(): AuraMusicCommandCenter {
       Watchdog: "ERROR",
     },
   };
+}
+
+function fromRemoteNodeSnapshot(snap: {
+  online: boolean;
+  nodeId: string | null;
+  label: string | null;
+  lastSeenAt: string | null;
+  ageMs: number | null;
+  heartbeat: Record<string, unknown> | null;
+  timedOut: boolean;
+}): AuraMusicCommandCenter {
+  if (!snap.online || !snap.heartbeat) {
+    const base = cloudPayload();
+    return {
+      ...base,
+      configured: true,
+      mode: "remote_production_node",
+      message: snap.timedOut
+        ? `Production node ${snap.nodeId ?? ""} last seen ${snap.lastSeenAt ?? "never"} — heartbeat timed out. Waiting for Mac agent reconnect.`
+        : "Production node enrolled but no heartbeat received yet.",
+      lastHeartbeatAt: snap.lastSeenAt,
+      lastHeartbeatAgeMs: snap.ageMs,
+      nodeId: snap.nodeId ?? undefined,
+    } as AuraMusicCommandCenter;
+  }
+
+  const hb = snap.heartbeat as {
+    services?: Record<string, string>;
+    summary?: Record<string, string>;
+    lastHeartbeatAt?: string | null;
+    lastHeartbeatAgeMs?: number | null;
+    currentJob?: AuraMusicJob | null;
+    jobQueue?: AuraMusicJob[];
+    recentExports?: AuraMusicExport[];
+    auraMusicReady?: boolean;
+    statusGeneratedAt?: string | null;
+    workerAvailable?: boolean;
+  };
+
+  const services = hb.services ?? {};
+  const musicIntelligence = (services.musicIntelligence || "OFFLINE") as AuraMusicServiceState;
+  const abletonBridge = (services.abletonBridge || "OFFLINE") as AuraMusicServiceState;
+  const abletonLive = (services.abletonLive || "DISCONNECTED") as AuraMusicServiceState;
+  const productionNode = (services.productionNode || "NOT READY") as AuraMusicServiceState;
+  const watchdog = (services.watchdog || "ERROR") as AuraMusicServiceState;
+  const ready =
+    Boolean(hb.auraMusicReady) &&
+    musicIntelligence === "ONLINE" &&
+    abletonBridge === "ONLINE" &&
+    snap.online;
+
+  return {
+    ok: ready,
+    configured: true,
+    mode: "remote_production_node",
+    auraMusicReady: ready,
+    publicExposure: false,
+    architecture: ARCHITECTURE,
+    message: undefined,
+    generatedAt: new Date().toISOString(),
+    statusGeneratedAt: hb.statusGeneratedAt ?? snap.lastSeenAt,
+    currentPhase: "2 (hardened) — remote production node linked",
+    phases: phaseBlock(),
+    services: {
+      musicIntelligence,
+      abletonBridge,
+      abletonLive,
+      productionNode,
+      watchdog,
+    },
+    lastHeartbeatAt: hb.lastHeartbeatAt ?? snap.lastSeenAt,
+    lastHeartbeatAgeMs: hb.lastHeartbeatAgeMs ?? snap.ageMs,
+    currentJob: (hb.currentJob as AuraMusicJob | null) ?? null,
+    jobQueue: (hb.jobQueue as AuraMusicJob[]) ?? [],
+    recentExports: (hb.recentExports as AuraMusicExport[]) ?? [],
+    sections: SECTIONS.map((s) => ({ ...s })),
+    summary: {
+      "Music Intelligence": musicIntelligence,
+      "Ableton Bridge": abletonBridge,
+      "Ableton Live": abletonLive,
+      "Production Node": productionNode,
+      Watchdog: watchdog,
+      "Node ID": snap.nodeId ?? "—",
+      Worker: hb.workerAvailable === false ? "UNAVAILABLE" : "AVAILABLE",
+    },
+    nodeId: snap.nodeId ?? undefined,
+    nodeLabel: snap.label ?? undefined,
+  } as AuraMusicCommandCenter;
 }
 
 function deriveFromStatus(raw: Record<string, unknown>): AuraMusicCommandCenter {
@@ -346,30 +436,38 @@ export async function getAuraMusicHealthSummary(): Promise<Record<string, unknow
 
 /** Full Command Center payload for HQ UI */
 export async function getAuraMusicCommandCenter(): Promise<AuraMusicCommandCenter> {
-  if (!hasLocalNodeSignal()) {
-    return cloudPayload();
-  }
-
-  const path = statusPath();
-  if (existsSync(path)) {
-    try {
-      const raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-      return deriveFromStatus(raw);
-    } catch (err) {
-      const base = await liveProbePayload();
-      return {
-        ...base,
-        mode: "local_offline",
-        message: err instanceof Error ? err.message : String(err),
-        services: { ...base.services, watchdog: "ERROR" },
-        summary: { ...base.summary, Watchdog: "ERROR" },
-      };
+  // Prefer local Mac status when this HQ process is on the Founder workstation.
+  if (hasLocalNodeSignal()) {
+    const path = statusPath();
+    if (existsSync(path)) {
+      try {
+        const raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+        return deriveFromStatus(raw);
+      } catch (err) {
+        const base = await liveProbePayload();
+        return {
+          ...base,
+          mode: "local_offline",
+          message: err instanceof Error ? err.message : String(err),
+          services: { ...base.services, watchdog: "ERROR" },
+          summary: { ...base.summary, Watchdog: "ERROR" },
+        };
+      }
+    }
+    if (String(process.env.AURA_MUSIC_LOCAL_NODE || "").trim() === "1") {
+      return liveProbePayload();
     }
   }
 
-  // Env forced local but no status file yet — probe carefully with timeouts
-  if (String(process.env.AURA_MUSIC_LOCAL_NODE || "").trim() === "1") {
-    return liveProbePayload();
+  // Cloud HQ: use authenticated remote production-node heartbeats (never probe 4177/4178).
+  try {
+    const { getPrimaryAuraMusicNodeSnapshot } = await import("./auraMusicProductionNode");
+    const snap = await getPrimaryAuraMusicNodeSnapshot();
+    if (snap) {
+      return fromRemoteNodeSnapshot(snap);
+    }
+  } catch (err) {
+    console.warn("[aura-music] remote node snapshot unavailable:", err instanceof Error ? err.message : err);
   }
 
   return cloudPayload();

@@ -92,7 +92,7 @@ export interface AuraMusicExport {
 export interface AuraMusicCommandCenter {
   ok: boolean;
   configured: boolean;
-  mode: "local_status_file" | "local_live_probe" | "cloud_hq" | "local_offline";
+  mode: "local_status_file" | "local_live_probe" | "cloud_hq" | "local_offline" | "remote_production_node";
   auraMusicReady: boolean;
   publicExposure: false;
   architecture: string;
@@ -120,6 +120,8 @@ export interface AuraMusicCommandCenter {
   recentExports: AuraMusicExport[];
   sections: { id: string; label: string; available: boolean; note?: string }[];
   summary: Record<string, string>;
+  nodeId?: string;
+  nodeLabel?: string;
 }
 
 export interface AuraMusicHealthSummary {
@@ -798,6 +800,64 @@ export const hqApi = {
   auraMusicHealth: () => hqFetch<AuraMusicHealthSummary>("/aura/music/health", { timeoutMs: 8_000 }),
   auraMusicCommandCenter: () =>
     hqFetch<AuraMusicCommandCenter>("/aura/music/command-center", { timeoutMs: 8_000 }),
+  auraMusicNodeStatus: () =>
+    hqFetch<{
+      ok: boolean;
+      allowlist: string[];
+      node: {
+        online: boolean;
+        nodeId: string | null;
+        label: string | null;
+        lastSeenAt: string | null;
+        ageMs: number | null;
+        timedOut: boolean;
+      } | null;
+      recentCommands: Array<{
+        id: string;
+        command: string;
+        status: string;
+        createdAt: string;
+        completedAt?: string | null;
+        error?: string | null;
+      }>;
+    }>("/aura/music/node/status", { timeoutMs: 8_000 }),
+  auraMusicEnrollNode: (opts?: { label?: string; hostname?: string }) =>
+    hqFetch<{
+      ok: boolean;
+      nodeId: string;
+      token: string;
+      tokenPrefix: string;
+      label: string;
+      hqBaseUrl: string | null;
+      agentEnv: Record<string, string>;
+      warning: string;
+    }>("/aura/music/node/enroll", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(opts ?? {}),
+    }),
+  auraMusicEnqueueCommand: (command: string, opts?: { args?: Record<string, unknown>; replayKey?: string }) =>
+    hqFetch<{ ok: boolean; id: string; replayKey: string; status: string; allowlist: string[] }>(
+      "/aura/music/commands",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command, args: opts?.args, replayKey: opts?.replayKey }),
+      }
+    ),
+  auraMusicGetCommand: (id: string) =>
+    hqFetch<{
+      ok: boolean;
+      command: {
+        id: string;
+        command: string;
+        status: string;
+        result: unknown;
+        error?: string | null;
+        createdAt: string;
+        completedAt?: string | null;
+      };
+    }>(`/aura/music/commands/${id}`, { timeoutMs: 8_000 }),
   auraCommand: (command: string, opts?: { module?: string; contextRef?: Record<string, unknown> }) => {
     const deviceId = getOrCreateFounderDeviceId();
     return hqFetch<AuraCommandResponse>("/aura/command", {

@@ -71,6 +71,14 @@ services:
         sync: false
       - key: HQ_MUSIC_LAUNCH_URL
         sync: false
+      - key: AURA_MUSIC_NODE_BOOTSTRAP_SECRET
+        sync: false
+      - key: AURA_MUSIC_NODE_TOKEN
+        sync: false
+      - key: AURA_MUSIC_NODE_ID
+        sync: false
+      - key: AURA_MUSIC_ALLOW_FIRST_NODE_CLAIM
+        value: "1"
       - key: HQ_TAPIS_LAUNCH_URL
         sync: false
       - key: HQ_INCLUSIVE_LAUNCH_URL
