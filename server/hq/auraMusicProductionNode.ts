@@ -19,6 +19,8 @@ export const AURA_MUSIC_COMMAND_ALLOWLIST = [
   "mix_run_job",
   "mix_get_job",
   "mix_submit_feedback",
+  "mix_revise_job",
+  "ensure_aura_racks",
 ] as const;
 
 export type AuraMusicRemoteCommand = (typeof AURA_MUSIC_COMMAND_ALLOWLIST)[number];

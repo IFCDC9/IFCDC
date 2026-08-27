@@ -858,6 +858,21 @@ export const hqApi = {
         completedAt?: string | null;
       };
     }>(`/aura/music/commands/${id}`, { timeoutMs: 8_000 }),
+  auraMusicMixReview: (jobId?: string) =>
+    hqFetch<{
+      ok: boolean;
+      review: {
+        jobId: string;
+        revision: string;
+        report: string | null;
+        createdAt: string;
+        audio: Array<{ revision: string; kind: string; bytes: number; url: string }>;
+      } | null;
+    }>(`/aura/music/mixes/review${jobId ? `?jobId=${encodeURIComponent(jobId)}` : ""}`, {
+      timeoutMs: 10_000,
+    }),
+  auraMusicMixAudioUrl: (jobId: string, revision: string, kind: string) =>
+    `/api/hq/aura/music/mixes/${encodeURIComponent(jobId)}/${encodeURIComponent(revision)}/${encodeURIComponent(kind)}`,
   auraCommand: (command: string, opts?: { module?: string; contextRef?: Record<string, unknown> }) => {
     const deviceId = getOrCreateFounderDeviceId();
     return hqFetch<AuraCommandResponse>("/aura/command", {

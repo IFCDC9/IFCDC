@@ -76,9 +76,149 @@ function FoundationPlaceholder({ title, note }: { title: string; note?: string }
   return (
     <HqPanel title={title} subtitle="UI foundation — full capability lands in later phases">
       <p style={{ color: "var(--hq-text-muted)", margin: 0, lineHeight: 1.5 }}>
-        {note || "Architecture reserved. No Phase 3 automatic mixing is enabled."}
+        {note || "Architecture reserved."}
       </p>
     </HqPanel>
+  );
+}
+
+function MixReviewPanel({ onDone }: { onDone: () => void }) {
+  const reviewQuery = useQuery({
+    queryKey: ["hq-aura-music-mix-review"],
+    queryFn: () => hqApi.auraMusicMixReview(),
+    refetchInterval: 12_000,
+  });
+  const [busy, setBusy] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
+  const [abMode, setAbMode] = useState<"original" | "mix">("mix");
+  const review = reviewQuery.data?.review;
+  const jobId = review?.jobId;
+  const revision = review?.revision || "Mix V2";
+
+  const originalUrl = jobId
+    ? hqApi.auraMusicMixAudioUrl(jobId, revision, "original")
+    : null;
+  const mixUrl = jobId ? hqApi.auraMusicMixAudioUrl(jobId, revision, "mix") : null;
+
+  async function enqueue(command: string, args: Record<string, unknown>) {
+    setBusy(command);
+    setMessage("");
+    try {
+      const enq = await hqApi.auraMusicEnqueueCommand(command, {
+        args,
+        replayKey: `${command}-${Date.now()}`,
+      });
+      setMessage(`Queued ${command} → ${enq.id}`);
+      onDone();
+      reviewQuery.refetch();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div style={{ display: "grid", gap: "1rem" }}>
+      <HqPanel title="Mixing Intelligence" subtitle="Phase 3 — Ableton engineering racks + audible Mix review">
+        <p style={{ color: "var(--hq-text-muted)", margin: "0 0 1rem", lineHeight: 1.5 }}>
+          Listen → Diagnose → Decide → Process → Re-analyze → Compare → Correct → Report.
+          Approved racks only. DO_NOTHING is always valid.
+        </p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginBottom: "1rem" }}>
+          {["AURA Vocal Rack", "AURA Drum Bus", "AURA Bass Control", "AURA Instrument Rack", "AURA Mix Bus"].map(
+            (rack) => (
+              <StatusBadge key={rack} label={rack} variant="gold" />
+            )
+          )}
+        </div>
+      </HqPanel>
+
+      <HqPanel title="Audible Mix Review" subtitle={jobId ? `${jobId} · ${revision}` : "Waiting for Mix V2 upload from production node"}>
+        {!jobId ? (
+          <p style={{ color: "var(--hq-text-muted)", margin: 0 }}>
+            After Mix V2 completes on the Mac node, Original + Mix WAVs appear here for A/B listening.
+          </p>
+        ) : (
+          <>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", marginBottom: "1rem" }}>
+              <button type="button" className="hq-btn" onClick={() => setAbMode("original")} disabled={!originalUrl}>
+                Play Original
+              </button>
+              <button type="button" className="hq-btn" onClick={() => setAbMode("mix")} disabled={!mixUrl}>
+                Play AURA {revision}
+              </button>
+              <button
+                type="button"
+                className="hq-btn"
+                onClick={() => setAbMode(abMode === "original" ? "mix" : "original")}
+              >
+                A/B Compare ({abMode === "original" ? "Original" : revision})
+              </button>
+            </div>
+            {(abMode === "original" ? originalUrl : mixUrl) ? (
+              <audio
+                key={`${abMode}-${revision}`}
+                controls
+                src={abMode === "original" ? originalUrl! : mixUrl!}
+                style={{ width: "100%", marginBottom: "1rem" }}
+              />
+            ) : null}
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", marginBottom: "1rem" }}>
+              <button
+                type="button"
+                className="hq-btn"
+                disabled={!!busy}
+                onClick={() =>
+                  enqueue("mix_submit_feedback", {
+                    jobId,
+                    feedbackType: "approved",
+                    comment: `Approved ${revision}`,
+                  })
+                }
+              >
+                Approve
+              </button>
+              <button
+                type="button"
+                className="hq-btn"
+                disabled={!!busy}
+                onClick={() =>
+                  enqueue("mix_revise_job", {
+                    jobId,
+                    instruction: "Bring the vocal forward.",
+                  })
+                }
+              >
+                Request Revision
+              </button>
+              <button type="button" className="hq-btn" disabled={!!busy} onClick={() => reviewQuery.refetch()}>
+                Refresh Review
+              </button>
+            </div>
+            {message ? <p className="hq-kpi-meta">{message}</p> : null}
+
+            <details open style={{ marginTop: "0.5rem" }}>
+              <summary style={{ cursor: "pointer", fontWeight: 600 }}>Engineering Report</summary>
+              <pre
+                style={{
+                  whiteSpace: "pre-wrap",
+                  fontSize: "0.75rem",
+                  lineHeight: 1.45,
+                  maxHeight: 360,
+                  overflow: "auto",
+                  marginTop: "0.75rem",
+                  color: "var(--hq-text-muted)",
+                }}
+              >
+                {review?.report || "Report will appear after Mix V2 upload."}
+              </pre>
+            </details>
+          </>
+        )}
+      </HqPanel>
+    </div>
   );
 }
 
@@ -439,31 +579,7 @@ const AuraMusicCommandCenterPage: React.FC = () => {
             note={sectionMeta.get("projects")?.note || "MUSIC-###### project records will surface here from the Secure Music Job Queue."}
           />
         )}
-        {tab === "mix" && data && (
-          <div>
-            <HqPanel title="Mixing Intelligence" subtitle="Phase 3 — controlled engineering decisions">
-              <p style={{ color: "var(--hq-text-muted)", margin: "0 0 1rem", lineHeight: 1.5 }}>
-                AURA operates: Listen → Diagnose → Decide → Process → Re-analyze → Compare → Correct → Report.
-                Every category supports DO_NOTHING. Approved racks only — no unrestricted plugin control.
-              </p>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginBottom: "1rem" }}>
-                {["AURA Vocal Rack", "AURA Drum Bus", "AURA Bass Control", "AURA Instrument Rack", "AURA Mix Bus"].map(
-                  (rack) => (
-                    <StatusBadge key={rack} label={rack} variant="gold" />
-                  )
-                )}
-              </div>
-              <StatusBadge
-                label={data.phases.phase3.status === "ACTIVE" ? "PHASE 3 ACTIVE" : data.phases.phase3.status}
-                variant={data.phases.phase3.status === "ACTIVE" ? "success" : "gold"}
-              />
-              <p className="hq-kpi-meta" style={{ marginTop: "0.75rem" }}>
-                Mix jobs run on the production node via intelligence :4178. Originals are never overwritten.
-                Use Jobs tab for current Mix V1 queue. Remote mix_run_job requires a MIX-JOB id from the node.
-              </p>
-            </HqPanel>
-          </div>
-        )}
+        {tab === "mix" && data && <MixReviewPanel onDone={() => query.refetch()} />}
         {tab === "master" && <FoundationPlaceholder title="Master" note="Phase 4 mastering + QC — not started." />}
         {tab === "sampling" && <FoundationPlaceholder title="Sampling" note="Sampling workspace reserved." />}
         {tab === "sounds" && <FoundationPlaceholder title="Sounds" note="Sound / instrument browser reserved." />}

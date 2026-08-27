@@ -255,4 +255,61 @@ router.get("/commands", hqAuthRequired, requireHQModule("aura"), async (_req, re
   }
 });
 
+/** Production node uploads Mix Original / Mix Vn WAV for HQ audible review. */
+router.post("/mixes/upload", async (req, res) => {
+  try {
+    const auth = await authenticateAuraMusicNode(req);
+    if (!auth) return res.status(401).json({ error: "Unauthorized production node" });
+    const { storeAuraMusicMixAudio } = await import("../hq/auraMusicMixStore");
+    const jobId = String(req.body?.jobId || "").trim();
+    const revision = String(req.body?.revision || "Mix V2").trim();
+    const kind = String(req.body?.kind || "mix").trim();
+    const base64 = String(req.body?.base64 || "");
+    if (!jobId || !base64) return res.status(400).json({ error: "jobId and base64 required" });
+    const stored = await storeAuraMusicMixAudio({
+      jobId,
+      revision,
+      kind,
+      filename: String(req.body?.filename || `${jobId}-${revision}.wav`),
+      base64,
+      reportText: req.body?.reportText ? String(req.body.reportText) : undefined,
+    });
+    res.status(201).json({ ok: true, ...stored, nodeId: auth.nodeId });
+  } catch (error) {
+    console.error("POST /aura/music/mixes/upload error:", error);
+    res.status(500).json({ error: "Mix upload failed" });
+  }
+});
+
+/** HQ — latest mix review payload for Mix tab. */
+router.get("/mixes/review", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  try {
+    const { getLatestMixReviewPayload } = await import("../hq/auraMusicMixStore");
+    const jobId = req.query.jobId ? String(req.query.jobId) : undefined;
+    const payload = await getLatestMixReviewPayload(jobId);
+    res.json({ ok: true, review: payload });
+  } catch (error) {
+    res.status(500).json({ error: "Mix review unavailable" });
+  }
+});
+
+/** HQ — stream mix audio for audible A/B. */
+router.get("/mixes/:jobId/:revision/:kind", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  try {
+    const { getAuraMusicMixAudio, readMixFile } = await import("../hq/auraMusicMixStore");
+    const jobId = String(req.params.jobId);
+    const revision = decodeURIComponent(String(req.params.revision));
+    const kind = String(req.params.kind);
+    const row = await getAuraMusicMixAudio(jobId, revision, kind);
+    if (!row) return res.status(404).json({ error: "Mix audio not found" });
+    const buf = readMixFile(row.path);
+    res.setHeader("Content-Type", "audio/wav");
+    res.setHeader("Content-Length", String(buf.length));
+    res.setHeader("Cache-Control", "no-store");
+    res.send(buf);
+  } catch (error) {
+    res.status(500).json({ error: "Mix audio stream failed" });
+  }
+});
+
 export default router;
