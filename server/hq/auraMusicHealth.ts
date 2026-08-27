@@ -464,7 +464,10 @@ export async function getAuraMusicCommandCenter(): Promise<AuraMusicCommandCente
     const { getPrimaryAuraMusicNodeSnapshot } = await import("./auraMusicProductionNode");
     const snap = await getPrimaryAuraMusicNodeSnapshot();
     if (snap) {
-      return fromRemoteNodeSnapshot(snap);
+      return fromRemoteNodeSnapshot({
+        ...snap,
+        heartbeat: (snap.heartbeat as Record<string, unknown> | null) ?? null,
+      });
     }
   } catch (err) {
     console.warn("[aura-music] remote node snapshot unavailable:", err instanceof Error ? err.message : err);

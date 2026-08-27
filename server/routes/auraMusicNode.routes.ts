@@ -110,7 +110,7 @@ router.get("/node/snapshot", async (req, res) => {
     if (!snap || snap.nodeId !== auth.nodeId) {
       return res.status(404).json({ error: "Snapshot not found for this node" });
     }
-    res.json({ ok: true, online: snap.online, timedOut: snap.timedOut, ...snap });
+    res.json({ ok: true, ...snap });
   } catch (error) {
     console.error("GET /aura/music/node/snapshot error:", error);
     res.status(500).json({ error: "Snapshot unavailable" });
@@ -139,6 +139,9 @@ router.post("/node/self-command", async (req, res) => {
     res.status(400).json({ error: msg });
   }
 });
+
+/** Mac agent heartbeat (Bearer node token). */
+router.post("/node/heartbeat", async (req, res) => {
   try {
     const auth = await authenticateAuraMusicNode(req);
     if (!auth) return res.status(401).json({ error: "Unauthorized production node" });
