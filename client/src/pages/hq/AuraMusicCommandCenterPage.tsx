@@ -103,6 +103,11 @@ function MixReviewPanel({ onDone }: { onDone: () => void }) {
     ? hqApi.auraMusicMixAudioUrl(jobId, revision, "original")
     : null;
   const mixUrl = jobId ? hqApi.auraMusicMixAudioUrl(jobId, revision, "mix") : null;
+  const selectedReport =
+    (review?.audio || []).find(
+      (a: { revision: string; kind: string; report?: string | null }) =>
+        a.revision === revision && a.kind === "mix" && a.report
+    )?.report || review?.report;
 
   async function enqueue(command: string, args: Record<string, unknown>) {
     setBusy(command);
@@ -233,7 +238,7 @@ function MixReviewPanel({ onDone }: { onDone: () => void }) {
                   color: "var(--hq-text-muted)",
                 }}
               >
-                {review?.report || "Report will appear after Mix V2 upload."}
+                {selectedReport || "Report will appear after Mix V2 upload."}
               </pre>
             </details>
           </>

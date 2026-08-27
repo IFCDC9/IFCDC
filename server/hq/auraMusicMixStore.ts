@@ -89,7 +89,7 @@ export async function listAuraMusicMixAudio(jobId: string) {
   await ensureAuraMusicMixTables();
   const db = await getDb();
   const rows = (await db.all(
-    `SELECT id, job_id, revision, kind, filename, bytes, created_at FROM aura_music_mix_audio
+    `SELECT id, job_id, revision, kind, filename, bytes, report_text, created_at FROM aura_music_mix_audio
      WHERE job_id = ? ORDER BY created_at DESC`,
     jobId
   )) as Array<Record<string, unknown>>;
@@ -121,6 +121,7 @@ export async function getLatestMixReviewPayload(jobId?: string) {
       revision: i.revision,
       kind: i.kind,
       bytes: i.bytes,
+      report: i.report_text || null,
       url: `/api/hq/aura/music/mixes/${i.job_id}/${encodeURIComponent(String(i.revision))}/${i.kind}`,
     })),
   };
