@@ -1,7 +1,6 @@
 /**
  * AURA MUSIC Command Center — IFCDC HQ module.
- * Surfaces production-node health via secure HQ API (never public 4177/4178).
- * Phase 3 automatic mixing is NOT enabled.
+ * Phase 3 controlled mixing intelligence enabled (engineering racks, Mix V1).
  */
 import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -89,6 +88,8 @@ const REMOTE_COMMANDS: { id: string; label: string }[] = [
   { id: "read_status", label: "Read bridge status" },
   { id: "transport_play", label: "Start playback" },
   { id: "transport_stop", label: "Stop playback" },
+  { id: "mix_get_job", label: "Get mix job status (requires jobId in args)" },
+  { id: "mix_run_job", label: "Run mix job on production node (requires jobId)" },
 ];
 
 function RemoteCommandPanel({ onDone }: { onDone: () => void }) {
@@ -339,7 +340,7 @@ const AuraMusicCommandCenterPage: React.FC = () => {
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "1rem", marginBottom: "1rem" }}>
-              <HqPanel title="Phase status" subtitle="Roadmap gates — Phase 3 blocked until authorized">
+              <HqPanel title="Phase status" subtitle="Roadmap gates — Phase 3 mixing intelligence active">
                 <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "0.65rem" }}>
                   {(
                     [
@@ -438,11 +439,30 @@ const AuraMusicCommandCenterPage: React.FC = () => {
             note={sectionMeta.get("projects")?.note || "MUSIC-###### project records will surface here from the Secure Music Job Queue."}
           />
         )}
-        {tab === "mix" && (
-          <FoundationPlaceholder
-            title="Mix"
-            note="Phase 3 automatic mixing assistants are not started. Awaiting explicit Founder authorization."
-          />
+        {tab === "mix" && data && (
+          <div>
+            <HqPanel title="Mixing Intelligence" subtitle="Phase 3 — controlled engineering decisions">
+              <p style={{ color: "var(--hq-text-muted)", margin: "0 0 1rem", lineHeight: 1.5 }}>
+                AURA operates: Listen → Diagnose → Decide → Process → Re-analyze → Compare → Correct → Report.
+                Every category supports DO_NOTHING. Approved racks only — no unrestricted plugin control.
+              </p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginBottom: "1rem" }}>
+                {["AURA Vocal Rack", "AURA Drum Bus", "AURA Bass Control", "AURA Instrument Rack", "AURA Mix Bus"].map(
+                  (rack) => (
+                    <StatusBadge key={rack} label={rack} variant="gold" />
+                  )
+                )}
+              </div>
+              <StatusBadge
+                label={data.phases.phase3.status === "ACTIVE" ? "PHASE 3 ACTIVE" : data.phases.phase3.status}
+                variant={data.phases.phase3.status === "ACTIVE" ? "success" : "gold"}
+              />
+              <p className="hq-kpi-meta" style={{ marginTop: "0.75rem" }}>
+                Mix jobs run on the production node via intelligence :4178. Originals are never overwritten.
+                Use Jobs tab for current Mix V1 queue. Remote mix_run_job requires a MIX-JOB id from the node.
+              </p>
+            </HqPanel>
+          </div>
         )}
         {tab === "master" && <FoundationPlaceholder title="Master" note="Phase 4 mastering + QC — not started." />}
         {tab === "sampling" && <FoundationPlaceholder title="Sampling" note="Sampling workspace reserved." />}
@@ -488,7 +508,7 @@ const AuraMusicCommandCenterPage: React.FC = () => {
 
       <div style={{ marginTop: "1.25rem", display: "flex", alignItems: "center", gap: "0.5rem", color: "var(--hq-text-dim)", fontSize: "0.75rem" }}>
         <Music2 size={14} />
-        <span>AURA MUSIC is an IFCDC HQ module — not a standalone AURA product. Phase 3 mixing remains blocked.</span>
+        <span>AURA MUSIC is an IFCDC HQ module — Phase 3 mixing intelligence active. Mastering, DJ mode, and publishing remain blocked.</span>
         <Radio size={14} style={{ marginLeft: "auto", opacity: 0.5 }} />
       </div>
     </HQLayout>

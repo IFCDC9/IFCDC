@@ -89,7 +89,7 @@ const SECTIONS = [
   { id: "dashboard", label: "Dashboard", available: true },
   { id: "library", label: "Library", available: true, note: "Foundation — ingest/search via Phase 2 API on production node" },
   { id: "projects", label: "Projects", available: true, note: "Foundation — MUSIC-###### projects" },
-  { id: "mix", label: "Mix", available: false, note: "Phase 3 — awaiting Founder authorization" },
+  { id: "mix", label: "Mix", available: true, note: "Phase 3 — controlled mixing intelligence (engineering racks, Mix V1)" },
   { id: "master", label: "Master", available: false, note: "Phase 4 — not started" },
   { id: "sampling", label: "Sampling", available: false, note: "Foundation placeholder" },
   { id: "sounds", label: "Sounds", available: false, note: "Foundation placeholder" },
@@ -147,12 +147,18 @@ function readJobs(): { current: AuraMusicJob | null; queue: AuraMusicJob[] } {
   return { current, queue };
 }
 
-function phaseBlock() {
+function phaseBlock(phase3Status: "ACTIVE" | "BLOCKED" = "ACTIVE") {
   return {
     phase1: { status: "PASS", label: "AURA ↔ Ableton Bridge" },
     phase2: { status: "PASS", label: "Audio Intelligence Foundation" },
     phase2Hardening: { status: "PASS", label: "Auto-start / recovery (LaunchAgents)" },
-    phase3: { status: "BLOCKED", label: "Automatic mixing — awaiting Founder authorization" },
+    phase3: {
+      status: phase3Status === "ACTIVE" ? "ACTIVE" : "BLOCKED",
+      label:
+        phase3Status === "ACTIVE"
+          ? "Mixing Intelligence — controlled engineering racks + Mix V1"
+          : "Automatic mixing — awaiting Founder authorization",
+    },
   };
 }
 
@@ -170,7 +176,7 @@ function cloudPayload(): AuraMusicCommandCenter {
     generatedAt,
     statusGeneratedAt: null,
     currentPhase: "2 (hardened) — production node offline from this HQ host",
-    phases: phaseBlock(),
+    phases: phaseBlock("ACTIVE"),
     services: {
       musicIntelligence: "OFFLINE",
       abletonBridge: "OFFLINE",
@@ -253,8 +259,8 @@ function fromRemoteNodeSnapshot(snap: {
     message: undefined,
     generatedAt: new Date().toISOString(),
     statusGeneratedAt: hb.statusGeneratedAt ?? snap.lastSeenAt,
-    currentPhase: "2 (hardened) — remote production node linked",
-    phases: phaseBlock(),
+    currentPhase: "3 — Mixing Intelligence (remote production node)",
+    phases: phaseBlock("ACTIVE"),
     services: {
       musicIntelligence,
       abletonBridge,
@@ -336,8 +342,8 @@ function deriveFromStatus(raw: Record<string, unknown>): AuraMusicCommandCenter 
     architecture: ARCHITECTURE,
     generatedAt: new Date().toISOString(),
     statusGeneratedAt,
-    currentPhase: "2 (hardened)",
-    phases: phaseBlock(),
+    currentPhase: "3 — Mixing Intelligence",
+    phases: phaseBlock("ACTIVE"),
     services: {
       musicIntelligence,
       abletonBridge,
@@ -390,8 +396,8 @@ async function liveProbePayload(): Promise<AuraMusicCommandCenter> {
     message: ready ? undefined : "Local production node partially offline",
     generatedAt: new Date().toISOString(),
     statusGeneratedAt: null,
-    currentPhase: "2 (hardened)",
-    phases: phaseBlock(),
+    currentPhase: "3 — Mixing Intelligence",
+    phases: phaseBlock("ACTIVE"),
     services: {
       musicIntelligence,
       abletonBridge,

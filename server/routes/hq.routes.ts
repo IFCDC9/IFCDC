@@ -918,7 +918,7 @@ router.get("/aura/music/command-center", hqAuthRequired, requireHQModule("aura")
         phase1: { status: "PASS", label: "AURA ↔ Ableton Bridge" },
         phase2: { status: "PASS", label: "Audio Intelligence Foundation" },
         phase2Hardening: { status: "PASS", label: "Auto-start / recovery" },
-        phase3: { status: "BLOCKED", label: "Automatic mixing — awaiting authorization" },
+        phase3: { status: "ACTIVE", label: "Mixing Intelligence — controlled engineering racks + Mix V1" },
       },
       sections: [],
     });
