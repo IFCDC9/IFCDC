@@ -91,9 +91,13 @@ function MixReviewPanel({ onDone }: { onDone: () => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [abMode, setAbMode] = useState<"original" | "mix">("mix");
+  const [selectedRevision, setSelectedRevision] = useState<string | null>(null);
   const review = reviewQuery.data?.review;
   const jobId = review?.jobId;
-  const revision = review?.revision || "Mix V2";
+  const revisionOptions = Array.from(
+    new Set((review?.audio || []).map((a: { revision: string }) => a.revision))
+  ) as string[];
+  const revision = selectedRevision || review?.revision || revisionOptions[0] || "Mix V2";
 
   const originalUrl = jobId
     ? hqApi.auraMusicMixAudioUrl(jobId, revision, "original")
@@ -141,6 +145,23 @@ function MixReviewPanel({ onDone }: { onDone: () => void }) {
           </p>
         ) : (
           <>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", marginBottom: "1rem" }}>
+              {revisionOptions.map((rev) => (
+                <button
+                  key={rev}
+                  type="button"
+                  className="hq-btn"
+                  onClick={() => setSelectedRevision(rev)}
+                  style={
+                    revision === rev
+                      ? { outline: "2px solid var(--hq-gold, #c9a227)" }
+                      : undefined
+                  }
+                >
+                  {rev}
+                </button>
+              ))}
+            </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", marginBottom: "1rem" }}>
               <button type="button" className="hq-btn" onClick={() => setAbMode("original")} disabled={!originalUrl}>
                 Play Original

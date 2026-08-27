@@ -99,11 +99,14 @@ export async function listAuraMusicMixAudio(jobId: string) {
 export async function getLatestMixReviewPayload(jobId?: string) {
   await ensureAuraMusicMixTables();
   const db = await getDb();
+  // Prefer mix WAVs with engineering reports (not original uploads).
   const row = (await db.get(
     jobId
       ? `SELECT job_id, revision, report_text, created_at FROM aura_music_mix_audio
-         WHERE job_id = ? ORDER BY created_at DESC LIMIT 1`
+         WHERE job_id = ? AND kind = 'mix'
+         ORDER BY created_at DESC LIMIT 1`
       : `SELECT job_id, revision, report_text, created_at FROM aura_music_mix_audio
+         WHERE kind = 'mix'
          ORDER BY created_at DESC LIMIT 1`,
     ...(jobId ? [jobId] : [])
   )) as { job_id: string; revision: string; report_text: string | null; created_at: string } | undefined;
