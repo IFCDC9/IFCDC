@@ -869,6 +869,60 @@ router.get("/aura/executive/health", hqAuthRequired, requireHQModule("aura"), as
   res.json(await buildExecutiveHealthSummary());
 });
 
+/** AURA MUSIC local production-node health (Founder Mac). Safe on Render — never probes public ports. */
+router.get("/aura/music/health", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
+  try {
+    const { getAuraMusicHealthSummary } = await import("../hq/auraMusicHealth");
+    res.json(await getAuraMusicHealthSummary());
+  } catch (error) {
+    console.error("GET /aura/music/health error:", error);
+    res.status(500).json({ error: "AURA MUSIC health unavailable" });
+  }
+});
+
+/** AURA MUSIC Command Center payload for HQ UI (local status file or clear cloud offline). */
+router.get("/aura/music/command-center", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
+  try {
+    const { getAuraMusicCommandCenter } = await import("../hq/auraMusicHealth");
+    res.json(await getAuraMusicCommandCenter());
+  } catch (error) {
+    console.error("GET /aura/music/command-center error:", error);
+    res.status(200).json({
+      ok: false,
+      configured: false,
+      mode: "cloud_hq",
+      auraMusicReady: false,
+      publicExposure: false,
+      message: "AURA MUSIC command center temporarily unavailable",
+      generatedAt: new Date().toISOString(),
+      services: {
+        musicIntelligence: "OFFLINE",
+        abletonBridge: "OFFLINE",
+        abletonLive: "DISCONNECTED",
+        productionNode: "NOT READY",
+        watchdog: "ERROR",
+      },
+      summary: {
+        "Music Intelligence": "OFFLINE",
+        "Ableton Bridge": "OFFLINE",
+        "Ableton Live": "DISCONNECTED",
+        "Production Node": "NOT READY",
+        Watchdog: "ERROR",
+      },
+      currentJob: null,
+      jobQueue: [],
+      recentExports: [],
+      phases: {
+        phase1: { status: "PASS", label: "AURA ↔ Ableton Bridge" },
+        phase2: { status: "PASS", label: "Audio Intelligence Foundation" },
+        phase2Hardening: { status: "PASS", label: "Auto-start / recovery" },
+        phase3: { status: "BLOCKED", label: "Automatic mixing — awaiting authorization" },
+      },
+      sections: [],
+    });
+  }
+});
+
 /** Build 61 — AURA Executive Intelligence Command Center */
 router.get("/aura/ei/dashboard", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
   try {

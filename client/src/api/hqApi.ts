@@ -73,6 +73,70 @@ export interface SoftwareAppHealth {
   error?: string;
 }
 
+export interface AuraMusicJob {
+  id: string;
+  title: string;
+  status: string;
+  createdAt?: string;
+  updatedAt?: string;
+  detail?: string;
+}
+
+export interface AuraMusicExport {
+  name: string;
+  path: string;
+  modifiedAt: string;
+  sizeBytes: number;
+}
+
+export interface AuraMusicCommandCenter {
+  ok: boolean;
+  configured: boolean;
+  mode: "local_status_file" | "local_live_probe" | "cloud_hq" | "local_offline";
+  auraMusicReady: boolean;
+  publicExposure: false;
+  architecture: string;
+  message?: string;
+  generatedAt: string;
+  statusGeneratedAt: string | null;
+  currentPhase: string;
+  phases: {
+    phase1: { status: string; label: string };
+    phase2: { status: string; label: string };
+    phase2Hardening: { status: string; label: string };
+    phase3: { status: string; label: string };
+  };
+  services: {
+    musicIntelligence: string;
+    abletonBridge: string;
+    abletonLive: string;
+    productionNode: string;
+    watchdog: string;
+  };
+  lastHeartbeatAt: string | null;
+  lastHeartbeatAgeMs: number | null;
+  currentJob: AuraMusicJob | null;
+  jobQueue: AuraMusicJob[];
+  recentExports: AuraMusicExport[];
+  sections: { id: string; label: string; available: boolean; note?: string }[];
+  summary: Record<string, string>;
+}
+
+export interface AuraMusicHealthSummary {
+  ok: boolean;
+  configured: boolean;
+  mode?: string;
+  auraMusicReady?: boolean;
+  ready?: boolean;
+  message?: string;
+  publicExposure?: boolean;
+  architecture?: string;
+  generatedAt?: string;
+  summary?: Record<string, string>;
+  services?: Record<string, string>;
+  lastHeartbeatAt?: string | null;
+}
+
 export interface SoftwareAppEntry {
   id: string;
   name: string;
@@ -731,6 +795,9 @@ export const hqApi = {
   appDiagnostics: (appId: string) => hqFetch<AppDiagnostics>(`/software-division/${appId}/diagnostics`),
   allDiagnostics: () => hqFetch<{ diagnostics: AppDiagnostics[] }>("/software-division/diagnostics"),
   auraStatus: () => hqFetch<{ auraCore: boolean; capabilities: string[] }>("/aura/status"),
+  auraMusicHealth: () => hqFetch<AuraMusicHealthSummary>("/aura/music/health", { timeoutMs: 8_000 }),
+  auraMusicCommandCenter: () =>
+    hqFetch<AuraMusicCommandCenter>("/aura/music/command-center", { timeoutMs: 8_000 }),
   auraCommand: (command: string, opts?: { module?: string; contextRef?: Record<string, unknown> }) => {
     const deviceId = getOrCreateFounderDeviceId();
     return hqFetch<AuraCommandResponse>("/aura/command", {

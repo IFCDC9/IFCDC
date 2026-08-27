@@ -32,6 +32,7 @@ import {
   Brain,
   Activity,
   BookOpen,
+  Music2,
 } from "lucide-react";
 
 export interface HQNavItem {
@@ -76,6 +77,7 @@ export const HQ_NAV_ITEMS: HQNavItem[] = [
   { label: "SSO Gateway", path: "/hq/sso", icon: Shield, section: "Operations" },
   { label: "AURA Executive Intelligence", path: "/hq/aura-executive", icon: Brain, section: "Command", badge: "61" },
   { label: "AURA AI Command Center", path: "/hq/aura", icon: Sparkles, section: "Command" },
+  { label: "AURA MUSIC", path: "/hq/aura-music", icon: Music2, section: "Command", badge: "Live" },
   { label: "Integrations Hub", path: "/hq/integrations", icon: Plug, section: "Operations" },
   { label: "Developer Portal", path: "/hq/developer", icon: Code2, section: "Operations" },
   { label: "People Management", path: "/hq/people", icon: Users, section: "Operations" },
