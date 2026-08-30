@@ -41,8 +41,9 @@ type TabId = (typeof TABS)[number]["id"];
 function badgeVariant(state: string): "success" | "warning" | "danger" | "gold" | "muted" {
   const s = state.toUpperCase();
   if (["ONLINE", "READY", "CONNECTED", "HEALTHY", "PASS"].includes(s)) return "success";
+  if (["RECONNECTING", "RECOVERING"].includes(s)) return "warning";
   if (["BLOCKED", "UNKNOWN", "NOT_APPLICABLE"].includes(s)) return "gold";
-  if (["NOT READY", "DISCONNECTED", "OFFLINE", "ERROR"].includes(s)) return "danger";
+  if (["NOT READY", "DISCONNECTED", "OFFLINE", "ERROR", "DEGRADED"].includes(s)) return "danger";
   return "muted";
 }
 
@@ -60,7 +61,7 @@ function formatBytes(n: number): string {
 }
 
 function ServiceCard({ label, value, meta }: { label: string; value: string; meta?: string }) {
-  const onlineish = ["ONLINE", "READY", "CONNECTED", "HEALTHY", "PASS"].includes(value.toUpperCase());
+  const onlineish = ["ONLINE", "READY", "CONNECTED", "HEALTHY", "PASS", "RECONNECTING"].includes(value.toUpperCase());
   return (
     <div className="hq-kpi-card">
       <div className="hq-kpi-label">{label}</div>
@@ -90,24 +91,79 @@ function MixReviewPanel({ onDone }: { onDone: () => void }) {
   });
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  const [playbackError, setPlaybackError] = useState("");
   const [abMode, setAbMode] = useState<"original" | "mix">("mix");
   const [selectedRevision, setSelectedRevision] = useState<string | null>(null);
   const review = reviewQuery.data?.review;
   const jobId = review?.jobId;
-  const revisionOptions = Array.from(
-    new Set((review?.audio || []).map((a: { revision: string }) => a.revision))
-  ) as string[];
+  const audioItems = (review?.audio || []) as Array<{
+    revision: string;
+    kind: string;
+    bytes: number;
+    url: string;
+    playable?: boolean;
+    mimeType?: string;
+    report?: string | null;
+  }>;
+  const revisionOptions = Array.from(new Set(audioItems.map((a) => a.revision)));
   const revision = selectedRevision || review?.revision || revisionOptions[0] || "Mix V2";
 
-  const originalUrl = jobId
-    ? hqApi.auraMusicMixAudioUrl(jobId, revision, "original")
-    : null;
-  const mixUrl = jobId ? hqApi.auraMusicMixAudioUrl(jobId, revision, "mix") : null;
+  // Resolve playable URLs from server inventory — original may live under a different revision label
+  const mixItem =
+    audioItems.find((a) => a.revision === revision && a.kind === "mix" && a.playable !== false) ||
+    audioItems.find((a) => a.revision === revision && a.kind === "mix") ||
+    audioItems.find((a) => a.kind === "mix" && a.playable !== false) ||
+    null;
+  const originalItem =
+    audioItems.find((a) => a.kind === "original" && a.playable !== false) ||
+    audioItems.find((a) => a.kind === "original") ||
+    null;
+
+  const mixUrl = mixItem?.url || review?.mixUrl || null;
+  const originalUrl = originalItem?.url || review?.originalUrl || null;
+  const activeUrl = abMode === "original" ? originalUrl : mixUrl;
+  const activeMeta = abMode === "original" ? originalItem : mixItem;
+
   const selectedReport =
-    (review?.audio || []).find(
-      (a: { revision: string; kind: string; report?: string | null }) =>
-        a.revision === revision && a.kind === "mix" && a.report
-    )?.report || review?.report;
+    audioItems.find((a) => a.revision === revision && a.kind === "mix" && a.report)?.report ||
+    review?.report;
+
+  async function probePlaybackUrl(url: string, label: string) {
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: { Range: "bytes=0-1" },
+        credentials: "include",
+      });
+      const mime = res.headers.get("content-type") || "";
+      const len = res.headers.get("content-length") || "";
+      const acceptRanges = res.headers.get("accept-ranges") || "";
+      console.info("[aura-music-mix] playback probe", {
+        label,
+        url,
+        status: res.status,
+        mime,
+        contentLength: len,
+        acceptRanges,
+        bytes: activeMeta?.bytes,
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        setPlaybackError(
+          `${label} failed HTTP ${res.status} · ${mime || "no mime"} · ${url}${body ? ` · ${body.slice(0, 120)}` : ""}`
+        );
+        return;
+      }
+      if (!/audio\//i.test(mime) && !/octet-stream/i.test(mime)) {
+        setPlaybackError(`${label} unexpected MIME "${mime}" for ${url}`);
+        return;
+      }
+      setPlaybackError("");
+    } catch (err) {
+      console.error("[aura-music-mix] playback probe error", { label, url, err });
+      setPlaybackError(`${label} probe error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   async function enqueue(command: string, args: Record<string, unknown>) {
     setBusy(command);
@@ -156,7 +212,10 @@ function MixReviewPanel({ onDone }: { onDone: () => void }) {
                   key={rev}
                   type="button"
                   className="hq-btn"
-                  onClick={() => setSelectedRevision(rev)}
+                  onClick={() => {
+                    setSelectedRevision(rev);
+                    setPlaybackError("");
+                  }}
                   style={
                     revision === rev
                       ? { outline: "2px solid var(--hq-gold, #c9a227)" }
@@ -168,27 +227,89 @@ function MixReviewPanel({ onDone }: { onDone: () => void }) {
               ))}
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", marginBottom: "1rem" }}>
-              <button type="button" className="hq-btn" onClick={() => setAbMode("original")} disabled={!originalUrl}>
+              <button
+                type="button"
+                className="hq-btn"
+                onClick={() => {
+                  setAbMode("original");
+                  if (originalUrl) void probePlaybackUrl(originalUrl, "Play Original");
+                }}
+                disabled={!originalUrl}
+              >
                 Play Original
               </button>
-              <button type="button" className="hq-btn" onClick={() => setAbMode("mix")} disabled={!mixUrl}>
+              <button
+                type="button"
+                className="hq-btn"
+                onClick={() => {
+                  setAbMode("mix");
+                  if (mixUrl) void probePlaybackUrl(mixUrl, `Play AURA ${revision}`);
+                }}
+                disabled={!mixUrl}
+              >
                 Play AURA {revision}
               </button>
               <button
                 type="button"
                 className="hq-btn"
-                onClick={() => setAbMode(abMode === "original" ? "mix" : "original")}
+                onClick={() => {
+                  const next = abMode === "original" ? "mix" : "original";
+                  setAbMode(next);
+                  const url = next === "original" ? originalUrl : mixUrl;
+                  if (url) void probePlaybackUrl(url, `A/B ${next}`);
+                }}
+                disabled={!originalUrl && !mixUrl}
               >
                 A/B Compare ({abMode === "original" ? "Original" : revision})
               </button>
             </div>
-            {(abMode === "original" ? originalUrl : mixUrl) ? (
+            {activeUrl ? (
               <audio
-                key={`${abMode}-${revision}`}
+                key={`${abMode}-${activeUrl}`}
                 controls
-                src={abMode === "original" ? originalUrl! : mixUrl!}
-                style={{ width: "100%", marginBottom: "1rem" }}
+                preload="metadata"
+                src={activeUrl}
+                style={{ width: "100%", marginBottom: "0.5rem" }}
+                onError={(e) => {
+                  const el = e.currentTarget;
+                  console.error("[aura-music-mix] audio element error", {
+                    url: activeUrl,
+                    mode: abMode,
+                    mediaError: el.error?.code,
+                    mediaMessage: el.error?.message,
+                    bytes: activeMeta?.bytes,
+                    mimeType: activeMeta?.mimeType,
+                  });
+                  setPlaybackError(
+                    `Player error (${abMode}) · code=${el.error?.code ?? "?"} · ${activeUrl}`
+                  );
+                  void probePlaybackUrl(activeUrl, abMode);
+                }}
+                onLoadedMetadata={() => {
+                  console.info("[aura-music-mix] audio loaded", {
+                    url: activeUrl,
+                    mode: abMode,
+                    bytes: activeMeta?.bytes,
+                    mimeType: activeMeta?.mimeType || "audio/wav",
+                  });
+                  setPlaybackError("");
+                }}
               />
+            ) : (
+              <p style={{ color: "var(--hq-danger, #c44)", margin: "0 0 1rem" }}>
+                No playable {abMode} URL for this job. Refresh or re-upload from the production node.
+              </p>
+            )}
+            {playbackError ? (
+              <p className="hq-kpi-meta" style={{ color: "var(--hq-danger, #c44)", marginBottom: "1rem" }}>
+                {playbackError}
+              </p>
+            ) : null}
+            {activeMeta ? (
+              <p className="hq-kpi-meta" style={{ marginBottom: "1rem" }}>
+                {abMode}: {activeMeta.bytes?.toLocaleString?.() || activeMeta.bytes} bytes ·{" "}
+                {activeMeta.mimeType || "audio/wav"} · {activeUrl}
+              </p>
             ) : null}
 
             <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", marginBottom: "1rem" }}>
@@ -245,6 +366,256 @@ function MixReviewPanel({ onDone }: { onDone: () => void }) {
         )}
       </HqPanel>
     </div>
+  );
+}
+
+function AbletonMasteryPanel({ onDone }: { onDone: () => void }) {
+  const masteryQuery = useQuery({
+    queryKey: ["hq-aura-music-mastery"],
+    queryFn: () => hqApi.auraMusicMastery(),
+    refetchInterval: 12_000,
+  });
+  const mixQuery = useQuery({
+    queryKey: ["hq-aura-music-mix-review-mastery"],
+    queryFn: () => hqApi.auraMusicMixReview(),
+    refetchInterval: 12_000,
+  });
+  const [busy, setBusy] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
+
+  const mastery = masteryQuery.data?.mastery as Record<string, any> | null;
+  const lastVal = masteryQuery.data?.lastValidation as Record<string, any> | null;
+  const dash = (lastVal?.result as Record<string, any>) || mastery || {};
+  const percent =
+    typeof dash.overallMasteryPercent === "number"
+      ? dash.overallMasteryPercent
+      : masteryQuery.data?.overallMasteryPercent ?? 0;
+  const levels = (dash.levels || dash.dashboard?.levels || {}) as Record<
+    string,
+    { name?: string; mastered?: number; total?: number; percent?: number; complete?: boolean }
+  >;
+  const counts = (dash.counts || dash.dashboard?.counts || {}) as Record<string, number>;
+  const capabilities = (dash.capabilities || dash.dashboard?.capabilities || []) as Array<{
+    id: string;
+    name: string;
+    level: number;
+    status: string;
+  }>;
+  const recentlyMastered = (dash.recentlyMastered || dash.dashboard?.recentlyMastered || []) as Array<{
+    name: string;
+    level: number;
+  }>;
+  const inventory = (dash.inventory || dash.dashboard?.inventory || {}) as {
+    instruments?: string[];
+    packs?: string[];
+  };
+  const gate =
+    dash.gateMessage ||
+    (dash.levels1to3AllMastered || dash.levels1to3Complete
+      ? "AURA ABLETON MASTERY — LEVELS 1–3 — ALL CHECKS PASSED"
+      : null);
+
+  const demoAudio = (mixQuery.data?.review?.audio || []).find(
+    (a: { revision: string; kind: string }) =>
+      /mastery/i.test(a.revision) && a.kind === "mix"
+  );
+  const demoJobId = mixQuery.data?.review?.jobId;
+  const demoUrl =
+    demoJobId && demoAudio
+      ? hqApi.auraMusicMixAudioUrl(demoJobId, demoAudio.revision, "mix")
+      : dash.jobId
+        ? hqApi.auraMusicMixAudioUrl(String(dash.jobId), "Mastery L1-3 Demo", "mix")
+        : null;
+
+  async function runValidation() {
+    setBusy("validate");
+    setMessage("");
+    try {
+      const enq = await hqApi.auraMusicEnqueueCommand("mastery_validate_l1_l3", {
+        replayKey: `mastery-l13-${Date.now()}`,
+      });
+      setMessage(`Queued mastery_validate_l1_l3 → ${enq.id} (runs on Mac; may take several minutes)`);
+      const started = Date.now();
+      while (Date.now() - started < 600_000) {
+        await new Promise((r) => setTimeout(r, 4000));
+        const look = await hqApi.auraMusicGetCommand(enq.id);
+        if (look.command.status === "succeeded" || look.command.status === "failed") {
+          setMessage(
+            look.command.status === "succeeded"
+              ? String((look.command.result as any)?.gateMessage || (look.command.result as any)?.result?.gateMessage || "Validation finished")
+              : `Validation failed: ${look.command.error || "unknown"}`
+          );
+          break;
+        }
+      }
+      await masteryQuery.refetch();
+      await mixQuery.refetch();
+      onDone();
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function refreshDashboard() {
+    setBusy("dashboard");
+    try {
+      await hqApi.auraMusicEnqueueCommand("mastery_dashboard", {
+        replayKey: `mastery-dash-${Date.now()}`,
+      });
+      await new Promise((r) => setTimeout(r, 5000));
+      await masteryQuery.refetch();
+      onDone();
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const statusColor = (s: string) => {
+    if (s === "MASTERED") return "var(--hq-success, #3d9a6a)";
+    if (s === "VALIDATED") return "var(--hq-gold, #c9a227)";
+    if (s === "VALIDATION_REQUIRED") return "#c47a2c";
+    if (s === "LEARNING") return "#5b8def";
+    return "var(--hq-text-muted)";
+  };
+
+  return (
+    <HqPanel
+      title="Ableton Mastery"
+      subtitle="Capability matrix · Mastery Lab · Levels 1–10 (founder only)"
+    >
+      {gate ? (
+        <div
+          style={{
+            marginBottom: "1rem",
+            padding: "0.75rem 1rem",
+            border: "1px solid rgba(61,154,106,0.45)",
+            background: "rgba(61,154,106,0.12)",
+            color: "var(--hq-text)",
+            fontWeight: 600,
+            letterSpacing: "0.02em",
+          }}
+        >
+          {gate}
+        </div>
+      ) : null}
+
+      <div className="hq-kpi-grid" style={{ marginBottom: "1rem" }}>
+        <ServiceCard label="AURA Ableton Mastery %" value={`${percent}%`} />
+        <ServiceCard label="Mastered" value={String(counts.mastered ?? recentlyMastered.length ?? "—")} />
+        <ServiceCard label="Learning" value={String(counts.learning ?? "—")} />
+        <ServiceCard
+          label="Validation required"
+          value={String(counts.validationRequired ?? "—")}
+        />
+        <ServiceCard label="Failed exercises" value={String(counts.failedExercises ?? "—")} />
+      </div>
+
+      <div style={{ display: "grid", gap: "0.5rem", marginBottom: "1rem" }}>
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((lvl) => {
+          const L = levels[lvl] || levels[String(lvl)];
+          return (
+            <div
+              key={lvl}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: "1rem",
+                padding: "0.35rem 0",
+                borderBottom: "1px solid rgba(255,255,255,0.06)",
+                fontSize: "0.9rem",
+              }}
+            >
+              <span>
+                Level {lvl}
+                {L?.name ? ` — ${L.name}` : ""}
+              </span>
+              <span style={{ color: "var(--hq-text-muted)" }}>
+                {L ? `${L.mastered ?? 0}/${L.total ?? "?"} · ${L.percent ?? 0}%` : "—"}
+                {L?.complete ? " · COMPLETE" : ""}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginBottom: "1rem" }}>
+        <button type="button" className="hq-btn" disabled={!!busy} onClick={() => runValidation()}>
+          {busy === "validate" ? "Running…" : "Run Validation"}
+        </button>
+        <button type="button" className="hq-btn" disabled={!!busy} onClick={() => refreshDashboard()}>
+          {busy === "dashboard" ? "Refreshing…" : "Refresh Matrix"}
+        </button>
+      </div>
+      {message ? (
+        <p style={{ color: "var(--hq-text-muted)", fontSize: "0.85rem" }}>{message}</p>
+      ) : null}
+
+      {demoUrl ? (
+        <div style={{ marginBottom: "1rem" }}>
+          <div style={{ marginBottom: "0.35rem", fontSize: "0.85rem", color: "var(--hq-text-muted)" }}>
+            View Demonstration
+          </div>
+          <audio controls src={demoUrl} style={{ width: "100%", maxWidth: 480 }} />
+        </div>
+      ) : (
+        <p style={{ color: "var(--hq-text-muted)", fontSize: "0.85rem" }}>
+          Demonstration audio appears here after Levels 1–3 validation uploads to Mix.
+        </p>
+      )}
+
+      {recentlyMastered.length > 0 ? (
+        <div style={{ marginBottom: "1rem" }}>
+          <div style={{ fontSize: "0.85rem", marginBottom: "0.35rem" }}>Recently mastered</div>
+          <ul style={{ margin: 0, paddingLeft: "1.1rem", color: "var(--hq-text-muted)", fontSize: "0.85rem" }}>
+            {recentlyMastered.slice(0, 8).map((c) => (
+              <li key={`${c.level}-${c.name}`}>
+                L{c.level} {c.name}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {(inventory.instruments?.length || inventory.packs?.length) ? (
+        <div style={{ marginBottom: "1rem", fontSize: "0.85rem", color: "var(--hq-text-muted)" }}>
+          Detected instruments: {(inventory.instruments || []).slice(0, 8).join(", ") || "—"}
+          {inventory.packs?.length ? ` · Packs: ${inventory.packs.slice(0, 6).join(", ")}` : ""}
+        </div>
+      ) : null}
+
+      <details>
+        <summary style={{ cursor: "pointer", marginBottom: "0.5rem" }}>Capability matrix</summary>
+        <div style={{ maxHeight: 320, overflow: "auto", fontSize: "0.8rem" }}>
+          {capabilities.length === 0 ? (
+            <p style={{ color: "var(--hq-text-muted)" }}>
+              Matrix loads after Refresh Matrix or Run Validation on the production node.
+            </p>
+          ) : (
+            capabilities.map((c) => (
+              <div
+                key={c.id}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: "0.75rem",
+                  padding: "0.2rem 0",
+                  borderBottom: "1px solid rgba(255,255,255,0.04)",
+                }}
+              >
+                <span>
+                  L{c.level} {c.name}
+                </span>
+                <span style={{ color: statusColor(c.status), whiteSpace: "nowrap" }}>{c.status}</span>
+              </div>
+            ))
+          )}
+        </div>
+      </details>
+    </HqPanel>
   );
 }
 
@@ -505,6 +876,27 @@ const AuraMusicCommandCenterPage: React.FC = () => {
               />
             </div>
 
+            <HqPanel title="Ableton Bridge — persistence" subtitle="Localhost :4177 · auto-recovery via bridge supervisor">
+              <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "0.55rem" }}>
+                {(
+                  [
+                    ["Bridge Build", data.bridgeBuild || data.summary?.["Bridge Build"] || "UNKNOWN"],
+                    ["Expected Build", data.bridgeExpectedBuild || "—"],
+                    ["Remote Script", data.remoteScriptStatus || "UNKNOWN"],
+                    ["Auto-Recovery", data.autoRecoveryStatus || data.summary?.["Auto-Recovery"] || "UNKNOWN"],
+                    ["Restart Count", String(data.bridgeRestartCount ?? 0)],
+                    ["Reconnect Attempts", String(data.bridgeReconnectAttempts ?? 0)],
+                    ["Last Error", data.bridgeLastError || "none"],
+                  ] as const
+                ).map(([label, val]) => (
+                  <li key={label} style={{ display: "flex", justifyContent: "space-between", gap: "1rem" }}>
+                    <span className="hq-kpi-meta">{label}</span>
+                    <strong style={{ textAlign: "right", maxWidth: "70%", wordBreak: "break-word" }}>{val}</strong>
+                  </li>
+                ))}
+              </ul>
+            </HqPanel>
+
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "1rem", marginBottom: "1rem" }}>
               <HqPanel title="Phase status" subtitle="Roadmap gates — Phase 3 mixing intelligence active">
                 <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "0.65rem" }}>
@@ -635,16 +1027,21 @@ const AuraMusicCommandCenterPage: React.FC = () => {
           </HqPanel>
         )}
         {tab === "ableton" && data && (
-          <div className="hq-kpi-grid">
-            <ServiceCard label="Ableton Bridge" value={services?.abletonBridge ?? "OFFLINE"} />
-            <ServiceCard label="Ableton Live" value={services?.abletonLive ?? "DISCONNECTED"} />
-            <ServiceCard label="Production Node" value={services?.productionNode ?? "NOT READY"} />
-            <ServiceCard
-              label="Heartbeat"
-              value={data.lastHeartbeatAt ? "FRESH" : "MISSING"}
-              meta={data.lastHeartbeatAt ? formatAge(data.lastHeartbeatAgeMs) : undefined}
-            />
-          </div>
+          <>
+            <div className="hq-kpi-grid">
+              <ServiceCard label="Ableton Bridge" value={services?.abletonBridge ?? "OFFLINE"} />
+              <ServiceCard label="Ableton Live" value={services?.abletonLive ?? "DISCONNECTED"} />
+              <ServiceCard label="Production Node" value={services?.productionNode ?? "NOT READY"} />
+              <ServiceCard
+                label="Heartbeat"
+                value={data.lastHeartbeatAt ? "FRESH" : "MISSING"}
+                meta={data.lastHeartbeatAt ? formatAge(data.lastHeartbeatAgeMs) : undefined}
+              />
+            </div>
+            <div style={{ marginTop: "1.25rem" }}>
+              <AbletonMasteryPanel onDone={() => query.refetch()} />
+            </div>
+          </>
         )}
       </HqQueryBoundary>
 

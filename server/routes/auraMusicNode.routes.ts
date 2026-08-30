@@ -255,6 +255,50 @@ router.get("/commands", hqAuthRequired, requireHQModule("aura"), async (_req, re
   }
 });
 
+/** HQ — Ableton mastery dashboard via production node heartbeat + command results. */
+router.get("/mastery", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
+  try {
+    const snap = await getPrimaryAuraMusicNodeSnapshot();
+    const hb = snap?.heartbeat || null;
+    const recent = await listRecentAuraMusicCommands(40);
+    const validateMeta = recent.find((c) => c.command === "mastery_validate_l1_l3");
+    let lastValidation: Record<string, unknown> | null = null;
+    if (validateMeta?.id) {
+      const full = await getAuraMusicCommand(String(validateMeta.id));
+      if (full) {
+        lastValidation = {
+          id: full.id,
+          status: full.status,
+          result: full.result,
+          error: full.error,
+          completedAt: full.completedAt,
+        };
+      }
+    }
+    const dashMeta = recent.find(
+      (c) => c.command === "mastery_dashboard" && (c.status === "succeeded" || c.status === "completed")
+    );
+    let masteryFromCmd: unknown = null;
+    if (dashMeta?.id) {
+      const full = await getAuraMusicCommand(String(dashMeta.id));
+      masteryFromCmd = full?.result || null;
+    }
+    res.json({
+      ok: true,
+      mastery: masteryFromCmd || hb?.abletonMastery || null,
+      lastValidation,
+      nodeOnline: Boolean(snap?.online),
+      overallMasteryPercent:
+        (masteryFromCmd as { overallMasteryPercent?: number } | null)?.overallMasteryPercent ??
+        (hb?.abletonMastery as { overallMasteryPercent?: number } | null)?.overallMasteryPercent ??
+        null,
+    });
+  } catch (error) {
+    console.error("GET /aura/music/mastery error:", error);
+    res.status(500).json({ error: "Mastery status unavailable" });
+  }
+});
+
 /** Production node uploads Mix Original / Mix Vn WAV for HQ audible review. */
 router.post("/mixes/upload", async (req, res) => {
   try {
@@ -274,10 +318,21 @@ router.post("/mixes/upload", async (req, res) => {
       base64,
       reportText: req.body?.reportText ? String(req.body.reportText) : undefined,
     });
+    console.info("[aura-music-mix] upload ok", {
+      nodeId: auth.nodeId,
+      jobId,
+      revision,
+      kind,
+      bytes: stored.bytes,
+      playbackUrl: stored.playbackUrl,
+    });
     res.status(201).json({ ok: true, ...stored, nodeId: auth.nodeId });
   } catch (error) {
     console.error("POST /aura/music/mixes/upload error:", error);
-    res.status(500).json({ error: "Mix upload failed" });
+    res.status(500).json({
+      error: "Mix upload failed",
+      detail: error instanceof Error ? error.message : String(error),
+    });
   }
 });
 
@@ -287,27 +342,53 @@ router.get("/mixes/review", hqAuthRequired, requireHQModule("aura"), async (req,
     const { getLatestMixReviewPayload } = await import("../hq/auraMusicMixStore");
     const jobId = req.query.jobId ? String(req.query.jobId) : undefined;
     const payload = await getLatestMixReviewPayload(jobId);
+    console.info("[aura-music-mix] review", {
+      jobId: payload?.jobId || null,
+      revision: payload?.revision || null,
+      audioCount: payload?.audio?.length || 0,
+      mixPlayable: Boolean(payload?.mixUrl),
+      originalPlayable: Boolean(payload?.originalUrl),
+    });
     res.json({ ok: true, review: payload });
   } catch (error) {
+    console.error("GET /aura/music/mixes/review error:", error);
     res.status(500).json({ error: "Mix review unavailable" });
   }
 });
 
-/** HQ — stream mix audio for audible A/B. */
+/** HQ — stream mix audio for audible A/B (Range/206 for Safari). */
 router.get("/mixes/:jobId/:revision/:kind", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
   try {
-    const { getAuraMusicMixAudio, readMixFile } = await import("../hq/auraMusicMixStore");
+    const { getAuraMusicMixAudio, streamMixAudioFile } = await import("../hq/auraMusicMixStore");
     const jobId = String(req.params.jobId);
     const revision = decodeURIComponent(String(req.params.revision));
     const kind = String(req.params.kind);
     const row = await getAuraMusicMixAudio(jobId, revision, kind);
-    if (!row) return res.status(404).json({ error: "Mix audio not found" });
-    const buf = readMixFile(row.path);
-    res.setHeader("Content-Type", "audio/wav");
-    res.setHeader("Content-Length", String(buf.length));
-    res.setHeader("Cache-Control", "no-store");
-    res.send(buf);
+    if (!row) {
+      console.warn("[aura-music-mix] stream 404", {
+        jobId,
+        revision,
+        kind,
+        range: req.headers.range || null,
+      });
+      return res.status(404).json({
+        error: "Mix audio not found",
+        jobId,
+        revision,
+        kind,
+        hint: "File missing on persistent disk or wrong revision/kind pairing",
+      });
+    }
+    streamMixAudioFile(req, res, {
+      path: row.path,
+      filename: row.filename,
+      bytes: row.bytes,
+      jobId,
+      revision,
+      kind,
+    });
   } catch (error) {
+    console.error("GET /aura/music/mixes/:jobId/:revision/:kind error:", error);
     res.status(500).json({ error: "Mix audio stream failed" });
   }
 });

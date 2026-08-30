@@ -115,6 +115,13 @@ export interface AuraMusicCommandCenter {
   };
   lastHeartbeatAt: string | null;
   lastHeartbeatAgeMs: number | null;
+  bridgeBuild?: string | null;
+  bridgeExpectedBuild?: string | null;
+  bridgeRestartCount?: number;
+  bridgeReconnectAttempts?: number;
+  bridgeLastError?: string | null;
+  autoRecoveryStatus?: string;
+  remoteScriptStatus?: string;
   currentJob: AuraMusicJob | null;
   jobQueue: AuraMusicJob[];
   recentExports: AuraMusicExport[];
@@ -866,13 +873,31 @@ export const hqApi = {
         revision: string;
         report: string | null;
         createdAt: string;
-        audio: Array<{ revision: string; kind: string; bytes: number; url: string }>;
+        originalUrl?: string | null;
+        mixUrl?: string | null;
+        audio: Array<{
+          revision: string;
+          kind: string;
+          bytes: number;
+          url: string;
+          playable?: boolean;
+          mimeType?: string;
+          report?: string | null;
+        }>;
       } | null;
     }>(`/aura/music/mixes/review${jobId ? `?jobId=${encodeURIComponent(jobId)}` : ""}`, {
       timeoutMs: 10_000,
     }),
   auraMusicMixAudioUrl: (jobId: string, revision: string, kind: string) =>
     `/api/hq/aura/music/mixes/${encodeURIComponent(jobId)}/${encodeURIComponent(revision)}/${encodeURIComponent(kind)}`,
+  auraMusicMastery: () =>
+    hqFetch<{
+      ok: boolean;
+      mastery: Record<string, unknown> | null;
+      lastValidation: Record<string, unknown> | null;
+      nodeOnline: boolean;
+      overallMasteryPercent: number | null;
+    }>("/aura/music/mastery", { timeoutMs: 10_000 }),
   auraCommand: (command: string, opts?: { module?: string; contextRef?: Record<string, unknown> }) => {
     const deviceId = getOrCreateFounderDeviceId();
     return hqFetch<AuraCommandResponse>("/aura/command", {
