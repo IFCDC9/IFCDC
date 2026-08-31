@@ -973,6 +973,62 @@ export const hqApi = {
     }),
   auraMusicMixAudioUrl: (jobId: string, revision: string, kind: string) =>
     `/api/hq/aura/music/mixes/${encodeURIComponent(jobId)}/${encodeURIComponent(revision)}/${encodeURIComponent(kind)}`,
+  auraMusicMasterReview: (jobId?: string) =>
+    hqFetch<{
+      ok: boolean;
+      review: {
+        jobId: string;
+        revision: string;
+        report: string | null;
+        createdAt: string;
+        validationLabel?: string;
+        premasterUrl?: string | null;
+        masterAUrl?: string | null;
+        masterBUrl?: string | null;
+        masterCUrl?: string | null;
+        audio: Array<{
+          id?: string;
+          revision: string;
+          kind: string;
+          bytes: number;
+          url: string;
+          playable?: boolean;
+          mimeType?: string;
+          report?: string | null;
+        }>;
+      } | null;
+    }>(`/aura/music/masters/review${jobId ? `?jobId=${encodeURIComponent(jobId)}` : ""}`, {
+      timeoutMs: 10_000,
+    }),
+  auraMusicMasterLibrary: (includeArchived = false) =>
+    hqFetch<{
+      ok: boolean;
+      count: number;
+      assets: Array<{
+        id: string;
+        jobId: string;
+        revision: string;
+        kind: string;
+        filename: string;
+        bytes: number;
+        playable: boolean;
+        mimeType: string;
+        report: string | null;
+        createdAt: string;
+        archivedAt: string | null;
+        url: string;
+      }>;
+    }>(`/aura/music/masters/library${includeArchived ? "?includeArchived=1" : ""}`, { timeoutMs: 10_000 }),
+  auraMusicMasterArchive: (id: string) =>
+    hqFetch<{ ok: boolean; error?: string }>(`/aura/music/masters/${encodeURIComponent(id)}/archive`, {
+      method: "POST",
+    }),
+  auraMusicMasterDelete: (id: string) =>
+    hqFetch<{ ok: boolean; error?: string }>(`/aura/music/masters/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  auraMusicMasterAudioUrl: (jobId: string, revision: string, kind: string) =>
+    `/api/hq/aura/music/masters/${encodeURIComponent(jobId)}/${encodeURIComponent(revision)}/${encodeURIComponent(kind)}`,
   auraMusicMastery: () =>
     hqFetch<{
       ok: boolean;

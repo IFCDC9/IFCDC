@@ -498,6 +498,241 @@ function MusicLibraryPanel() {
   );
 }
 
+function MasterReviewPanel({ onDone }: { onDone: () => void }) {
+  const reviewQuery = useQuery({
+    queryKey: ["hq-aura-music-master-review"],
+    queryFn: () => hqApi.auraMusicMasterReview(),
+    refetchInterval: 12_000,
+  });
+  const libraryQuery = useQuery({
+    queryKey: ["hq-aura-music-master-library"],
+    queryFn: () => hqApi.auraMusicMasterLibrary(false),
+    refetchInterval: 20_000,
+  });
+  const [busy, setBusy] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
+  const [playbackError, setPlaybackError] = useState("");
+  const [selected, setSelected] = useState<"premaster" | "A" | "B" | "C">("B");
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const review = reviewQuery.data?.review;
+
+  const urlMap = {
+    premaster: review?.premasterUrl || null,
+    A: review?.masterAUrl || null,
+    B: review?.masterBUrl || null,
+    C: review?.masterCUrl || null,
+  } as const;
+  const labelMap = {
+    premaster: "Play Premaster",
+    A: "Master A — Dynamic",
+    B: "Master B — Competitive",
+    C: "Master C — Platform-safe",
+  } as const;
+  const activeUrl = urlMap[selected];
+
+  async function playSelection(key: typeof selected) {
+    setSelected(key);
+    setPlaybackError("");
+    const url = urlMap[key];
+    if (!url) {
+      setPlaybackError(`${labelMap[key]} not available yet`);
+      return;
+    }
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: { Range: "bytes=0-1" },
+        credentials: "include",
+      });
+      if (!res.ok) {
+        setPlaybackError(`${labelMap[key]} failed HTTP ${res.status}`);
+        return;
+      }
+      requestAnimationFrame(() => {
+        const el = audioRef.current;
+        if (!el) {
+          setPlaybackError("audio element missing");
+          return;
+        }
+        el.src = url;
+        void el
+          .play()
+          .then(() => setPlaybackError(""))
+          .catch((err) => {
+            setPlaybackError(`play blocked: ${err instanceof Error ? err.message : String(err)}`);
+          });
+      });
+    } catch (err) {
+      setPlaybackError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function archiveAsset(id: string) {
+    setBusy(id);
+    try {
+      await hqApi.auraMusicMasterArchive(id);
+      setMessage("Archived audition master");
+      libraryQuery.refetch();
+      reviewQuery.refetch();
+      onDone();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function deleteAsset(id: string) {
+    if (!window.confirm("Permanently delete this audition master?")) return;
+    setBusy(id);
+    try {
+      await hqApi.auraMusicMasterDelete(id);
+      setMessage("Deleted audition master");
+      libraryQuery.refetch();
+      reviewQuery.refetch();
+      onDone();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div style={{ display: "grid", gap: "1rem" }}>
+      <HqPanel title="AURA Mastering Engine" subtitle="Stereo-program mastering — validation lineage only">
+        <p style={{ color: "var(--hq-text-muted)", margin: "0 0 0.75rem", lineHeight: 1.5 }}>
+          Listen → Analyze → Diagnose → Decide → Process → Re-analyze → A/B → Translate → Keep / Modify / Remove.
+          DO NOTHING is always valid. Mix problems must RETURN TO MIX — not be hidden by limiting.
+        </p>
+        <StatusBadge
+          label={review?.validationLabel || "VALIDATION MASTER — FINAL HUMAN VOCAL STILL REQUIRED"}
+          variant="warning"
+        />
+      </HqPanel>
+
+      <HqPanel
+        title="Master Workspace"
+        subtitle={review?.jobId ? `${review.jobId} · Premaster → Master A/B/C` : "Waiting for premaster / master uploads"}
+      >
+        {!review?.jobId ? (
+          <p style={{ color: "var(--hq-text-muted)", margin: 0 }}>
+            After the mastering pipeline runs on the production node, Premaster + Master A/B/C appear here.
+          </p>
+        ) : (
+          <>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", marginBottom: "1rem" }}>
+              {(["premaster", "A", "B", "C"] as const).map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={selected === key ? "hq-btn hq-btn-primary" : "hq-btn"}
+                  onClick={() => void playSelection(key)}
+                  disabled={!urlMap[key]}
+                >
+                  {labelMap[key]}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="hq-btn"
+                onClick={() => {
+                  const next = selected === "premaster" ? "B" : selected === "B" ? "A" : selected === "A" ? "C" : "premaster";
+                  void playSelection(next);
+                }}
+                disabled={!urlMap.premaster && !urlMap.B}
+              >
+                Loudness-Aware A/B
+              </button>
+            </div>
+            {activeUrl ? (
+              <audio
+                ref={audioRef}
+                key={`${selected}-${activeUrl}`}
+                controls
+                preload="metadata"
+                src={activeUrl}
+                style={{ width: "100%", marginBottom: "0.5rem" }}
+                onError={() => setPlaybackError(`Player error · ${activeUrl}`)}
+              />
+            ) : (
+              <p style={{ color: "var(--hq-danger, #c44)", margin: "0 0 1rem" }}>No playable URL for {labelMap[selected]}.</p>
+            )}
+            {playbackError ? (
+              <p className="hq-kpi-meta" style={{ color: "var(--hq-danger, #c44)", marginBottom: "1rem" }}>
+                {playbackError}
+              </p>
+            ) : null}
+            {review.report ? (
+              <details style={{ marginTop: "0.5rem" }}>
+                <summary style={{ cursor: "pointer", fontWeight: 600 }}>Mastering Report</summary>
+                <pre
+                  style={{
+                    whiteSpace: "pre-wrap",
+                    fontSize: "0.78rem",
+                    color: "var(--hq-text-muted)",
+                    maxHeight: 360,
+                    overflow: "auto",
+                  }}
+                >
+                  {review.report}
+                </pre>
+              </details>
+            ) : null}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", marginTop: "1rem" }}>
+              <button type="button" className="hq-btn hq-btn-primary" disabled>
+                Approve (validation only)
+              </button>
+              <button type="button" className="hq-btn" disabled={busy != null}>
+                Request Revision
+              </button>
+            </div>
+            <p className="hq-kpi-meta" style={{ marginTop: "0.75rem" }}>
+              Commercial FINAL MASTER is blocked until cleared human vocal replaces AURA_INTERNAL_VALIDATION_PLACEHOLDER.
+            </p>
+          </>
+        )}
+        {message ? <p className="hq-kpi-meta">{message}</p> : null}
+      </HqPanel>
+
+      <HqPanel title="Master Library Cleanup" subtitle="Archive or delete audition masters">
+        {(libraryQuery.data?.assets || []).length === 0 ? (
+          <p style={{ color: "var(--hq-text-muted)", margin: 0 }}>No mastering auditions in library yet.</p>
+        ) : (
+          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            {(libraryQuery.data?.assets || []).map((asset) => (
+              <li
+                key={asset.id}
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "0.5rem",
+                  alignItems: "center",
+                  padding: "0.65rem 0",
+                  borderBottom: "1px solid rgba(255,255,255,0.06)",
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 180 }}>
+                  <div style={{ fontWeight: 600 }}>{asset.revision}</div>
+                  <div className="hq-kpi-meta">
+                    {asset.kind} · {asset.bytes.toLocaleString()} bytes · {asset.playable ? "playable" : "missing"}
+                  </div>
+                </div>
+                <button type="button" className="hq-btn" disabled={busy === asset.id} onClick={() => void archiveAsset(asset.id)}>
+                  Archive
+                </button>
+                <button type="button" className="hq-btn" disabled={busy === asset.id} onClick={() => void deleteAsset(asset.id)}>
+                  Delete
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </HqPanel>
+    </div>
+  );
+}
+
 function tabBadge(meta: { status?: string; available?: boolean } | undefined): string | null {
   if (!meta) return null;
   if (meta.status === "SOON" || (meta.available === false && meta.status !== "ACTIVE" && meta.status !== "COMPLETE")) {
@@ -1314,12 +1549,7 @@ const AuraMusicCommandCenterPage: React.FC = () => {
           />
         )}
         {tab === "mix" && data && <MixReviewPanel onDone={() => query.refetch()} />}
-        {tab === "master" && (
-          <FoundationPlaceholder
-            title="Master"
-            note={sectionMeta.get("master")?.note || "Dedicated AURA Mastering Engine — not started. This tab will become the production mastering workspace when mastering phase begins."}
-          />
-        )}
+        {tab === "master" && <MasterReviewPanel onDone={() => query.refetch()} />}
         {tab === "sampling" && <SamplingPanel />}
         {tab === "jobs" && data && (
           <HqPanel title="Secure Music Job Queue" subtitle="Foundation">
@@ -1367,7 +1597,7 @@ const AuraMusicCommandCenterPage: React.FC = () => {
 
       <div style={{ marginTop: "1.25rem", display: "flex", alignItems: "center", gap: "0.5rem", color: "var(--hq-text-dim)", fontSize: "0.75rem" }}>
         <Music2 size={14} />
-        <span>AURA MUSIC is an IFCDC HQ module — Mixing Intelligence and Sampling active. Mastering remains blocked until the dedicated engine is validated.</span>
+        <span>AURA MUSIC is an IFCDC HQ module — Mixing, Sampling, and Mastering Engine active. Validation masters only until cleared human vocal replaces the placeholder.</span>
         <Radio size={14} style={{ marginLeft: "auto", opacity: 0.5 }} />
       </div>
     </HQLayout>

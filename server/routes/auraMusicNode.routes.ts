@@ -438,4 +438,127 @@ router.get("/mixes/:jobId/:revision/:kind", hqAuthRequired, requireHQModule("aur
   }
 });
 
+/** Production node uploads Premaster / Master A/B/C for HQ Master workspace. */
+router.post("/masters/upload", async (req, res) => {
+  try {
+    const auth = await authenticateAuraMusicNode(req);
+    if (!auth) return res.status(401).json({ error: "Unauthorized production node" });
+    const { storeAuraMusicMasterAudio } = await import("../hq/auraMusicMasterStore");
+    const jobId = String(req.body?.jobId || "").trim();
+    const revision = String(req.body?.revision || "MASTER-V1").trim();
+    const kind = String(req.body?.kind || "master").trim();
+    const base64 = String(req.body?.base64 || "");
+    if (!jobId || !base64) return res.status(400).json({ error: "jobId and base64 required" });
+    const stored = await storeAuraMusicMasterAudio({
+      jobId,
+      revision,
+      kind,
+      filename: String(req.body?.filename || `${jobId}-${revision}.wav`),
+      base64,
+      reportText: req.body?.reportText ? String(req.body.reportText) : undefined,
+    });
+    console.info("[aura-music-master] upload ok", {
+      nodeId: auth.nodeId,
+      jobId,
+      revision,
+      kind,
+      bytes: stored.bytes,
+      playbackUrl: stored.playbackUrl,
+    });
+    res.status(201).json({ ok: true, ...stored, nodeId: auth.nodeId });
+  } catch (error) {
+    console.error("POST /aura/music/masters/upload error:", error);
+    res.status(500).json({
+      error: "Master upload failed",
+      detail: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+/** HQ — latest mastering review payload for Master tab. */
+router.get("/masters/review", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  try {
+    const { getLatestMasterReviewPayload } = await import("../hq/auraMusicMasterStore");
+    const jobId = req.query.jobId ? String(req.query.jobId) : undefined;
+    const payload = await getLatestMasterReviewPayload(jobId);
+    res.json({ ok: true, review: payload });
+  } catch (error) {
+    console.error("GET /aura/music/masters/review error:", error);
+    res.status(500).json({ error: "Master review unavailable" });
+  }
+});
+
+/** HQ — master library inventory for cleanup controls. */
+router.get("/masters/library", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  try {
+    const { listAuraMusicMasterLibrary } = await import("../hq/auraMusicMasterStore");
+    const includeArchived = String(req.query.includeArchived || "") === "1";
+    const assets = await listAuraMusicMasterLibrary({ includeArchived });
+    res.json({ ok: true, assets, count: assets.length });
+  } catch (error) {
+    console.error("GET /aura/music/masters/library error:", error);
+    res.status(500).json({ error: "Master library unavailable" });
+  }
+});
+
+router.post("/masters/:id/archive", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  try {
+    if (!founderOrAdmin(req)) {
+      return res.status(403).json({ error: "Founder/executive required to archive master assets" });
+    }
+    const { archiveAuraMusicMasterAudio } = await import("../hq/auraMusicMasterStore");
+    const result = await archiveAuraMusicMasterAudio(String(req.params.id));
+    if (!result.ok) return res.status(404).json(result);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("POST /aura/music/masters/:id/archive error:", error);
+    res.status(500).json({ error: "Archive failed" });
+  }
+});
+
+router.delete("/masters/:id", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  try {
+    if (!founderOrAdmin(req)) {
+      return res.status(403).json({ error: "Founder/executive required to delete master assets" });
+    }
+    const { deleteAuraMusicMasterAudio } = await import("../hq/auraMusicMasterStore");
+    const result = await deleteAuraMusicMasterAudio(String(req.params.id));
+    if (!result.ok) return res.status(404).json(result);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("DELETE /aura/music/masters/:id error:", error);
+    res.status(500).json({ error: "Delete failed" });
+  }
+});
+
+/** HQ — stream master / premaster audio (Range/206 for Safari). */
+router.get("/masters/:jobId/:revision/:kind", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  try {
+    const { getAuraMusicMasterAudio, streamMasterAudioFile } = await import("../hq/auraMusicMasterStore");
+    const jobId = String(req.params.jobId);
+    const revision = decodeURIComponent(String(req.params.revision));
+    const kind = String(req.params.kind);
+    const row = await getAuraMusicMasterAudio(jobId, revision, kind);
+    if (!row) {
+      return res.status(404).json({
+        error: "Master audio not found",
+        jobId,
+        revision,
+        kind,
+      });
+    }
+    streamMasterAudioFile(req, res, {
+      path: row.path,
+      filename: row.filename,
+      bytes: row.bytes,
+      jobId,
+      revision,
+      kind,
+    });
+  } catch (error) {
+    console.error("GET /aura/music/masters/:jobId/:revision/:kind error:", error);
+    res.status(500).json({ error: "Master audio stream failed" });
+  }
+});
+
 export default router;

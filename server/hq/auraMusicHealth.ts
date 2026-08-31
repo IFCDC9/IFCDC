@@ -138,9 +138,9 @@ function buildSections(): NonNullable<AuraMusicCommandCenter["sections"]> {
     {
       id: "master",
       label: "Master",
-      available: false,
-      status: "SOON",
-      note: "Dedicated AURA Mastering Engine — not started",
+      available: true,
+      status: "ACTIVE",
+      note: "AURA Mastering Engine — validation masters (final human vocal still required)",
     },
     { id: "jobs", label: "Jobs", available: true, status: "ACTIVE", note: "Secure Music Job Queue" },
     { id: "ableton", label: "Ableton", available: true, status: "ACTIVE", note: "Production node + Ableton mastery" },
@@ -202,19 +202,27 @@ function readMasterySnapshot() {
   const read = (name: string) => readJsonFile<Record<string, unknown>>(join(masteryRoot, name));
   const l7 = read("levels-7-status.json");
   const l9 = read("levels-9-status.json");
+  const l10 = read("levels-10-status.json");
   const vocal = read("vocal-gate-status.json");
+  const mastering = read("mastering-engine-status.json");
   const matrix = read("capability-matrix.json");
 
   const level7Complete = Boolean((l7?.level7 as { complete?: boolean })?.complete);
   const level9Complete = Boolean((l9?.level9 as { complete?: boolean })?.complete);
+  const level10Complete = Boolean((l10?.level10 as { complete?: boolean })?.complete) || Boolean(l10?.gate);
   const vocalComplete = Boolean(vocal?.gate && String(vocal.gate).includes("ALL CHECKS PASSED"));
+  const masteringActive = Boolean(
+    mastering?.gate && String(mastering.gate).includes("ALL CHECKS PASSED")
+  );
 
   let overallPercent: number | null =
-    typeof l9?.overallMasteryPercent === "number"
-      ? (l9.overallMasteryPercent as number)
-      : typeof l7?.overallMasteryPercent === "number"
-        ? (l7.overallMasteryPercent as number)
-        : null;
+    typeof l10?.overallMasteryPercent === "number"
+      ? (l10.overallMasteryPercent as number)
+      : typeof l9?.overallMasteryPercent === "number"
+        ? (l9.overallMasteryPercent as number)
+        : typeof l7?.overallMasteryPercent === "number"
+          ? (l7.overallMasteryPercent as number)
+          : null;
 
   if (overallPercent == null && matrix?.capabilities && Array.isArray(matrix.capabilities)) {
     const caps = matrix.capabilities as Array<{ status?: string }>;
@@ -226,9 +234,13 @@ function readMasterySnapshot() {
     overallPercent,
     level7Complete,
     level9Complete,
+    level10Complete,
     vocalComplete,
+    masteringActive,
     l7Mastered: (l7?.level7 as { mastered?: number; total?: number })?.mastered,
     l7Total: (l7?.level7 as { total?: number })?.total ?? 18,
+    masteringCaps: mastering?.capabilitiesValidated as number | undefined,
+    masteringTotal: mastering?.capabilitiesTotal as number | undefined,
   };
 }
 
@@ -236,18 +248,26 @@ function moduleBlock(remote?: {
   overallPercent?: number | null;
   level7Complete?: boolean;
   level9Complete?: boolean;
+  level10Complete?: boolean;
   vocalComplete?: boolean;
+  masteringActive?: boolean;
   l7Mastered?: number;
   l7Total?: number;
+  masteringCaps?: number;
+  masteringTotal?: number;
 } | null) {
   const local = readMasterySnapshot();
   const m = {
     overallPercent: local.overallPercent ?? remote?.overallPercent ?? null,
     level7Complete: local.level7Complete || Boolean(remote?.level7Complete),
     level9Complete: local.level9Complete || Boolean(remote?.level9Complete),
+    level10Complete: local.level10Complete || Boolean(remote?.level10Complete),
     vocalComplete: local.vocalComplete || Boolean(remote?.vocalComplete),
+    masteringActive: local.masteringActive || Boolean(remote?.masteringActive),
     l7Mastered: local.l7Mastered ?? remote?.l7Mastered,
     l7Total: local.l7Total ?? remote?.l7Total ?? 18,
+    masteringCaps: local.masteringCaps ?? remote?.masteringCaps,
+    masteringTotal: local.masteringTotal ?? remote?.masteringTotal ?? 44,
   };
   return {
     mixingIntelligence: { status: "ACTIVE", label: "Mixing Intelligence — engineering racks + Mix review" },
@@ -262,11 +282,17 @@ function moduleBlock(remote?: {
       status: m.vocalComplete ? "COMPLETE" : "NOT STARTED",
       label: m.vocalComplete ? "Vocal Production Gate — Hard Street Soul V6" : "Vocal Production Gate — pending",
     },
-    masteringEngine: { status: "SOON", label: "Dedicated AURA Mastering Engine — not started" },
+    masteringEngine: {
+      status: "ACTIVE",
+      label: m.masteringActive
+        ? `AURA Mastering Engine — ${m.masteringCaps ?? 44}/${m.masteringTotal ?? 44} validated (validation masters only)`
+        : "AURA Mastering Engine — Premaster → Master A/B/C validation workspace",
+    },
     abletonMastery: {
       overallPercent: m.overallPercent,
       level9Complete: m.level9Complete,
       level7Complete: m.level7Complete,
+      level10Complete: m.level10Complete,
     },
   };
 }
