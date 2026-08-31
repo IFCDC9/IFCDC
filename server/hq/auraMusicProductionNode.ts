@@ -21,6 +21,8 @@ export const AURA_MUSIC_COMMAND_ALLOWLIST = [
   "mix_submit_feedback",
   "mix_revise_job",
   "ensure_aura_racks",
+  "mastery_dashboard",
+  "mastery_validate_l1_l3",
 ] as const;
 
 export type AuraMusicRemoteCommand = (typeof AURA_MUSIC_COMMAND_ALLOWLIST)[number];
@@ -40,6 +42,16 @@ export interface AuraMusicNodeHeartbeatPayload {
   auraMusicReady?: boolean;
   statusGeneratedAt?: string | null;
   rawStatus?: Record<string, unknown>;
+  abletonMastery?: Record<string, unknown> | null;
+  masterySnapshot?: {
+    overallPercent?: number | null;
+    level7Complete?: boolean;
+    level9Complete?: boolean;
+    vocalComplete?: boolean;
+    l7Mastered?: number;
+    l7Total?: number;
+  } | null;
+  samplingWorkspace?: Record<string, unknown> | null;
 }
 
 function timingSafeEqualString(a: string, b: string): boolean {

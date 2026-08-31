@@ -22,12 +22,13 @@ const JOBS_CURRENT_FILE = join(JOBS_DIR, "current.json");
 export type AuraMusicServiceState =
   | "ONLINE"
   | "OFFLINE"
+  | "RECONNECTING"
+  | "ERROR"
   | "READY"
   | "NOT READY"
   | "CONNECTED"
   | "DISCONNECTED"
   | "HEALTHY"
-  | "ERROR"
   | "NOT_APPLICABLE"
   | "UNKNOWN";
 
@@ -57,13 +58,27 @@ export interface AuraMusicCommandCenter {
   };
   lastHeartbeatAt: string | null;
   lastHeartbeatAgeMs: number | null;
+  bridgeBuild: string | null;
+  bridgeExpectedBuild: string | null;
+  bridgeRestartCount: number;
+  bridgeReconnectAttempts: number;
+  bridgeLastError: string | null;
+  autoRecoveryStatus: string;
+  remoteScriptStatus: string;
   currentJob: AuraMusicJob | null;
   jobQueue: AuraMusicJob[];
   recentExports: AuraMusicExport[];
-  sections: { id: string; label: string; available: boolean; note?: string }[];
+  sections: { id: string; label: string; available: boolean; status?: string; note?: string }[];
   summary: Record<string, string>;
   nodeId?: string;
   nodeLabel?: string;
+  modules?: {
+    mixingIntelligence: { status: string; label: string };
+    samplingMastery: { status: string; label: string; mastered?: string };
+    vocalProductionGate: { status: string; label: string };
+    masteringEngine: { status: string; label: string };
+    abletonMastery: { overallPercent: number | null; level9Complete: boolean; level7Complete: boolean };
+  };
 }
 
 export interface AuraMusicJob {
@@ -85,17 +100,52 @@ export interface AuraMusicExport {
 const ARCHITECTURE =
   "Authorized Device → IFCDC HQ → AURA MUSIC → Secure Music Job Queue → Ableton Production Node → Music Library";
 
-const SECTIONS = [
-  { id: "dashboard", label: "Dashboard", available: true },
-  { id: "library", label: "Library", available: true, note: "Foundation — ingest/search via Phase 2 API on production node" },
-  { id: "projects", label: "Projects", available: true, note: "Foundation — MUSIC-###### projects" },
-  { id: "mix", label: "Mix", available: true, note: "Phase 3 — controlled mixing intelligence (engineering racks, Mix V1)" },
-  { id: "master", label: "Master", available: false, note: "Phase 4 — not started" },
-  { id: "sampling", label: "Sampling", available: false, note: "Foundation placeholder" },
-  { id: "sounds", label: "Sounds", available: false, note: "Foundation placeholder" },
-  { id: "jobs", label: "Jobs", available: true, note: "Secure Music Job Queue foundation" },
-  { id: "ableton", label: "Ableton", available: true, note: "Production node status + session" },
-] as const;
+function buildSections(): NonNullable<AuraMusicCommandCenter["sections"]> {
+  const m = readMasterySnapshot();
+  const samplingNote = m.level7Complete
+    ? `Level 7 Sampling — ${m.l7Mastered ?? 18}/${m.l7Total ?? 18} mastered · IFCDC Music Library`
+    : "Level 7 Sampling — operational · IFCDC Music Library";
+  return [
+    { id: "dashboard", label: "Dashboard", available: true, status: "ACTIVE" },
+    {
+      id: "library",
+      label: "Library",
+      available: true,
+      status: "ACTIVE",
+      note: "IFCDC Music Library — ingest, rights, search on production node",
+    },
+    {
+      id: "projects",
+      label: "Projects",
+      available: true,
+      status: "ACTIVE",
+      note: "MUSIC-###### projects + Signature Sound productions",
+    },
+    {
+      id: "mix",
+      label: "Mix",
+      available: true,
+      status: "ACTIVE",
+      note: "Mixing Intelligence — controlled engineering racks + Mix review",
+    },
+    {
+      id: "sampling",
+      label: "Sampling",
+      available: true,
+      status: "ACTIVE",
+      note: samplingNote,
+    },
+    {
+      id: "master",
+      label: "Master",
+      available: false,
+      status: "SOON",
+      note: "Dedicated AURA Mastering Engine — not started",
+    },
+    { id: "jobs", label: "Jobs", available: true, status: "ACTIVE", note: "Secure Music Job Queue" },
+    { id: "ableton", label: "Ableton", available: true, status: "ACTIVE", note: "Production node + Ableton mastery" },
+  ];
+}
 
 function statusPath(): string {
   return process.env.AURA_MUSIC_STATUS_FILE || DEFAULT_STATUS;
@@ -147,6 +197,101 @@ function readJobs(): { current: AuraMusicJob | null; queue: AuraMusicJob[] } {
   return { current, queue };
 }
 
+function readMasterySnapshot() {
+  const masteryRoot = join(MUSIC_ROOT, "mastery");
+  const read = (name: string) => readJsonFile<Record<string, unknown>>(join(masteryRoot, name));
+  const l7 = read("levels-7-status.json");
+  const l9 = read("levels-9-status.json");
+  const vocal = read("vocal-gate-status.json");
+  const matrix = read("capability-matrix.json");
+
+  const level7Complete = Boolean((l7?.level7 as { complete?: boolean })?.complete);
+  const level9Complete = Boolean((l9?.level9 as { complete?: boolean })?.complete);
+  const vocalComplete = Boolean(vocal?.gate && String(vocal.gate).includes("ALL CHECKS PASSED"));
+
+  let overallPercent: number | null =
+    typeof l9?.overallMasteryPercent === "number"
+      ? (l9.overallMasteryPercent as number)
+      : typeof l7?.overallMasteryPercent === "number"
+        ? (l7.overallMasteryPercent as number)
+        : null;
+
+  if (overallPercent == null && matrix?.capabilities && Array.isArray(matrix.capabilities)) {
+    const caps = matrix.capabilities as Array<{ status?: string }>;
+    const mastered = caps.filter((c) => c.status === "MASTERED").length;
+    overallPercent = caps.length ? Math.round((mastered / caps.length) * 1000) / 10 : null;
+  }
+
+  return {
+    overallPercent,
+    level7Complete,
+    level9Complete,
+    vocalComplete,
+    l7Mastered: (l7?.level7 as { mastered?: number; total?: number })?.mastered,
+    l7Total: (l7?.level7 as { total?: number })?.total ?? 18,
+  };
+}
+
+function moduleBlock(remote?: {
+  overallPercent?: number | null;
+  level7Complete?: boolean;
+  level9Complete?: boolean;
+  vocalComplete?: boolean;
+  l7Mastered?: number;
+  l7Total?: number;
+} | null) {
+  const local = readMasterySnapshot();
+  const m = {
+    overallPercent: local.overallPercent ?? remote?.overallPercent ?? null,
+    level7Complete: local.level7Complete || Boolean(remote?.level7Complete),
+    level9Complete: local.level9Complete || Boolean(remote?.level9Complete),
+    vocalComplete: local.vocalComplete || Boolean(remote?.vocalComplete),
+    l7Mastered: local.l7Mastered ?? remote?.l7Mastered,
+    l7Total: local.l7Total ?? remote?.l7Total ?? 18,
+  };
+  return {
+    mixingIntelligence: { status: "ACTIVE", label: "Mixing Intelligence — engineering racks + Mix review" },
+    samplingMastery: {
+      status: m.level7Complete ? "COMPLETE" : "ACTIVE",
+      label: m.level7Complete
+        ? `Sampling Mastery — ${m.l7Mastered ?? 18}/${m.l7Total ?? 18} mastered`
+        : "Sampling Mastery — in progress",
+      mastered: m.level7Complete ? `${m.l7Mastered ?? 18}/${m.l7Total ?? 18}` : undefined,
+    },
+    vocalProductionGate: {
+      status: m.vocalComplete ? "COMPLETE" : "NOT STARTED",
+      label: m.vocalComplete ? "Vocal Production Gate — Hard Street Soul V6" : "Vocal Production Gate — pending",
+    },
+    masteringEngine: { status: "SOON", label: "Dedicated AURA Mastering Engine — not started" },
+    abletonMastery: {
+      overallPercent: m.overallPercent,
+      level9Complete: m.level9Complete,
+      level7Complete: m.level7Complete,
+    },
+  };
+}
+
+function attachModules(
+  payload: AuraMusicCommandCenter,
+  remote?: Parameters<typeof moduleBlock>[0]
+): AuraMusicCommandCenter {
+  return { ...payload, modules: moduleBlock(remote) };
+}
+
+function finalizePayload(
+  payload: AuraMusicCommandCenter,
+  remote?: Parameters<typeof moduleBlock>[0]
+): AuraMusicCommandCenter {
+  return attachModules({ ...payload, sections: buildSections() }, remote);
+}
+
+function normalizeProductionNode(raw: string | undefined): AuraMusicServiceState {
+  const s = String(raw || "NOT READY").toUpperCase();
+  if (["READY", "NOT READY", "RECONNECTING", "OFFLINE", "ERROR"].includes(s)) return s as AuraMusicServiceState;
+  if (s === "ONLINE") return "READY";
+  return "NOT READY";
+}
+
 function phaseBlock(phase3Status: "ACTIVE" | "BLOCKED" = "ACTIVE") {
   return {
     phase1: { status: "PASS", label: "AURA ↔ Ableton Bridge" },
@@ -164,7 +309,7 @@ function phaseBlock(phase3Status: "ACTIVE" | "BLOCKED" = "ACTIVE") {
 
 function cloudPayload(): AuraMusicCommandCenter {
   const generatedAt = new Date().toISOString();
-  return {
+  return finalizePayload({
     ok: true,
     configured: false,
     mode: "cloud_hq",
@@ -181,23 +326,30 @@ function cloudPayload(): AuraMusicCommandCenter {
       musicIntelligence: "OFFLINE",
       abletonBridge: "OFFLINE",
       abletonLive: "DISCONNECTED",
-      productionNode: "NOT READY",
+      productionNode: "OFFLINE",
       watchdog: "ERROR",
     },
     lastHeartbeatAt: null,
     lastHeartbeatAgeMs: null,
+    bridgeBuild: null,
+    bridgeExpectedBuild: null,
+    bridgeRestartCount: 0,
+    bridgeReconnectAttempts: 0,
+    bridgeLastError: null,
+    autoRecoveryStatus: "UNKNOWN",
+    remoteScriptStatus: "UNKNOWN",
     currentJob: null,
     jobQueue: [],
     recentExports: [],
-    sections: SECTIONS.map((s) => ({ ...s })),
+    sections: [],
     summary: {
       "Music Intelligence": "OFFLINE",
       "Ableton Bridge": "OFFLINE",
       "Ableton Live": "DISCONNECTED",
-      "Production Node": "NOT READY",
+      "Production Node": "OFFLINE",
       Watchdog: "ERROR",
     },
-  };
+  });
 }
 
 function fromRemoteNodeSnapshot(snap: {
@@ -211,7 +363,7 @@ function fromRemoteNodeSnapshot(snap: {
 }): AuraMusicCommandCenter {
   if (!snap.online || !snap.heartbeat) {
     const base = cloudPayload();
-    return {
+    return finalizePayload({
       ...base,
       configured: true,
       mode: "remote_production_node",
@@ -221,7 +373,15 @@ function fromRemoteNodeSnapshot(snap: {
       lastHeartbeatAt: snap.lastSeenAt,
       lastHeartbeatAgeMs: snap.ageMs,
       nodeId: snap.nodeId ?? undefined,
-    } as AuraMusicCommandCenter;
+      services: {
+        ...base.services,
+        productionNode: snap.timedOut ? "OFFLINE" : "NOT READY",
+      },
+      summary: {
+        ...base.summary,
+        "Production Node": snap.timedOut ? "OFFLINE" : "NOT READY",
+      },
+    });
   }
 
   const hb = snap.heartbeat as {
@@ -229,27 +389,53 @@ function fromRemoteNodeSnapshot(snap: {
     summary?: Record<string, string>;
     lastHeartbeatAt?: string | null;
     lastHeartbeatAgeMs?: number | null;
+    bridgeBuild?: string | null;
+    bridgeExpectedBuild?: string | null;
+    bridgeRestartCount?: number;
+    bridgeReconnectAttempts?: number;
+    bridgeLastError?: string | null;
+    autoRecoveryStatus?: string;
+    remoteScriptStatus?: string;
     currentJob?: AuraMusicJob | null;
     jobQueue?: AuraMusicJob[];
     recentExports?: AuraMusicExport[];
     auraMusicReady?: boolean;
     statusGeneratedAt?: string | null;
     workerAvailable?: boolean;
+    masterySnapshot?: {
+      overallPercent?: number | null;
+      level7Complete?: boolean;
+      level9Complete?: boolean;
+      vocalComplete?: boolean;
+      l7Mastered?: number;
+      l7Total?: number;
+    };
+    modules?: AuraMusicCommandCenter["modules"];
   };
 
   const services = hb.services ?? {};
   const musicIntelligence = (services.musicIntelligence || "OFFLINE") as AuraMusicServiceState;
   const abletonBridge = (services.abletonBridge || "OFFLINE") as AuraMusicServiceState;
   const abletonLive = (services.abletonLive || "DISCONNECTED") as AuraMusicServiceState;
-  const productionNode = (services.productionNode || "NOT READY") as AuraMusicServiceState;
+  const productionNode = normalizeProductionNode(services.productionNode || summaryRawFallback(hb.summary, "Production Node"));
   const watchdog = (services.watchdog || "ERROR") as AuraMusicServiceState;
   const ready =
-    Boolean(hb.auraMusicReady) &&
     musicIntelligence === "ONLINE" &&
-    abletonBridge === "ONLINE" &&
-    snap.online;
+    productionNode === "READY" &&
+    snap.online &&
+    watchdog !== "ERROR";
 
-  return {
+  const remoteMastery = hb.masterySnapshot || {
+    overallPercent: hb.modules?.abletonMastery?.overallPercent ?? null,
+    level7Complete: hb.modules?.abletonMastery?.level7Complete,
+    level9Complete: hb.modules?.abletonMastery?.level9Complete,
+    vocalComplete: hb.modules?.vocalProductionGate?.status === "COMPLETE",
+    l7Mastered: hb.modules?.samplingMastery?.mastered
+      ? Number(String(hb.modules.samplingMastery.mastered).split("/")[0])
+      : undefined,
+  };
+
+  return finalizePayload({
     ok: ready,
     configured: true,
     mode: "remote_production_node",
@@ -270,10 +456,17 @@ function fromRemoteNodeSnapshot(snap: {
     },
     lastHeartbeatAt: hb.lastHeartbeatAt ?? snap.lastSeenAt,
     lastHeartbeatAgeMs: hb.lastHeartbeatAgeMs ?? snap.ageMs,
+    bridgeBuild: hb.bridgeBuild ?? null,
+    bridgeExpectedBuild: hb.bridgeExpectedBuild ?? null,
+    bridgeRestartCount: hb.bridgeRestartCount ?? 0,
+    bridgeReconnectAttempts: hb.bridgeReconnectAttempts ?? 0,
+    bridgeLastError: hb.bridgeLastError ?? null,
+    autoRecoveryStatus: hb.autoRecoveryStatus || "UNKNOWN",
+    remoteScriptStatus: hb.remoteScriptStatus || "UNKNOWN",
     currentJob: (hb.currentJob as AuraMusicJob | null) ?? null,
     jobQueue: (hb.jobQueue as AuraMusicJob[]) ?? [],
     recentExports: (hb.recentExports as AuraMusicExport[]) ?? [],
-    sections: SECTIONS.map((s) => ({ ...s })),
+    sections: [],
     summary: {
       "Music Intelligence": musicIntelligence,
       "Ableton Bridge": abletonBridge,
@@ -282,10 +475,15 @@ function fromRemoteNodeSnapshot(snap: {
       Watchdog: watchdog,
       "Node ID": snap.nodeId ?? "—",
       Worker: hb.workerAvailable === false ? "UNAVAILABLE" : "AVAILABLE",
+      "Bridge Build": hb.bridgeBuild || hb.summary?.["Bridge Build"] || "UNKNOWN",
     },
     nodeId: snap.nodeId ?? undefined,
     nodeLabel: snap.label ?? undefined,
-  } as AuraMusicCommandCenter;
+  }, remoteMastery);
+}
+
+function summaryRawFallback(summary: Record<string, string> | undefined, key: string): string | undefined {
+  return summary?.[key];
 }
 
 function deriveFromStatus(raw: Record<string, unknown>): AuraMusicCommandCenter {
@@ -298,9 +496,11 @@ function deriveFromStatus(raw: Record<string, unknown>): AuraMusicCommandCenter 
   const abletonBridge = (servicesRaw.abletonBridge?.status ||
     summaryRaw["Ableton Bridge"] ||
     "OFFLINE") as AuraMusicServiceState;
-  const productionNode = (servicesRaw.abletonProductionNode?.status ||
-    summaryRaw["Ableton Production Node"] ||
-    "NOT READY") as AuraMusicServiceState;
+  const productionNode = normalizeProductionNode(
+    servicesRaw.abletonProductionNode?.status ||
+      summaryRaw["Ableton Production Node"] ||
+      summaryRaw["Production Node"]
+  );
 
   const nodeDetail = (servicesRaw.abletonProductionNode?.detail ?? {}) as {
     liveRunning?: boolean;
@@ -310,17 +510,45 @@ function deriveFromStatus(raw: Record<string, unknown>): AuraMusicCommandCenter 
   };
   const bridgeDetail = (servicesRaw.abletonBridge?.detail ?? {}) as {
     ableton?: { fileQueue?: { lastHeartbeatAt?: string; heartbeatAgeMs?: number; connectedHint?: boolean } };
+    build?: string;
+    expectedBuild?: string;
+    lastHeartbeatAt?: string;
+    lastHeartbeatAgeMs?: number;
+    restartCount?: number;
+    reconnectAttempts?: number;
+    lastError?: string;
+    autoRecoveryStatus?: string;
+    remoteScriptStatus?: string;
   };
+  const bridgeService = servicesRaw.abletonBridge as {
+    status?: string;
+    build?: string;
+    expectedBuild?: string;
+    lastHeartbeatAt?: string;
+    lastHeartbeatAgeMs?: number;
+    restartCount?: number;
+    reconnectAttempts?: number;
+    lastError?: string;
+    autoRecoveryStatus?: string;
+    remoteScriptStatus?: string;
+  } | undefined;
   const fq = bridgeDetail.ableton?.fileQueue;
-  const lastHeartbeatAt = fq?.lastHeartbeatAt ?? null;
+  const lastHeartbeatAt =
+    bridgeService?.lastHeartbeatAt || bridgeDetail.lastHeartbeatAt || fq?.lastHeartbeatAt || null;
   const lastHeartbeatAgeMs =
-    typeof fq?.heartbeatAgeMs === "number"
-      ? fq.heartbeatAgeMs
-      : typeof nodeDetail.heartbeatAgeMs === "number"
-        ? nodeDetail.heartbeatAgeMs
-        : null;
+    typeof bridgeService?.lastHeartbeatAgeMs === "number"
+      ? bridgeService.lastHeartbeatAgeMs
+      : typeof bridgeDetail.lastHeartbeatAgeMs === "number"
+        ? bridgeDetail.lastHeartbeatAgeMs
+        : typeof fq?.heartbeatAgeMs === "number"
+          ? fq.heartbeatAgeMs
+          : typeof nodeDetail.heartbeatAgeMs === "number"
+            ? nodeDetail.heartbeatAgeMs
+            : null;
 
+  const liveService = servicesRaw.abletonLive as { status?: string } | undefined;
   const liveConnected =
+    liveService?.status === "CONNECTED" ||
     productionNode === "READY" ||
     Boolean(nodeDetail.liveRunning && (lastHeartbeatAgeMs == null || lastHeartbeatAgeMs < 30_000)) ||
     Boolean(fq?.connectedHint);
@@ -330,10 +558,13 @@ function deriveFromStatus(raw: Record<string, unknown>): AuraMusicCommandCenter 
   const watchdog: AuraMusicServiceState =
     statusAgeMs != null && Number.isFinite(statusAgeMs) && statusAgeMs < 45_000 ? "HEALTHY" : "ERROR";
 
-  const ready = Boolean(raw.ok ?? raw.ready ?? raw.auraMusicReady) && musicIntelligence === "ONLINE" && abletonBridge === "ONLINE";
+  const ready =
+    musicIntelligence === "ONLINE" &&
+    productionNode === "READY" &&
+    watchdog !== "ERROR";
   const { current, queue } = readJobs();
 
-  return {
+  return finalizePayload({
     ok: ready,
     configured: true,
     mode: "local_status_file",
@@ -348,23 +579,32 @@ function deriveFromStatus(raw: Record<string, unknown>): AuraMusicCommandCenter 
       musicIntelligence,
       abletonBridge,
       abletonLive: liveConnected ? "CONNECTED" : "DISCONNECTED",
-      productionNode: productionNode === "READY" ? "READY" : "NOT READY",
+      productionNode,
       watchdog,
     },
     lastHeartbeatAt,
     lastHeartbeatAgeMs,
+    bridgeBuild: bridgeService?.build || bridgeDetail.build || null,
+    bridgeExpectedBuild: bridgeService?.expectedBuild || bridgeDetail.expectedBuild || null,
+    bridgeRestartCount: bridgeService?.restartCount ?? bridgeDetail.restartCount ?? 0,
+    bridgeReconnectAttempts: bridgeService?.reconnectAttempts ?? bridgeDetail.reconnectAttempts ?? 0,
+    bridgeLastError: bridgeService?.lastError || bridgeDetail.lastError || null,
+    autoRecoveryStatus: bridgeService?.autoRecoveryStatus || bridgeDetail.autoRecoveryStatus || "UNKNOWN",
+    remoteScriptStatus: bridgeService?.remoteScriptStatus || bridgeDetail.remoteScriptStatus || "UNKNOWN",
     currentJob: current,
     jobQueue: queue,
     recentExports: listRecentExports(),
-    sections: SECTIONS.map((s) => ({ ...s })),
+    sections: [],
     summary: {
       "Music Intelligence": musicIntelligence,
       "Ableton Bridge": abletonBridge,
       "Ableton Live": liveConnected ? "CONNECTED" : "DISCONNECTED",
-      "Production Node": productionNode === "READY" ? "READY" : "NOT READY",
+      "Production Node": productionNode,
       Watchdog: watchdog,
+      "Bridge Build": bridgeService?.build || bridgeDetail.build || "UNKNOWN",
+      "Auto-Recovery": bridgeService?.autoRecoveryStatus || bridgeDetail.autoRecoveryStatus || "UNKNOWN",
     },
-  };
+  });
 }
 
 async function probe(url: string): Promise<boolean> {
@@ -386,7 +626,7 @@ async function liveProbePayload(): Promise<AuraMusicCommandCenter> {
   const ready = intel && bridge;
   const { current, queue } = readJobs();
 
-  return {
+  return finalizePayload({
     ok: ready,
     configured: true,
     mode: "local_live_probe",
@@ -402,23 +642,23 @@ async function liveProbePayload(): Promise<AuraMusicCommandCenter> {
       musicIntelligence,
       abletonBridge,
       abletonLive: "UNKNOWN",
-      productionNode: "NOT READY",
-      watchdog: "ERROR",
+      productionNode: ready ? "READY" : "NOT READY",
+      watchdog: ready ? "HEALTHY" : "ERROR",
     },
     lastHeartbeatAt: null,
     lastHeartbeatAgeMs: null,
     currentJob: current,
     jobQueue: queue,
     recentExports: listRecentExports(),
-    sections: SECTIONS.map((s) => ({ ...s })),
+    sections: [],
     summary: {
       "Music Intelligence": musicIntelligence,
       "Ableton Bridge": abletonBridge,
       "Ableton Live": "UNKNOWN",
-      "Production Node": "NOT READY",
-      Watchdog: "ERROR",
+      "Production Node": ready ? "READY" : "NOT READY",
+      Watchdog: ready ? "HEALTHY" : "ERROR",
     },
-  };
+  });
 }
 
 /** Backward-compatible health summary used by GET /aura/music/health */
@@ -451,13 +691,13 @@ export async function getAuraMusicCommandCenter(): Promise<AuraMusicCommandCente
         return deriveFromStatus(raw);
       } catch (err) {
         const base = await liveProbePayload();
-        return {
+        return finalizePayload({
           ...base,
           mode: "local_offline",
           message: err instanceof Error ? err.message : String(err),
           services: { ...base.services, watchdog: "ERROR" },
           summary: { ...base.summary, Watchdog: "ERROR" },
-        };
+        });
       }
     }
     if (String(process.env.AURA_MUSIC_LOCAL_NODE || "").trim() === "1") {

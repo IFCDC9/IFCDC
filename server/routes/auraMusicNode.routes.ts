@@ -356,6 +356,51 @@ router.get("/mixes/review", hqAuthRequired, requireHQModule("aura"), async (req,
   }
 });
 
+/** HQ — mix library inventory for Library / cleanup controls. */
+router.get("/mixes/library", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  try {
+    const { listAuraMusicMixLibrary } = await import("../hq/auraMusicMixStore");
+    const includeArchived = String(req.query.includeArchived || "") === "1";
+    const assets = await listAuraMusicMixLibrary({ includeArchived });
+    res.json({ ok: true, assets, count: assets.length });
+  } catch (error) {
+    console.error("GET /aura/music/mixes/library error:", error);
+    res.status(500).json({ error: "Mix library unavailable" });
+  }
+});
+
+/** HQ — archive mix asset (soft remove from active review library). */
+router.post("/mixes/:id/archive", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  try {
+    if (!founderOrAdmin(req)) {
+      return res.status(403).json({ error: "Founder/executive required to archive mix assets" });
+    }
+    const { archiveAuraMusicMixAudio } = await import("../hq/auraMusicMixStore");
+    const result = await archiveAuraMusicMixAudio(String(req.params.id));
+    if (!result.ok) return res.status(404).json(result);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("POST /aura/music/mixes/:id/archive error:", error);
+    res.status(500).json({ error: "Archive failed" });
+  }
+});
+
+/** HQ — permanently delete mix asset from disk + DB. */
+router.delete("/mixes/:id", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  try {
+    if (!founderOrAdmin(req)) {
+      return res.status(403).json({ error: "Founder/executive required to delete mix assets" });
+    }
+    const { deleteAuraMusicMixAudio } = await import("../hq/auraMusicMixStore");
+    const result = await deleteAuraMusicMixAudio(String(req.params.id));
+    if (!result.ok) return res.status(404).json(result);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("DELETE /aura/music/mixes/:id error:", error);
+    res.status(500).json({ error: "Delete failed" });
+  }
+});
+
 /** HQ — stream mix audio for audible A/B (Range/206 for Safari). */
 router.get("/mixes/:jobId/:revision/:kind", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
   try {

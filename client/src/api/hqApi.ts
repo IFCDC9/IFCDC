@@ -125,10 +125,60 @@ export interface AuraMusicCommandCenter {
   currentJob: AuraMusicJob | null;
   jobQueue: AuraMusicJob[];
   recentExports: AuraMusicExport[];
-  sections: { id: string; label: string; available: boolean; note?: string }[];
+  sections: { id: string; label: string; available: boolean; status?: string; note?: string }[];
   summary: Record<string, string>;
   nodeId?: string;
   nodeLabel?: string;
+  modules?: {
+    mixingIntelligence: { status: string; label: string };
+    samplingMastery: { status: string; label: string; mastered?: string };
+    vocalProductionGate: { status: string; label: string };
+    masteringEngine: { status: string; label: string };
+    abletonMastery: { overallPercent: number | null; level9Complete: boolean; level7Complete: boolean };
+  };
+}
+
+export interface AuraMusicSamplingAsset {
+  id: string;
+  name: string;
+  category: string;
+  path: string;
+  modifiedAt: string;
+  sizeBytes: number;
+  rightsId?: string | null;
+  sourceType?: string | null;
+  production?: string | null;
+  tags?: string[];
+}
+
+export interface AuraMusicSamplingWorkspace {
+  ok: boolean;
+  generatedAt: string;
+  level7: {
+    complete: boolean;
+    mastered: number;
+    total: number;
+    gate: string | null;
+  };
+  overallMasteryPercent: number | null;
+  areas: {
+    id: string;
+    label: string;
+    count: number;
+    assets: AuraMusicSamplingAsset[];
+  }[];
+  rightsRecords: Array<{
+    id: string;
+    path: string;
+    sourceType?: string;
+    authorized?: boolean;
+    production?: string;
+  }>;
+  hardStreetSoul: {
+    catalogAssets: number;
+    categories: string[];
+  };
+  message?: string;
 }
 
 export interface AuraMusicHealthSummary {
@@ -807,6 +857,8 @@ export const hqApi = {
   auraMusicHealth: () => hqFetch<AuraMusicHealthSummary>("/aura/music/health", { timeoutMs: 8_000 }),
   auraMusicCommandCenter: () =>
     hqFetch<AuraMusicCommandCenter>("/aura/music/command-center", { timeoutMs: 8_000 }),
+  auraMusicSampling: () =>
+    hqFetch<AuraMusicSamplingWorkspace>("/aura/music/sampling", { timeoutMs: 12_000 }),
   auraMusicNodeStatus: () =>
     hqFetch<{
       ok: boolean;
@@ -886,6 +938,37 @@ export const hqApi = {
         }>;
       } | null;
     }>(`/aura/music/mixes/review${jobId ? `?jobId=${encodeURIComponent(jobId)}` : ""}`, {
+      timeoutMs: 10_000,
+    }),
+  auraMusicMixLibrary: (includeArchived = false) =>
+    hqFetch<{
+      ok: boolean;
+      count: number;
+      assets: Array<{
+        id: string;
+        jobId: string;
+        revision: string;
+        kind: string;
+        filename: string;
+        bytes: number;
+        playable: boolean;
+        mimeType: string;
+        report: string | null;
+        createdAt: string;
+        archivedAt: string | null;
+        url: string;
+      }>;
+    }>(`/aura/music/mixes/library${includeArchived ? "?includeArchived=1" : ""}`, { timeoutMs: 10_000 }),
+  auraMusicMixArchive: (id: string) =>
+    hqFetch<{ ok: boolean; error?: string }>(`/aura/music/mixes/${encodeURIComponent(id)}/archive`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+      timeoutMs: 10_000,
+    }),
+  auraMusicMixDelete: (id: string) =>
+    hqFetch<{ ok: boolean; error?: string }>(`/aura/music/mixes/${encodeURIComponent(id)}`, {
+      method: "DELETE",
       timeoutMs: 10_000,
     }),
   auraMusicMixAudioUrl: (jobId: string, revision: string, kind: string) =>

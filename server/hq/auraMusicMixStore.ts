@@ -9,6 +9,8 @@ import {
   readFileSync,
   statSync,
   createReadStream,
+  unlinkSync,
+  renameSync,
 } from "fs";
 import { join, basename } from "path";
 import type { Request, Response } from "express";
@@ -70,6 +72,11 @@ export async function ensureAuraMusicMixTables(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_aura_mix_job ON aura_music_mix_audio(job_id, revision, kind);
   `);
+  try {
+    await db.exec(`ALTER TABLE aura_music_mix_audio ADD COLUMN archived_at TEXT`);
+  } catch {
+    /* column already exists */
+  }
   getAuraMusicMixDir();
 }
 
@@ -196,11 +203,95 @@ export async function listAuraMusicMixAudio(jobId: string) {
   await ensureAuraMusicMixTables();
   const db = await getDb();
   const rows = (await db.all(
-    `SELECT id, job_id, revision, kind, filename, path, bytes, report_text, created_at FROM aura_music_mix_audio
-     WHERE job_id = ? ORDER BY created_at DESC`,
+    `SELECT id, job_id, revision, kind, filename, path, bytes, report_text, created_at, archived_at FROM aura_music_mix_audio
+     WHERE job_id = ? AND archived_at IS NULL ORDER BY created_at DESC`,
     jobId
   )) as Array<Record<string, unknown>>;
   return rows;
+}
+
+/** Full HQ mix library for Founder review / cleanup. */
+export async function listAuraMusicMixLibrary(opts?: { includeArchived?: boolean }) {
+  await ensureAuraMusicMixTables();
+  const db = await getDb();
+  const rows = (await db.all(
+    opts?.includeArchived
+      ? `SELECT id, job_id, revision, kind, filename, path, bytes, report_text, created_at, archived_at
+         FROM aura_music_mix_audio ORDER BY created_at DESC LIMIT 200`
+      : `SELECT id, job_id, revision, kind, filename, path, bytes, report_text, created_at, archived_at
+         FROM aura_music_mix_audio WHERE archived_at IS NULL ORDER BY created_at DESC LIMIT 200`
+  )) as Array<Record<string, unknown>>;
+
+  return rows.map((i) => {
+    const revision = String(i.revision);
+    const kind = String(i.kind);
+    const jobId = String(i.job_id);
+    const filename = String(i.filename);
+    const resolved = resolveMixAudioPath(String(i.path || ""), filename);
+    const playable = Boolean(resolved);
+    return {
+      id: String(i.id),
+      jobId,
+      revision,
+      kind,
+      filename,
+      bytes: resolved ? statSync(resolved).size : Number(i.bytes) || 0,
+      playable,
+      mimeType: "audio/wav",
+      report: (i.report_text as string) || null,
+      createdAt: String(i.created_at || ""),
+      archivedAt: i.archived_at ? String(i.archived_at) : null,
+      url: `/api/hq/aura/music/mixes/${encodeURIComponent(jobId)}/${encodeURIComponent(revision)}/${encodeURIComponent(kind)}`,
+    };
+  });
+}
+
+export async function archiveAuraMusicMixAudio(id: string): Promise<{ ok: boolean; error?: string }> {
+  await ensureAuraMusicMixTables();
+  const db = await getDb();
+  const row = (await db.get(
+    `SELECT id, path, filename, archived_at FROM aura_music_mix_audio WHERE id = ?`,
+    id
+  )) as { id: string; path: string; filename: string; archived_at: string | null } | undefined;
+  if (!row) return { ok: false, error: "Mix asset not found" };
+  if (row.archived_at) return { ok: true };
+
+  const resolved = resolveMixAudioPath(row.path, row.filename);
+  const archiveDir = join(getAuraMusicMixDir(), "archive");
+  mkdirSync(archiveDir, { recursive: true });
+  if (resolved && existsSync(resolved)) {
+    const dest = join(archiveDir, basename(resolved));
+    try {
+      renameSync(resolved, dest);
+      await db.run(`UPDATE aura_music_mix_audio SET path = ?, archived_at = ? WHERE id = ?`, dest, new Date().toISOString(), id);
+    } catch {
+      await db.run(`UPDATE aura_music_mix_audio SET archived_at = ? WHERE id = ?`, new Date().toISOString(), id);
+    }
+  } else {
+    await db.run(`UPDATE aura_music_mix_audio SET archived_at = ? WHERE id = ?`, new Date().toISOString(), id);
+  }
+  return { ok: true };
+}
+
+export async function deleteAuraMusicMixAudio(id: string): Promise<{ ok: boolean; error?: string }> {
+  await ensureAuraMusicMixTables();
+  const db = await getDb();
+  const row = (await db.get(
+    `SELECT id, path, filename FROM aura_music_mix_audio WHERE id = ?`,
+    id
+  )) as { id: string; path: string; filename: string } | undefined;
+  if (!row) return { ok: false, error: "Mix asset not found" };
+
+  const resolved = resolveMixAudioPath(row.path, row.filename);
+  if (resolved && existsSync(resolved)) {
+    try {
+      unlinkSync(resolved);
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+  await db.run(`DELETE FROM aura_music_mix_audio WHERE id = ?`, id);
+  return { ok: true };
 }
 
 export async function getLatestMixReviewPayload(jobId?: string) {
@@ -209,10 +300,10 @@ export async function getLatestMixReviewPayload(jobId?: string) {
   const row = (await db.get(
     jobId
       ? `SELECT job_id, revision, report_text, created_at FROM aura_music_mix_audio
-         WHERE job_id = ? AND kind = 'mix'
+         WHERE job_id = ? AND kind = 'mix' AND archived_at IS NULL
          ORDER BY created_at DESC LIMIT 1`
       : `SELECT job_id, revision, report_text, created_at FROM aura_music_mix_audio
-         WHERE kind = 'mix'
+         WHERE kind = 'mix' AND archived_at IS NULL
          ORDER BY created_at DESC LIMIT 1`,
     ...(jobId ? [jobId] : [])
   )) as { job_id: string; revision: string; report_text: string | null; created_at: string } | undefined;

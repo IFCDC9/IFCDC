@@ -925,6 +925,17 @@ router.get("/aura/music/command-center", hqAuthRequired, requireHQModule("aura")
   }
 });
 
+/** AURA MUSIC Sampling workspace — real IFCDC Music Library assets (no demo content). */
+router.get("/aura/music/sampling", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
+  try {
+    const { getAuraMusicSamplingWorkspaceForHq } = await import("../hq/auraMusicSampling");
+    res.json(await getAuraMusicSamplingWorkspaceForHq());
+  } catch (error) {
+    console.error("GET /aura/music/sampling error:", error);
+    res.status(500).json({ ok: false, error: "Sampling workspace unavailable" });
+  }
+});
+
 /** Build 61 — AURA Executive Intelligence Command Center */
 router.get("/aura/ei/dashboard", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
   try {

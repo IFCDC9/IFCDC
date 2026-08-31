@@ -2,7 +2,7 @@
  * AURA MUSIC Command Center — IFCDC HQ module.
  * Phase 3 controlled mixing intelligence enabled (engineering racks, Mix V1).
  */
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Music2,
@@ -13,7 +13,6 @@ import {
   SlidersHorizontal,
   Disc3,
   AudioWaveform,
-  Volume2,
   ListTodo,
   Cable,
   LayoutDashboard,
@@ -24,23 +23,27 @@ import { StatusBadge } from "../../components/hq/StatusBadge";
 import { HqPanel } from "../../components/hq/HqPanel";
 import { HqQueryBoundary } from "../../components/hq/HqQueryBoundary";
 
-const TABS = [
+const PRIMARY_TABS = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "library", label: "Library", icon: Library },
   { id: "projects", label: "Projects", icon: FolderKanban },
   { id: "mix", label: "Mix", icon: SlidersHorizontal },
-  { id: "master", label: "Master", icon: Disc3 },
   { id: "sampling", label: "Sampling", icon: AudioWaveform },
-  { id: "sounds", label: "Sounds", icon: Volume2 },
+  { id: "master", label: "Master", icon: Disc3 },
+] as const;
+
+const SECONDARY_TABS = [
   { id: "jobs", label: "Jobs", icon: ListTodo },
   { id: "ableton", label: "Ableton", icon: Cable },
 ] as const;
+
+const TABS = [...PRIMARY_TABS, ...SECONDARY_TABS] as const;
 
 type TabId = (typeof TABS)[number]["id"];
 
 function badgeVariant(state: string): "success" | "warning" | "danger" | "gold" | "muted" {
   const s = state.toUpperCase();
-  if (["ONLINE", "READY", "CONNECTED", "HEALTHY", "PASS"].includes(s)) return "success";
+  if (["ONLINE", "READY", "CONNECTED", "HEALTHY", "PASS", "COMPLETE", "ACTIVE"].includes(s)) return "success";
   if (["RECONNECTING", "RECOVERING"].includes(s)) return "warning";
   if (["BLOCKED", "UNKNOWN", "NOT_APPLICABLE"].includes(s)) return "gold";
   if (["NOT READY", "DISCONNECTED", "OFFLINE", "ERROR", "DEGRADED"].includes(s)) return "danger";
@@ -94,6 +97,7 @@ function MixReviewPanel({ onDone }: { onDone: () => void }) {
   const [playbackError, setPlaybackError] = useState("");
   const [abMode, setAbMode] = useState<"original" | "mix">("mix");
   const [selectedRevision, setSelectedRevision] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const review = reviewQuery.data?.review;
   const jobId = review?.jobId;
   const audioItems = (review?.audio || []) as Array<{
@@ -128,40 +132,36 @@ function MixReviewPanel({ onDone }: { onDone: () => void }) {
     audioItems.find((a) => a.revision === revision && a.kind === "mix" && a.report)?.report ||
     review?.report;
 
-  async function probePlaybackUrl(url: string, label: string) {
+  async function playUrl(url: string, label: string, mode: "original" | "mix") {
+    setAbMode(mode);
+    setPlaybackError("");
     try {
       const res = await fetch(url, {
         method: "GET",
         headers: { Range: "bytes=0-1" },
         credentials: "include",
       });
-      const mime = res.headers.get("content-type") || "";
-      const len = res.headers.get("content-length") || "";
-      const acceptRanges = res.headers.get("accept-ranges") || "";
-      console.info("[aura-music-mix] playback probe", {
-        label,
-        url,
-        status: res.status,
-        mime,
-        contentLength: len,
-        acceptRanges,
-        bytes: activeMeta?.bytes,
-      });
       if (!res.ok) {
-        const body = await res.text().catch(() => "");
-        setPlaybackError(
-          `${label} failed HTTP ${res.status} · ${mime || "no mime"} · ${url}${body ? ` · ${body.slice(0, 120)}` : ""}`
-        );
+        setPlaybackError(`${label} failed HTTP ${res.status}`);
         return;
       }
-      if (!/audio\//i.test(mime) && !/octet-stream/i.test(mime)) {
-        setPlaybackError(`${label} unexpected MIME "${mime}" for ${url}`);
-        return;
-      }
-      setPlaybackError("");
+      // Wait a tick so React applies the new src from abMode, then play
+      requestAnimationFrame(() => {
+        const el = audioRef.current;
+        if (!el) {
+          setPlaybackError(`${label}: audio element missing`);
+          return;
+        }
+        el.src = url;
+        void el
+          .play()
+          .then(() => setPlaybackError(""))
+          .catch((err) => {
+            setPlaybackError(`${label} play blocked: ${err instanceof Error ? err.message : String(err)}`);
+          });
+      });
     } catch (err) {
-      console.error("[aura-music-mix] playback probe error", { label, url, err });
-      setPlaybackError(`${label} probe error: ${err instanceof Error ? err.message : String(err)}`);
+      setPlaybackError(`${label}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -229,22 +229,16 @@ function MixReviewPanel({ onDone }: { onDone: () => void }) {
             <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", marginBottom: "1rem" }}>
               <button
                 type="button"
-                className="hq-btn"
-                onClick={() => {
-                  setAbMode("original");
-                  if (originalUrl) void probePlaybackUrl(originalUrl, "Play Original");
-                }}
+                className="hq-btn hq-btn-primary"
+                onClick={() => originalUrl && void playUrl(originalUrl, "Play Original", "original")}
                 disabled={!originalUrl}
               >
                 Play Original
               </button>
               <button
                 type="button"
-                className="hq-btn"
-                onClick={() => {
-                  setAbMode("mix");
-                  if (mixUrl) void probePlaybackUrl(mixUrl, `Play AURA ${revision}`);
-                }}
+                className="hq-btn hq-btn-primary"
+                onClick={() => mixUrl && void playUrl(mixUrl, `Play AURA ${revision}`, "mix")}
                 disabled={!mixUrl}
               >
                 Play AURA {revision}
@@ -254,9 +248,8 @@ function MixReviewPanel({ onDone }: { onDone: () => void }) {
                 className="hq-btn"
                 onClick={() => {
                   const next = abMode === "original" ? "mix" : "original";
-                  setAbMode(next);
                   const url = next === "original" ? originalUrl : mixUrl;
-                  if (url) void probePlaybackUrl(url, `A/B ${next}`);
+                  if (url) void playUrl(url, `A/B ${next}`, next);
                 }}
                 disabled={!originalUrl && !mixUrl}
               >
@@ -265,6 +258,7 @@ function MixReviewPanel({ onDone }: { onDone: () => void }) {
             </div>
             {activeUrl ? (
               <audio
+                ref={audioRef}
                 key={`${abMode}-${activeUrl}`}
                 controls
                 preload="metadata"
@@ -272,28 +266,11 @@ function MixReviewPanel({ onDone }: { onDone: () => void }) {
                 style={{ width: "100%", marginBottom: "0.5rem" }}
                 onError={(e) => {
                   const el = e.currentTarget;
-                  console.error("[aura-music-mix] audio element error", {
-                    url: activeUrl,
-                    mode: abMode,
-                    mediaError: el.error?.code,
-                    mediaMessage: el.error?.message,
-                    bytes: activeMeta?.bytes,
-                    mimeType: activeMeta?.mimeType,
-                  });
                   setPlaybackError(
                     `Player error (${abMode}) · code=${el.error?.code ?? "?"} · ${activeUrl}`
                   );
-                  void probePlaybackUrl(activeUrl, abMode);
                 }}
-                onLoadedMetadata={() => {
-                  console.info("[aura-music-mix] audio loaded", {
-                    url: activeUrl,
-                    mode: abMode,
-                    bytes: activeMeta?.bytes,
-                    mimeType: activeMeta?.mimeType || "audio/wav",
-                  });
-                  setPlaybackError("");
-                }}
+                onLoadedMetadata={() => setPlaybackError("")}
               />
             ) : (
               <p style={{ color: "var(--hq-danger, #c44)", margin: "0 0 1rem" }}>
@@ -312,39 +289,41 @@ function MixReviewPanel({ onDone }: { onDone: () => void }) {
               </p>
             ) : null}
 
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", marginBottom: "1rem" }}>
-              <button
-                type="button"
-                className="hq-btn"
-                disabled={!!busy}
-                onClick={() =>
-                  enqueue("mix_submit_feedback", {
-                    jobId,
-                    feedbackType: "approved",
-                    comment: `Approved ${revision}`,
-                  })
-                }
-              >
-                Approve
-              </button>
-              <button
-                type="button"
-                className="hq-btn"
-                disabled={!!busy}
-                onClick={() =>
-                  enqueue("mix_revise_job", {
-                    jobId,
-                    instruction: "Bring the vocal forward.",
-                  })
-                }
-              >
-                Request Revision
-              </button>
-              <button type="button" className="hq-btn" disabled={!!busy} onClick={() => reviewQuery.refetch()}>
-                Refresh Review
-              </button>
-            </div>
-            {message ? <p className="hq-kpi-meta">{message}</p> : null}
+            <HqPanel title="Review Controls" subtitle="Founder decision actions for the selected mix">
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", marginBottom: "0.5rem" }}>
+                <button
+                  type="button"
+                  className="hq-btn"
+                  disabled={!!busy}
+                  onClick={() =>
+                    enqueue("mix_submit_feedback", {
+                      jobId,
+                      feedbackType: "approved",
+                      comment: `Approved ${revision}`,
+                    })
+                  }
+                >
+                  Approve
+                </button>
+                <button
+                  type="button"
+                  className="hq-btn"
+                  disabled={!!busy}
+                  onClick={() =>
+                    enqueue("mix_revise_job", {
+                      jobId,
+                      instruction: "Bring the vocal forward.",
+                    })
+                  }
+                >
+                  Request Revision
+                </button>
+                <button type="button" className="hq-btn" disabled={!!busy} onClick={() => reviewQuery.refetch()}>
+                  Refresh Review
+                </button>
+              </div>
+              {message ? <p className="hq-kpi-meta">{message}</p> : null}
+            </HqPanel>
 
             <details open style={{ marginTop: "0.5rem" }}>
               <summary style={{ cursor: "pointer", fontWeight: 600 }}>Engineering Report</summary>
@@ -366,6 +345,332 @@ function MixReviewPanel({ onDone }: { onDone: () => void }) {
         )}
       </HqPanel>
     </div>
+  );
+}
+
+function MusicLibraryPanel() {
+  const [showArchived, setShowArchived] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [msg, setMsg] = useState("");
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const libQuery = useQuery({
+    queryKey: ["hq-aura-music-mix-library", showArchived],
+    queryFn: () => hqApi.auraMusicMixLibrary(showArchived),
+    refetchInterval: 15_000,
+  });
+  const assets = libQuery.data?.assets || [];
+
+  async function playAsset(url: string) {
+    setMsg("");
+    const el = audioRef.current;
+    if (!el) return;
+    el.src = url;
+    try {
+      await el.play();
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function archiveAsset(id: string) {
+    setBusyId(id);
+    setMsg("");
+    try {
+      await hqApi.auraMusicMixArchive(id);
+      await libQuery.refetch();
+      setMsg("Archived.");
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function deleteAsset(id: string) {
+    if (!window.confirm("Permanently delete this mix asset from HQ storage?")) return;
+    setBusyId(id);
+    setMsg("");
+    try {
+      await hqApi.auraMusicMixDelete(id);
+      await libQuery.refetch();
+      setMsg("Deleted.");
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <HqQueryBoundary
+      query={libQuery}
+      hasRenderableData={Boolean(libQuery.data)}
+      title="Music Library unavailable"
+      loadingMessage="Loading HQ mix library…"
+    >
+      <HqPanel
+        title="Music Library"
+        subtitle="HQ mix inventory — playback, archive, and delete (persistent Render disk)"
+      >
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", marginBottom: "1rem", alignItems: "center" }}>
+          <button
+            type="button"
+            className={`hq-btn hq-btn-sm ${!showArchived ? "hq-btn-primary" : "hq-btn-secondary"}`}
+            onClick={() => setShowArchived(false)}
+          >
+            Active
+          </button>
+          <button
+            type="button"
+            className={`hq-btn hq-btn-sm ${showArchived ? "hq-btn-primary" : "hq-btn-secondary"}`}
+            onClick={() => setShowArchived(true)}
+          >
+            Include archived
+          </button>
+          <button type="button" className="hq-btn hq-btn-sm hq-btn-secondary" onClick={() => libQuery.refetch()}>
+            Refresh
+          </button>
+          <span className="hq-kpi-meta">{assets.length} assets</span>
+        </div>
+        <audio ref={audioRef} controls preload="metadata" style={{ width: "100%", marginBottom: "1rem" }} />
+        {msg ? <p className="hq-kpi-meta" style={{ marginBottom: "0.75rem" }}>{msg}</p> : null}
+        {assets.length === 0 ? (
+          <p style={{ color: "var(--hq-text-muted)", margin: 0 }}>No mix assets on this HQ host yet.</p>
+        ) : (
+          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            {assets.map((a) => (
+              <li
+                key={a.id}
+                style={{
+                  padding: "0.7rem 0",
+                  borderBottom: "1px solid rgba(255,255,255,0.06)",
+                  display: "grid",
+                  gap: "0.35rem",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
+                  <div>
+                    <strong>
+                      {a.jobId} · {a.revision} · {a.kind}
+                    </strong>
+                    <div className="hq-kpi-meta">
+                      {formatBytes(a.bytes)} · {a.createdAt ? new Date(a.createdAt).toLocaleString() : "—"}
+                      {a.archivedAt ? ` · archived ${new Date(a.archivedAt).toLocaleString()}` : ""}
+                      {a.playable ? " · playable" : " · missing file"}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      className="hq-btn hq-btn-sm hq-btn-primary"
+                      disabled={!a.playable || busyId === a.id}
+                      onClick={() => void playAsset(a.url)}
+                    >
+                      Play
+                    </button>
+                    {!a.archivedAt ? (
+                      <button
+                        type="button"
+                        className="hq-btn hq-btn-sm"
+                        disabled={busyId === a.id}
+                        onClick={() => void archiveAsset(a.id)}
+                      >
+                        Archive
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="hq-btn hq-btn-sm"
+                      disabled={busyId === a.id}
+                      onClick={() => void deleteAsset(a.id)}
+                      style={{ color: "var(--hq-danger, #c44)" }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </HqPanel>
+    </HqQueryBoundary>
+  );
+}
+
+function tabBadge(meta: { status?: string; available?: boolean } | undefined): string | null {
+  if (!meta) return null;
+  if (meta.status === "SOON" || (meta.available === false && meta.status !== "ACTIVE" && meta.status !== "COMPLETE")) {
+    return "Soon";
+  }
+  if (meta.status === "COMPLETE") return "Complete";
+  return null;
+}
+
+function productionNodeBanner(productionNode: string | undefined): { label: string; variant: "success" | "warning" | "danger" | "gold" | "muted"; pulse: boolean } {
+  const state = String(productionNode || "NOT READY").toUpperCase();
+  if (state === "READY") return { label: "PRODUCTION NODE READY", variant: "success", pulse: true };
+  if (state === "RECONNECTING") return { label: "PRODUCTION NODE RECONNECTING", variant: "warning", pulse: true };
+  if (state === "OFFLINE") return { label: "PRODUCTION NODE OFFLINE", variant: "danger", pulse: false };
+  if (state === "ERROR") return { label: "PRODUCTION NODE ERROR", variant: "danger", pulse: false };
+  return { label: "PRODUCTION NODE NOT READY", variant: "warning", pulse: false };
+}
+
+function ModuleStatusPanel({ modules }: { modules: NonNullable<AuraMusicCommandCenter["modules"]> }) {
+  const rows = [
+    { name: "Mixing Intelligence", ...modules.mixingIntelligence },
+    { name: "Sampling Mastery", ...modules.samplingMastery },
+    { name: "Vocal Production Gate", ...modules.vocalProductionGate },
+    { name: "Mastering Engine", ...modules.masteringEngine },
+  ];
+  const mastery = modules.abletonMastery;
+  return (
+    <HqPanel title="AURA module state" subtitle="Backend-driven capability status">
+      <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "0.65rem" }}>
+        {rows.map((row) => (
+          <li key={row.name} style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", alignItems: "center" }}>
+            <div>
+              <div style={{ fontWeight: 650 }}>{row.name}</div>
+              <div className="hq-kpi-meta">{row.label}</div>
+            </div>
+            <StatusBadge label={row.status} variant={badgeVariant(row.status)} />
+          </li>
+        ))}
+      </ul>
+      <div style={{ marginTop: "1rem", paddingTop: "0.75rem", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+        <div className="hq-kpi-meta">Overall Ableton Mastery</div>
+        <div style={{ fontWeight: 700, fontSize: "1.25rem", color: "var(--hq-gold)" }}>
+          {mastery.overallPercent != null ? `${mastery.overallPercent}%` : "—"}
+        </div>
+        <div className="hq-kpi-meta" style={{ marginTop: "0.35rem" }}>
+          Level 7 {mastery.level7Complete ? "complete" : "in progress"} · Level 9 {mastery.level9Complete ? "complete" : "pending"}
+        </div>
+      </div>
+    </HqPanel>
+  );
+}
+
+function SamplingPanel() {
+  const samplingQuery = useQuery({
+    queryKey: ["hq-aura-music-sampling"],
+    queryFn: () => hqApi.auraMusicSampling(),
+    refetchInterval: 20_000,
+    staleTime: 10_000,
+  });
+  const [areaId, setAreaId] = useState<string>("sample-library");
+  const ws = samplingQuery.data;
+
+  return (
+    <HqQueryBoundary
+      query={samplingQuery}
+      hasRenderableData={Boolean(ws)}
+      title="Sampling workspace unavailable"
+      loadingMessage="Loading IFCDC Music Library sampling workspace…"
+    >
+      {ws && (
+        <>
+          <div className="hq-kpi-grid" style={{ marginBottom: "1rem" }}>
+            <ServiceCard
+              label="Level 7 Sampling"
+              value={ws.level7.complete ? "COMPLETE" : "ACTIVE"}
+              meta={`${ws.level7.mastered}/${ws.level7.total} mastered`}
+            />
+            <ServiceCard
+              label="Overall Mastery"
+              value={ws.overallMasteryPercent != null ? `${ws.overallMasteryPercent}%` : "—"}
+            />
+            <ServiceCard
+              label="Hard Street Soul Catalog"
+              value={String(ws.hardStreetSoul.catalogAssets)}
+              meta={ws.hardStreetSoul.categories.length ? ws.hardStreetSoul.categories.join(", ") : "No catalog categories"}
+            />
+            <ServiceCard label="Rights Records" value={String(ws.rightsRecords.length)} meta="sample-rights metadata" />
+          </div>
+
+          {ws.message ? (
+            <div className="hq-panel" style={{ marginBottom: "1rem", borderColor: "rgba(245,158,11,0.35)" }}>
+              <div className="hq-panel-body" style={{ padding: "0.9rem 1.1rem", color: "var(--hq-warning)", fontSize: "0.85rem" }}>
+                {ws.message}
+              </div>
+            </div>
+          ) : null}
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginBottom: "1rem" }}>
+            {ws.areas.map((area) => (
+              <button
+                key={area.id}
+                type="button"
+                className={`hq-btn hq-btn-sm ${areaId === area.id ? "hq-btn-primary" : "hq-btn-secondary"}`}
+                onClick={() => setAreaId(area.id)}
+              >
+                {area.label} ({area.count})
+              </button>
+            ))}
+            <button
+              type="button"
+              className={`hq-btn hq-btn-sm ${areaId === "rights" ? "hq-btn-primary" : "hq-btn-secondary"}`}
+              onClick={() => setAreaId("rights")}
+            >
+              Rights / License Metadata ({ws.rightsRecords.length})
+            </button>
+          </div>
+
+          {areaId === "rights" ? (
+            <HqPanel title="Rights / License Metadata" subtitle="Real sample-rights records from IFCDC Music Library">
+              {ws.rightsRecords.length === 0 ? (
+                <p style={{ color: "var(--hq-text-muted)", margin: 0 }}>No rights records found on this host.</p>
+              ) : (
+                <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                  {ws.rightsRecords.map((r) => (
+                    <li key={r.id} style={{ padding: "0.55rem 0", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                      <strong>{r.id}</strong>
+                      <div className="hq-kpi-meta">
+                        {r.sourceType || "unknown source"} · {r.authorized ? "authorized" : "pending"} · {r.production || "—"}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </HqPanel>
+          ) : (
+            <HqPanel
+              title={ws.areas.find((a) => a.id === areaId)?.label || "Sample Library"}
+              subtitle="Real assets from AURA / IFCDC Music Library — no demo content"
+            >
+              {(() => {
+                const area = ws.areas.find((a) => a.id === areaId);
+                if (!area || area.assets.length === 0) {
+                  return <p style={{ color: "var(--hq-text-muted)", margin: 0 }}>No assets in this category on this host.</p>;
+                }
+                return (
+                  <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                    {area.assets.map((asset) => (
+                      <li key={asset.path} style={{ padding: "0.55rem 0", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                        <strong>{asset.name}</strong>
+                        <div className="hq-kpi-meta">
+                          {formatBytes(asset.sizeBytes)} · {new Date(asset.modifiedAt).toLocaleString()}
+                          {asset.rightsId ? ` · rights: ${asset.rightsId}` : ""}
+                          {asset.sourceType ? ` · ${asset.sourceType}` : ""}
+                        </div>
+                        <div className="hq-kpi-meta" style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.72rem", opacity: 0.75 }}>
+                          {asset.path}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                );
+              })()}
+            </HqPanel>
+          )}
+
+          {ws.level7.gate ? (
+            <p className="hq-kpi-meta" style={{ marginTop: "1rem" }}>
+              {ws.level7.gate}
+            </p>
+          ) : null}
+        </>
+      )}
+    </HqQueryBoundary>
   );
 }
 
@@ -787,6 +1092,7 @@ const AuraMusicCommandCenterPage: React.FC = () => {
 
   const data: AuraMusicCommandCenter | undefined = query.data;
   const services = data?.services;
+  const nodeBanner = productionNodeBanner(services?.productionNode);
   const sectionMeta = useMemo(() => {
     const map = new Map((data?.sections ?? []).map((s) => [s.id, s]));
     return map;
@@ -800,11 +1106,10 @@ const AuraMusicCommandCenterPage: React.FC = () => {
       auraActions={["ask", "summarize"]}
     >
       <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", alignItems: "center", marginBottom: "1rem" }}>
-        <StatusBadge
-          label={data?.auraMusicReady ? "AURA MUSIC READY" : "PRODUCTION NODE NOT READY"}
-          variant={data?.auraMusicReady ? "success" : "warning"}
-          pulse={Boolean(data?.auraMusicReady)}
-        />
+        <StatusBadge label={nodeBanner.label} variant={nodeBanner.variant} pulse={nodeBanner.pulse} />
+        {data?.auraMusicReady ? (
+          <StatusBadge label="AURA MUSIC OPERATIONAL" variant="success" />
+        ) : null}
         <StatusBadge label={`Phase ${data?.currentPhase ?? "2"}`} variant="gold" />
         <StatusBadge label={data?.mode === "cloud_hq" ? "Cloud HQ" : "Local node linked"} variant="muted" />
         <button
@@ -831,9 +1136,9 @@ const AuraMusicCommandCenterPage: React.FC = () => {
       ) : null}
 
       <div className="hq-tabs" role="tablist" aria-label="AURA MUSIC sections">
-        {TABS.map(({ id, label, icon: Icon }) => {
+        {PRIMARY_TABS.map(({ id, label, icon: Icon }) => {
           const meta = sectionMeta.get(id);
-          const locked = meta ? meta.available === false : ["mix", "master", "sampling", "sounds"].includes(id);
+          const badge = tabBadge(meta);
           return (
             <button
               key={id}
@@ -845,10 +1150,24 @@ const AuraMusicCommandCenterPage: React.FC = () => {
             >
               <Icon size={14} />
               {label}
-              {locked ? <span className="hq-badge muted" style={{ marginLeft: 4 }}>Soon</span> : null}
+              {badge ? <span className="hq-badge muted" style={{ marginLeft: 4 }}>{badge}</span> : null}
             </button>
           );
         })}
+        <span style={{ width: 1, alignSelf: "stretch", background: "rgba(255,255,255,0.08)", margin: "0 0.25rem" }} aria-hidden />
+        {SECONDARY_TABS.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            className={`hq-tab ${tab === id ? "active" : ""}`}
+            onClick={() => setTab(id)}
+          >
+            <Icon size={14} />
+            {label}
+          </button>
+        ))}
       </div>
 
       <HqQueryBoundary
@@ -898,7 +1217,7 @@ const AuraMusicCommandCenterPage: React.FC = () => {
             </HqPanel>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "1rem", marginBottom: "1rem" }}>
-              <HqPanel title="Phase status" subtitle="Roadmap gates — Phase 3 mixing intelligence active">
+              <HqPanel title="Phase status" subtitle="Roadmap gates — backend-driven">
                 <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "0.65rem" }}>
                   {(
                     [
@@ -918,6 +1237,8 @@ const AuraMusicCommandCenterPage: React.FC = () => {
                   ))}
                 </ul>
               </HqPanel>
+
+              {data.modules ? <ModuleStatusPanel modules={data.modules} /> : null}
 
               <HqPanel title="Current job" subtitle="Secure Music Job Queue">
                 {data.currentJob ? (
@@ -985,12 +1306,7 @@ const AuraMusicCommandCenterPage: React.FC = () => {
           </>
         )}
 
-        {tab === "library" && (
-          <FoundationPlaceholder
-            title="Music Library"
-            note={sectionMeta.get("library")?.note || "Phase 2 intelligence library (ingest, rights, search) runs on the production node. HQ browse UX expands here without exposing localhost ports."}
-          />
-        )}
+        {tab === "library" && <MusicLibraryPanel />}
         {tab === "projects" && (
           <FoundationPlaceholder
             title="Projects"
@@ -998,9 +1314,13 @@ const AuraMusicCommandCenterPage: React.FC = () => {
           />
         )}
         {tab === "mix" && data && <MixReviewPanel onDone={() => query.refetch()} />}
-        {tab === "master" && <FoundationPlaceholder title="Master" note="Phase 4 mastering + QC — not started." />}
-        {tab === "sampling" && <FoundationPlaceholder title="Sampling" note="Sampling workspace reserved." />}
-        {tab === "sounds" && <FoundationPlaceholder title="Sounds" note="Sound / instrument browser reserved." />}
+        {tab === "master" && (
+          <FoundationPlaceholder
+            title="Master"
+            note={sectionMeta.get("master")?.note || "Dedicated AURA Mastering Engine — not started. This tab will become the production mastering workspace when mastering phase begins."}
+          />
+        )}
+        {tab === "sampling" && <SamplingPanel />}
         {tab === "jobs" && data && (
           <HqPanel title="Secure Music Job Queue" subtitle="Foundation">
             {data.currentJob || data.jobQueue.length > 0 ? (
@@ -1047,7 +1367,7 @@ const AuraMusicCommandCenterPage: React.FC = () => {
 
       <div style={{ marginTop: "1.25rem", display: "flex", alignItems: "center", gap: "0.5rem", color: "var(--hq-text-dim)", fontSize: "0.75rem" }}>
         <Music2 size={14} />
-        <span>AURA MUSIC is an IFCDC HQ module — Phase 3 mixing intelligence active. Mastering, DJ mode, and publishing remain blocked.</span>
+        <span>AURA MUSIC is an IFCDC HQ module — Mixing Intelligence and Sampling active. Mastering remains blocked until the dedicated engine is validated.</span>
         <Radio size={14} style={{ marginLeft: "auto", opacity: 0.5 }} />
       </div>
     </HQLayout>
