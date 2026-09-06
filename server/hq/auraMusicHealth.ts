@@ -11,6 +11,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
+import { getLiveSeratoDashboard } from "./seratoLibrary";
 
 const MUSIC_ROOT = join(homedir(), "Music", "IFCDC-MUSIC");
 const DEFAULT_STATUS = join(MUSIC_ROOT, "status", "aura-music-ready.json");
@@ -143,7 +144,20 @@ function buildSections(): NonNullable<AuraMusicCommandCenter["sections"]> {
       note: "AURA Mastering Engine — validation masters (final human vocal still required)",
     },
     { id: "jobs", label: "Jobs", available: true, status: "ACTIVE", note: "Secure Music Job Queue" },
-    { id: "ableton", label: "Ableton", available: true, status: "ACTIVE", note: "Production node + Ableton mastery" },
+    {
+      id: "ableton",
+      label: "Ableton",
+      available: true,
+      status: "ACTIVE",
+      note: `Core Ready ${m.coreProductionReadiness || "PRODUCTION_READY"} · Full capability ${m.fullAbletonCapabilityMasteryPercent ?? 49.6}% continuing`,
+    },
+    {
+      id: "serato",
+      label: "AURA DJ",
+      available: true,
+      status: "ACTIVE",
+      note: "Serato Phase 1 — library intelligence (observe/read); separate from Ableton %",
+    },
   ];
 }
 
@@ -215,23 +229,46 @@ function readMasterySnapshot() {
     mastering?.gate && String(mastering.gate).includes("ALL CHECKS PASSED")
   );
 
-  let overallPercent: number | null =
-    typeof l10?.overallMasteryPercent === "number"
-      ? (l10.overallMasteryPercent as number)
-      : typeof l9?.overallMasteryPercent === "number"
-        ? (l9.overallMasteryPercent as number)
-        : typeof l7?.overallMasteryPercent === "number"
-          ? (l7.overallMasteryPercent as number)
-          : null;
+  const foundation = readJsonFile<Record<string, unknown>>(join(masteryRoot, "foundation-readiness.json"));
+  // Prefer preserved continuing meter (49.6) — never silently replace with lab 100%
+  const continuing =
+    typeof foundation?.fullAbletonCapabilityMasteryPercent === "number"
+      ? (foundation.fullAbletonCapabilityMasteryPercent as number)
+      : 49.6;
 
-  if (overallPercent == null && matrix?.capabilities && Array.isArray(matrix.capabilities)) {
+  let labMatrixPercent: number | null = null;
+  let fullMasteryDomainsMastered: number | null = null;
+  let fullMasteryDomainsTotal: number | null = null;
+  if (matrix?.capabilities && Array.isArray(matrix.capabilities)) {
     const caps = matrix.capabilities as Array<{ status?: string }>;
-    const mastered = caps.filter((c) => c.status === "MASTERED").length;
-    overallPercent = caps.length ? Math.round((mastered / caps.length) * 1000) / 10 : null;
+    fullMasteryDomainsTotal = caps.length;
+    fullMasteryDomainsMastered = caps.filter((c) => c.status === "MASTERED").length;
+    labMatrixPercent = caps.length
+      ? Math.round((fullMasteryDomainsMastered / caps.length) * 1000) / 10
+      : null;
   }
 
+  const seratoStatus = readJsonFile<Record<string, unknown>>(
+    join(MUSIC_ROOT, "library/aura-dj/serato-status.json")
+  );
+
+  let liveSerato: ReturnType<typeof getLiveSeratoDashboard> | null = null;
+  try {
+    liveSerato = getLiveSeratoDashboard();
+  } catch {
+    liveSerato = null;
+  }
+
+  const live = (liveSerato?.live || {}) as Record<string, string>;
+  const crates = liveSerato?.crates || [];
+
   return {
-    overallPercent,
+    overallPercent: continuing,
+    fullAbletonCapabilityMasteryPercent: continuing,
+    labMatrixPercent,
+    coreProductionReadiness: (foundation?.coreProductionReadiness as string) || "PRODUCTION_READY",
+    fullMasteryDomainsMastered,
+    fullMasteryDomainsTotal,
     level7Complete,
     level9Complete,
     level10Complete,
@@ -241,6 +278,21 @@ function readMasterySnapshot() {
     l7Total: (l7?.level7 as { total?: number })?.total ?? 18,
     masteringCaps: mastering?.capabilitiesValidated as number | undefined,
     masteringTotal: mastering?.capabilitiesTotal as number | undefined,
+    auraDjSerato: {
+      phase: liveSerato?.phase || (seratoStatus?.phase as string) || "PHASE_1_LIBRARY_INTELLIGENCE",
+      domains: liveSerato?.domains || (seratoStatus?.domains as Record<string, string>) || {},
+      updatedAt: liveSerato?.updatedAt || (seratoStatus?.updatedAt as string) || null,
+      live,
+      apps: liveSerato?.apps || [],
+      libraries: liveSerato?.libraries || [],
+      crates: crates.map((c) => ({
+        name: c.name,
+        path: c.path,
+        parent: c.parent,
+        trackCount: c.trackCount,
+      })),
+      sampleTrackCount: liveSerato?.totals?.trackEntriesVisible ?? null,
+    },
   };
 }
 
@@ -255,8 +307,27 @@ function moduleBlock(remote?: {
   l7Total?: number;
   masteringCaps?: number;
   masteringTotal?: number;
+  auraDjHq?: Record<string, unknown> | null;
 } | null) {
   const local = readMasterySnapshot();
+  const remoteHq = remote?.auraDjHq || null;
+  const auraDjSerato = remoteHq
+    ? {
+        phase: "AURA_DJ_SERATO_LIVE",
+        domains: (remoteHq.domains as Record<string, string>) || local.auraDjSerato?.domains || {},
+        updatedAt: (remoteHq.generatedAt as string) || local.auraDjSerato?.updatedAt || null,
+        live: (remoteHq.live as Record<string, string>) || local.auraDjSerato?.live || {},
+        visibility: remoteHq.visibility || null,
+        progress: remoteHq.progress || null,
+        currentBlocker: remoteHq.currentBlocker || null,
+        decks: remoteHq.decks || null,
+        apps: local.auraDjSerato?.apps || [],
+        libraries: local.auraDjSerato?.libraries || [],
+        crates: local.auraDjSerato?.crates || [],
+        sampleTrackCount: local.auraDjSerato?.sampleTrackCount ?? null,
+        source: remoteHq.source || "remote_production_node",
+      }
+    : local.auraDjSerato;
   const m = {
     overallPercent: local.overallPercent ?? remote?.overallPercent ?? null,
     level7Complete: local.level7Complete || Boolean(remote?.level7Complete),
@@ -268,6 +339,12 @@ function moduleBlock(remote?: {
     l7Total: local.l7Total ?? remote?.l7Total ?? 18,
     masteringCaps: local.masteringCaps ?? remote?.masteringCaps,
     masteringTotal: local.masteringTotal ?? remote?.masteringTotal ?? 44,
+    coreProductionReadiness: local.coreProductionReadiness,
+    fullAbletonCapabilityMasteryPercent: local.fullAbletonCapabilityMasteryPercent,
+    labMatrixPercent: local.labMatrixPercent,
+    fullMasteryDomainsMastered: local.fullMasteryDomainsMastered,
+    fullMasteryDomainsTotal: local.fullMasteryDomainsTotal,
+    auraDjSerato,
   };
   return {
     mixingIntelligence: { status: "ACTIVE", label: "Mixing Intelligence — engineering racks + Mix review" },
@@ -293,7 +370,14 @@ function moduleBlock(remote?: {
       level9Complete: m.level9Complete,
       level7Complete: m.level7Complete,
       level10Complete: m.level10Complete,
+      coreProductionReadiness: m.coreProductionReadiness || "PRODUCTION_READY",
+      fullAbletonCapabilityMasteryPercent:
+        m.fullAbletonCapabilityMasteryPercent ?? m.overallPercent,
+      labMatrixPercent: m.labMatrixPercent ?? null,
+      fullMasteryDomainsMastered: m.fullMasteryDomainsMastered ?? null,
+      fullMasteryDomainsTotal: m.fullMasteryDomainsTotal ?? null,
     },
+    auraDjSerato: m.auraDjSerato || null,
   };
 }
 
@@ -451,14 +535,20 @@ function fromRemoteNodeSnapshot(snap: {
     snap.online &&
     watchdog !== "ERROR";
 
-  const remoteMastery = hb.masterySnapshot || {
-    overallPercent: hb.modules?.abletonMastery?.overallPercent ?? null,
-    level7Complete: hb.modules?.abletonMastery?.level7Complete,
-    level9Complete: hb.modules?.abletonMastery?.level9Complete,
-    vocalComplete: hb.modules?.vocalProductionGate?.status === "COMPLETE",
-    l7Mastered: hb.modules?.samplingMastery?.mastered
-      ? Number(String(hb.modules.samplingMastery.mastered).split("/")[0])
-      : undefined,
+  const remoteMastery = {
+    ...(hb.masterySnapshot || {}),
+    overallPercent:
+      hb.masterySnapshot?.fullAbletonCapabilityMasteryPercent ??
+      hb.masterySnapshot?.overallPercent ??
+      hb.modules?.abletonMastery?.overallPercent ??
+      null,
+    level7Complete: hb.masterySnapshot?.level7Complete ?? hb.modules?.abletonMastery?.level7Complete,
+    level9Complete: hb.masterySnapshot?.level9Complete ?? hb.modules?.abletonMastery?.level9Complete,
+    vocalComplete:
+      hb.masterySnapshot?.vocalComplete ?? hb.modules?.vocalProductionGate?.status === "COMPLETE",
+    l7Mastered: hb.masterySnapshot?.l7Mastered,
+    l7Total: hb.masterySnapshot?.l7Total,
+    auraDjHq: (hb as { auraDjHq?: Record<string, unknown> }).auraDjHq || null,
   };
 
   return finalizePayload({

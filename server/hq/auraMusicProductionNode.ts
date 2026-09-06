@@ -52,6 +52,8 @@ export interface AuraMusicNodeHeartbeatPayload {
     l7Total?: number;
   } | null;
   samplingWorkspace?: Record<string, unknown> | null;
+  /** Live AURA DJ / Serato HQ visibility (from Serato bridge via Mac agent). */
+  auraDjHq?: Record<string, unknown> | null;
 }
 
 function timingSafeEqualString(a: string, b: string): boolean {

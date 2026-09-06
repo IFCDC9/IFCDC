@@ -1,9 +1,11 @@
 /**
  * AURA MUSIC Command Center — IFCDC HQ module.
  * Phase 3 controlled mixing intelligence enabled (engineering racks, Mix V1).
+ * AURA DJ — Serato is a primary tab inside this command center (not a separate AURA system).
  */
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import {
   Music2,
   RefreshCw,
@@ -23,6 +25,7 @@ import { StatusBadge } from "../../components/hq/StatusBadge";
 import { HqPanel } from "../../components/hq/HqPanel";
 import { HqQueryBoundary } from "../../components/hq/HqQueryBoundary";
 
+/** Primary row — AURA DJ must stay visible without horizontal scroll hunting */
 const PRIMARY_TABS = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "library", label: "Library", icon: Library },
@@ -30,6 +33,7 @@ const PRIMARY_TABS = [
   { id: "mix", label: "Mix", icon: SlidersHorizontal },
   { id: "sampling", label: "Sampling", icon: AudioWaveform },
   { id: "master", label: "Master", icon: Disc3 },
+  { id: "serato", label: "AURA DJ — Serato", icon: Radio },
 ] as const;
 
 const SECONDARY_TABS = [
@@ -40,6 +44,10 @@ const SECONDARY_TABS = [
 const TABS = [...PRIMARY_TABS, ...SECONDARY_TABS] as const;
 
 type TabId = (typeof TABS)[number]["id"];
+
+function isTabId(value: string | null): value is TabId {
+  return Boolean(value && TABS.some((t) => t.id === value));
+}
 
 function badgeVariant(state: string): "success" | "warning" | "danger" | "gold" | "muted" {
   const s = state.toUpperCase();
@@ -759,8 +767,11 @@ function ModuleStatusPanel({ modules }: { modules: NonNullable<AuraMusicCommandC
     { name: "Mastering Engine", ...modules.masteringEngine },
   ];
   const mastery = modules.abletonMastery;
+  const continuing =
+    mastery.fullAbletonCapabilityMasteryPercent ?? mastery.overallPercent;
+  const core = mastery.coreProductionReadiness || "PRODUCTION_READY";
   return (
-    <HqPanel title="AURA module state" subtitle="Backend-driven capability status">
+    <HqPanel title="AURA module state" subtitle="Core readiness vs continuing Ableton capability">
       <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "0.65rem" }}>
         {rows.map((row) => (
           <li key={row.name} style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", alignItems: "center" }}>
@@ -773,15 +784,493 @@ function ModuleStatusPanel({ modules }: { modules: NonNullable<AuraMusicCommandC
         ))}
       </ul>
       <div style={{ marginTop: "1rem", paddingTop: "0.75rem", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-        <div className="hq-kpi-meta">Overall Ableton Mastery</div>
+        <div className="hq-kpi-meta">Core Production Readiness</div>
+        <div style={{ fontWeight: 700, fontSize: "1.1rem", color: "var(--hq-success, #3d9a6a)" }}>{core}</div>
+        <div className="hq-kpi-meta" style={{ marginTop: "0.75rem" }}>
+          Full Ableton Capability Mastery (continuing)
+        </div>
         <div style={{ fontWeight: 700, fontSize: "1.25rem", color: "var(--hq-gold)" }}>
-          {mastery.overallPercent != null ? `${mastery.overallPercent}%` : "—"}
+          {continuing != null ? `${continuing}%` : "—"}
+        </div>
+        <div className="hq-kpi-meta" style={{ marginTop: "0.35rem" }}>
+          Not the same as Core Ready · Advances via real projects · Lab matrix{" "}
+          {mastery.labMatrixPercent != null ? `${mastery.labMatrixPercent}%` : "—"} · Domains MASTERED{" "}
+          {mastery.fullMasteryDomainsMastered != null
+            ? `${mastery.fullMasteryDomainsMastered}/${mastery.fullMasteryDomainsTotal ?? "?"}`
+            : "—"}
         </div>
         <div className="hq-kpi-meta" style={{ marginTop: "0.35rem" }}>
           Level 7 {mastery.level7Complete ? "complete" : "in progress"} · Level 9 {mastery.level9Complete ? "complete" : "pending"}
         </div>
       </div>
     </HqPanel>
+  );
+}
+
+function SeratoDjPanel({ modules }: { modules?: AuraMusicCommandCenter["modules"] }) {
+  const seratoQuery = useQuery({
+    queryKey: ["hq-aura-music-serato"],
+    queryFn: () => hqApi.auraMusicSerato(),
+    refetchInterval: 5_000,
+    staleTime: 2_000,
+  });
+  const decksQuery = useQuery({
+    queryKey: ["hq-aura-music-serato-decks"],
+    queryFn: () => hqApi.auraMusicSeratoDecks(),
+    refetchInterval: 3_000,
+    staleTime: 1_000,
+    retry: 0,
+  });
+  const [selectedCrateId, setSelectedCrateId] = useState<string | null>(null);
+  const [selectedTrackPath, setSelectedTrackPath] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [launchMsg, setLaunchMsg] = useState("");
+  const [cmdLog, setCmdLog] = useState<string>("");
+
+  const tracksQuery = useQuery({
+    queryKey: ["hq-aura-music-serato-tracks", selectedCrateId],
+    queryFn: () => hqApi.auraMusicSeratoCrateTracks(String(selectedCrateId)),
+    enabled: Boolean(selectedCrateId),
+    staleTime: 10_000,
+  });
+
+  const dash = seratoQuery.data;
+  const live = dash?.live || {};
+  const domains = (dash?.domains || modules?.auraDjSerato?.domains || {}) as Record<string, string>;
+  const crates = dash?.crates || [];
+  const bridge = (dash?.bridge || {}) as Record<string, any>;
+  const visibility = (dash?.visibility || {}) as Record<string, string>;
+  const progress = dash?.progress || null;
+  const currentBlocker = dash?.currentBlocker || null;
+
+  const rows: Array<[string, string]> = [
+    ["Serato DJ Pro", domains.seratoDjPro || live.seratoDjProRunning || "NOT_BUILT"],
+    ["Library", domains.library || live.seratoLibraryAccess || "NOT_BUILT"],
+    ["Founder Mac node", visibility.founderMacSeratoNode || domains.localNode || "ONLINE"],
+    ["AURA–Serato Bridge", visibility.bridge || domains.auraSeratoBridge || live.bridgeConnected || "NOT_BUILT"],
+    ["Read-only Deck State", domains.readOnlyDeckState || "NOT_BUILT"],
+    ["Control", domains.control || domains.controlBridge || "NOT_BUILT"],
+    ["Transport", domains.transport || "TESTING"],
+    ["BPM / Key", domains.bpmKey || "NOT_BUILT"],
+    ["Cue / Grid", domains.cueGridIntelligence || domains.cueGrid || "NOT_BUILT"],
+    ["Two-deck", domains.twoDeckState || "NOT_BUILT"],
+    ["Stems", domains.stems || "NOT_BUILT"],
+    ["Transition Intelligence", domains.transitionPlanning || domains.transitionIntelligence || "NOT_BUILT"],
+    ["Live Mixing", domains.liveMixing || "NOT_BUILT"],
+    ["Set Memory", domains.setMemory || "NOT_BUILT"],
+  ];
+
+  async function launchSerato() {
+    setBusy("launch");
+    setLaunchMsg("");
+    try {
+      const res = await hqApi.auraMusicSeratoLaunch();
+      setLaunchMsg(res.ok ? (res.running ? "Serato DJ Pro is running." : "Launch requested — check Dock.") : res.error || "Launch failed");
+      await seratoQuery.refetch();
+    } catch (e) {
+      setLaunchMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function runControl(command: string) {
+    if (!selectedTrackPath && command.startsWith("load_track")) {
+      setCmdLog("Select a track first.");
+      return;
+    }
+    setBusy(command);
+    setCmdLog("");
+    try {
+      const res = await hqApi.auraMusicSeratoCommand(command, {
+        trackPath: selectedTrackPath,
+        deck: command.includes("deck_b") ? "B" : "A",
+      });
+      const result = res.result || res;
+      setCmdLog(
+        JSON.stringify(
+          {
+            ok: res.ok,
+            command,
+            success: (result as any)?.success,
+            error: (result as any)?.error || res.error,
+            visibleStateAfter: (result as any)?.visibleStateAfter?.decks?.A?.track || null,
+          },
+          null,
+          2
+        )
+      );
+      await Promise.all([seratoQuery.refetch(), decksQuery.refetch()]);
+    } catch (e) {
+      setCmdLog(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function fmtDur(sec: number | null | undefined) {
+    if (sec == null || !Number.isFinite(sec)) return "—";
+    const m = Math.floor(sec / 60);
+    const s = Math.round(sec % 60);
+    return `${m}:${String(s).padStart(2, "0")}`;
+  }
+
+  function statusVariant(status: string) {
+    const s = String(status).toUpperCase();
+    if (s === "PASSED" || s === "CONNECTED" || s === "RUNNING" || s === "ONLINE") return "success" as const;
+    if (s.includes("OFFLINE") || s.includes("DISCONNECTED") || s === "BLOCKED" || s === "NOT_BUILT") return "muted" as const;
+    if (s === "TESTING" || s === "BUILT") return "gold" as const;
+    return "muted" as const;
+  }
+
+  const hqDeckA = dash?.decks?.A;
+  const hqDeckB = dash?.decks?.B;
+  const liveDeckA = (decksQuery.data?.hqDecks as any)?.A || (decksQuery.data?.decks as any)?.A;
+  const liveDeckB = (decksQuery.data?.hqDecks as any)?.B || (decksQuery.data?.decks as any)?.B;
+
+  function deckCard(label: string, hq: typeof hqDeckA, live: any) {
+    const title = hq?.title || live?.track?.title || live?.title || "EMPTY";
+    const artist = hq?.artist || live?.track?.artist || live?.artist || null;
+    const bpm = hq?.bpm ?? live?.bpm ?? live?.track?.bpm ?? "UNKNOWN";
+    const key = hq?.key ?? live?.track?.key ?? live?.key ?? "UNKNOWN";
+    const play = hq?.play || live?.play || "UNKNOWN";
+    const pos = hq?.positionSeconds ?? live?.positionSeconds;
+    const cue = hq?.cue ?? live?.cue;
+    const grid = hq?.gridTrust ?? live?.gridTrust;
+    const phrase = (hq?.phrase as any)?.status || (live?.phrase as any)?.status || null;
+    return (
+      <div
+        style={{
+          padding: "0.85rem 1rem",
+          border: "1px solid rgba(255,255,255,0.1)",
+          background: "rgba(0,0,0,0.28)",
+          minWidth: 0,
+        }}
+      >
+        <div style={{ fontWeight: 750, marginBottom: "0.35rem" }}>{label}</div>
+        <div style={{ fontSize: "1.05rem", fontWeight: 650, wordBreak: "break-word" }}>{title}</div>
+        <div className="hq-kpi-meta" style={{ marginTop: "0.25rem" }}>
+          {artist || "—"} · {play} · BPM {String(bpm)} · Key {String(key)}
+        </div>
+        <div className="hq-kpi-meta" style={{ marginTop: "0.35rem" }}>
+          Pos {pos != null && Number.isFinite(Number(pos)) ? `${Number(pos).toFixed(1)}s` : "—"} · Cue{" "}
+          {cue == null ? "—" : String(typeof cue === "object" ? "set" : cue)} · Grid {grid == null ? "—" : String(grid)}
+          {phrase ? ` · Phrase ${phrase}` : ""}
+        </div>
+      </div>
+    );
+  }
+
+  const offlineBanner =
+    visibility.founderMacSeratoNode === "SERATO NODE OFFLINE"
+      ? "SERATO NODE OFFLINE"
+      : visibility.bridge === "BRIDGE DISCONNECTED" || String(bridge?.status || "").includes("DISCONNECTED")
+        ? "BRIDGE DISCONNECTED"
+        : visibility.seratoDjPro === "SERATO OFFLINE" || live.seratoDjProRunning === "NO"
+          ? "SERATO OFFLINE"
+          : null;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+      <HqPanel
+        title="AURA DJ — Serato"
+        subtitle="HQ → Founder Mac node → AURA–Serato bridge (:4179) → Serato DJ Pro · live data only · no fake PASSED"
+      >
+        {offlineBanner ? (
+          <div
+            style={{
+              marginBottom: "1rem",
+              padding: "0.75rem 1rem",
+              border: "1px solid rgba(245,158,11,0.45)",
+              color: "var(--hq-warning)",
+              fontWeight: 700,
+              letterSpacing: "0.04em",
+            }}
+          >
+            {offlineBanner}
+          </div>
+        ) : null}
+
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginBottom: "1rem" }}>
+          <button type="button" className="hq-btn" disabled={!!busy} onClick={() => void launchSerato()}>
+            {busy === "launch" ? "Launching…" : "Open Serato DJ Pro"}
+          </button>
+          <button
+            type="button"
+            className="hq-btn hq-btn-secondary"
+            disabled={seratoQuery.isFetching}
+            onClick={() => void Promise.all([seratoQuery.refetch(), decksQuery.refetch()])}
+          >
+            Refresh live status
+          </button>
+          {launchMsg ? <span className="hq-kpi-meta">{launchMsg}</span> : null}
+          {dash?.source ? <span className="hq-kpi-meta">source: {dash.source}</span> : null}
+        </div>
+
+        <div className="hq-kpi-grid" style={{ marginBottom: "1rem" }}>
+          <ServiceCard label="AURA DJ" value={String(visibility.auraDj || "—")} />
+          <ServiceCard
+            label="Serato DJ Pro"
+            value={String(
+              visibility.seratoDjPro ||
+                (live as any).seratoDjProStatus ||
+                (live.seratoDjProRunning === "YES" ? "RUNNING" : "SERATO OFFLINE")
+            )}
+          />
+          <ServiceCard
+            label="AURA–Serato bridge"
+            value={String(visibility.bridge || domains.auraSeratoBridge || "BRIDGE DISCONNECTED")}
+            meta={bridge?.bind ? String(bridge.bind) : "127.0.0.1:4179"}
+          />
+          <ServiceCard
+            label="Founder Mac Serato node"
+            value={String(visibility.founderMacSeratoNode || live.localNode || "—")}
+          />
+          <ServiceCard label="Remote observer" value={String((live as any).remoteObserver || domains.remoteObserver || "DISCONNECTED")} />
+          <ServiceCard
+            label="Control"
+            value={String((live as any).controlChannel || domains.control || "BLOCKED")}
+            meta={(live as any).controlBlockedReason ? String((live as any).controlBlockedReason) : undefined}
+          />
+          <ServiceCard
+            label="Transition intelligence"
+            value={String(domains.transitionIntelligence || domains.transitionPlanning || "NOT_BUILT")}
+          />
+          <ServiceCard
+            label="Last heartbeat"
+            value={live.lastHeartbeat ? "LIVE" : "—"}
+            meta={live.lastHeartbeat ? new Date(String(live.lastHeartbeat)).toLocaleString() : undefined}
+          />
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+            gap: "0.75rem",
+            marginBottom: "1rem",
+          }}
+        >
+          <div style={{ padding: "0.85rem 1rem", border: "1px solid rgba(201,162,39,0.35)", background: "rgba(201,162,39,0.08)" }}>
+            <div className="hq-kpi-meta">Current lesson</div>
+            <div style={{ fontWeight: 750, marginTop: "0.25rem" }}>
+              {progress?.currentLesson?.label || "—"}
+            </div>
+            {progress?.currentLesson?.status ? (
+              <div style={{ marginTop: "0.4rem" }}>
+                <StatusBadge label={progress.currentLesson.status} variant={statusVariant(progress.currentLesson.status)} />
+              </div>
+            ) : null}
+          </div>
+          <div style={{ padding: "0.85rem 1rem", border: "1px solid rgba(255,255,255,0.1)", background: "rgba(0,0,0,0.22)" }}>
+            <div className="hq-kpi-meta">Competency</div>
+            <div style={{ fontWeight: 700, marginTop: "0.25rem" }}>{progress?.currentCompetency || "—"}</div>
+          </div>
+          <div style={{ padding: "0.85rem 1rem", border: "1px solid rgba(255,255,255,0.1)", background: "rgba(0,0,0,0.22)" }}>
+            <div className="hq-kpi-meta">Progress</div>
+            <div style={{ fontWeight: 750, marginTop: "0.25rem" }}>
+              {progress?.passedCount != null ? `${progress.passedCount}/${progress.totalCount}` : "—"}
+              {progress?.progressPercent != null ? ` · ${progress.progressPercent}%` : ""}
+            </div>
+            {progress?.overallStatus ? (
+              <div style={{ marginTop: "0.4rem" }}>
+                <StatusBadge label={progress.overallStatus} variant={statusVariant(progress.overallStatus)} />
+              </div>
+            ) : null}
+          </div>
+          <div style={{ padding: "0.85rem 1rem", border: "1px solid rgba(255,255,255,0.1)", background: "rgba(0,0,0,0.22)" }}>
+            <div className="hq-kpi-meta">Last completed</div>
+            <div style={{ fontWeight: 650, marginTop: "0.25rem" }}>{progress?.lastCompletedLesson?.label || "—"}</div>
+          </div>
+          <div style={{ padding: "0.85rem 1rem", border: "1px solid rgba(255,255,255,0.1)", background: "rgba(0,0,0,0.22)" }}>
+            <div className="hq-kpi-meta">Next lesson</div>
+            <div style={{ fontWeight: 650, marginTop: "0.25rem" }}>{progress?.nextLesson?.label || "—"}</div>
+          </div>
+          <div style={{ padding: "0.85rem 1rem", border: "1px solid rgba(245,158,11,0.35)", background: "rgba(245,158,11,0.08)" }}>
+            <div className="hq-kpi-meta">Current blocker</div>
+            <div style={{ fontWeight: 650, marginTop: "0.25rem", wordBreak: "break-word", fontSize: "0.9rem" }}>
+              {currentBlocker || "None reported"}
+            </div>
+          </div>
+        </div>
+
+        <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+          {rows.map(([label, status]) => (
+            <li
+              key={label}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: "0.75rem",
+                flexWrap: "wrap",
+                alignItems: "center",
+              }}
+            >
+              <span>{label}</span>
+              <StatusBadge label={String(status)} variant={statusVariant(String(status))} />
+            </li>
+          ))}
+        </ul>
+        {live.lastError ? (
+          <p className="hq-kpi-meta" style={{ marginTop: "0.75rem", color: "var(--hq-warning)" }}>
+            Last error: {String(live.lastError)}
+          </p>
+        ) : null}
+        {dash?.message ? (
+          <p className="hq-kpi-meta" style={{ marginTop: "0.5rem" }}>
+            {dash.message}
+          </p>
+        ) : null}
+      </HqPanel>
+
+      <HqPanel title="Live decks" subtitle="Deck A / Deck B — title, artist, BPM, key, play/pause, cue/grid">
+        {decksQuery.isError && !dash?.decks ? (
+          <p style={{ color: "var(--hq-warning)", margin: 0 }}>
+            {offlineBanner || "BRIDGE DISCONNECTED — start aura-serato-bridge on Founder Mac"}
+          </p>
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+              gap: "0.75rem",
+            }}
+          >
+            {deckCard("Deck A", hqDeckA, liveDeckA)}
+            {deckCard("Deck B", hqDeckB, liveDeckB)}
+          </div>
+        )}
+      </HqPanel>
+
+      <HqPanel title="Serato crates (real)" subtitle="Click a crate → select a track → gated control test (Founder Mac)">
+        {seratoQuery.isLoading ? (
+          <p className="hq-kpi-meta">Loading Serato library…</p>
+        ) : crates.length === 0 ? (
+          <p style={{ color: "var(--hq-text-muted)", margin: 0 }}>
+            No crates readable on this HQ host. Live status still updates from the Founder Mac node when online.
+          </p>
+        ) : (
+          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            {crates.map((c) => (
+              <li key={c.id} style={{ padding: "0.55rem 0", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                <button
+                  type="button"
+                  className="hq-btn hq-btn-secondary"
+                  style={{ width: "100%", justifyContent: "space-between", display: "flex", flexWrap: "wrap", gap: "0.35rem" }}
+                  onClick={() => {
+                    setSelectedCrateId(c.id);
+                    setSelectedTrackPath(null);
+                  }}
+                >
+                  <span style={{ fontWeight: 650 }}>{c.name}</span>
+                  <span className="hq-kpi-meta">
+                    {c.trackCount} tracks · {c.kind || "crate"}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </HqPanel>
+
+      {selectedCrateId ? (
+        <HqPanel
+          title={tracksQuery.data?.crate?.name ? `Crate: ${tracksQuery.data.crate.name}` : "Crate tracks"}
+          subtitle="BPM/key from real ID3/Serato tags only — UNKNOWN if missing"
+        >
+          {tracksQuery.isLoading ? (
+            <p className="hq-kpi-meta">Reading crate tracks…</p>
+          ) : tracksQuery.data?.ok === false ? (
+            <p style={{ color: "var(--hq-warning)" }}>{tracksQuery.data.error || "Failed to load tracks"}</p>
+          ) : (
+            <>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginBottom: "0.75rem" }}>
+                <button
+                  type="button"
+                  className="hq-btn"
+                  disabled={!!busy || !selectedTrackPath}
+                  onClick={() => void runControl("load_track_deck_a")}
+                >
+                  Load → Deck A
+                </button>
+                <button type="button" className="hq-btn" disabled={!!busy || !selectedTrackPath} onClick={() => void runControl("play")}>
+                  Play
+                </button>
+                <button type="button" className="hq-btn" disabled={!!busy || !selectedTrackPath} onClick={() => void runControl("pause")}>
+                  Pause
+                </button>
+              </div>
+              {selectedTrackPath ? (
+                <p className="hq-kpi-meta" style={{ marginBottom: "0.75rem", wordBreak: "break-all" }}>
+                  Selected: {selectedTrackPath}
+                </p>
+              ) : (
+                <p className="hq-kpi-meta" style={{ marginBottom: "0.75rem" }}>
+                  Select a track row, then Load → Deck A. PASS only if Serato deck state confirms.
+                </p>
+              )}
+              {cmdLog ? (
+                <pre
+                  style={{
+                    marginBottom: "0.75rem",
+                    padding: "0.75rem",
+                    background: "rgba(0,0,0,0.35)",
+                    fontSize: "0.75rem",
+                    overflow: "auto",
+                    maxHeight: 180,
+                  }}
+                >
+                  {cmdLog}
+                </pre>
+              ) : null}
+              <div className="hq-table-scroll">
+                <table className="hq-table hq-table-compact">
+                  <thead>
+                    <tr>
+                      <th></th>
+                      <th>Title</th>
+                      <th>Artist</th>
+                      <th>BPM</th>
+                      <th>Key</th>
+                      <th>Duration</th>
+                      <th>File</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(tracksQuery.data?.tracks || []).map((t) => (
+                      <tr
+                        key={t.path}
+                        style={{
+                          background: selectedTrackPath === t.path ? "rgba(201,162,39,0.12)" : undefined,
+                          cursor: "pointer",
+                        }}
+                        onClick={() => setSelectedTrackPath(t.path)}
+                      >
+                        <td>
+                          <input
+                            type="radio"
+                            checked={selectedTrackPath === t.path}
+                            onChange={() => setSelectedTrackPath(t.path)}
+                          />
+                        </td>
+                        <td>{t.title}</td>
+                        <td>{t.artist || "UNKNOWN"}</td>
+                        <td>{t.bpm ?? "UNKNOWN"}</td>
+                        <td>{t.key ?? "UNKNOWN"}</td>
+                        <td>{fmtDur(t.durationSeconds)}</td>
+                        <td style={{ maxWidth: 280, wordBreak: "break-all", fontSize: "0.75rem" }}>
+                          {t.exists ? "on disk" : "missing"} · {t.path}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </HqPanel>
+      ) : null}
+    </div>
   );
 }
 
@@ -926,15 +1415,35 @@ function AbletonMasteryPanel({ onDone }: { onDone: () => void }) {
   const mastery = masteryQuery.data?.mastery as Record<string, any> | null;
   const lastVal = masteryQuery.data?.lastValidation as Record<string, any> | null;
   const dash = (lastVal?.result as Record<string, any>) || mastery || {};
+  const foundation = dash.foundationReadiness || {};
   const percent =
-    typeof dash.overallMasteryPercent === "number"
-      ? dash.overallMasteryPercent
-      : masteryQuery.data?.overallMasteryPercent ?? 0;
+    typeof dash.fullAbletonCapabilityMasteryPercent === "number"
+      ? dash.fullAbletonCapabilityMasteryPercent
+      : typeof foundation.fullAbletonCapabilityMasteryPercent === "number"
+        ? foundation.fullAbletonCapabilityMasteryPercent
+        : typeof dash.overallMasteryPercent === "number"
+          ? dash.overallMasteryPercent
+          : masteryQuery.data?.overallMasteryPercent ?? 49.6;
+  const coreReady =
+    dash.coreProductionReadiness || foundation.coreProductionReadiness || "PRODUCTION_READY";
   const levels = (dash.levels || dash.dashboard?.levels || {}) as Record<
     string,
     { name?: string; mastered?: number; total?: number; percent?: number; complete?: boolean }
   >;
   const counts = (dash.counts || dash.dashboard?.counts || {}) as Record<string, number>;
+  const fullMasteryDomains = dash.fullMasteryDomains || foundation.fullMasteryDomains || {};
+  const masteredDomains =
+    typeof fullMasteryDomains.mastered === "number"
+      ? fullMasteryDomains.mastered
+      : typeof counts.mastered === "number"
+        ? counts.mastered
+        : Object.values(levels).reduce((n, L) => n + (Number(L?.mastered) || 0), 0);
+  const totalDomains =
+    typeof fullMasteryDomains.total === "number"
+      ? fullMasteryDomains.total
+      : typeof counts.total === "number"
+        ? counts.total
+        : Object.values(levels).reduce((n, L) => n + (Number(L?.total) || 0), 0);
   const capabilities = (dash.capabilities || dash.dashboard?.capabilities || []) as Array<{
     id: string;
     name: string;
@@ -1025,7 +1534,7 @@ function AbletonMasteryPanel({ onDone }: { onDone: () => void }) {
   return (
     <HqPanel
       title="Ableton Mastery"
-      subtitle="Capability matrix · Mastery Lab · Levels 1–10 (founder only)"
+      subtitle="Core Production Readiness ≠ Full Ableton Capability Mastery · Levels 1–10 continuing"
     >
       {gate ? (
         <div
@@ -1044,8 +1553,17 @@ function AbletonMasteryPanel({ onDone }: { onDone: () => void }) {
       ) : null}
 
       <div className="hq-kpi-grid" style={{ marginBottom: "1rem" }}>
-        <ServiceCard label="AURA Ableton Mastery %" value={`${percent}%`} />
-        <ServiceCard label="Mastered" value={String(counts.mastered ?? recentlyMastered.length ?? "—")} />
+        <ServiceCard label="Core Production Readiness" value={String(coreReady)} meta="Cleared for normal production use" />
+        <ServiceCard
+          label="Full Ableton Capability Mastery"
+          value={`${percent}%`}
+          meta="Continuing — real projects advance this · not auto-set to 100%"
+        />
+        <ServiceCard
+          label="Full-mastery domains (MASTERED)"
+          value={totalDomains ? `${masteredDomains}/${totalDomains}` : String(masteredDomains ?? "—")}
+          meta="Capability matrix domains with MASTERED status — not Core Ready"
+        />
         <ServiceCard label="Learning" value={String(counts.learning ?? "—")} />
         <ServiceCard
           label="Validation required"
@@ -1315,7 +1833,23 @@ function RemoteCommandPanel({ onDone }: { onDone: () => void }) {
 }
 
 const AuraMusicCommandCenterPage: React.FC = () => {
-  const [tab, setTab] = useState<TabId>("dashboard");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabFromUrl = searchParams.get("tab");
+  const [tab, setTab] = useState<TabId>(() => (isTabId(tabFromUrl) ? tabFromUrl : "dashboard"));
+
+  useEffect(() => {
+    if (isTabId(tabFromUrl) && tabFromUrl !== tab) {
+      setTab(tabFromUrl);
+    }
+  }, [tabFromUrl, tab]);
+
+  function selectTab(id: TabId) {
+    setTab(id);
+    const next = new URLSearchParams(searchParams);
+    if (id === "dashboard") next.delete("tab");
+    else next.set("tab", id);
+    setSearchParams(next, { replace: true });
+  }
 
   const query = useQuery({
     queryKey: ["hq-aura-music-command-center"],
@@ -1332,11 +1866,12 @@ const AuraMusicCommandCenterPage: React.FC = () => {
     const map = new Map((data?.sections ?? []).map((s) => [s.id, s]));
     return map;
   }, [data?.sections]);
+  const djPreview = data?.modules?.auraDjSerato;
 
   return (
     <HQLayout
       title="AURA MUSIC"
-      subtitle="HQ music production command center — monitor the local production node securely"
+      subtitle="HQ music production command center — Ableton production + AURA DJ (Serato) Phase 1"
       auraModule="aura"
       auraActions={["ask", "summarize"]}
     >
@@ -1345,6 +1880,7 @@ const AuraMusicCommandCenterPage: React.FC = () => {
         {data?.auraMusicReady ? (
           <StatusBadge label="AURA MUSIC OPERATIONAL" variant="success" />
         ) : null}
+        <StatusBadge label="AURA DJ — SERATO PHASE 1" variant="gold" />
         <StatusBadge label={`Phase ${data?.currentPhase ?? "2"}`} variant="gold" />
         <StatusBadge label={data?.mode === "cloud_hq" ? "Cloud HQ" : "Local node linked"} variant="muted" />
         <button
@@ -1370,7 +1906,35 @@ const AuraMusicCommandCenterPage: React.FC = () => {
         </div>
       ) : null}
 
-      <div className="hq-tabs" role="tablist" aria-label="AURA MUSIC sections">
+      {/* Always-visible entry — do not bury AURA DJ behind secondary tabs */}
+      <div
+        style={{
+          marginBottom: "1rem",
+          padding: "1rem 1.15rem",
+          border: "2px solid var(--hq-gold)",
+          background: "linear-gradient(135deg, rgba(201,162,39,0.18), rgba(0,0,0,0.25))",
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "0.85rem",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <div>
+          <div style={{ fontWeight: 800, fontSize: "1.15rem", letterSpacing: "0.02em" }}>AURA DJ — SERATO</div>
+          <div className="hq-kpi-meta">Live Serato status · lessons · decks · progress — same HQ as Ableton</div>
+        </div>
+        <button
+          type="button"
+          className="hq-btn"
+          style={{ minHeight: 48, padding: "0.75rem 1.25rem", fontWeight: 700 }}
+          onClick={() => selectTab("serato")}
+        >
+          <Radio size={16} /> Open AURA DJ — Serato
+        </button>
+      </div>
+
+      <div className="hq-tabs" role="tablist" aria-label="AURA MUSIC sections" style={{ flexWrap: "wrap" }}>
         {PRIMARY_TABS.map(({ id, label, icon: Icon }) => {
           const meta = sectionMeta.get(id);
           const badge = tabBadge(meta);
@@ -1381,7 +1945,8 @@ const AuraMusicCommandCenterPage: React.FC = () => {
               role="tab"
               aria-selected={tab === id}
               className={`hq-tab ${tab === id ? "active" : ""}`}
-              onClick={() => setTab(id)}
+              onClick={() => selectTab(id)}
+              style={id === "serato" ? { borderColor: "rgba(201,162,39,0.55)" } : undefined}
             >
               <Icon size={14} />
               {label}
@@ -1397,7 +1962,7 @@ const AuraMusicCommandCenterPage: React.FC = () => {
             role="tab"
             aria-selected={tab === id}
             className={`hq-tab ${tab === id ? "active" : ""}`}
-            onClick={() => setTab(id)}
+            onClick={() => selectTab(id)}
           >
             <Icon size={14} />
             {label}
@@ -1413,6 +1978,34 @@ const AuraMusicCommandCenterPage: React.FC = () => {
       >
         {tab === "dashboard" && data && (
           <>
+            <div
+              className="hq-panel"
+              style={{ marginBottom: "1rem", borderColor: "rgba(201,162,39,0.4)", cursor: "pointer" }}
+              onClick={() => selectTab("serato")}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  selectTab("serato");
+                }
+              }}
+              role="button"
+              tabIndex={0}
+            >
+              <div className="hq-panel-body" style={{ padding: "0.9rem 1.1rem", display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "center", flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ fontWeight: 700 }}>Open AURA DJ — Serato</div>
+                  <div className="hq-kpi-meta">
+                    Phase 1 open · Connection {String((djPreview?.domains as Record<string, string> | undefined)?.seratoConnection || "…")}
+                    {" · "}
+                    {(djPreview?.crates || []).length} crates · route /hq/aura-music?tab=serato
+                  </div>
+                </div>
+                <button type="button" className="hq-btn" onClick={(e) => { e.stopPropagation(); selectTab("serato"); }}>
+                  <Radio size={14} /> Open AURA DJ
+                </button>
+              </div>
+            </div>
+
             <div className="hq-kpi-grid">
               <ServiceCard label="Music Intelligence" value={services?.musicIntelligence ?? "OFFLINE"} />
               <ServiceCard label="Ableton Bridge" value={services?.abletonBridge ?? "OFFLINE"} />
@@ -1551,6 +2144,7 @@ const AuraMusicCommandCenterPage: React.FC = () => {
         {tab === "mix" && data && <MixReviewPanel onDone={() => query.refetch()} />}
         {tab === "master" && <MasterReviewPanel onDone={() => query.refetch()} />}
         {tab === "sampling" && <SamplingPanel />}
+        {tab === "serato" && <SeratoDjPanel modules={data?.modules} />}
         {tab === "jobs" && data && (
           <HqPanel title="Secure Music Job Queue" subtitle="Foundation">
             {data.currentJob || data.jobQueue.length > 0 ? (

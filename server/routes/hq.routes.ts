@@ -925,6 +925,70 @@ router.get("/aura/music/command-center", hqAuthRequired, requireHQModule("aura")
   }
 });
 
+/** AURA DJ — Serato live dashboard (real crates / process state on Founder Mac). */
+router.get("/aura/music/serato", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
+  try {
+    const { getLiveSeratoDashboardMerged } = await import("../hq/seratoLibrary");
+    res.json(await getLiveSeratoDashboardMerged());
+  } catch (error) {
+    console.error("GET /aura/music/serato error:", error);
+    res.status(500).json({ ok: false, error: "Serato dashboard unavailable" });
+  }
+});
+
+router.get("/aura/music/serato/decks", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
+  try {
+    const { getSeratoDecksForHq } = await import("../hq/seratoLibrary");
+    const decks = await getSeratoDecksForHq();
+    if (!decks || decks.ok === false) {
+      return res.status(503).json(decks || { ok: false, error: "serato_bridge_offline" });
+    }
+    res.json(decks);
+  } catch (error) {
+    console.error("GET /aura/music/serato/decks error:", error);
+    res.status(500).json({ ok: false, error: "Deck state unavailable" });
+  }
+});
+
+router.post("/aura/music/serato/command", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  try {
+    const { postSeratoBridgeCommand } = await import("../hq/seratoLibrary");
+    const command = String(req.body?.command || "");
+    const args = (req.body?.args || {}) as Record<string, unknown>;
+    const result = await postSeratoBridgeCommand(command, args);
+    res.json(result);
+  } catch (error) {
+    console.error("POST /aura/music/serato/command error:", error);
+    res.status(503).json({
+      ok: false,
+      error: error instanceof Error ? error.message : "serato_bridge_command_failed",
+    });
+  }
+});
+
+router.get("/aura/music/serato/crates/:crateId/tracks", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  try {
+    const { getCrateTracks } = await import("../hq/seratoLibrary");
+    const result = getCrateTracks(String(req.params.crateId), { probeDuration: true });
+    if (!result.ok) return res.status(404).json(result);
+    res.json(result);
+  } catch (error) {
+    console.error("GET /aura/music/serato/crates/:crateId/tracks error:", error);
+    res.status(500).json({ ok: false, error: "Crate tracks unavailable" });
+  }
+});
+
+router.post("/aura/music/serato/launch", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
+  try {
+    const { launchSeratoDjPro, getLiveSeratoDashboardMerged } = await import("../hq/seratoLibrary");
+    const launched = launchSeratoDjPro();
+    res.json({ ...launched, dashboard: await getLiveSeratoDashboardMerged() });
+  } catch (error) {
+    console.error("POST /aura/music/serato/launch error:", error);
+    res.status(500).json({ ok: false, error: "Could not launch Serato DJ Pro" });
+  }
+});
+
 /** AURA MUSIC Sampling workspace — real IFCDC Music Library assets (no demo content). */
 router.get("/aura/music/sampling", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
   try {

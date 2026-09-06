@@ -180,6 +180,8 @@ const App: React.FC = () => (
           <Route path="/hq/developer" element={<HqRoute path="/hq/developer"><DeveloperPortalPage /></HqRoute>} />
           <Route path="/hq/aura" element={<HqRoute path="/hq/aura"><AuraCommandCenterPage /></HqRoute>} />
           <Route path="/hq/aura-music" element={<HqRoute path="/hq/aura-music"><AuraMusicCommandCenterPage /></HqRoute>} />
+          <Route path="/hq/aura-dj" element={<Navigate to="/hq/aura-music?tab=serato" replace />} />
+          <Route path="/hq/aura-serato" element={<Navigate to="/hq/aura-music?tab=serato" replace />} />
           <Route path="/hq/aura-brain" element={<HqRoute path="/hq/aura-brain"><AuraEnterpriseBrainV1Page /></HqRoute>} />
           <Route path="/hq/aura-executive" element={<HqRoute path="/hq/aura-executive"><AuraExecutiveIntelligencePage /></HqRoute>} />
           <Route path="/hq/executive-brain" element={<HqRoute path="/hq/executive-brain"><EnterpriseBrainDashboardPage /></HqRoute>} />

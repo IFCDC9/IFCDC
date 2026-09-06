@@ -134,7 +134,26 @@ export interface AuraMusicCommandCenter {
     samplingMastery: { status: string; label: string; mastered?: string };
     vocalProductionGate: { status: string; label: string };
     masteringEngine: { status: string; label: string };
-    abletonMastery: { overallPercent: number | null; level9Complete: boolean; level7Complete: boolean };
+    abletonMastery: {
+      overallPercent: number | null;
+      level9Complete: boolean;
+      level7Complete: boolean;
+      coreProductionReadiness?: string;
+      fullAbletonCapabilityMasteryPercent?: number | null;
+      labMatrixPercent?: number | null;
+      fullMasteryDomainsMastered?: number | null;
+      fullMasteryDomainsTotal?: number | null;
+    };
+    auraDjSerato?: {
+      phase?: string;
+      domains?: Record<string, string>;
+      updatedAt?: string | null;
+      live?: Record<string, string>;
+      apps?: Array<{ name: string; path: string; exists?: boolean }>;
+      libraries?: Array<{ path: string; exists?: boolean; entryCount?: number }>;
+      crates?: Array<{ name: string; path: string; parent?: string; trackCount?: number }>;
+      sampleTrackCount?: number | null;
+    } | null;
   };
 }
 
@@ -1037,6 +1056,98 @@ export const hqApi = {
       nodeOnline: boolean;
       overallMasteryPercent: number | null;
     }>("/aura/music/mastery", { timeoutMs: 10_000 }),
+  auraMusicSerato: () =>
+    hqFetch<{
+      ok: boolean;
+      phase?: string;
+      updatedAt?: string;
+      hostname?: string;
+      source?: string;
+      message?: string;
+      live?: Record<string, string>;
+      domains?: Record<string, string>;
+      bridge?: Record<string, unknown>;
+      visibility?: Record<string, string>;
+      progress?: {
+        progressPercent?: number;
+        overallStatus?: string;
+        currentLesson?: { id: string; label: string; status: string } | null;
+        currentCompetency?: string | null;
+        lastCompletedLesson?: { id: string; label: string; status: string } | null;
+        nextLesson?: { id: string; label: string; status: string } | null;
+        lessons?: Array<{ id: string; label: string; status: string }>;
+        passedCount?: number;
+        totalCount?: number;
+      } | null;
+      currentBlocker?: string | null;
+      decks?: Record<
+        string,
+        {
+          loaded?: boolean;
+          title?: string;
+          artist?: string | null;
+          bpm?: unknown;
+          key?: unknown;
+          play?: string;
+          positionSeconds?: number | null;
+          cue?: unknown;
+          gridTrust?: unknown;
+          phrase?: unknown;
+          path?: string | null;
+        }
+      > | null;
+      apps?: Array<{ name: string; path: string }>;
+      libraries?: Array<{ path: string; exists?: boolean; entryCount?: number }>;
+      crates?: Array<{ id: string; name: string; path: string; trackCount: number; kind?: string }>;
+      totals?: { crateCount: number; trackEntriesVisible: number };
+    }>("/aura/music/serato", { timeoutMs: 12_000 }),
+  auraMusicSeratoDecks: () =>
+    hqFetch<{
+      ok: boolean;
+      decks?: Record<string, unknown>;
+      hqDecks?: Record<string, unknown>;
+      mixer?: Record<string, unknown>;
+      remote?: Record<string, unknown>;
+      visibility?: Record<string, string>;
+      message?: string;
+      error?: string;
+      source?: string;
+    }>("/aura/music/serato/decks", { timeoutMs: 8_000 }),
+  auraMusicSeratoCommand: (command: string, args?: Record<string, unknown>) =>
+    hqFetch<{
+      ok: boolean;
+      result?: Record<string, unknown>;
+      error?: string;
+    }>("/aura/music/serato/command", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command, args: args || {} }),
+      timeoutMs: 45_000,
+    }),
+  auraMusicSeratoCrateTracks: (crateId: string) =>
+    hqFetch<{
+      ok: boolean;
+      crate?: { id: string; name: string; path: string; trackCount: number };
+      tracks?: Array<{
+        path: string;
+        exists: boolean;
+        title: string;
+        artist: string | null;
+        bpm: number | null;
+        key: string | null;
+        durationSeconds: number | null;
+        cues: unknown;
+        stems: unknown;
+        provenance?: { cratePathEntry: string; fileExists: boolean; bytes: number | null };
+      }>;
+      note?: string;
+      error?: string;
+    }>(`/aura/music/serato/crates/${encodeURIComponent(crateId)}/tracks`, { timeoutMs: 60_000 }),
+  auraMusicSeratoLaunch: () =>
+    hqFetch<{ ok: boolean; running?: boolean; error?: string }>("/aura/music/serato/launch", {
+      method: "POST",
+      timeoutMs: 20_000,
+    }),
   auraCommand: (command: string, opts?: { module?: string; contextRef?: Record<string, unknown> }) => {
     const deviceId = getOrCreateFounderDeviceId();
     return hqFetch<AuraCommandResponse>("/aura/command", {
