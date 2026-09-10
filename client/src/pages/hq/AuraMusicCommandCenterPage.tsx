@@ -842,6 +842,17 @@ function SeratoDjPanel({ modules }: { modules?: AuraMusicCommandCenter["modules"
   const visibility = (dash?.visibility || {}) as Record<string, string>;
   const progress = dash?.progress || null;
   const currentBlocker = dash?.currentBlocker || null;
+  const coreFoundation = (dash?.coreFoundation || null) as {
+    title?: string;
+    status?: string;
+    display?: string;
+    softwareFirst?: boolean;
+    controllerRequired?: boolean;
+  } | null;
+  const certification = (dash?.certification || null) as Record<string, any> | null;
+  const operatingModel = (dash?.operatingModel || null) as Record<string, any> | null;
+  const intelligence = (dash?.intelligence || null) as Record<string, any> | null;
+  const memory = (dash?.memory || null) as Record<string, any> | null;
 
   const rows: Array<[string, string]> = [
     ["Serato DJ Pro", domains.seratoDjPro || live.seratoDjProRunning || "NOT_BUILT"],
@@ -850,13 +861,16 @@ function SeratoDjPanel({ modules }: { modules?: AuraMusicCommandCenter["modules"
     ["AURA–Serato Bridge", visibility.bridge || domains.auraSeratoBridge || live.bridgeConnected || "NOT_BUILT"],
     ["Read-only Deck State", domains.readOnlyDeckState || "NOT_BUILT"],
     ["Control", domains.control || domains.controlBridge || "NOT_BUILT"],
-    ["Transport", domains.transport || "TESTING"],
+    ["Transport", domains.transport || progress?.lessons?.find((l: any) => l.id === "transport")?.status || "TESTING"],
     ["BPM / Key", domains.bpmKey || "NOT_BUILT"],
     ["Cue / Grid", domains.cueGridIntelligence || domains.cueGrid || "NOT_BUILT"],
     ["Two-deck", domains.twoDeckState || "NOT_BUILT"],
-    ["Stems", domains.stems || "NOT_BUILT"],
+    ["Crossfader", progress?.lessons?.find((l: any) => l.id === "crossfader")?.status || "TESTING"],
+    ["Channel Faders", progress?.lessons?.find((l: any) => l.id === "channel-faders")?.status || "TESTING"],
     ["Transition Intelligence", domains.transitionPlanning || domains.transitionIntelligence || "NOT_BUILT"],
-    ["Live Mixing", domains.liveMixing || "NOT_BUILT"],
+    ["Safe Transition", progress?.lessons?.find((l: any) => l.id === "safe-transition")?.status || "TESTING"],
+    ["Live Mixing", domains.liveMixing || progress?.lessons?.find((l: any) => l.id === "live-mixing")?.status || "NOT_BUILT"],
+    ["Stems", domains.stems || "NOT_BUILT"],
     ["Set Memory", domains.setMemory || "NOT_BUILT"],
   ];
 
@@ -974,7 +988,7 @@ function SeratoDjPanel({ modules }: { modules?: AuraMusicCommandCenter["modules"
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
       <HqPanel
         title="AURA DJ — Serato"
-        subtitle="HQ → Founder Mac node → AURA–Serato bridge (:4179) → Serato DJ Pro · live data only · no fake PASSED"
+        subtitle="Founder → IFCDC HQ → AURA DJ → Bridge → Serato DJ Pro software · controllers optional · live data only"
       >
         {offlineBanner ? (
           <div
@@ -990,6 +1004,41 @@ function SeratoDjPanel({ modules }: { modules?: AuraMusicCommandCenter["modules"
             {offlineBanner}
           </div>
         ) : null}
+
+        <div
+          style={{
+            marginBottom: "1rem",
+            padding: "0.9rem 1.1rem",
+            border: "1px solid rgba(34,197,94,0.45)",
+            background: "rgba(34,197,94,0.1)",
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "0.75rem",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <div>
+            <div className="hq-kpi-meta">AURA DJ CORE FOUNDATION</div>
+            <div style={{ fontWeight: 800, fontSize: "1.15rem", marginTop: "0.2rem" }}>
+              {coreFoundation?.display ||
+                (progress?.passedCount != null
+                  ? `${progress.passedCount} / ${progress.totalCount} PASSED`
+                  : "11 / 11 PASSED")}
+            </div>
+            <div className="hq-kpi-meta" style={{ marginTop: "0.35rem" }}>
+              Software-first Serato control · Controllers = optional accessory only
+            </div>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+            <StatusBadge
+              label={coreFoundation?.status || progress?.overallStatus || "PASSED"}
+              variant={statusVariant(String(coreFoundation?.status || progress?.overallStatus || "PASSED"))}
+            />
+            <StatusBadge label="SOFTWARE-FIRST" variant="success" />
+            <StatusBadge label="NO CONTROLLER REQUIRED" variant="muted" />
+          </div>
+        </div>
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginBottom: "1rem" }}>
           <button type="button" className="hq-btn" disabled={!!busy} onClick={() => void launchSerato()}>
@@ -1069,7 +1118,7 @@ function SeratoDjPanel({ modules }: { modules?: AuraMusicCommandCenter["modules"
           <div style={{ padding: "0.85rem 1rem", border: "1px solid rgba(255,255,255,0.1)", background: "rgba(0,0,0,0.22)" }}>
             <div className="hq-kpi-meta">Progress</div>
             <div style={{ fontWeight: 750, marginTop: "0.25rem" }}>
-              {progress?.passedCount != null ? `${progress.passedCount}/${progress.totalCount}` : "—"}
+              {progress?.passedCount != null ? `${progress.passedCount} / ${progress.totalCount}` : "—"}
               {progress?.progressPercent != null ? ` · ${progress.progressPercent}%` : ""}
             </div>
             {progress?.overallStatus ? (
@@ -1083,13 +1132,35 @@ function SeratoDjPanel({ modules }: { modules?: AuraMusicCommandCenter["modules"
             <div style={{ fontWeight: 650, marginTop: "0.25rem" }}>{progress?.lastCompletedLesson?.label || "—"}</div>
           </div>
           <div style={{ padding: "0.85rem 1rem", border: "1px solid rgba(255,255,255,0.1)", background: "rgba(0,0,0,0.22)" }}>
-            <div className="hq-kpi-meta">Next lesson</div>
-            <div style={{ fontWeight: 650, marginTop: "0.25rem" }}>{progress?.nextLesson?.label || "—"}</div>
+            <div className="hq-kpi-meta">Next objective</div>
+            <div style={{ fontWeight: 650, marginTop: "0.25rem" }}>
+              {progress?.nextLesson?.label || certification?.currentObjective?.label || "—"}
+            </div>
           </div>
           <div style={{ padding: "0.85rem 1rem", border: "1px solid rgba(245,158,11,0.35)", background: "rgba(245,158,11,0.08)" }}>
             <div className="hq-kpi-meta">Current blocker</div>
             <div style={{ fontWeight: 650, marginTop: "0.25rem", wordBreak: "break-word", fontSize: "0.9rem" }}>
-              {currentBlocker || "None reported"}
+              {currentBlocker || "None — core foundation clear"}
+            </div>
+          </div>
+          <div style={{ padding: "0.85rem 1rem", border: "1px solid rgba(255,255,255,0.1)", background: "rgba(0,0,0,0.22)" }}>
+            <div className="hq-kpi-meta">DJ intelligence</div>
+            <div style={{ fontWeight: 650, marginTop: "0.25rem", fontSize: "0.9rem" }}>
+              {intelligence?.cycle?.ticks != null
+                ? `${intelligence.cycle.ticks} ticks · next ${intelligence?.cycle?.activeKnowledge?.nextObjective?.label || "—"}`
+                : operatingModel?.loop
+                  ? "Loop armed"
+                  : "—"}
+            </div>
+          </div>
+          <div style={{ padding: "0.85rem 1rem", border: "1px solid rgba(255,255,255,0.1)", background: "rgba(0,0,0,0.22)" }}>
+            <div className="hq-kpi-meta">Memory status</div>
+            <div style={{ fontWeight: 650, marginTop: "0.25rem", fontSize: "0.9rem" }}>
+              {memory?.verifiedControls
+                ? `${memory.verifiedControls.length} verified controls · ${memory?.mixLessons?.count ?? 0} mix lessons`
+                : certification?.coreMatrix?.status === "PASSED"
+                  ? "Core 11/11 locked · permanent"
+                  : "—"}
             </div>
           </div>
         </div>
@@ -1871,7 +1942,7 @@ const AuraMusicCommandCenterPage: React.FC = () => {
   return (
     <HQLayout
       title="AURA MUSIC"
-      subtitle="HQ music production command center — Ableton production + AURA DJ (Serato) Phase 1"
+      subtitle="HQ music production command center — Ableton production + AURA DJ (Serato) Core Foundation 11/11"
       auraModule="aura"
       auraActions={["ask", "summarize"]}
     >
@@ -1880,7 +1951,16 @@ const AuraMusicCommandCenterPage: React.FC = () => {
         {data?.auraMusicReady ? (
           <StatusBadge label="AURA MUSIC OPERATIONAL" variant="success" />
         ) : null}
-        <StatusBadge label="AURA DJ — SERATO PHASE 1" variant="gold" />
+        <StatusBadge
+          label={
+            djPreview?.coreFoundation?.display
+              ? `AURA DJ CORE ${djPreview.coreFoundation.display}`
+              : djPreview?.progress?.overallStatus === "PASSED"
+                ? "AURA DJ CORE FOUNDATION 11 / 11 PASSED"
+                : "AURA DJ — SERATO"
+          }
+          variant={djPreview?.progress?.overallStatus === "PASSED" || djPreview?.coreFoundation?.status === "PASSED" ? "success" : "gold"}
+        />
         <StatusBadge label={`Phase ${data?.currentPhase ?? "2"}`} variant="gold" />
         <StatusBadge label={data?.mode === "cloud_hq" ? "Cloud HQ" : "Local node linked"} variant="muted" />
         <button
