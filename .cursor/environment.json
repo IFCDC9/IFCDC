@@ -1,0 +1,17 @@
+{
+  "name": "IFCDC Headquarters",
+  "install": "npm install --no-audit --no-fund && DATABASE_URL=\"${DATABASE_URL:-postgresql://localhost/ifcdc}\" npx prisma generate && npm run build:packages",
+  "terminals": [
+    {
+      "name": "dev-server",
+      "command": "npm run dev",
+      "description": "IFCDC Headquarters dev server (Express API + Vite client) on http://localhost:5000"
+    }
+  ],
+  "ports": [
+    {
+      "name": "IFCDC HQ",
+      "port": 5000
+    }
+  ]
+}
