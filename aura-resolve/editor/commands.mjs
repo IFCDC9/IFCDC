@@ -55,12 +55,15 @@ function formatFromText(lower) {
 }
 
 function projectNameFrom(lower) {
-  if (/barber/.test(lower) && /promo|promotional|commercial|tiktok|draft/.test(lower)) {
-    return "IFCDC-AURA-BARBERS-PROMO-V1";
+  if (/phase\s*4|p4|multi.?format|master/.test(lower)) return "IFCDC-AURA-BARBERS-PROMO-P4";
+  if (/barber/.test(lower) && /promo|promotional|commercial|tiktok|draft|youtube/.test(lower)) {
+    return "IFCDC-AURA-BARBERS-PROMO-P4";
   }
   if (/barber/.test(lower)) return "IFCDC-AURA-BARBERS-COMMERCIAL";
   return "IFCDC-AURA-EDIT";
 }
+
+const COMPANY = "IFCDC PRODUCTIONS";
 
 /**
  * Turn a Founder instruction into a structured creative plan + executable steps.
@@ -167,6 +170,11 @@ export function planInstruction(text, options = {}) {
     });
   }
 
+  steps.push({
+    command: "add_title",
+    payload: { titleName: "Text", titleText: `AN IFCDC PRODUCTION · ${COMPANY}` },
+  });
+
   steps.push({ command: "save_project", payload: {} });
   steps.push({
     command: format === LANDSCAPE ? "render_landscape" : format === SQUARE ? "render_square" : "render_vertical",
@@ -177,6 +185,7 @@ export function planInstruction(text, options = {}) {
 
   return {
     instruction,
+    company: COMPANY,
     publish: false,
     founderApprovalRequiredForFinal: true,
     draftAllowedWithoutFinalApproval: true,
@@ -190,12 +199,13 @@ export function planInstruction(text, options = {}) {
     SCENES,
     ASSETS_REQUIRED,
     SHOT_ORDER: SCENES.map((scene) => scene.label),
-    TEXT_TITLES: ["IFCDC Barbers App", BRAND_HANDLES_CTA()],
-    BRANDING: wantsBrand ? "IFCDC + Barbers App logos" : "none",
-    MUSIC: wantsMusic ? "Approved IFCDC bed or test tone" : "none",
+    TEXT_TITLES: ["IFCDC Barbers App", BRAND_HANDLES_CTA(), COMPANY],
+    PRODUCTION_CREDITS: { company: COMPANY, line: "AN IFCDC PRODUCTION" },
+    BRANDING: wantsBrand ? "IFCDC + Barbers App logos + production kit" : "none",
+    MUSIC: wantsMusic ? "Approved IFCDC bed or test tone (ffmpeg pre-shaped)" : "none",
     VOICEOVER: wantsVoice ? "Requested" : "none",
     TRANSITIONS: wantsTransition ? "Visible brand-flash clips between scenes (API has no native dissolve)" : "cuts",
-    ENDING: wantsFade ? "Smooth fade-out baked into ending media + Resolve placement" : "hard end",
+    ENDING: wantsFade ? "Smooth fade-out + AN IFCDC PRODUCTION end card" : "hard end",
     RENDER_FORMAT: `${format.width}x${format.height} mp4 H264 draft`,
     steps,
     blockers: [],

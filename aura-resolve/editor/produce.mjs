@@ -1,19 +1,42 @@
 /**
- * Creative production runner for the Production Mac agent.
- * Stages approved brand assets, builds visible transition/fade media, drives Resolve, returns draft to HQ.
+ * Creative production runner — Phase 4 IFCDC PRODUCTION intelligence.
+ * Stages production kit, captions, multi-format masters, revisions; returns drafts to HQ.
+ * publish stays false. Never overwrites protected proof projects.
  */
 import { spawnSync } from "child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { basename, join } from "path";
 import { planInstruction, toResolveCall } from "./commands.mjs";
-import { rememberProduction, rememberRevision, readCreativeMemory } from "./memory.mjs";
+import { directCreativeIdea } from "./director.mjs";
+import { parseRevision, formatFromRevisionOrInstruction, VERTICAL, LANDSCAPE, SQUARE } from "./revision.mjs";
+import {
+  rememberProduction,
+  rememberRevision,
+  rememberMaster,
+  rememberEditorial,
+  rememberGate,
+  ensureCompanyMemory,
+  readCreativeMemory,
+  PRODUCTION_COMPANY,
+} from "./memory.mjs";
 import { pickAssets, stageBrandKit } from "../brand/kit.mjs";
+import { ensureProductionKit, kitAsset, PRODUCTION_COMPANY as KIT_COMPANY } from "../brand/production-kit.mjs";
+import { clonePlan } from "../clone/pipeline.mjs";
+import { gatePayload } from "./gates.mjs";
 
 const ROOT = join(homedir(), "Library/Application Support/IFCDC/aura-resolve");
 const MEDIA = join(ROOT, "media");
 const RENDERS = join(ROOT, "renders");
 const GENERATED = join(MEDIA, "generated");
+const MASTERS = join(RENDERS, "masters");
+
+const PROTECTED_PROJECTS = new Set([
+  "IFCDC-AURA-BRIDGE-PROOF",
+  "IFCDC-AURA-BRIDGE-PROOF-2",
+  "IFCDC-AURA-BARBERS-PROMO-V1",
+  "IFCDC-NEXT LEVEL",
+]);
 
 function runFfmpeg(args) {
   const result = spawnSync("ffmpeg", ["-y", ...args], { encoding: "utf8" });
@@ -47,6 +70,29 @@ function stillToClip(input, output, { seconds = 2.5, width = 1080, height = 1920
   return output;
 }
 
+function overlayOnStill(baseStill, overlayPng, output, { seconds = 2.5, width = 1080, height = 1920 } = {}) {
+  runFfmpeg([
+    "-loop", "1",
+    "-i", baseStill,
+    "-loop", "1",
+    "-i", overlayPng,
+    "-t", String(seconds),
+    "-filter_complex",
+    `[0]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black[bg];` +
+      `[1]scale=${width}:${height}[ov];[bg][ov]overlay=0:0,format=yuv420p`,
+    "-r", "24",
+    "-c:v", "libx264",
+    "-pix_fmt", "yuv420p",
+    "-an",
+    output,
+  ]);
+  return output;
+}
+
+function pngToClip(png, output, { seconds = 2.4, width = 1080, height = 1920, fadeOut = false } = {}) {
+  return stillToClip(png, output, { seconds, width, height, fadeOut });
+}
+
 function makeTransitionFlash(output, { width = 1080, height = 1920 } = {}) {
   runFfmpeg([
     "-f", "lavfi",
@@ -73,11 +119,12 @@ function makeFadeBlack(output, { width = 1080, height = 1920, seconds = 1.2 } = 
   return output;
 }
 
-function trimAudio(input, output, seconds = 12) {
+function trimAudio(input, output, seconds = 14, volume = 0.28) {
+  const fadeStart = Math.max(0.5, seconds - 1.4);
   runFfmpeg([
     "-i", input,
     "-t", String(seconds),
-    "-af", `afade=t=in:st=0:d=0.4,afade=t=out:st=${Math.max(0.5, seconds - 1.2)}:d=1.1,volume=0.35`,
+    "-af", `afade=t=in:st=0:d=0.4,afade=t=out:st=${fadeStart}:d=1.2,volume=${volume}`,
     "-c:a", "aac",
     "-b:a", "160k",
     output,
@@ -93,6 +140,21 @@ function probeDuration(filePath) {
   );
   const value = Number(String(probe.stdout || "").trim());
   return Number.isFinite(value) ? value : null;
+}
+
+function remasterFormat(sourcePath, format, outPath) {
+  const { width, height } = format;
+  runFfmpeg([
+    "-i", sourcePath,
+    "-vf", `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p`,
+    "-c:v", "libx264",
+    "-pix_fmt", "yuv420p",
+    "-c:a", "aac",
+    "-b:a", "160k",
+    "-movflags", "+faststart",
+    outPath,
+  ]);
+  return outPath;
 }
 
 async function waitForRender(askResolve, jobId, customName, timeoutMs = 120000) {
@@ -116,14 +178,152 @@ async function waitForRender(askResolve, jobId, customName, timeoutMs = 120000) 
   return matches[0] || null;
 }
 
+function findExistingMaster(projectHint = "IFCDC-AURA-BARBERS-PROMO-V1") {
+  const candidates = [];
+  if (existsSync(RENDERS)) {
+    for (const name of readdirSync(RENDERS)) {
+      if (!name.endsWith(".mp4")) continue;
+      if (name.includes(projectHint) || name.includes("BARBERS-PROMO")) {
+        candidates.push({ name, path: join(RENDERS, name), mtime: statSync(join(RENDERS, name)).mtimeMs });
+      }
+    }
+  }
+  candidates.sort((a, b) => b.mtime - a.mtime);
+  return candidates[0] || null;
+}
+
+/**
+ * Multi-format mastering from an existing accepted master (no Phase 3 rebuild).
+ */
+export async function runMultiFormatMastering({
+  sourceProject = "IFCDC-AURA-BARBERS-PROMO-V1",
+  sourcePath = null,
+  formats = [VERTICAL, LANDSCAPE, SQUARE],
+  uploadPreview = null,
+  projectName = "IFCDC-AURA-BARBERS-PROMO-P4",
+} = {}) {
+  mkdirSync(MASTERS, { recursive: true });
+  ensureCompanyMemory();
+  const source = sourcePath && existsSync(sourcePath)
+    ? { name: basename(sourcePath), path: sourcePath }
+    : findExistingMaster(sourceProject);
+  if (!source) throw new Error(`No existing master found for ${sourceProject}`);
+
+  const masters = [];
+  for (const format of formats) {
+    const label = format.label.replace(":", "x");
+    const outName = `${projectName}-${label}.mp4`;
+    const outPath = join(MASTERS, outName);
+    remasterFormat(source.path, format, outPath);
+    // Also place a copy at renders root for Discoverability
+    const renderCopy = join(RENDERS, outName);
+    copyFileSync(outPath, renderCopy);
+    const duration = probeDuration(outPath);
+    let preview = null;
+    if (typeof uploadPreview === "function") {
+      preview = await uploadPreview({
+        name: outName,
+        path: outPath,
+        duration,
+        project: projectName,
+        instruction: `Multi-format master ${format.label} from ${source.name}`,
+        publish: false,
+        format: format.label,
+      });
+    }
+    masters.push({
+      format: format.label,
+      name: outName,
+      path: outPath,
+      duration,
+      preview,
+      source: source.name,
+    });
+  }
+
+  const record = {
+    at: new Date().toISOString(),
+    company: PRODUCTION_COMPANY,
+    project: projectName,
+    source: source.name,
+    masters,
+    publish: false,
+  };
+  rememberMaster(record);
+  rememberGate({ gate: "MASTER", at: record.at, project: projectName });
+  rememberEditorial({
+    at: record.at,
+    kind: "multiformat_mastering",
+    decisions: masters.map((m) => `${m.format} · ${m.duration?.toFixed?.(1) || "?"}s`),
+    preferences: { formats: masters.map((m) => m.format) },
+  });
+
+  return {
+    ok: masters.every((m) => existsSync(m.path)),
+    publish: false,
+    company: PRODUCTION_COMPANY,
+    gate: gatePayload("MASTER"),
+    source,
+    masters,
+    memory: readCreativeMemory(),
+  };
+}
+
 export async function runCreativeProduction({
   instruction,
   askResolve,
   revisionNote = null,
   uploadPreview = null,
+  projectName = null,
+  masterFormatsAfter = false,
 } = {}) {
   mkdirSync(GENERATED, { recursive: true });
   mkdirSync(RENDERS, { recursive: true });
+  ensureCompanyMemory();
+  ensureProductionKit({ force: true });
+  clonePlan(instruction);
+
+  const director = directCreativeIdea(instruction, {
+    revisionNote,
+    projectName: projectName || undefined,
+  });
+  const revision = revisionNote
+    ? parseRevision(revisionNote, {
+        instruction,
+        projectName: director.project,
+        preferences: readCreativeMemory().preferences,
+      })
+    : director.revision;
+
+  // Format-only remasters reuse the existing V1/P4 master without a full rebuild.
+  if (revision?.remasterFromExisting && revision.format) {
+    const mastered = await runMultiFormatMastering({
+      sourceProject: "IFCDC-AURA-BARBERS-PROMO-V1",
+      formats: [revision.format],
+      uploadPreview,
+      projectName: projectName || "IFCDC-AURA-BARBERS-PROMO-P4",
+    });
+    rememberRevision({
+      at: new Date().toISOString(),
+      instruction,
+      revisionNote,
+      intents: revision.intents,
+      project: mastered.project || projectName || "IFCDC-AURA-BARBERS-PROMO-P4",
+      render: mastered.masters?.[0] || null,
+      masters: mastered.masters,
+      preferences: revision.preferences,
+      publish: false,
+      note: revisionNote,
+    });
+    return {
+      ok: mastered.ok,
+      publish: false,
+      mode: "format_remaster",
+      director,
+      revision,
+      ...mastered,
+    };
+  }
 
   const kit = stageBrandKit({ intoMedia: true });
   const logos = pickAssets(kit, ["logo"]);
@@ -131,11 +331,27 @@ export async function runCreativeProduction({
   const music =
     (kit.staged || []).find((item) => item.role === "music") ||
     (kit.staged || []).find((item) => item.role === "music-fallback");
-  const format = /landscape|16\s*:\s*9/.test(String(instruction || "").toLowerCase())
-    ? { width: 1920, height: 1080 }
-    : /square|1\s*:\s*1/.test(String(instruction || "").toLowerCase())
-      ? { width: 1080, height: 1080 }
-      : { width: 1080, height: 1920 };
+
+  const format = revision?.format || director.format || VERTICAL;
+  const musicVolume = revision?.musicVolume ?? director.MUSIC_DIRECTION?.level ?? 0.28;
+  const openSeconds = revision?.openSeconds ?? 2.2;
+  const fadeSeconds = revision?.fadeSeconds ?? 1.4;
+
+  let project = projectName || director.project || "IFCDC-AURA-BARBERS-PROMO-P4";
+  // Never overwrite protected accepted projects when doing new Phase 4 creative work.
+  if (!revisionNote && PROTECTED_PROJECTS.has(project)) {
+    project = "IFCDC-AURA-BARBERS-PROMO-P4";
+  }
+  // Revisions against "current production" may target P4 (or explicitly named project).
+  if (revisionNote && PROTECTED_PROJECTS.has(project) && project === "IFCDC-AURA-BARBERS-PROMO-V1") {
+    project = "IFCDC-AURA-BARBERS-PROMO-P4";
+  }
+
+  const titleCard = kitAsset("title-card", format.label);
+  const endCard = kitAsset("end-card", format.label);
+  const ctaCard = kitAsset("social-cta", format.label);
+  const captionPlate = kitAsset("caption-plate", format.label);
+  const lowerThird = kitAsset("lower-third", format.label);
 
   const stillSources = [
     logos[0]?.mediaPath,
@@ -148,36 +364,94 @@ export async function runCreativeProduction({
   }
 
   const clipPaths = [];
-  stillSources.slice(0, 3).forEach((source, index) => {
-    const out = join(GENERATED, `promo-clip-${index + 1}.mp4`);
-    stillToClip(source, out, {
-      seconds: index === stillSources.length - 1 ? 3.2 : 2.6,
+
+  // Open: title card from production kit
+  if (titleCard?.path || titleCard?.mediaPath) {
+    const openPath = join(GENERATED, "promo-open-title.mp4");
+    pngToClip(titleCard.mediaPath || titleCard.path, openPath, {
+      seconds: openSeconds,
       width: format.width,
       height: format.height,
-      fadeOut: false,
     });
+    clipPaths.push(openPath);
+  } else {
+    const openPath = join(GENERATED, "promo-clip-1.mp4");
+    stillToClip(stillSources[0], openPath, { seconds: openSeconds, width: format.width, height: format.height });
+    clipPaths.push(openPath);
+  }
+
+  // Proof A
+  {
+    const out = join(GENERATED, "promo-proof-a.mp4");
+    if (captionPlate?.path || captionPlate?.mediaPath) {
+      overlayOnStill(stillSources[1] || stillSources[0], captionPlate.mediaPath || captionPlate.path, out, {
+        seconds: 2.6,
+        width: format.width,
+        height: format.height,
+      });
+    } else {
+      stillToClip(stillSources[1] || stillSources[0], out, { seconds: 2.6, width: format.width, height: format.height });
+    }
     clipPaths.push(out);
-  });
+  }
 
   const transitionPath = join(GENERATED, "aura-transition-flash.mp4");
   makeTransitionFlash(transitionPath, format);
 
+  // Proof B with lower-third overlay when available
+  {
+    const out = join(GENERATED, "promo-proof-b.mp4");
+    const base = stillSources[2] || stillSources[0];
+    if (lowerThird?.path || lowerThird?.mediaPath) {
+      overlayOnStill(base, lowerThird.mediaPath || lowerThird.path, out, {
+        seconds: 2.6,
+        width: format.width,
+        height: format.height,
+      });
+    } else {
+      stillToClip(base, out, { seconds: 2.6, width: format.width, height: format.height });
+    }
+    clipPaths.push(out);
+  }
+
+  // CTA card
+  if (ctaCard?.path || ctaCard?.mediaPath) {
+    const out = join(GENERATED, "promo-cta.mp4");
+    pngToClip(ctaCard.mediaPath || ctaCard.path, out, {
+      seconds: 2.2,
+      width: format.width,
+      height: format.height,
+    });
+    clipPaths.push(out);
+  }
+
+  // End card + smooth fade
   const fadePath = join(GENERATED, "aura-fade-out.mp4");
-  // Bake a visible fade into ending still, then append pure black fade for smoothness.
-  const endingStill = stillSources[stillSources.length - 1];
-  const fadedEnding = join(GENERATED, "promo-clip-ending-fade.mp4");
-  stillToClip(endingStill, fadedEnding, {
-    seconds: 2.4,
-    width: format.width,
-    height: format.height,
-    fadeOut: true,
-  });
-  makeFadeBlack(fadePath, { ...format, seconds: 1.1 });
+  if (endCard?.path || endCard?.mediaPath) {
+    const endClip = join(GENERATED, "promo-end-card.mp4");
+    pngToClip(endCard.mediaPath || endCard.path, endClip, {
+      seconds: Math.max(2.0, fadeSeconds),
+      width: format.width,
+      height: format.height,
+      fadeOut: true,
+    });
+    clipPaths.push(endClip);
+  } else {
+    const fadedEnding = join(GENERATED, "promo-clip-ending-fade.mp4");
+    stillToClip(stillSources[stillSources.length - 1], fadedEnding, {
+      seconds: Math.max(2.2, fadeSeconds),
+      width: format.width,
+      height: format.height,
+      fadeOut: true,
+    });
+    clipPaths.push(fadedEnding);
+  }
+  makeFadeBlack(fadePath, { ...format, seconds: Math.max(1.1, fadeSeconds * 0.7) });
 
   let musicPath = null;
   if (music?.mediaPath || music?.source) {
     musicPath = join(GENERATED, "promo-music-bed.m4a");
-    trimAudio(music.mediaPath || music.source, musicPath, 14);
+    trimAudio(music.mediaPath || music.source, musicPath, 16, musicVolume);
   }
 
   const logoPath = logos[0]?.mediaPath || null;
@@ -186,7 +460,6 @@ export async function runCreativeProduction({
     arranged.push(clipPaths[i]);
     if (i < clipPaths.length - 1) arranged.push(transitionPath);
   }
-  arranged.push(fadedEnding);
   arranged.push(fadePath);
 
   const importPaths = [...new Set([...arranged, logoPath, musicPath].filter(Boolean))];
@@ -200,22 +473,45 @@ export async function runCreativeProduction({
     fadeMediaName: basename(fadePath),
     logoPath,
     musicPath,
-    projectName: revisionNote
-      ? `IFCDC-AURA-BARBERS-PROMO-V1`
-      : undefined,
+    projectName: project,
   });
-  // Fresh timeline each draft so prior clips do not stack.
+  plan.format = format;
+  plan.FORMAT = format.label;
+  plan.company = KIT_COMPANY;
+  plan.PRODUCTION_CREDITS = director.PRODUCTION_CREDITS;
+  plan.director = {
+    CONCEPT: director.CONCEPT,
+    SCRIPT: director.SCRIPT,
+    SCENE_PLAN: director.SCENE_PLAN,
+    SHOT_LIST: director.SHOT_LIST,
+    ASSET_REQUIREMENTS: director.ASSET_REQUIREMENTS,
+    EDITORIAL: director.EDITORIAL,
+  };
+
   const timelineName = `${plan.project}-TL-${Date.now().toString(36).slice(-5)}`;
   plan.timeline = timelineName;
   for (const step of plan.steps) {
+    if (step.command === "create_project") {
+      step.payload = { ...(step.payload || {}), name: project, width: format.width, height: format.height };
+    }
     if (step.command === "create_timeline") step.payload = { ...(step.payload || {}), name: timelineName };
-    if (step.command === "create_bin") step.payload = { ...(step.payload || {}), name: `${plan.project}-BIN` };
+    if (step.command === "create_bin") step.payload = { ...(step.payload || {}), name: `${project}-BIN` };
+    if (step.command?.startsWith("render_")) {
+      step.command =
+        format.label === "16:9" ? "render_landscape" : format.label === "1:1" ? "render_square" : "render_vertical";
+      step.payload = { name: `${project}-DRAFT`, ...format };
+    }
   }
 
   if (revisionNote) {
     plan.revisionNote = revisionNote;
-    plan.TEXT_TITLES = [...(plan.TEXT_TITLES || []), `Revision: ${revisionNote}`].slice(0, 4);
+    plan.revision = revision;
+    plan.TEXT_TITLES = [...(plan.TEXT_TITLES || []), `Revision: ${revisionNote}`, PRODUCTION_COMPANY].slice(0, 5);
+  } else {
+    plan.TEXT_TITLES = [...(plan.TEXT_TITLES || []), PRODUCTION_COMPANY].slice(0, 4);
   }
+
+  rememberGate({ gate: revisionNote ? "FOUNDER_REVISION" : "BUILD", at: new Date().toISOString(), project });
 
   const results = [];
   const blockers = [];
@@ -253,6 +549,7 @@ export async function runCreativeProduction({
                 project: plan.project,
                 instruction,
                 publish: false,
+                format: format.label,
               });
             }
             results.push({
@@ -262,8 +559,9 @@ export async function runCreativeProduction({
               path: file.path,
               duration,
               preview,
+              format: format.label,
             });
-            plan.render = { name: file.name, path: file.path, duration, preview };
+            plan.render = { name: file.name, path: file.path, duration, preview, format: format.label };
           }
         }
       } catch (error) {
@@ -274,32 +572,75 @@ export async function runCreativeProduction({
   }
 
   plan.blockers = blockers;
+
+  let masters = null;
+  if (masterFormatsAfter && plan.render?.path) {
+    try {
+      masters = await runMultiFormatMastering({
+        sourcePath: plan.render.path,
+        formats: [VERTICAL, LANDSCAPE, SQUARE],
+        uploadPreview,
+        projectName: plan.project,
+      });
+    } catch (error) {
+      blockers.push(`multiformat: ${error.message}`);
+    }
+  }
+
   const record = {
     at: new Date().toISOString(),
+    company: PRODUCTION_COMPANY,
     instruction,
     project: plan.project,
     revisionNote,
+    revisionIntents: revision?.intents || [],
     render: plan.render || null,
+    masters: masters?.masters || null,
     blockers,
     publish: false,
+    gate: revisionNote ? "FOUNDER_REVISION" : "HQ_PREVIEW",
   };
-  if (revisionNote) rememberRevision({ ...record, note: revisionNote });
-  else rememberProduction(record);
+  if (revisionNote) {
+    rememberRevision({ ...record, note: revisionNote, preferences: revision?.preferences });
+  } else {
+    rememberProduction(record);
+  }
+  rememberEditorial({
+    at: record.at,
+    project: plan.project,
+    decisions: director.EDITORIAL,
+    preferences: {
+      musicVolume,
+      fadeSeconds,
+      openSeconds,
+      endings: revision?.endingStyle || director.ENDING,
+      formats: [format.label],
+    },
+  });
+  rememberGate({ gate: record.gate, at: record.at, project: plan.project });
 
-  writeFileSync(join(ROOT, "last-creative-plan.json"), JSON.stringify(plan, null, 2));
+  writeFileSync(join(ROOT, "last-creative-plan.json"), JSON.stringify({ ...plan, director }, null, 2));
   writeFileSync(join(ROOT, "last-creative-results.json"), JSON.stringify(results, null, 2));
 
   return {
     ok: blockers.filter((item) => !/noted only|API limitation/i.test(item)).length === 0 && Boolean(plan.render),
     publish: false,
+    company: PRODUCTION_COMPANY,
+    gate: gatePayload(record.gate),
     plan,
+    director,
+    revision,
     results,
+    masters: masters?.masters || null,
     memory: readCreativeMemory(),
     brandKit: {
       logos: logos.map((item) => item.id),
       music: music?.id || null,
       gaps: kit.gaps,
+      productionKit: true,
     },
+    assetIntelligence: director.ASSET_REQUIREMENTS,
+    clone: clonePlan(instruction),
   };
 }
 

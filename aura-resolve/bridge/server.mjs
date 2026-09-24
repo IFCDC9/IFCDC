@@ -12,9 +12,14 @@ import { randomBytes } from "crypto";
 import { fileURLToPath } from "url";
 import { EDITOR_COMMANDS, planInstruction, toResolveCall } from "../editor/commands.mjs";
 import { clonePlan } from "../clone/pipeline.mjs";
-import { runCreativeProduction, readRenderBytes } from "../editor/produce.mjs";
+import { runCreativeProduction, runMultiFormatMastering, readRenderBytes } from "../editor/produce.mjs";
 import { stageBrandKit, readBrandKit } from "../brand/kit.mjs";
-import { readCreativeMemory } from "../editor/memory.mjs";
+import { ensureProductionKit, readProductionKit } from "../brand/production-kit.mjs";
+import { readCreativeMemory, ensureCompanyMemory } from "../editor/memory.mjs";
+import { directCreativeIdea } from "../editor/director.mjs";
+import { parseRevision } from "../editor/revision.mjs";
+import { gatePayload } from "../editor/gates.mjs";
+import { analyzeAssets } from "../editor/assets.mjs";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.AURA_RESOLVE_BRIDGE_PORT || 4181);
@@ -440,21 +445,55 @@ let commandWorker = Promise.resolve();
 
 async function runQueuedCommand(link, command) {
   if (command.command === "editor_plan") {
-    const planned = planInstruction(command.args?.instruction || "");
-    const clone = /clone|founder identity|digital clone/i.test(String(command.args?.instruction || ""))
-      ? clonePlan(command.args.instruction)
-      : null;
+    const instruction = command.args?.instruction || "";
+    ensureCompanyMemory();
+    const director = directCreativeIdea(instruction, { projectName: command.args?.projectName });
+    const planned = planInstruction(instruction, { projectName: director.project });
+    const clone = clonePlan(instruction);
     const brand = stageBrandKit({ intoMedia: true });
+    const productionKit = ensureProductionKit({ force: false });
+    const assets = analyzeAssets();
     await completeCommand(link, command.id, {
       ok: true,
       publish: false,
-      plan: planned,
+      company: "IFCDC PRODUCTIONS",
+      plan: { ...planned, ...director, steps: planned.steps },
+      director,
       clone,
       brandKit: brand,
+      productionKit: {
+        company: productionKit.company,
+        itemCount: (productionKit.items || []).length,
+        fonts: productionKit.fonts,
+      },
+      assetIntelligence: assets,
+      gate: gatePayload("PLAN"),
       commands: EDITOR_COMMANDS,
       memory: readCreativeMemory(),
     });
     writeFileSync(join(ROOT, "last-command.json"), JSON.stringify({ command: "editor_plan", at: new Date().toISOString() }));
+    return;
+  }
+  if (command.command === "master_formats") {
+    if (command.args?.publish === true) {
+      await completeCommand(link, command.id, { ok: false, error: "publishing requires Founder approval and is not available", publish: false });
+      return;
+    }
+    try {
+      const mastered = await runMultiFormatMastering({
+        sourceProject: command.args?.sourceProject || "IFCDC-AURA-BARBERS-PROMO-V1",
+        sourcePath: command.args?.sourcePath || null,
+        projectName: command.args?.projectName || "IFCDC-AURA-BARBERS-PROMO-P4",
+        uploadPreview: (meta) => uploadPreviewToHq(link, meta),
+      });
+      writeFileSync(
+        join(ROOT, "last-command.json"),
+        JSON.stringify({ command: "master_formats", at: new Date().toISOString(), masters: mastered.masters?.map((m) => m.format) }),
+      );
+      await completeCommand(link, command.id, mastered);
+    } catch (error) {
+      await completeCommand(link, command.id, { ok: false, error: error.message, publish: false });
+    }
     return;
   }
   if (command.command === "editor_run" || command.command === "request_revision") {
@@ -463,15 +502,28 @@ async function runQueuedCommand(link, command) {
       return;
     }
     try {
+      const revisionNote =
+        command.command === "request_revision"
+          ? command.args?.revisionNote || command.args?.note || "Founder revision"
+          : null;
+      if (revisionNote) {
+        parseRevision(revisionNote, { instruction: command.args?.instruction || "" });
+      }
       const produced = await runCreativeProduction({
         instruction: command.args?.instruction || "",
-        revisionNote: command.command === "request_revision" ? command.args?.revisionNote || command.args?.note || "Founder revision" : null,
+        revisionNote,
+        projectName: command.args?.projectName || null,
+        masterFormatsAfter: command.args?.masterFormatsAfter === true,
         askResolve: (action, payload) => askResolve(action, payload, action === "render" ? 60000 : 45000),
         uploadPreview: (meta) => uploadPreviewToHq(link, meta),
       });
       writeFileSync(
         join(ROOT, "last-command.json"),
-        JSON.stringify({ command: command.command, at: new Date().toISOString(), project: produced.plan?.project }),
+        JSON.stringify({
+          command: command.command,
+          at: new Date().toISOString(),
+          project: produced.plan?.project || produced.masters?.[0]?.name,
+        }),
       );
       await completeCommand(link, command.id, produced);
     } catch (error) {
@@ -564,9 +616,12 @@ async function heartbeatOnce(link) {
       brandKit: (() => {
         try {
           const kit = readBrandKit();
+          const prod = readProductionKit();
           return {
             assetCount: (kit.staged || kit.assets || []).filter((item) => item.available !== false).length,
             gaps: kit.gaps || [],
+            productionKitItems: (prod.items || []).length,
+            company: prod.company || "IFCDC PRODUCTIONS",
           };
         } catch {
           return null;
@@ -576,9 +631,12 @@ async function heartbeatOnce(link) {
         try {
           const memory = readCreativeMemory();
           return {
+            company: memory.company,
             productions: (memory.productions || []).length,
             revisions: (memory.revisions || []).length,
+            masters: (memory.masters || []).length,
             preferences: memory.preferences || {},
+            currentGate: memory.currentGate || null,
           };
         } catch {
           return null;

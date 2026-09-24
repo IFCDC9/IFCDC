@@ -912,6 +912,7 @@ router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), asyn
     res.json({
       ok: true,
       publicExposure: false,
+      company: "IFCDC PRODUCTIONS",
       bridge: bridgeOnline ? "ONLINE" : "OFFLINE",
       resolve: resolveOnline ? "ONLINE" : "OFFLINE",
       resolveVersion: macOnline
@@ -929,21 +930,40 @@ router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), asyn
       previews,
       creativeMemory: memory,
       brandKit: beat.brandKit || null,
+      gate: beat.creativeMemory?.currentGate || "IDEA",
+      gateStates: [
+        "IDEA",
+        "PLAN",
+        "BUILD",
+        "DRAFT",
+        "HQ_PREVIEW",
+        "FOUNDER_REVISION",
+        "APPROVAL",
+        "MASTER",
+        "DISTRIBUTION",
+      ],
+      publish: false,
+      distributionBlocked: true,
       errors: macOnline ? beat.errors || [] : [],
-      notes: beat.notes || ["Publishing stays off until Founder approval."],
+      notes: beat.notes || [
+        "Publishing stays off until Founder approval.",
+        "IFCDC PRODUCTIONS applies automatically.",
+      ],
       lastHeartbeat: node.lastSeenAt,
       heartbeatAgeMs: node.ageMs ?? null,
       heartbeatTtlMs: node.heartbeatTtlMs ?? 45_000,
       lastSuccessfulCommand: beat.lastSuccessfulCommand || jobs.find((job) => job.status === "complete") || null,
       jobs,
       clonePrep: {
-        founderIdentityLibrary: "PLACEHOLDER",
-        approvedPhotosVideoVoice: "PLACEHOLDER",
-        generatedScenesTakes: "PLACEHOLDER",
-        identityConsistency: "PLACEHOLDER",
-        wardrobeEnvironment: "PLACEHOLDER",
-        roleTransformation: "PLACEHOLDER",
-        provenance: "PLACEHOLDER",
+        status: "ARCHITECTURE_READY",
+        generationEngine: "NOT_EXECUTED",
+        founderIdentityLibrary: "READY_FOR_APPROVED_UPLOADS",
+        approvedPhotosVideoVoice: "WAITING_FOR_APPROVED_MEDIA",
+        generatedScenesTakes: "STORAGE_READY_NO_GENERATION",
+        identityConsistency: "DEFINED",
+        wardrobeEnvironment: "REFERENCE_DIRS_READY",
+        roleTransformation: "REFERENCE_DIRS_READY",
+        provenance: "ACTIVE",
       },
     });
   } catch (error) {
@@ -1037,18 +1057,21 @@ router.post("/aura/resolve/produce", hqAuthRequired, requireHQModule("aura"), as
     res.status(409).json({ ok: false, error: "Production Mac is not enrolled" });
     return;
   }
-  await recordAuraResolveCreativeMemory("produce", { instruction, project: plan.project });
+  await recordAuraResolveCreativeMemory("produce", { instruction, project: plan.project, company: "IFCDC PRODUCTIONS" });
   const queued = await queueAuraResolveCommand(node.nodeId, "editor_run", {
     instruction,
+    projectName: plan.project,
     publish: false,
     draft: true,
+    masterFormatsAfter: req.body?.masterFormatsAfter === true,
   });
   res.json({
     ok: true,
     publish: false,
+    company: "IFCDC PRODUCTIONS",
     plan,
     queued,
-    message: "Creative production queued on the Production Mac. Draft only.",
+    message: "IFCDC PRODUCTION queued on the Production Mac. Draft only.",
   });
 });
 
@@ -1066,18 +1089,58 @@ router.post("/aura/resolve/revise", hqAuthRequired, requireHQModule("aura"), asy
   const { getAuraResolveNodeSnapshot, queueAuraResolveCommand, recordAuraResolveCreativeMemory } = await import(
     "../hq/auraResolveProductionNode"
   );
+  const { parseAuraRevisionNote } = await import("../hq/auraResolveCreativePlanner");
+  const parsed = parseAuraRevisionNote(revisionNote);
   const node = await getAuraResolveNodeSnapshot();
   if (!node.nodeId) {
     res.status(409).json({ ok: false, error: "Production Mac is not enrolled" });
     return;
   }
-  await recordAuraResolveCreativeMemory("revision", { instruction, revisionNote });
+  await recordAuraResolveCreativeMemory("revision", { instruction, revisionNote, intents: parsed.intents });
   const queued = await queueAuraResolveCommand(node.nodeId, "request_revision", {
     instruction,
     revisionNote,
+    projectName: req.body?.projectName || "IFCDC-AURA-BARBERS-PROMO-P4",
     publish: false,
   });
-  res.json({ ok: true, publish: false, queued, message: "Revision queued. Draft only." });
+  res.json({
+    ok: true,
+    publish: false,
+    company: "IFCDC PRODUCTIONS",
+    revision: parsed,
+    queued,
+    message: `Revision queued (${parsed.intents.join(", ")}). Draft only.`,
+  });
+});
+
+router.post("/aura/resolve/master-formats", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  if (req.body?.publish === true) {
+    res.status(403).json({ ok: false, error: "publishing requires Founder approval and is not available", publish: false });
+    return;
+  }
+  const { getAuraResolveNodeSnapshot, queueAuraResolveCommand, recordAuraResolveCreativeMemory } = await import(
+    "../hq/auraResolveProductionNode"
+  );
+  const node = await getAuraResolveNodeSnapshot();
+  if (!node.nodeId) {
+    res.status(409).json({ ok: false, error: "Production Mac is not enrolled" });
+    return;
+  }
+  const sourceProject = String(req.body?.sourceProject || "IFCDC-AURA-BARBERS-PROMO-V1");
+  const projectName = String(req.body?.projectName || "IFCDC-AURA-BARBERS-PROMO-P4");
+  await recordAuraResolveCreativeMemory("master_formats", { sourceProject, projectName });
+  const queued = await queueAuraResolveCommand(node.nodeId, "master_formats", {
+    sourceProject,
+    projectName,
+    publish: false,
+  });
+  res.json({
+    ok: true,
+    publish: false,
+    company: "IFCDC PRODUCTIONS",
+    queued,
+    message: "Multi-format mastering queued from existing master (9:16 / 16:9 / 1:1). Draft only.",
+  });
 });
 
 router.get("/aura/resolve/preview/:id", hqAuthRequired, requireHQModule("aura"), async (req, res) => {

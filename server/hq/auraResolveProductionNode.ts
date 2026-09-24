@@ -56,6 +56,7 @@ export const AURA_RESOLVE_COMMANDS = [
   "editor_plan",
   "editor_run",
   "request_revision",
+  "master_formats",
   "resolve_status",
 ] as const;
 
