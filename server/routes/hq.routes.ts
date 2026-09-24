@@ -884,37 +884,51 @@ router.get("/aura/music/health", hqAuthRequired, requireHQModule("aura"), async 
 
 /** AURA Resolve board. Browser talks to HQ only. The bridge stays on 127.0.0.1. */
 router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
-  const { getAuraResolveNodeSnapshot, listAuraResolveJobs, readLocalResolveBridge } = await import(
-    "../hq/auraResolveProductionNode"
-  );
-  const node = await getAuraResolveNodeSnapshot();
-  const local = await readLocalResolveBridge();
-  const beat = (node.heartbeat || {}) as Record<string, any>;
-  const live = (local?.api as { result?: Record<string, any> } | undefined)?.result || beat.resolve || {};
-  const jobs = await listAuraResolveJobs(node.nodeId);
-  const current = jobs.find((job) => job.status === "claimed") || jobs.find((job) => job.status === "queued") || null;
-  const render = beat.render || live.render || {};
-  res.json({
-    ok: true,
-    publicExposure: false,
-    bridge: local?.api ? "ONLINE" : beat.bridge || "OFFLINE",
-    resolve: live.resolve === "ONLINE" || local?.resolveRunning || beat.resolveRunning ? "ONLINE" : "OFFLINE",
-    resolveVersion: live.version || (local?.resolve as { version?: string } | undefined)?.version || beat.resolveVersion || null,
-    productionMac: node.online ? "ONLINE" : "OFFLINE",
-    project: live.project || beat.project || null,
-    timeline: live.timeline || beat.timeline || null,
-    currentJob: current,
-    renderStatus: render.status || beat.renderStatus || "idle",
-    renderPercent: render.percent ?? beat.renderPercent ?? null,
-    queue: jobs.filter((job) => job.status === "queued" || job.status === "claimed"),
-    assets: beat.assets || [],
-    completedRenders: beat.completedRenders || [],
-    errors: beat.errors || [],
-    notes: beat.notes || ["Publishing stays off until Founder approval."],
-    lastHeartbeat: node.lastSeenAt,
-    lastSuccessfulCommand: beat.lastSuccessfulCommand || jobs.find((job) => job.status === "complete") || null,
-    jobs,
-  });
+  try {
+    const { getAuraResolveNodeSnapshot, listAuraResolveJobs, readLocalResolveBridge } = await import(
+      "../hq/auraResolveProductionNode"
+    );
+    const node = await getAuraResolveNodeSnapshot();
+    const local = await readLocalResolveBridge();
+    const beat = (node.heartbeat || {}) as Record<string, any>;
+    const live = (local?.api as { result?: Record<string, any> } | undefined)?.result || beat.resolve || {};
+    const jobs = await listAuraResolveJobs(node.nodeId);
+    const current = jobs.find((job) => job.status === "claimed") || jobs.find((job) => job.status === "queued") || null;
+    const render = beat.render || live.render || {};
+    res.json({
+      ok: true,
+      publicExposure: false,
+      bridge: local?.api ? "ONLINE" : beat.bridge || "OFFLINE",
+      resolve: live.resolve === "ONLINE" || local?.resolveRunning || beat.resolveRunning ? "ONLINE" : "OFFLINE",
+      resolveVersion: live.version || (local?.resolve as { version?: string } | undefined)?.version || beat.resolveVersion || null,
+      productionMac: node.online ? "ONLINE" : "OFFLINE",
+      project: live.project || beat.project || null,
+      timeline: live.timeline || beat.timeline || null,
+      currentJob: current,
+      renderStatus: render.status || beat.renderStatus || "idle",
+      renderPercent: render.percent ?? beat.renderPercent ?? null,
+      queue: jobs.filter((job) => job.status === "queued" || job.status === "claimed"),
+      assets: beat.assets || [],
+      completedRenders: beat.completedRenders || [],
+      errors: beat.errors || [],
+      notes: beat.notes || ["Publishing stays off until Founder approval."],
+      lastHeartbeat: node.lastSeenAt,
+      lastSuccessfulCommand: beat.lastSuccessfulCommand || jobs.find((job) => job.status === "complete") || null,
+      jobs,
+    });
+  } catch (error) {
+    console.error("GET /aura/resolve/status error:", error);
+    res.status(200).json({
+      ok: false,
+      publicExposure: false,
+      bridge: "OFFLINE",
+      resolve: "OFFLINE",
+      productionMac: "OFFLINE",
+      error: "Resolve status temporarily unavailable",
+      jobs: [],
+      queue: [],
+    });
+  }
 });
 
 router.post("/aura/resolve/jobs", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
@@ -964,18 +978,26 @@ router.post("/aura/resolve/plan", hqAuthRequired, requireHQModule("aura"), async
 });
 
 router.post("/aura/resolve/node/claim", async (req, res) => {
-  const { claimFirstAuraResolveNode } = await import("../hq/auraResolveProductionNode");
-  const result = await claimFirstAuraResolveNode({
-    nodeId: String(req.body?.nodeId || ""),
-    token: String(req.body?.token || ""),
-    label: String(req.body?.label || "Founder Mac Resolve Node"),
-    hostname: String(req.body?.hostname || ""),
-  });
-  if (!result.ok) {
-    res.status(403).json(result);
-    return;
+  try {
+    const { claimFirstAuraResolveNode } = await import("../hq/auraResolveProductionNode");
+    const result = await claimFirstAuraResolveNode({
+      nodeId: String(req.body?.nodeId || ""),
+      token: String(req.body?.token || ""),
+      label: String(req.body?.label || "Founder Mac Resolve Node"),
+      hostname: String(req.body?.hostname || ""),
+    });
+    if (!result.ok) {
+      res.status(403).json(result);
+      return;
+    }
+    res.status(201).json({ ok: true, nodeId: result.nodeId, publicExposure: false });
+  } catch (error) {
+    console.error("POST /aura/resolve/node/claim error:", error);
+    res.status(503).json({
+      ok: false,
+      error: error instanceof Error ? error.message : "Resolve node claim unavailable",
+    });
   }
-  res.status(201).json({ ok: true, nodeId: result.nodeId, publicExposure: false });
 });
 
 router.post("/aura/resolve/node/claim-local", async (req, res) => {
@@ -999,28 +1021,46 @@ router.post("/aura/resolve/node/enroll", hqAuthRequired, requireHQModule("aura")
 });
 
 router.post("/aura/resolve/node/heartbeat", async (req, res) => {
-  const { authenticateAuraResolveNode, recordAuraResolveHeartbeat, claimAuraResolveCommands } = await import(
-    "../hq/auraResolveProductionNode"
-  );
-  const node = await authenticateAuraResolveNode(req);
-  if (!node) {
-    res.status(401).json({ ok: false, error: "resolve node token rejected" });
-    return;
+  try {
+    const { authenticateAuraResolveNode, recordAuraResolveHeartbeat, claimAuraResolveCommands } = await import(
+      "../hq/auraResolveProductionNode"
+    );
+    const node = await authenticateAuraResolveNode(req);
+    if (!node) {
+      res.status(401).json({ ok: false, error: "resolve node token rejected" });
+      return;
+    }
+    await recordAuraResolveHeartbeat(node.nodeId, req.body || {});
+    const commands = await claimAuraResolveCommands(node.nodeId);
+    res.json({ ok: true, commands, publicExposure: false });
+  } catch (error) {
+    console.error("POST /aura/resolve/node/heartbeat error:", error);
+    res.status(503).json({
+      ok: false,
+      error: error instanceof Error ? error.message : "Resolve heartbeat unavailable",
+      commands: [],
+      publicExposure: false,
+    });
   }
-  await recordAuraResolveHeartbeat(node.nodeId, req.body || {});
-  const commands = await claimAuraResolveCommands(node.nodeId);
-  res.json({ ok: true, commands, publicExposure: false });
 });
 
 router.post("/aura/resolve/node/complete", async (req, res) => {
-  const { authenticateAuraResolveNode, completeAuraResolveCommand } = await import("../hq/auraResolveProductionNode");
-  const node = await authenticateAuraResolveNode(req);
-  if (!node) {
-    res.status(401).json({ ok: false, error: "resolve node token rejected" });
-    return;
+  try {
+    const { authenticateAuraResolveNode, completeAuraResolveCommand } = await import("../hq/auraResolveProductionNode");
+    const node = await authenticateAuraResolveNode(req);
+    if (!node) {
+      res.status(401).json({ ok: false, error: "resolve node token rejected" });
+      return;
+    }
+    await completeAuraResolveCommand(String(req.body?.id || ""), req.body?.result || {});
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("POST /aura/resolve/node/complete error:", error);
+    res.status(503).json({
+      ok: false,
+      error: error instanceof Error ? error.message : "Resolve complete unavailable",
+    });
   }
-  await completeAuraResolveCommand(String(req.body?.id || ""), req.body?.result || {});
-  res.json({ ok: true });
 });
 
 /** AURA MUSIC Command Center payload for HQ UI (local status file or clear cloud offline). */
