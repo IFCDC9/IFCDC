@@ -250,7 +250,12 @@ server.listen(PORT, HOST, () => {
 });
 
 const HQ_FILE = join(ROOT, "hq-production.json");
+const AGENT_STATE_PATH = join(ROOT, "agent-state.json");
 const PRODUCTION_HQ = process.env.AURA_RESOLVE_HQ_URL || "https://ifcdc-hq-wst6.onrender.com";
+/** Keep well inside HQ's 45s Production Mac TTL. */
+const HEARTBEAT_INTERVAL_MS = Number(process.env.AURA_RESOLVE_HEARTBEAT_MS || 8000);
+const MAX_BACKOFF_MS = Number(process.env.AURA_RESOLVE_MAX_BACKOFF_MS || 20000);
+const HQ_FETCH_TIMEOUT_MS = Number(process.env.AURA_RESOLVE_HQ_TIMEOUT_MS || 8000);
 const ACTION_FOR = {
   create_project: "create_project",
   open_project: "create_project",
@@ -272,30 +277,143 @@ const ACTION_FOR = {
   resolve_status: "status",
 };
 
-async function ensureHqLink() {
-  if (existsSync(HQ_FILE)) return JSON.parse(readFileSync(HQ_FILE, "utf8"));
-  const hqUrl = PRODUCTION_HQ;
-  const nodeId = `arn_${randomBytes(8).toString("hex")}`;
-  const token = `arnt_${randomBytes(24).toString("base64url")}`;
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function writeAgentState(patch) {
+  let prior = {};
   try {
-    const response = await fetch(`${hqUrl}/api/hq/aura/resolve/node/claim`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ nodeId, token, label: "Founder Mac Resolve Node", hostname: "production-mac" }),
-    });
-    if (!response.ok) return null;
-    const body = await response.json();
-    const link = { hqUrl, nodeId: body.nodeId || nodeId, token };
-    writeFileSync(HQ_FILE, JSON.stringify(link, null, 2));
-    return link;
+    prior = JSON.parse(readFileSync(AGENT_STATE_PATH, "utf8"));
+  } catch {
+    prior = {};
+  }
+  writeFileSync(
+    AGENT_STATE_PATH,
+    JSON.stringify({ ...prior, ...patch, updatedAt: new Date().toISOString() }, null, 2),
+  );
+}
+
+function readStoredLink() {
+  if (!existsSync(HQ_FILE)) return null;
+  try {
+    const link = JSON.parse(readFileSync(HQ_FILE, "utf8"));
+    const hqUrl = String(link.hqUrl || PRODUCTION_HQ).replace(/\/$/, "");
+    if (hqUrl !== PRODUCTION_HQ) {
+      console.warn(`[aura-resolve] refusing non-production hqUrl; forcing ${PRODUCTION_HQ}`);
+    }
+    if (!link.nodeId || !link.token) return null;
+    return { hqUrl: PRODUCTION_HQ, nodeId: String(link.nodeId), token: String(link.token) };
   } catch {
     return null;
   }
 }
 
-async function heartbeatOnce() {
-  const link = await ensureHqLink();
-  if (!link?.token) return;
+function persistLink(link) {
+  const next = { hqUrl: PRODUCTION_HQ, nodeId: link.nodeId, token: link.token };
+  writeFileSync(HQ_FILE, JSON.stringify(next, null, 2));
+  return next;
+}
+
+async function hqFetch(url, init = {}) {
+  return fetch(url, {
+    ...init,
+    signal: AbortSignal.timeout(HQ_FETCH_TIMEOUT_MS),
+  });
+}
+
+/**
+ * Claim/reconnect with stored credentials. Never storms: caller backs off.
+ * Existing hq-production.json token is preferred; only mint credentials when none exist
+ * and forceClaim is true.
+ */
+async function ensureHqLink({ forceClaim = false } = {}) {
+  const stored = readStoredLink();
+  if (stored && !forceClaim) return stored;
+  if (!stored && !forceClaim) return null;
+
+  const hqUrl = PRODUCTION_HQ;
+  const nodeId = stored?.nodeId || `arn_${randomBytes(8).toString("hex")}`;
+  const token = stored?.token || `arnt_${randomBytes(24).toString("base64url")}`;
+  try {
+    const response = await hqFetch(`${hqUrl}/api/hq/aura/resolve/node/claim`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        nodeId,
+        token,
+        label: "Founder Mac Resolve Node",
+        hostname: "production-mac",
+      }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (response.ok || response.status === 201) {
+      return persistLink({ nodeId: body.nodeId || nodeId, token });
+    }
+    // Another node already owns the slot — keep stored token and retry heartbeat later.
+    if (response.status === 403 && /already enrolled/i.test(String(body.error || ""))) {
+      if (stored) return stored;
+      console.warn("[aura-resolve] claim blocked: a Resolve node is already enrolled");
+      writeAgentState({ ok: false, lastError: "claim_already_enrolled" });
+      return null;
+    }
+    console.warn(`[aura-resolve] claim failed: ${response.status}`);
+    writeAgentState({ ok: false, lastError: `claim_${response.status}` });
+    return stored;
+  } catch (error) {
+    console.warn(`[aura-resolve] claim error: ${error.message}`);
+    writeAgentState({ ok: false, lastError: error.message });
+    return stored;
+  }
+}
+
+async function completeCommand(link, id, result) {
+  await hqFetch(`${link.hqUrl}/api/hq/aura/resolve/node/complete`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${link.token}`,
+      "x-aura-resolve-node-id": link.nodeId,
+    },
+    body: JSON.stringify({ id, result }),
+  });
+}
+
+async function runQueuedCommand(link, command) {
+  if (command.command === "editor_plan") {
+    const planned = await fetch(`http://${HOST}:${PORT}/v1/editor/plan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instruction: command.args?.instruction || "" }),
+      signal: AbortSignal.timeout(15_000),
+    }).then((item) => item.json());
+    await completeCommand(link, command.id, { ok: true, publish: false, plan: planned });
+    writeFileSync(join(ROOT, "last-command.json"), JSON.stringify({ command: "editor_plan", at: new Date().toISOString() }));
+    return;
+  }
+  const action = ACTION_FOR[command.command];
+  let result;
+  if (!action) result = { ok: false, error: "command is not allowlisted" };
+  else {
+    const payload = { ...(command.args || {}), publish: false };
+    if (command.command === "render_vertical") Object.assign(payload, { width: 1080, height: 1920 });
+    if (command.command === "render_landscape") Object.assign(payload, { width: 1920, height: 1080 });
+    try {
+      result = await askResolve(action, payload);
+    } catch (error) {
+      result = { ok: false, error: error.message };
+    }
+  }
+  if (result?.ok) {
+    writeFileSync(
+      join(ROOT, "last-command.json"),
+      JSON.stringify({ command: command.command, at: new Date().toISOString() }),
+    );
+  }
+  await completeCommand(link, command.id, result);
+}
+
+async function heartbeatOnce(link) {
   const snap = await health();
   const result = snap.api?.result || {};
   const rendersDir = join(ROOT, "renders");
@@ -310,7 +428,7 @@ async function heartbeatOnce() {
   } catch {
     lastSuccessfulCommand = null;
   }
-  const response = await fetch(`${link.hqUrl}/api/hq/aura/resolve/node/heartbeat`, {
+  const response = await hqFetch(`${link.hqUrl}/api/hq/aura/resolve/node/heartbeat`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -333,46 +451,75 @@ async function heartbeatOnce() {
       lastSuccessfulCommand,
     }),
   });
-  if (!response.ok) return;
+  if (response.status === 401) {
+    const err = new Error("resolve_node_token_rejected");
+    err.code = 401;
+    throw err;
+  }
+  if (!response.ok) {
+    const err = new Error(`heartbeat_${response.status}`);
+    err.code = response.status;
+    throw err;
+  }
   const body = await response.json();
   for (const command of body.commands || []) {
-    if (command.command === "editor_plan") {
-      const planned = await fetch(`http://${HOST}:${PORT}/v1/editor/plan`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ instruction: command.args?.instruction || "" }),
-      }).then((item) => item.json());
-      await fetch(`${link.hqUrl}/api/hq/aura/resolve/node/complete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${link.token}`, "x-aura-resolve-node-id": link.nodeId },
-        body: JSON.stringify({ id: command.id, result: { ok: true, publish: false, plan: planned } }),
-      });
-      writeFileSync(join(ROOT, "last-command.json"), JSON.stringify({ command: "editor_plan", at: new Date().toISOString() }));
-      continue;
-    }
-    const action = ACTION_FOR[command.command];
-    let result;
-    if (!action) result = { ok: false, error: "command is not allowlisted" };
-    else {
-      const payload = { ...(command.args || {}) };
-      if (command.command === "render_vertical") Object.assign(payload, { width: 1080, height: 1920 });
-      if (command.command === "render_landscape") Object.assign(payload, { width: 1920, height: 1080 });
+    try {
+      await runQueuedCommand(link, command);
+    } catch (error) {
+      console.error(`[aura-resolve] command ${command.id} failed:`, error.message);
       try {
-        result = await askResolve(action, payload);
-      } catch (error) {
-        result = { ok: false, error: error.message };
+        await completeCommand(link, command.id, { ok: false, error: error.message, publish: false });
+      } catch {
+        /* ignore complete failure; next heartbeat will surface */
       }
     }
-    if (result?.ok) writeFileSync(join(ROOT, "last-command.json"), JSON.stringify({ command: command.command, at: new Date().toISOString() }));
-    await fetch(`${link.hqUrl}/api/hq/aura/resolve/node/complete`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${link.token}`, "x-aura-resolve-node-id": link.nodeId },
-      body: JSON.stringify({ id: command.id, result }),
-    });
+  }
+  writeAgentState({
+    ok: true,
+    lastHeartbeatAt: new Date().toISOString(),
+    lastError: null,
+    hqUrl: link.hqUrl,
+    nodeId: link.nodeId,
+    heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
+  });
+}
+
+async function productionHeartbeatLoop() {
+  let backoff = HEARTBEAT_INTERVAL_MS;
+  let claimCooldownUntil = 0;
+  console.log(
+    `[aura-resolve] production heartbeat loop start interval=${HEARTBEAT_INTERVAL_MS}ms maxBackoff=${MAX_BACKOFF_MS}ms ttlTarget=45000ms`,
+  );
+  for (;;) {
+    try {
+      let link = await ensureHqLink({ forceClaim: false });
+      if (!link?.token && Date.now() >= claimCooldownUntil) {
+        link = await ensureHqLink({ forceClaim: true });
+        claimCooldownUntil = Date.now() + Math.min(backoff, MAX_BACKOFF_MS);
+      }
+      if (!link?.token) {
+        await sleep(Math.min(backoff, MAX_BACKOFF_MS));
+        backoff = Math.min(Math.floor(backoff * 1.8), MAX_BACKOFF_MS);
+        continue;
+      }
+      await heartbeatOnce(link);
+      backoff = HEARTBEAT_INTERVAL_MS;
+      await sleep(HEARTBEAT_INTERVAL_MS);
+    } catch (error) {
+      console.error(`[aura-resolve] heartbeat: ${error.message}`);
+      writeAgentState({ ok: false, lastError: error.message });
+      if (error.code === 401 && Date.now() >= claimCooldownUntil) {
+        // Re-claim with the same stored credentials once per cooldown — do not mint a new node.
+        await ensureHqLink({ forceClaim: true });
+        claimCooldownUntil = Date.now() + Math.min(backoff * 2, MAX_BACKOFF_MS);
+      }
+      await sleep(Math.min(backoff, MAX_BACKOFF_MS));
+      backoff = Math.min(Math.floor(backoff * 1.8), MAX_BACKOFF_MS);
+    }
   }
 }
 
-setInterval(() => {
-  heartbeatOnce().catch((error) => console.error("resolve heartbeat", error.message));
-}, 8000);
-heartbeatOnce().catch(() => {});
+productionHeartbeatLoop().catch((error) => {
+  console.error("[aura-resolve] heartbeat loop crashed", error.message);
+  process.exit(1);
+});

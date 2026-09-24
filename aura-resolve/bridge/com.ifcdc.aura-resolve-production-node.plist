@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>AURA_RESOLVE_HQ_URL</key>
+		<string>https://ifcdc-hq-wst6.onrender.com</string>
+		<key>AURA_RESOLVE_HEARTBEAT_MS</key>
+		<string>8000</string>
+		<key>AURA_RESOLVE_MAX_BACKOFF_MS</key>
+		<string>20000</string>
+		<key>PATH</key>
+		<string>/usr/local/bin:/opt/homebrew/bin:/usr/sbin:/usr/bin:/bin</string>
+	</dict>
+	<key>KeepAlive</key>
+	<true/>
+	<key>Label</key>
+	<string>com.ifcdc.aura-resolve-production-node</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/local/bin/node</string>
+		<string>/Users/fahrealallah/Development/IFCDC/Apps/IMPERIAL-FOUNDATION-CDC/aura-resolve/bridge/server.mjs</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/Users/fahrealallah/Library/Logs/IFCDC/aura-resolve-production-node.stderr.log</string>
+	<key>StandardOutPath</key>
+	<string>/Users/fahrealallah/Library/Logs/IFCDC/aura-resolve-production-node.stdout.log</string>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+	<key>WorkingDirectory</key>
+	<string>/Users/fahrealallah/Development/IFCDC/Apps/IMPERIAL-FOUNDATION-CDC/aura-resolve/bridge</string>
+</dict>
+</plist>

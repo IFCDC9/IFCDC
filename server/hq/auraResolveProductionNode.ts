@@ -41,6 +41,8 @@ export const AURA_RESOLVE_COMMANDS = [
 ] as const;
 
 const LOCAL_BRIDGE = "http://127.0.0.1:4181";
+/** Production Mac is ONLINE only while heartbeat age is under this TTL. */
+export const AURA_RESOLVE_HEARTBEAT_TTL_MS = 45_000;
 /** Hard ceiling so a wedged sqlite op cannot pin an HTTP request. */
 const DB_OP_TIMEOUT_MS = 4_000;
 const ENSURE_TIMEOUT_MS = 3_000;
@@ -427,13 +429,16 @@ export async function getAuraResolveNodeSnapshot() {
       )) as { node_id: string; label: string; last_seen_at: string | null; last_heartbeat_json: string | null } | undefined;
       if (!row) return { online: false, nodeId: null, heartbeat: null };
       const ageMs = row.last_seen_at ? Date.now() - Date.parse(row.last_seen_at) : null;
+      const online = ageMs != null && ageMs < AURA_RESOLVE_HEARTBEAT_TTL_MS;
       return {
-        online: ageMs != null && ageMs < 45_000,
+        online,
         nodeId: row.node_id,
         label: row.label,
         lastSeenAt: row.last_seen_at,
         ageMs,
+        // Stale payloads stay available for diagnostics, but callers must gate "live" fields on `online`.
         heartbeat: row.last_heartbeat_json ? JSON.parse(row.last_heartbeat_json) : null,
+        heartbeatTtlMs: AURA_RESOLVE_HEARTBEAT_TTL_MS,
       };
     });
   } catch (err) {

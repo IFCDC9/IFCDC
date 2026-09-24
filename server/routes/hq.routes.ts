@@ -890,29 +890,41 @@ router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), asyn
     );
     const node = await getAuraResolveNodeSnapshot();
     const local = await readLocalResolveBridge();
-    const beat = (node.heartbeat || {}) as Record<string, any>;
-    const live = (local?.api as { result?: Record<string, any> } | undefined)?.result || beat.resolve || {};
+    const macOnline = Boolean(node.online);
+    // Never treat a stale heartbeat JSON as live once the Mac TTL expires.
+    const beat = macOnline ? ((node.heartbeat || {}) as Record<string, any>) : ({} as Record<string, any>);
+    const live = macOnline
+      ? ((local?.api as { result?: Record<string, any> } | undefined)?.result || beat.resolve || {})
+      : {};
     const jobs = await listAuraResolveJobs(node.nodeId);
     const current = jobs.find((job) => job.status === "claimed") || jobs.find((job) => job.status === "queued") || null;
     const render = beat.render || live.render || {};
+    const bridgeOnline = macOnline && Boolean(local?.api || beat.bridge === "ONLINE");
+    const resolveOnline =
+      macOnline &&
+      Boolean(live.resolve === "ONLINE" || local?.resolveRunning || beat.resolveRunning);
     res.json({
       ok: true,
       publicExposure: false,
-      bridge: local?.api ? "ONLINE" : beat.bridge || "OFFLINE",
-      resolve: live.resolve === "ONLINE" || local?.resolveRunning || beat.resolveRunning ? "ONLINE" : "OFFLINE",
-      resolveVersion: live.version || (local?.resolve as { version?: string } | undefined)?.version || beat.resolveVersion || null,
-      productionMac: node.online ? "ONLINE" : "OFFLINE",
-      project: live.project || beat.project || null,
-      timeline: live.timeline || beat.timeline || null,
+      bridge: bridgeOnline ? "ONLINE" : "OFFLINE",
+      resolve: resolveOnline ? "ONLINE" : "OFFLINE",
+      resolveVersion: macOnline
+        ? live.version || (local?.resolve as { version?: string } | undefined)?.version || beat.resolveVersion || null
+        : null,
+      productionMac: macOnline ? "ONLINE" : "OFFLINE",
+      project: macOnline ? live.project || beat.project || null : null,
+      timeline: macOnline ? live.timeline || beat.timeline || null : null,
       currentJob: current,
-      renderStatus: render.status || beat.renderStatus || "idle",
-      renderPercent: render.percent ?? beat.renderPercent ?? null,
+      renderStatus: macOnline ? render.status || beat.renderStatus || "idle" : "idle",
+      renderPercent: macOnline ? render.percent ?? beat.renderPercent ?? null : null,
       queue: jobs.filter((job) => job.status === "queued" || job.status === "claimed"),
-      assets: beat.assets || [],
-      completedRenders: beat.completedRenders || [],
-      errors: beat.errors || [],
+      assets: macOnline ? beat.assets || [] : [],
+      completedRenders: macOnline ? beat.completedRenders || [] : [],
+      errors: macOnline ? beat.errors || [] : [],
       notes: beat.notes || ["Publishing stays off until Founder approval."],
       lastHeartbeat: node.lastSeenAt,
+      heartbeatAgeMs: node.ageMs ?? null,
+      heartbeatTtlMs: node.heartbeatTtlMs ?? 45_000,
       lastSuccessfulCommand: beat.lastSuccessfulCommand || jobs.find((job) => job.status === "complete") || null,
       jobs,
     });
