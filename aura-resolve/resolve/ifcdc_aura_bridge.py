@@ -8,6 +8,31 @@ import threading
 import traceback
 from pathlib import Path
 
+# When launched via Workspace > Scripts, Resolve injects resolve/fusion/bmd.
+# When relaunched attached to the host (-a), recover the same objects if missing.
+try:
+    resolve  # noqa: F821
+except NameError:
+    try:
+        import fusionscript as _bmd  # type: ignore
+        resolve = _bmd.scriptapp("Resolve")
+        fusion = _bmd.scriptapp("Fusion")
+        bmd = _bmd
+    except Exception:
+        resolve = None
+        fusion = None
+        bmd = None
+
+try:
+    fusion  # noqa: F821
+except NameError:
+    fusion = None
+
+try:
+    bmd  # noqa: F821
+except NameError:
+    bmd = None
+
 HOME = Path.home()
 ROOT = HOME / "Library/Application Support/IFCDC/aura-resolve"
 MEDIA = ROOT / "media"
@@ -485,13 +510,13 @@ def op_create_bin(payload):
     name = payload.get("name") or "IFCDC-AURA-BIN"
     if not str(name).startswith("IFCDC-AURA-"):
         raise ValueError("bin name must start with IFCDC-AURA-")
+    for child in root.GetSubFolderList() or []:
+        if child.GetName() == name:
+            return {"name": name, "created": False, "applied": True}
     folder = pool.AddSubFolder(root, name)
     if not folder:
-        # Folder may already exist — treat as success for idempotent plans.
-        for child in root.GetSubFolderList() or []:
-            if child.GetName() == name:
-                return {"name": name, "created": False, "applied": True}
-        raise RuntimeError("AddSubFolder returned nothing")
+        # Some Resolve pages refuse subfolder creation; draft can continue in the root.
+        return {"name": name, "created": False, "applied": False, "reason": "AddSubFolder unavailable on this page; using root"}
     return {"name": folder.GetName(), "created": True, "applied": True}
 
 

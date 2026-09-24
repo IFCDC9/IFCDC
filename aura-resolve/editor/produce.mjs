@@ -187,7 +187,7 @@ export async function runCreativeProduction({
     if (i < clipPaths.length - 1) arranged.push(transitionPath);
   }
   arranged.push(fadedEnding);
-  // Black fade is placed by the fade_video step so we do not double-append it.
+  arranged.push(fadePath);
 
   const importPaths = [...new Set([...arranged, logoPath, musicPath].filter(Boolean))];
   const clipMediaNames = arranged.map((path) => basename(path));

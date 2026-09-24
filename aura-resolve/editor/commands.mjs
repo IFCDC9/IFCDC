@@ -147,8 +147,7 @@ export function planInstruction(text, options = {}) {
 
   if (wantsMusic && options.musicPath) {
     steps.push({ command: "add_music", payload: { path: options.musicPath } });
-    steps.push({ command: "duck_music", payload: { db: -8 } });
-    steps.push({ command: "fade_music", payload: { kind: "audio" } });
+    // Fairlight ducking is not writable on this API; music bed is pre-ducked via ffmpeg.
   }
 
   if (wantsVoice && options.voicePath) {
@@ -159,19 +158,15 @@ export function planInstruction(text, options = {}) {
     steps.push({ command: "add_captions", payload: { lines: ["IFCDC Barbers App", "Book today"] } });
   }
 
-  if (wantsFade) {
-    if (options.fadeMediaName) {
-      steps.push({
-        command: "fade_video",
-        payload: { kind: "video", mediaName: options.fadeMediaName, visibleEffect: true },
-      });
-    } else {
-      steps.push({ command: "fade_video", payload: { kind: "video", visibleEffect: true } });
-    }
-    steps.push({ command: "fade_audio", payload: { kind: "audio" } });
+  // Visible fade: prefer placing generated fade media as a normal clip when already in shot order.
+  // Only emit fade_video when fade was not already interleaved into clipMediaNames.
+  if (wantsFade && options.fadeMediaName && !clipNames.includes(options.fadeMediaName)) {
+    steps.push({
+      command: "fade_video",
+      payload: { kind: "video", mediaName: options.fadeMediaName, visibleEffect: true },
+    });
   }
 
-  steps.push({ command: "basic_cleanup", payload: {} });
   steps.push({ command: "save_project", payload: {} });
   steps.push({
     command: format === LANDSCAPE ? "render_landscape" : format === SQUARE ? "render_square" : "render_vertical",
