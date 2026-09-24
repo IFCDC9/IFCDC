@@ -139,11 +139,25 @@ def op_create_timeline(payload):
         raise ValueError("timeline name must start with IFCDC-AURA-")
     project = resolve.GetProjectManager().GetCurrentProject()
     pool = project.GetMediaPool()
+    # Reuse an existing timeline with the same name when re-running a draft.
+    try:
+        count = int(project.GetTimelineCount() or 0)
+        for index in range(1, count + 1):
+            existing = project.GetTimelineByIndex(index)
+            if existing and existing.GetName() == name:
+                project.SetCurrentTimeline(existing)
+                return {"name": existing.GetName(), "id": existing.GetUniqueId(), "created": False}
+    except Exception:
+        pass
     timeline = pool.CreateEmptyTimeline(name)
+    if not timeline:
+        # Collision or UI lock — try a unique suffix rather than failing the draft.
+        alt = "%s-%s" % (name, str(int(__import__("time").time()) % 100000))
+        timeline = pool.CreateEmptyTimeline(alt)
     if not timeline:
         raise RuntimeError("CreateEmptyTimeline returned nothing")
     project.SetCurrentTimeline(timeline)
-    return {"name": timeline.GetName(), "id": timeline.GetUniqueId()}
+    return {"name": timeline.GetName(), "id": timeline.GetUniqueId(), "created": True}
 
 
 def op_add_clip(payload):
@@ -318,19 +332,50 @@ def op_move_clip(payload):
     return {"name": placed[0].GetName(), "start": placed[0].GetStart(), "end": placed[0].GetEnd()}
 
 
+def _try_set_title_text(item, text):
+    if not text:
+        return False
+    try:
+        comp = item.GetFusionCompByIndex(1) if hasattr(item, "GetFusionCompByIndex") else None
+        if comp:
+            tools = list(comp.GetToolList().values()) if hasattr(comp, "GetToolList") else []
+            for tool in tools:
+                try:
+                    if hasattr(tool, "SetInput"):
+                        tool.SetInput("StyledText", str(text)[:120])
+                        return True
+                except Exception:
+                    continue
+        if hasattr(item, "SetProperty"):
+            item.SetProperty("Text", str(text)[:120])
+            return True
+    except Exception:
+        return False
+    return False
+
+
 def op_add_title(payload):
     _project, _pool, timeline = guarded_project()
     title = payload.get("titleName") or "Text"
     item = timeline.InsertTitleIntoTimeline(title) or timeline.InsertFusionTitleIntoTimeline(title)
     if not item:
         raise RuntimeError("title was not inserted")
-    return {"name": item.GetName(), "start": item.GetStart(), "end": item.GetEnd()}
+    text = payload.get("titleText") or payload.get("text")
+    text_set = _try_set_title_text(item, text)
+    return {
+        "name": item.GetName(),
+        "start": item.GetStart(),
+        "end": item.GetEnd(),
+        "text": text,
+        "textSet": bool(text_set),
+        "applied": True,
+    }
 
 
 def op_add_logo(payload):
     imported = op_import_media({"path": payload.get("path")})
     placed = op_add_clip({"mediaName": imported["name"]})
-    return {"imported": imported, "placed": placed}
+    return {"imported": imported, "placed": placed, "applied": True}
 
 
 def op_add_music(payload):
@@ -370,11 +415,21 @@ def op_adjust_audio_levels(payload):
 
 
 def op_mark_fade(payload):
+    """Prefer placing generated fade media so the render actually darkens."""
+    media_name = payload.get("mediaName")
+    if media_name:
+        placed = op_add_clip({"mediaName": media_name})
+        return {"applied": True, "visibleEffect": True, "kind": payload.get("kind") or "video", "placed": placed, "method": "generated-fade-clip"}
+    path = payload.get("path")
+    if path:
+        imported = op_import_media({"path": path})
+        placed = op_add_clip({"mediaName": imported["name"]})
+        return {"applied": True, "visibleEffect": True, "kind": payload.get("kind") or "video", "placed": placed, "method": "imported-fade-clip"}
     _project, _pool, timeline = guarded_project()
     kind = payload.get("kind") or "video"
     frame = int(payload.get("frame", timeline.GetEndFrame() - 24))
-    timeline.AddMarker(frame, "Yellow", "AURA fade " + kind, "Founder requested a smooth fade. Keyframe fades are not in this API yet.", 1)
-    return {"applied": False, "noted": True, "kind": kind, "frame": frame}
+    timeline.AddMarker(frame, "Yellow", "AURA fade " + kind, "No fade media supplied. Keyframe fades are not in this Resolve API.", 1)
+    return {"applied": False, "noted": True, "kind": kind, "frame": frame, "reason": "Provide mediaName/path for a visible fade"}
 
 
 def op_add_subtitles(payload):
@@ -382,16 +437,28 @@ def op_add_subtitles(payload):
     lines = payload.get("lines") or []
     timeline.AddTrack("subtitle")
     if lines:
-        timeline.AddMarker(timeline.GetStartFrame(), "Blue", "AURA subtitles", " | ".join(str(line) for line in lines)[:500], 1)
-        return {"applied": False, "noted": True, "lines": len(lines), "reason": "Supplied subtitle text is marked. Automatic transcription is a separate command."}
+        # Visible stand-in: insert a title card with caption text (subtitle track APIs are limited).
+        title = op_add_title({"titleName": "Text", "titleText": " | ".join(str(line) for line in lines)[:80]})
+        timeline.AddMarker(timeline.GetStartFrame(), "Blue", "AURA captions", " | ".join(str(line) for line in lines)[:500], 1)
+        return {"applied": True, "visibleEffect": True, "lines": len(lines), "title": title, "method": "title-as-caption"}
     ok = timeline.CreateSubtitlesFromAudio({})
     return {"applied": bool(ok), "fromAudio": True}
 
 
 def op_add_transition(payload):
+    """Native dissolve insert is unavailable; place a visible brand-flash clip when provided."""
+    media_name = payload.get("mediaName")
+    if media_name:
+        placed = op_add_clip({"mediaName": media_name})
+        return {"applied": True, "visibleEffect": True, "kind": payload.get("kind") or "brand-flash", "placed": placed, "method": "generated-transition-clip"}
+    path = payload.get("path")
+    if path:
+        imported = op_import_media({"path": path})
+        placed = op_add_clip({"mediaName": imported["name"]})
+        return {"applied": True, "visibleEffect": True, "kind": payload.get("kind") or "brand-flash", "placed": placed, "method": "imported-transition-clip"}
     _project, _pool, timeline = guarded_project()
     timeline.AddMarker(int(payload.get("frame", timeline.GetStartFrame())), "Pink", "AURA transition", str(payload.get("kind") or "cross dissolve"), 1)
-    return {"applied": False, "noted": True, "reason": "Resolve scripting has no transition insert on this version"}
+    return {"applied": False, "noted": True, "reason": "Resolve scripting has no transition insert; supply mediaName for a visible flash"}
 
 
 def op_apply_branding(payload):
@@ -401,20 +468,90 @@ def op_apply_branding(payload):
     if logo:
         placed = op_add_logo({"path": logo})
         notes.append("logo")
-    title = op_add_title({"titleName": payload.get("titleName") or "Text"})
+    title = op_add_title({
+        "titleName": payload.get("titleName") or "Text",
+        "titleText": payload.get("titleText") or "IFCDC",
+    })
     notes.append("title")
-    return {"notes": notes, "title": title, "logo": placed, "publish": False}
+    return {"notes": notes, "title": title, "logo": placed, "publish": False, "applied": True}
+
+
+def op_create_bin(payload):
+    project = resolve.GetProjectManager().GetCurrentProject()
+    if not project:
+        raise RuntimeError("no current project")
+    pool = project.GetMediaPool()
+    root = pool.GetRootFolder()
+    name = payload.get("name") or "IFCDC-AURA-BIN"
+    if not str(name).startswith("IFCDC-AURA-"):
+        raise ValueError("bin name must start with IFCDC-AURA-")
+    folder = pool.AddSubFolder(root, name)
+    if not folder:
+        # Folder may already exist — treat as success for idempotent plans.
+        for child in root.GetSubFolderList() or []:
+            if child.GetName() == name:
+                return {"name": name, "created": False, "applied": True}
+        raise RuntimeError("AddSubFolder returned nothing")
+    return {"name": folder.GetName(), "created": True, "applied": True}
+
+
+def op_remove_clip(payload):
+    _project, _pool, timeline = guarded_project()
+    item, _track_type, _index = find_timeline_item(timeline, payload.get("mediaName"))
+    if not item:
+        raise RuntimeError("clip not on the timeline")
+    if not timeline.DeleteClips([item], False):
+        raise RuntimeError("DeleteClips returned false")
+    return {"removed": payload.get("mediaName"), "applied": True}
+
+
+def op_duplicate_clip(payload):
+    placed = op_add_clip({"mediaName": payload.get("mediaName")})
+    return {"duplicated": True, "placed": placed, "applied": True}
+
+
+def op_set_clip_duration(payload):
+    # Closest real edit: trim end frame to approximate duration.
+    frames = int(payload.get("frames") or payload.get("durationFrames") or 0)
+    if frames <= 0:
+        raise ValueError("frames required")
+    return op_trim_clip({
+        "mediaName": payload.get("mediaName"),
+        "startFrame": int(payload.get("startFrame") or 0),
+        "endFrame": int(payload.get("startFrame") or 0) + frames,
+        "recordFrame": payload.get("recordFrame"),
+    })
+
+
+def op_reorder_clips(payload):
+    # Honest limitation: full reorder requires lift/replace of every item.
+    order = payload.get("order") or []
+    _project, _pool, timeline = guarded_project()
+    timeline.AddMarker(timeline.GetStartFrame(), "Cyan", "AURA reorder", "Requested order: " + ",".join(str(x) for x in order)[:400], 1)
+    return {"applied": False, "noted": True, "reason": "Use move_clip per item for concrete reorders"}
+
+
+def op_basic_cleanup(payload):
+    project, _pool, timeline = guarded_project()
+    # Light real cleanup: ensure current timeline is selected and project settings stick.
+    project.SetCurrentTimeline(timeline)
+    return {"applied": True, "timeline": timeline.GetName(), "note": "timeline re-selected"}
 
 
 OPS = {
     "status": op_status,
     "create_project": op_create_project,
     "import_media": op_import_media,
+    "create_bin": op_create_bin,
     "create_timeline": op_create_timeline,
     "add_clip": op_add_clip,
     "trim_clip": op_trim_clip,
     "split_clip": op_split_clip,
     "move_clip": op_move_clip,
+    "remove_clip": op_remove_clip,
+    "duplicate_clip": op_duplicate_clip,
+    "set_clip_duration": op_set_clip_duration,
+    "reorder_clips": op_reorder_clips,
     "add_transition": op_add_transition,
     "add_title": op_add_title,
     "add_logo": op_add_logo,
@@ -425,6 +562,7 @@ OPS = {
     "fade_video": op_mark_fade,
     "add_subtitles": op_add_subtitles,
     "apply_branding": op_apply_branding,
+    "basic_cleanup": op_basic_cleanup,
     "save_project": op_save,
     "render": op_render,
     "render_status": op_render_status,

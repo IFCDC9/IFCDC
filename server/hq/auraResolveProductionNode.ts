@@ -22,8 +22,17 @@ export const AURA_RESOLVE_COMMANDS = [
   "create_project",
   "open_project",
   "import_media",
+  "import_assets",
+  "create_bin",
   "create_timeline",
   "add_clip",
+  "trim_clip",
+  "split_clip",
+  "move_clip",
+  "remove_clip",
+  "duplicate_clip",
+  "set_clip_duration",
+  "reorder_clips",
   "add_title",
   "add_logo",
   "add_music",
@@ -31,12 +40,22 @@ export const AURA_RESOLVE_COMMANDS = [
   "add_transition",
   "fade_audio",
   "fade_video",
+  "fade_music",
+  "duck_music",
+  "adjust_audio_levels",
+  "add_subtitles",
+  "add_captions",
+  "apply_branding",
+  "basic_cleanup",
   "save_project",
   "preview_project",
   "queue_render",
   "render_vertical",
   "render_landscape",
+  "render_square",
   "editor_plan",
+  "editor_run",
+  "request_revision",
   "resolve_status",
 ] as const;
 
@@ -137,6 +156,23 @@ export async function ensureAuraResolveNodeTables(): Promise<void> {
           status TEXT NOT NULL,
           created_at TEXT NOT NULL,
           result_json TEXT
+        );
+        CREATE TABLE IF NOT EXISTS aura_resolve_creative_memory (
+          id TEXT PRIMARY KEY,
+          kind TEXT NOT NULL,
+          payload_json TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS aura_resolve_previews (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          project TEXT,
+          instruction TEXT,
+          duration REAL,
+          content_type TEXT NOT NULL,
+          size INTEGER NOT NULL,
+          path TEXT NOT NULL,
+          created_at TEXT NOT NULL
         );
       `),
       ENSURE_TIMEOUT_MS,
@@ -494,5 +530,171 @@ export async function readLocalResolveBridge(): Promise<Record<string, unknown> 
     return (await response.json()) as Record<string, unknown>;
   } catch {
     return null;
+  }
+}
+
+const MAX_RESOLVE_PREVIEWS = 3;
+
+function previewDir(): string {
+  const dir = path.join(getDataDir(), "aura-resolve-previews");
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+export async function storeAuraResolvePreview(opts: {
+  name: string;
+  project?: string | null;
+  instruction?: string | null;
+  duration?: number | null;
+  contentType?: string;
+  base64: string;
+  size?: number;
+}) {
+  const safeName = String(opts.name || "draft.mp4").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120);
+  const id = `arp_${crypto.randomBytes(8).toString("hex")}`;
+  const bytes = Buffer.from(String(opts.base64 || ""), "base64");
+  if (!bytes.length) throw new Error("preview payload empty");
+  // Soft cap ~40MB decoded to protect Render disk.
+  if (bytes.length > 40 * 1024 * 1024) throw new Error("preview exceeds 40MB limit");
+  const filePath = path.join(previewDir(), `${id}-${safeName}`);
+  fs.writeFileSync(filePath, bytes);
+
+  return withResolveDb("storeAuraResolvePreview", async (db) => {
+    await db.run(
+      `INSERT INTO aura_resolve_previews
+        (id, name, project, instruction, duration, content_type, size, path, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id,
+      safeName,
+      opts.project ?? null,
+      opts.instruction ?? null,
+      opts.duration ?? null,
+      opts.contentType || "video/mp4",
+      bytes.length,
+      filePath,
+      new Date().toISOString()
+    );
+
+    const rows = (await db.all(
+      `SELECT id, path FROM aura_resolve_previews ORDER BY created_at DESC`
+    )) as { id: string; path: string }[];
+    for (const row of rows.slice(MAX_RESOLVE_PREVIEWS)) {
+      try {
+        if (fs.existsSync(row.path)) fs.unlinkSync(row.path);
+      } catch {
+        /* ignore */
+      }
+      await db.run(`DELETE FROM aura_resolve_previews WHERE id = ?`, row.id);
+    }
+
+    await db.run(
+      `INSERT INTO aura_resolve_creative_memory (id, kind, payload_json, created_at) VALUES (?, ?, ?, ?)`,
+      `arm_${crypto.randomBytes(6).toString("hex")}`,
+      "preview",
+      JSON.stringify({
+        previewId: id,
+        name: safeName,
+        project: opts.project,
+        duration: opts.duration,
+        publish: false,
+      }),
+      new Date().toISOString()
+    );
+
+    return {
+      ok: true as const,
+      id,
+      name: safeName,
+      size: bytes.length,
+      duration: opts.duration ?? null,
+      publish: false,
+      previewUrl: `/api/hq/aura/resolve/preview/${id}`,
+    };
+  });
+}
+
+export async function listAuraResolvePreviews() {
+  try {
+    return await withResolveDb("listAuraResolvePreviews", async (db) => {
+      const rows = (await db.all(
+        `SELECT id, name, project, instruction, duration, content_type, size, created_at
+         FROM aura_resolve_previews ORDER BY created_at DESC LIMIT 10`
+      )) as {
+        id: string;
+        name: string;
+        project: string | null;
+        instruction: string | null;
+        duration: number | null;
+        content_type: string;
+        size: number;
+        created_at: string;
+      }[];
+      return rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        project: row.project,
+        instruction: row.instruction,
+        duration: row.duration,
+        contentType: row.content_type,
+        size: row.size,
+        createdAt: row.created_at,
+        previewUrl: `/api/hq/aura/resolve/preview/${row.id}`,
+        publish: false,
+      }));
+    });
+  } catch (err) {
+    console.error("[aura-resolve] list previews failed:", err);
+    return [];
+  }
+}
+
+export async function getAuraResolvePreview(id: string) {
+  return withResolveDb("getAuraResolvePreview", async (db) => {
+    const row = (await db.get(
+      `SELECT id, name, content_type, path, size FROM aura_resolve_previews WHERE id = ?`,
+      id
+    )) as { id: string; name: string; content_type: string; path: string; size: number } | undefined;
+    if (!row || !fs.existsSync(row.path)) return null;
+    return {
+      id: row.id,
+      name: row.name,
+      contentType: row.content_type,
+      size: row.size,
+      bytes: fs.readFileSync(row.path),
+    };
+  });
+}
+
+export async function recordAuraResolveCreativeMemory(kind: string, payload: Record<string, unknown>) {
+  return withResolveDb("recordAuraResolveCreativeMemory", async (db) => {
+    const id = `arm_${crypto.randomBytes(6).toString("hex")}`;
+    await db.run(
+      `INSERT INTO aura_resolve_creative_memory (id, kind, payload_json, created_at) VALUES (?, ?, ?, ?)`,
+      id,
+      kind.slice(0, 40),
+      JSON.stringify({ ...payload, publish: false }),
+      new Date().toISOString()
+    );
+    return { id };
+  });
+}
+
+export async function listAuraResolveCreativeMemory(limit = 20) {
+  try {
+    return await withResolveDb("listAuraResolveCreativeMemory", async (db) => {
+      const rows = (await db.all(
+        `SELECT id, kind, payload_json, created_at FROM aura_resolve_creative_memory
+         ORDER BY created_at DESC LIMIT ?`,
+        Math.min(limit, 40)
+      )) as { id: string; kind: string; payload_json: string; created_at: string }[];
+      return rows.map((row) => ({
+        id: row.id,
+        kind: row.kind,
+        payload: JSON.parse(row.payload_json || "{}"),
+        createdAt: row.created_at,
+      }));
+    });
+  } catch {
+    return [];
   }
 }

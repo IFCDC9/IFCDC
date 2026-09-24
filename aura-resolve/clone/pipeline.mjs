@@ -1,12 +1,16 @@
 /**
- * Founder Digital Clone pipeline.
- * Resolve/Fusion finishes the edit. Generation is a swappable module.
- * Nothing publishes without Founder approval.
+ * Founder Digital Clone pipeline — placeholders only for Phase 3G.
+ * No generation engine. No model calls. Resolve only receives approved clips later.
  */
 
 export const CLONE_PROVIDERS = [
   { id: "resolve-fusion", role: "edit, composite, warp, titles, grade, finish", local: true },
-  { id: "approved-generator", role: "still or video identity generation from approved Founder media", local: true, configured: false },
+  {
+    id: "approved-generator",
+    role: "still or video identity generation from approved Founder media",
+    local: true,
+    configured: false,
+  },
 ];
 
 export function clonePlan(instruction) {
@@ -14,6 +18,37 @@ export function clonePlan(instruction) {
     publish: false,
     founderApprovalRequired: true,
     usesExistingResolveBridge: true,
+    status: "PLACEHOLDERS_ONLY",
+    modules: {
+      founderIdentityLibrary: {
+        status: "PLACEHOLDER",
+        note: "Approved Founder photos / video / voice will live here. Not configured.",
+      },
+      approvedPhotosVideoVoice: {
+        status: "PLACEHOLDER",
+        note: "No Founder-identity assets are imported by creative draft runs.",
+      },
+      generatedScenesTakes: {
+        status: "PLACEHOLDER",
+        note: "Scene / take generation stays off until Founder enables a generator.",
+      },
+      identityConsistency: {
+        status: "PLACEHOLDER",
+        note: "Likeness locks are defined later against approved sources only.",
+      },
+      wardrobeEnvironment: {
+        status: "PLACEHOLDER",
+        note: "Wardrobe and environment variants are not generated in this milestone.",
+      },
+      roleTransformation: {
+        status: "PLACEHOLDER",
+        note: "Role transformation (barber / loctician / etc.) waits on approved media.",
+      },
+      provenance: {
+        status: "PLACEHOLDER",
+        note: "Provenance tracking will attach to accepted clips before Resolve import.",
+      },
+    },
     stages: [
       { id: "source", label: "Approved Founder photos and video only" },
       { id: "identity", label: "Lock face, voice, and likeness to those approved sources" },

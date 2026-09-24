@@ -885,9 +885,13 @@ router.get("/aura/music/health", hqAuthRequired, requireHQModule("aura"), async 
 /** AURA Resolve board. Browser talks to HQ only. The bridge stays on 127.0.0.1. */
 router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
   try {
-    const { getAuraResolveNodeSnapshot, listAuraResolveJobs, readLocalResolveBridge } = await import(
-      "../hq/auraResolveProductionNode"
-    );
+    const {
+      getAuraResolveNodeSnapshot,
+      listAuraResolveJobs,
+      readLocalResolveBridge,
+      listAuraResolvePreviews,
+      listAuraResolveCreativeMemory,
+    } = await import("../hq/auraResolveProductionNode");
     const node = await getAuraResolveNodeSnapshot();
     const local = await readLocalResolveBridge();
     const macOnline = Boolean(node.online);
@@ -903,6 +907,8 @@ router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), asyn
     const resolveOnline =
       macOnline &&
       Boolean(live.resolve === "ONLINE" || local?.resolveRunning || beat.resolveRunning);
+    const previews = await listAuraResolvePreviews();
+    const memory = await listAuraResolveCreativeMemory(12);
     res.json({
       ok: true,
       publicExposure: false,
@@ -920,6 +926,9 @@ router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), asyn
       queue: jobs.filter((job) => job.status === "queued" || job.status === "claimed"),
       assets: macOnline ? beat.assets || [] : [],
       completedRenders: macOnline ? beat.completedRenders || [] : [],
+      previews,
+      creativeMemory: memory,
+      brandKit: beat.brandKit || null,
       errors: macOnline ? beat.errors || [] : [],
       notes: beat.notes || ["Publishing stays off until Founder approval."],
       lastHeartbeat: node.lastSeenAt,
@@ -927,6 +936,15 @@ router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), asyn
       heartbeatTtlMs: node.heartbeatTtlMs ?? 45_000,
       lastSuccessfulCommand: beat.lastSuccessfulCommand || jobs.find((job) => job.status === "complete") || null,
       jobs,
+      clonePrep: {
+        founderIdentityLibrary: "PLACEHOLDER",
+        approvedPhotosVideoVoice: "PLACEHOLDER",
+        generatedScenesTakes: "PLACEHOLDER",
+        identityConsistency: "PLACEHOLDER",
+        wardrobeEnvironment: "PLACEHOLDER",
+        roleTransformation: "PLACEHOLDER",
+        provenance: "PLACEHOLDER",
+      },
     });
   } catch (error) {
     console.error("GET /aura/resolve/status error:", error);
@@ -939,6 +957,7 @@ router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), asyn
       error: "Resolve status temporarily unavailable",
       jobs: [],
       queue: [],
+      previews: [],
     });
   }
 });
@@ -950,6 +969,10 @@ router.post("/aura/resolve/jobs", hqAuthRequired, requireHQModule("aura"), async
   const command = String(req.body?.command || "");
   if (!AURA_RESOLVE_COMMANDS.includes(command as (typeof AURA_RESOLVE_COMMANDS)[number])) {
     res.status(400).json({ ok: false, error: "command is not allowlisted" });
+    return;
+  }
+  if (req.body?.payload?.publish === true || req.body?.publish === true) {
+    res.status(403).json({ ok: false, error: "publishing requires Founder approval and is not available", publish: false });
     return;
   }
   const node = await getAuraResolveNodeSnapshot();
@@ -968,25 +991,107 @@ router.post("/aura/resolve/jobs/:id/cancel", hqAuthRequired, requireHQModule("au
 
 router.post("/aura/resolve/plan", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
   const instruction = String(req.body?.instruction || "");
-  const { getAuraResolveNodeSnapshot, queueAuraResolveCommand } = await import("../hq/auraResolveProductionNode");
-  let plan = null;
-  try {
-    const response = await fetch("http://127.0.0.1:4181/v1/editor/plan", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instruction }),
-    });
-    plan = await response.json();
-  } catch {
-    plan = null;
-  }
+  const { getAuraResolveNodeSnapshot, queueAuraResolveCommand, recordAuraResolveCreativeMemory } = await import(
+    "../hq/auraResolveProductionNode"
+  );
+  const { planAuraCreativeInstruction } = await import("../hq/auraResolveCreativePlanner");
+  const plan = planAuraCreativeInstruction(instruction);
   const node = await getAuraResolveNodeSnapshot();
   if (!node.nodeId) {
-    res.status(200).json({ ok: false, publish: false, plan, message: "No Resolve production node is enrolled yet." });
+    res.status(200).json({
+      ok: false,
+      publish: false,
+      plan,
+      message: "No Resolve production node is enrolled yet.",
+    });
     return;
   }
+  await recordAuraResolveCreativeMemory("plan", { instruction, project: plan.project });
   const queued = await queueAuraResolveCommand(node.nodeId, "editor_plan", { instruction, publish: false });
-  res.json({ ok: true, publish: false, plan, queued, message: "Plan queued for the production Mac. Nothing renders until you approve a run." });
+  res.json({
+    ok: true,
+    publish: false,
+    plan,
+    queued,
+    message: "Plan ready. Start production to build the draft on the Production Mac.",
+  });
+});
+
+router.post("/aura/resolve/produce", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const instruction = String(req.body?.instruction || "");
+  if (!instruction.trim()) {
+    res.status(400).json({ ok: false, error: "instruction required" });
+    return;
+  }
+  if (req.body?.publish === true) {
+    res.status(403).json({ ok: false, error: "publishing requires Founder approval and is not available", publish: false });
+    return;
+  }
+  const { getAuraResolveNodeSnapshot, queueAuraResolveCommand, recordAuraResolveCreativeMemory } = await import(
+    "../hq/auraResolveProductionNode"
+  );
+  const { planAuraCreativeInstruction } = await import("../hq/auraResolveCreativePlanner");
+  const plan = planAuraCreativeInstruction(instruction);
+  const node = await getAuraResolveNodeSnapshot();
+  if (!node.nodeId) {
+    res.status(409).json({ ok: false, error: "Production Mac is not enrolled" });
+    return;
+  }
+  await recordAuraResolveCreativeMemory("produce", { instruction, project: plan.project });
+  const queued = await queueAuraResolveCommand(node.nodeId, "editor_run", {
+    instruction,
+    publish: false,
+    draft: true,
+  });
+  res.json({
+    ok: true,
+    publish: false,
+    plan,
+    queued,
+    message: "Creative production queued on the Production Mac. Draft only.",
+  });
+});
+
+router.post("/aura/resolve/revise", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const instruction = String(req.body?.instruction || "");
+  const revisionNote = String(req.body?.revisionNote || req.body?.note || "").trim();
+  if (!instruction.trim() || !revisionNote) {
+    res.status(400).json({ ok: false, error: "instruction and revisionNote required" });
+    return;
+  }
+  if (req.body?.publish === true) {
+    res.status(403).json({ ok: false, error: "publishing requires Founder approval and is not available", publish: false });
+    return;
+  }
+  const { getAuraResolveNodeSnapshot, queueAuraResolveCommand, recordAuraResolveCreativeMemory } = await import(
+    "../hq/auraResolveProductionNode"
+  );
+  const node = await getAuraResolveNodeSnapshot();
+  if (!node.nodeId) {
+    res.status(409).json({ ok: false, error: "Production Mac is not enrolled" });
+    return;
+  }
+  await recordAuraResolveCreativeMemory("revision", { instruction, revisionNote });
+  const queued = await queueAuraResolveCommand(node.nodeId, "request_revision", {
+    instruction,
+    revisionNote,
+    publish: false,
+  });
+  res.json({ ok: true, publish: false, queued, message: "Revision queued. Draft only." });
+});
+
+router.get("/aura/resolve/preview/:id", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { getAuraResolvePreview } = await import("../hq/auraResolveProductionNode");
+  const preview = await getAuraResolvePreview(String(req.params.id));
+  if (!preview) {
+    res.status(404).json({ ok: false, error: "preview not found" });
+    return;
+  }
+  res.setHeader("Content-Type", preview.contentType);
+  res.setHeader("Content-Length", String(preview.size));
+  res.setHeader("Content-Disposition", `inline; filename="${preview.name}"`);
+  res.setHeader("Cache-Control", "private, max-age=60");
+  res.send(preview.bytes);
 });
 
 router.post("/aura/resolve/node/claim", async (req, res) => {
@@ -1071,6 +1176,38 @@ router.post("/aura/resolve/node/complete", async (req, res) => {
     res.status(503).json({
       ok: false,
       error: error instanceof Error ? error.message : "Resolve complete unavailable",
+    });
+  }
+});
+
+router.post("/aura/resolve/node/preview", async (req, res) => {
+  try {
+    const { authenticateAuraResolveNode, storeAuraResolvePreview } = await import("../hq/auraResolveProductionNode");
+    const node = await authenticateAuraResolveNode(req);
+    if (!node) {
+      res.status(401).json({ ok: false, error: "resolve node token rejected" });
+      return;
+    }
+    if (req.body?.publish === true) {
+      res.status(403).json({ ok: false, error: "publishing requires Founder approval and is not available", publish: false });
+      return;
+    }
+    const stored = await storeAuraResolvePreview({
+      name: String(req.body?.name || "draft.mp4"),
+      project: req.body?.project ? String(req.body.project) : null,
+      instruction: req.body?.instruction ? String(req.body.instruction) : null,
+      duration: typeof req.body?.duration === "number" ? req.body.duration : null,
+      contentType: String(req.body?.contentType || "video/mp4"),
+      base64: String(req.body?.base64 || ""),
+      size: typeof req.body?.size === "number" ? req.body.size : undefined,
+    });
+    res.status(201).json(stored);
+  } catch (error) {
+    console.error("POST /aura/resolve/node/preview error:", error);
+    res.status(503).json({
+      ok: false,
+      error: error instanceof Error ? error.message : "Resolve preview upload unavailable",
+      publish: false,
     });
   }
 });

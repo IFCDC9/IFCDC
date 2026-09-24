@@ -12,6 +12,9 @@ import { randomBytes } from "crypto";
 import { fileURLToPath } from "url";
 import { EDITOR_COMMANDS, planInstruction, toResolveCall } from "../editor/commands.mjs";
 import { clonePlan } from "../clone/pipeline.mjs";
+import { runCreativeProduction, readRenderBytes } from "../editor/produce.mjs";
+import { stageBrandKit, readBrandKit } from "../brand/kit.mjs";
+import { readCreativeMemory } from "../editor/memory.mjs";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.AURA_RESOLVE_BRIDGE_PORT || 4181);
@@ -56,7 +59,7 @@ function resolveRunning() {
   return probe.status === 0;
 }
 
-function askResolve(action, payload) {
+function askResolve(action, payload, timeoutMs = 20000) {
   const message = JSON.stringify({ token: token(), action, payload: payload || {} }) + "\n";
   return new Promise((resolve, reject) => {
     const socket = connect({ host: "127.0.0.1", port: RESOLVE_PORT });
@@ -64,7 +67,7 @@ function askResolve(action, payload) {
     const timer = setTimeout(() => {
       socket.destroy();
       reject(new Error("Resolve bridge timed out"));
-    }, 20000);
+    }, timeoutMs);
     socket.on("data", (chunk) => {
       raw += chunk.toString();
       if (raw.includes("\n")) {
@@ -128,11 +131,16 @@ const ALLOWED = new Set([
   "status",
   "create_project",
   "import_media",
+  "create_bin",
   "create_timeline",
   "add_clip",
   "trim_clip",
   "split_clip",
   "move_clip",
+  "remove_clip",
+  "duplicate_clip",
+  "set_clip_duration",
+  "reorder_clips",
   "add_transition",
   "add_title",
   "add_logo",
@@ -143,6 +151,7 @@ const ALLOWED = new Set([
   "fade_video",
   "add_subtitles",
   "apply_branding",
+  "basic_cleanup",
   "save_project",
   "render",
   "render_status",
@@ -256,12 +265,22 @@ const PRODUCTION_HQ = process.env.AURA_RESOLVE_HQ_URL || "https://ifcdc-hq-wst6.
 const HEARTBEAT_INTERVAL_MS = Number(process.env.AURA_RESOLVE_HEARTBEAT_MS || 8000);
 const MAX_BACKOFF_MS = Number(process.env.AURA_RESOLVE_MAX_BACKOFF_MS || 20000);
 const HQ_FETCH_TIMEOUT_MS = Number(process.env.AURA_RESOLVE_HQ_TIMEOUT_MS || 8000);
+const HQ_PREVIEW_TIMEOUT_MS = Number(process.env.AURA_RESOLVE_PREVIEW_TIMEOUT_MS || 120000);
 const ACTION_FOR = {
   create_project: "create_project",
   open_project: "create_project",
   import_media: "import_media",
+  import_assets: "import_media",
+  create_bin: "create_bin",
   create_timeline: "create_timeline",
   add_clip: "add_clip",
+  trim_clip: "trim_clip",
+  split_clip: "split_clip",
+  move_clip: "move_clip",
+  remove_clip: "remove_clip",
+  duplicate_clip: "duplicate_clip",
+  set_clip_duration: "set_clip_duration",
+  reorder_clips: "reorder_clips",
   add_title: "add_title",
   add_logo: "add_logo",
   add_music: "add_music",
@@ -269,11 +288,19 @@ const ACTION_FOR = {
   add_transition: "add_transition",
   fade_audio: "fade_audio",
   fade_video: "fade_video",
+  fade_music: "fade_audio",
+  duck_music: "adjust_audio_levels",
+  adjust_audio_levels: "adjust_audio_levels",
+  add_subtitles: "add_subtitles",
+  add_captions: "add_subtitles",
+  apply_branding: "apply_branding",
+  basic_cleanup: "basic_cleanup",
   save_project: "save_project",
   preview_project: "status",
   queue_render: "render",
   render_vertical: "render",
   render_landscape: "render",
+  render_square: "render",
   resolve_status: "status",
 };
 
@@ -315,10 +342,10 @@ function persistLink(link) {
   return next;
 }
 
-async function hqFetch(url, init = {}) {
+async function hqFetch(url, init = {}, timeoutMs = HQ_FETCH_TIMEOUT_MS) {
   return fetch(url, {
     ...init,
-    signal: AbortSignal.timeout(HQ_FETCH_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   });
 }
 
@@ -379,16 +406,77 @@ async function completeCommand(link, id, result) {
   });
 }
 
+async function uploadPreviewToHq(link, meta) {
+  const file = readRenderBytes(meta.path || meta.name);
+  if (!file) return { ok: false, error: "render file missing" };
+  const response = await hqFetch(
+    `${link.hqUrl}/api/hq/aura/resolve/node/preview`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${link.token}`,
+        "x-aura-resolve-node-id": link.nodeId,
+      },
+      body: JSON.stringify({
+        name: file.name,
+        project: meta.project || null,
+        instruction: meta.instruction || null,
+        duration: file.duration ?? meta.duration ?? null,
+        publish: false,
+        contentType: "video/mp4",
+        base64: file.bytes.toString("base64"),
+        size: file.size,
+      }),
+    },
+    HQ_PREVIEW_TIMEOUT_MS,
+  );
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) return { ok: false, error: body.error || `preview_upload_${response.status}` };
+  return { ok: true, ...body, name: file.name, duration: file.duration };
+}
+
+let commandWorker = Promise.resolve();
+
 async function runQueuedCommand(link, command) {
   if (command.command === "editor_plan") {
-    const planned = await fetch(`http://${HOST}:${PORT}/v1/editor/plan`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instruction: command.args?.instruction || "" }),
-      signal: AbortSignal.timeout(15_000),
-    }).then((item) => item.json());
-    await completeCommand(link, command.id, { ok: true, publish: false, plan: planned });
+    const planned = planInstruction(command.args?.instruction || "");
+    const clone = /clone|founder identity|digital clone/i.test(String(command.args?.instruction || ""))
+      ? clonePlan(command.args.instruction)
+      : null;
+    const brand = stageBrandKit({ intoMedia: true });
+    await completeCommand(link, command.id, {
+      ok: true,
+      publish: false,
+      plan: planned,
+      clone,
+      brandKit: brand,
+      commands: EDITOR_COMMANDS,
+      memory: readCreativeMemory(),
+    });
     writeFileSync(join(ROOT, "last-command.json"), JSON.stringify({ command: "editor_plan", at: new Date().toISOString() }));
+    return;
+  }
+  if (command.command === "editor_run" || command.command === "request_revision") {
+    if (command.args?.publish === true) {
+      await completeCommand(link, command.id, { ok: false, error: "publishing requires Founder approval and is not available", publish: false });
+      return;
+    }
+    try {
+      const produced = await runCreativeProduction({
+        instruction: command.args?.instruction || "",
+        revisionNote: command.command === "request_revision" ? command.args?.revisionNote || command.args?.note || "Founder revision" : null,
+        askResolve: (action, payload) => askResolve(action, payload, action === "render" ? 60000 : 45000),
+        uploadPreview: (meta) => uploadPreviewToHq(link, meta),
+      });
+      writeFileSync(
+        join(ROOT, "last-command.json"),
+        JSON.stringify({ command: command.command, at: new Date().toISOString(), project: produced.plan?.project }),
+      );
+      await completeCommand(link, command.id, produced);
+    } catch (error) {
+      await completeCommand(link, command.id, { ok: false, error: error.message, publish: false });
+    }
     return;
   }
   const action = ACTION_FOR[command.command];
@@ -398,8 +486,9 @@ async function runQueuedCommand(link, command) {
     const payload = { ...(command.args || {}), publish: false };
     if (command.command === "render_vertical") Object.assign(payload, { width: 1080, height: 1920 });
     if (command.command === "render_landscape") Object.assign(payload, { width: 1920, height: 1080 });
+    if (command.command === "render_square") Object.assign(payload, { width: 1080, height: 1080 });
     try {
-      result = await askResolve(action, payload);
+      result = await askResolve(action, payload, action === "render" ? 60000 : 20000);
     } catch (error) {
       result = { ok: false, error: error.message };
     }
@@ -411,6 +500,26 @@ async function runQueuedCommand(link, command) {
     );
   }
   await completeCommand(link, command.id, result);
+}
+
+function enqueueCommand(link, command) {
+  // Keep heartbeat responsive during long creative runs (TTL 45s).
+  commandWorker = commandWorker
+    .then(async () => {
+      try {
+        await runQueuedCommand(link, command);
+      } catch (error) {
+        console.error(`[aura-resolve] command ${command.id} failed:`, error.message);
+        try {
+          await completeCommand(link, command.id, { ok: false, error: error.message, publish: false });
+        } catch {
+          /* ignore */
+        }
+      }
+    })
+    .catch((error) => {
+      console.error(`[aura-resolve] command worker:`, error.message);
+    });
 }
 
 async function heartbeatOnce(link) {
@@ -447,8 +556,34 @@ async function heartbeatOnce(link) {
       renderStatus: "idle",
       renderPercent: null,
       errors: snap.apiError ? [snap.apiError] : [],
-      notes: ["Publishing stays off until Founder approval."],
+      notes: [
+        "Publishing stays off until Founder approval.",
+        "Draft creative runs are available from HQ. Final/publish stays gated.",
+      ],
       lastSuccessfulCommand,
+      brandKit: (() => {
+        try {
+          const kit = readBrandKit();
+          return {
+            assetCount: (kit.staged || kit.assets || []).filter((item) => item.available !== false).length,
+            gaps: kit.gaps || [],
+          };
+        } catch {
+          return null;
+        }
+      })(),
+      creativeMemory: (() => {
+        try {
+          const memory = readCreativeMemory();
+          return {
+            productions: (memory.productions || []).length,
+            revisions: (memory.revisions || []).length,
+            preferences: memory.preferences || {},
+          };
+        } catch {
+          return null;
+        }
+      })(),
     }),
   });
   if (response.status === 401) {
@@ -463,16 +598,7 @@ async function heartbeatOnce(link) {
   }
   const body = await response.json();
   for (const command of body.commands || []) {
-    try {
-      await runQueuedCommand(link, command);
-    } catch (error) {
-      console.error(`[aura-resolve] command ${command.id} failed:`, error.message);
-      try {
-        await completeCommand(link, command.id, { ok: false, error: error.message, publish: false });
-      } catch {
-        /* ignore complete failure; next heartbeat will surface */
-      }
-    }
+    enqueueCommand(link, command);
   }
   writeAgentState({
     ok: true,
