@@ -4,8 +4,11 @@
  * Separate from the Ableton and Serato node tables.
  */
 import crypto from "crypto";
-import bcrypt from "bcryptjs";
 import { getDb } from "../db";
+
+function tokenHash(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
 
 export const AURA_RESOLVE_COMMANDS = [
   "create_project",
@@ -83,7 +86,7 @@ export async function claimFirstAuraResolveNode(opts: {
      VALUES (?, ?, ?, ?, 1, ?)`,
     nodeId,
     (opts.label || "Founder Mac Resolve Node").slice(0, 120),
-    await bcrypt.hash(token, 10),
+    tokenHash(token),
     opts.hostname ?? null,
     new Date().toISOString()
   );
@@ -101,7 +104,7 @@ export async function enrollAuraResolveNode(opts: { label?: string; hostname?: s
      VALUES (?, ?, ?, ?, 1, ?)`,
     nodeId,
     (opts.label || "Founder Mac Resolve Node").slice(0, 120),
-    await bcrypt.hash(token, 10),
+    tokenHash(token),
     opts.hostname ?? null,
     new Date().toISOString()
   );
@@ -121,7 +124,7 @@ export async function authenticateAuraResolveNode(req: {
     `SELECT node_id, label, token_hash, active FROM aura_resolve_production_nodes WHERE node_id = ? AND active = 1`,
     nodeId
   )) as { node_id: string; label: string; token_hash: string } | undefined;
-  if (!row || !(await bcrypt.compare(token, row.token_hash))) return null;
+  if (!row || tokenHash(token) !== row.token_hash) return null;
   return { nodeId: row.node_id, label: row.label };
 }
 
@@ -233,7 +236,7 @@ export async function cancelAuraResolveJob(id: string) {
 
 export async function readLocalResolveBridge(): Promise<Record<string, unknown> | null> {
   try {
-    const response = await fetch(`${LOCAL_BRIDGE}/health`);
+    const response = await fetch(`${LOCAL_BRIDGE}/health`, { signal: AbortSignal.timeout(400) });
     if (!response.ok) return null;
     return (await response.json()) as Record<string, unknown>;
   } catch {
