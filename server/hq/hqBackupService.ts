@@ -27,7 +27,7 @@ export async function ensureBackupTables(): Promise<void> {
   `);
 }
 
-const MAX_BACKUPS = 30;
+const MAX_BACKUPS = 3;
 
 export async function createDatabaseBackup(triggeredBy = "system"): Promise<{
   id: string;

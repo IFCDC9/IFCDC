@@ -8,9 +8,11 @@
  * and Resolve schema work cannot queue behind other modules on that singleton.
  */
 import crypto from "crypto";
+import fs from "fs";
+import path from "path";
 import sqlite3 from "sqlite3";
 import { open, Database } from "sqlite";
-import { getDataDir, getDbPath } from "../config/dataPaths";
+import { getBackupDir, getDataDir, getDbPath, getReportsDir } from "../config/dataPaths";
 
 function tokenHash(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
@@ -171,6 +173,114 @@ function bearer(req: { headers: Record<string, unknown> }): string | null {
   return null;
 }
 
+/** Free disposable disk so Resolve enrollment writes are not blocked by SQLITE_FULL. */
+function reclaimDiskForResolveWrites(): { freedBytes: number; actions: string[] } {
+  const actions: string[] = [];
+  let freedBytes = 0;
+  const unlinkSafe = (filePath: string, label: string) => {
+    try {
+      if (!fs.existsSync(filePath)) return;
+      const size = fs.statSync(filePath).size;
+      fs.unlinkSync(filePath);
+      freedBytes += size;
+      actions.push(`${label}:${path.basename(filePath)}`);
+    } catch (err) {
+      console.warn("[aura-resolve] reclaim skip", filePath, err);
+    }
+  };
+
+  const backupDir = getBackupDir();
+  if (fs.existsSync(backupDir)) {
+    const backups = fs
+      .readdirSync(backupDir)
+      .map((name) => {
+        const full = path.join(backupDir, name);
+        try {
+          const st = fs.statSync(full);
+          return st.isFile() ? { full, mtimeMs: st.mtimeMs, size: st.size } : null;
+        } catch {
+          return null;
+        }
+      })
+      .filter((row): row is { full: string; mtimeMs: number; size: number } => Boolean(row))
+      .sort((a, b) => b.mtimeMs - a.mtimeMs);
+    // Drop every backup copy when the disk is full — enrollment needs write headroom.
+    for (const row of backups) unlinkSafe(row.full, "backup");
+  }
+
+  const dataDir = getDataDir();
+  for (const name of fs.readdirSync(dataDir)) {
+    if (!/^ifcdc-.*\.db$/i.test(name) && !/\.db\.(bak|tmp|old)$/i.test(name)) continue;
+    const full = path.join(dataDir, name);
+    if (path.resolve(full) === path.resolve(getDbPath())) continue;
+    unlinkSafe(full, "data-copy");
+  }
+
+  try {
+    const reportsDir = getReportsDir();
+    if (fs.existsSync(reportsDir)) {
+      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      for (const name of fs.readdirSync(reportsDir)) {
+        const full = path.join(reportsDir, name);
+        try {
+          const st = fs.statSync(full);
+          if (st.isFile() && st.mtimeMs < cutoff) unlinkSafe(full, "report");
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  console.warn("[aura-resolve] disk reclaim", { freedBytes, actions: actions.slice(0, 20) });
+  return { freedBytes, actions };
+}
+
+async function insertClaimNode(
+  db: Database,
+  opts: { nodeId: string; token: string; label?: string; hostname?: string }
+): Promise<{ ok: true; nodeId: string } | { ok: false; error: string }> {
+  const nodeId = opts.nodeId;
+  const token = opts.token;
+  const existing = (await db.get(
+    `SELECT node_id, token_hash FROM aura_resolve_production_nodes WHERE node_id = ? AND active = 1`,
+    nodeId
+  )) as { node_id: string; token_hash: string } | undefined;
+  if (existing) {
+    if (tokenHash(token) === existing.token_hash) {
+      return { ok: true, nodeId };
+    }
+    return { ok: false, error: "A Resolve production node is already enrolled" };
+  }
+
+  // Drop never-heartbeated enrollments so a lost credential cannot permanently block the Mac.
+  await db.run(
+    `UPDATE aura_resolve_production_nodes SET active = 0
+     WHERE active = 1 AND last_seen_at IS NULL`
+  );
+
+  const countRow = (await db.get(
+    `SELECT COUNT(*) AS c FROM aura_resolve_production_nodes WHERE active = 1`
+  )) as { c: number };
+  if (Number(countRow?.c || 0) > 0) {
+    return { ok: false, error: "A Resolve production node is already enrolled" };
+  }
+
+  await db.run(
+    `INSERT INTO aura_resolve_production_nodes
+      (node_id, label, token_hash, hostname, active, created_at)
+     VALUES (?, ?, ?, ?, 1, ?)`,
+    nodeId,
+    (opts.label || "Founder Mac Resolve Node").slice(0, 120),
+    tokenHash(token),
+    opts.hostname ?? null,
+    new Date().toISOString()
+  );
+  return { ok: true, nodeId };
+}
+
 export async function claimFirstAuraResolveNode(opts: {
   nodeId: string;
   token: string;
@@ -181,46 +291,32 @@ export async function claimFirstAuraResolveNode(opts: {
   const token = String(opts.token || "").trim();
   if (!nodeId || token.length < 24) return { ok: false as const, error: "Invalid node credentials" };
 
+  const runOnce = () =>
+    withResolveDb("claimFirstAuraResolveNode", (db) => insertClaimNode(db, { ...opts, nodeId, token }));
+
   try {
-    return await withResolveDb("claimFirstAuraResolveNode", async (db) => {
-      const existing = (await db.get(
-        `SELECT node_id, token_hash FROM aura_resolve_production_nodes WHERE node_id = ? AND active = 1`,
-        nodeId
-      )) as { node_id: string; token_hash: string } | undefined;
-      if (existing) {
-        if (tokenHash(token) === existing.token_hash) {
-          return { ok: true as const, nodeId };
-        }
-        return { ok: false as const, error: "A Resolve production node is already enrolled" };
-      }
-
-      // Drop never-heartbeated enrollments so a lost credential cannot permanently block the Mac.
-      await db.run(
-        `UPDATE aura_resolve_production_nodes SET active = 0
-         WHERE active = 1 AND last_seen_at IS NULL`
-      );
-
-      const countRow = (await db.get(
-        `SELECT COUNT(*) AS c FROM aura_resolve_production_nodes WHERE active = 1`
-      )) as { c: number };
-      if (Number(countRow?.c || 0) > 0) {
-        return { ok: false as const, error: "A Resolve production node is already enrolled" };
-      }
-
-      await db.run(
-        `INSERT INTO aura_resolve_production_nodes
-          (node_id, label, token_hash, hostname, active, created_at)
-         VALUES (?, ?, ?, ?, 1, ?)`,
-        nodeId,
-        (opts.label || "Founder Mac Resolve Node").slice(0, 120),
-        tokenHash(token),
-        opts.hostname ?? null,
-        new Date().toISOString()
-      );
-      return { ok: true as const, nodeId };
-    });
+    return await runOnce();
   } catch (err) {
     const message = err instanceof Error ? err.message : "Resolve node database unavailable";
+    if (/SQLITE_FULL|database or disk is full/i.test(message)) {
+      const reclaim = reclaimDiskForResolveWrites();
+      await resetResolveDb("sqlite-full-reclaim");
+      try {
+        const retry = await runOnce();
+        if (retry.ok) return retry;
+        return {
+          ok: false as const,
+          error: `${retry.error} (reclaimed ${reclaim.freedBytes} bytes)`,
+        };
+      } catch (retryErr) {
+        const retryMessage = retryErr instanceof Error ? retryErr.message : String(retryErr);
+        console.error("[aura-resolve] claim retry failed:", retryMessage, reclaim);
+        return {
+          ok: false as const,
+          error: `Resolve node claim failed after reclaim (${reclaim.freedBytes} bytes): ${retryMessage}`,
+        };
+      }
+    }
     console.error("[aura-resolve] claim failed:", message);
     return { ok: false as const, error: `Resolve node claim failed: ${message}` };
   }
