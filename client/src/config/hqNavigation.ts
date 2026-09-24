@@ -33,6 +33,7 @@ import {
   Activity,
   BookOpen,
   Music2,
+  Clapperboard,
 } from "lucide-react";
 
 export interface HQNavItem {
@@ -59,6 +60,7 @@ export const HQ_NAV_ITEMS: HQNavItem[] = [
   { label: "Founder Workspace", path: "/hq/founder-workspace", icon: Sparkles, section: "Command", badge: "AO" },
   { label: "AURA AI Command Center", path: "/hq/aura", icon: Sparkles, section: "Command" },
   { label: "AURA MUSIC", path: "/hq/aura-music", icon: Music2, section: "Command", badge: "Live" },
+  { label: "AURA Resolve", path: "/hq/aura-resolve", icon: Clapperboard, section: "Command", badge: "Bridge" },
   { label: "AURA DJ — Serato", path: "/hq/aura-music?tab=serato", icon: Radio, section: "Command", badge: "OPEN" },
   { label: "Organization Analytics", path: "/hq/analytics", icon: BarChart3, section: "Command" },
   { label: "Enterprise Reporting", path: "/hq/reports", icon: FileBarChart, section: "Command" },

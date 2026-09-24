@@ -882,6 +882,147 @@ router.get("/aura/music/health", hqAuthRequired, requireHQModule("aura"), async 
   }
 });
 
+/** AURA Resolve board. Browser talks to HQ only. The bridge stays on 127.0.0.1. */
+router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
+  const { getAuraResolveNodeSnapshot, listAuraResolveJobs, readLocalResolveBridge } = await import(
+    "../hq/auraResolveProductionNode"
+  );
+  const node = await getAuraResolveNodeSnapshot();
+  const local = await readLocalResolveBridge();
+  const beat = (node.heartbeat || {}) as Record<string, any>;
+  const live = (local?.api as { result?: Record<string, any> } | undefined)?.result || beat.resolve || {};
+  const jobs = await listAuraResolveJobs(node.nodeId);
+  const current = jobs.find((job) => job.status === "claimed") || jobs.find((job) => job.status === "queued") || null;
+  const render = beat.render || live.render || {};
+  res.json({
+    ok: true,
+    publicExposure: false,
+    bridge: local?.api ? "ONLINE" : beat.bridge || "OFFLINE",
+    resolve: live.resolve === "ONLINE" || local?.resolveRunning || beat.resolveRunning ? "ONLINE" : "OFFLINE",
+    resolveVersion: live.version || (local?.resolve as { version?: string } | undefined)?.version || beat.resolveVersion || null,
+    productionMac: node.online ? "ONLINE" : "OFFLINE",
+    project: live.project || beat.project || null,
+    timeline: live.timeline || beat.timeline || null,
+    currentJob: current,
+    renderStatus: render.status || beat.renderStatus || "idle",
+    renderPercent: render.percent ?? beat.renderPercent ?? null,
+    queue: jobs.filter((job) => job.status === "queued" || job.status === "claimed"),
+    assets: beat.assets || [],
+    completedRenders: beat.completedRenders || [],
+    errors: beat.errors || [],
+    notes: beat.notes || ["Publishing stays off until Founder approval."],
+    lastHeartbeat: node.lastSeenAt,
+    lastSuccessfulCommand: beat.lastSuccessfulCommand || jobs.find((job) => job.status === "complete") || null,
+    jobs,
+  });
+});
+
+router.post("/aura/resolve/jobs", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { getAuraResolveNodeSnapshot, queueAuraResolveCommand, AURA_RESOLVE_COMMANDS } = await import(
+    "../hq/auraResolveProductionNode"
+  );
+  const command = String(req.body?.command || "");
+  if (!AURA_RESOLVE_COMMANDS.includes(command as (typeof AURA_RESOLVE_COMMANDS)[number])) {
+    res.status(400).json({ ok: false, error: "command is not allowlisted" });
+    return;
+  }
+  const node = await getAuraResolveNodeSnapshot();
+  if (!node.nodeId) {
+    res.status(409).json({ ok: false, error: "Production Mac is not enrolled" });
+    return;
+  }
+  const queued = await queueAuraResolveCommand(node.nodeId, command, { ...(req.body?.payload || {}), publish: false });
+  res.json({ ok: true, publish: false, queued });
+});
+
+router.post("/aura/resolve/jobs/:id/cancel", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { cancelAuraResolveJob } = await import("../hq/auraResolveProductionNode");
+  res.json({ ok: true, ...(await cancelAuraResolveJob(String(req.params.id))) });
+});
+
+router.post("/aura/resolve/plan", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const instruction = String(req.body?.instruction || "");
+  const { getAuraResolveNodeSnapshot, queueAuraResolveCommand } = await import("../hq/auraResolveProductionNode");
+  let plan = null;
+  try {
+    const response = await fetch("http://127.0.0.1:4181/v1/editor/plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instruction }),
+    });
+    plan = await response.json();
+  } catch {
+    plan = null;
+  }
+  const node = await getAuraResolveNodeSnapshot();
+  if (!node.nodeId) {
+    res.status(200).json({ ok: false, publish: false, plan, message: "No Resolve production node is enrolled yet." });
+    return;
+  }
+  const queued = await queueAuraResolveCommand(node.nodeId, "editor_plan", { instruction, publish: false });
+  res.json({ ok: true, publish: false, plan, queued, message: "Plan queued for the production Mac. Nothing renders until you approve a run." });
+});
+
+router.post("/aura/resolve/node/claim", async (req, res) => {
+  const { claimFirstAuraResolveNode } = await import("../hq/auraResolveProductionNode");
+  const result = await claimFirstAuraResolveNode({
+    nodeId: String(req.body?.nodeId || ""),
+    token: String(req.body?.token || ""),
+    label: String(req.body?.label || "Founder Mac Resolve Node"),
+    hostname: String(req.body?.hostname || ""),
+  });
+  if (!result.ok) {
+    res.status(403).json(result);
+    return;
+  }
+  res.status(201).json({ ok: true, nodeId: result.nodeId, publicExposure: false });
+});
+
+router.post("/aura/resolve/node/claim-local", async (req, res) => {
+  const address = req.socket.remoteAddress || "";
+  if (address !== "127.0.0.1" && address !== "::1" && !address.endsWith("127.0.0.1")) {
+    res.status(403).json({ ok: false, error: "local claim only" });
+    return;
+  }
+  const { enrollAuraResolveNode } = await import("../hq/auraResolveProductionNode");
+  const enrolled = await enrollAuraResolveNode({ label: "Founder Mac Resolve Node", hostname: "production-mac" });
+  res.json({ ...enrolled, publicExposure: false });
+});
+
+router.post("/aura/resolve/node/enroll", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const { enrollAuraResolveNode } = await import("../hq/auraResolveProductionNode");
+  const enrolled = await enrollAuraResolveNode({
+    label: String(req.body?.label || "Founder Mac Resolve Node"),
+    hostname: String(req.body?.hostname || ""),
+  });
+  res.json({ ...enrolled, publicExposure: false });
+});
+
+router.post("/aura/resolve/node/heartbeat", async (req, res) => {
+  const { authenticateAuraResolveNode, recordAuraResolveHeartbeat, claimAuraResolveCommands } = await import(
+    "../hq/auraResolveProductionNode"
+  );
+  const node = await authenticateAuraResolveNode(req);
+  if (!node) {
+    res.status(401).json({ ok: false, error: "resolve node token rejected" });
+    return;
+  }
+  await recordAuraResolveHeartbeat(node.nodeId, req.body || {});
+  const commands = await claimAuraResolveCommands(node.nodeId);
+  res.json({ ok: true, commands, publicExposure: false });
+});
+
+router.post("/aura/resolve/node/complete", async (req, res) => {
+  const { authenticateAuraResolveNode, completeAuraResolveCommand } = await import("../hq/auraResolveProductionNode");
+  const node = await authenticateAuraResolveNode(req);
+  if (!node) {
+    res.status(401).json({ ok: false, error: "resolve node token rejected" });
+    return;
+  }
+  await completeAuraResolveCommand(String(req.body?.id || ""), req.body?.result || {});
+  res.json({ ok: true });
+});
+
 /** AURA MUSIC Command Center payload for HQ UI (local status file or clear cloud offline). */
 router.get("/aura/music/command-center", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
   try {
@@ -922,6 +1063,37 @@ router.get("/aura/music/command-center", hqAuthRequired, requireHQModule("aura")
       },
       sections: [],
     });
+  }
+});
+
+/** FRP SPINS source — metadata/intelligence only (audio stays on production node). */
+router.get("/aura/music/spins", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
+  try {
+    const { getAuraSpinsDashboard } = await import("../hq/auraMusicHealth");
+    res.json(await getAuraSpinsDashboard());
+  } catch (error) {
+    console.error("GET /aura/music/spins error:", error);
+    res.status(500).json({ ok: false, error: "SPINS dashboard unavailable" });
+  }
+});
+
+router.get("/aura/music/founder-dna", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
+  try {
+    const { getFounderSoundDnaDashboard } = await import("../hq/auraMusicHealth");
+    res.json(await getFounderSoundDnaDashboard());
+  } catch (error) {
+    console.error("GET /aura/music/founder-dna error:", error);
+    res.status(500).json({ ok: false, error: "Founder Sound DNA unavailable" });
+  }
+});
+
+router.get("/aura/music/current-sound", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
+  try {
+    const { getCurrentSoundDashboard } = await import("../hq/auraMusicHealth");
+    res.json(await getCurrentSoundDashboard());
+  } catch (error) {
+    console.error("GET /aura/music/current-sound error:", error);
+    res.status(500).json({ ok: false, error: "Current Sound Profile unavailable" });
   }
 });
 

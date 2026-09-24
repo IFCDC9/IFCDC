@@ -36,6 +36,7 @@ const AuraMusicCommandCenterPage = lazyWithRetry(
   () => import("./pages/hq/AuraMusicCommandCenterPage"),
   "AuraMusicCommandCenterPage"
 );
+const AuraResolvePage = lazyWithRetry(() => import("./pages/hq/AuraResolvePage"), "AuraResolvePage");
 const AuraExecutiveIntelligencePage = lazyWithRetry(
   () => import("./pages/hq/AuraExecutiveIntelligencePage"),
   "AuraExecutiveIntelligencePage"
@@ -180,6 +181,7 @@ const App: React.FC = () => (
           <Route path="/hq/developer" element={<HqRoute path="/hq/developer"><DeveloperPortalPage /></HqRoute>} />
           <Route path="/hq/aura" element={<HqRoute path="/hq/aura"><AuraCommandCenterPage /></HqRoute>} />
           <Route path="/hq/aura-music" element={<HqRoute path="/hq/aura-music"><AuraMusicCommandCenterPage /></HqRoute>} />
+          <Route path="/hq/aura-resolve" element={<HqRoute path="/hq/aura-resolve"><AuraResolvePage /></HqRoute>} />
           <Route path="/hq/aura-dj" element={<Navigate to="/hq/aura-music?tab=serato" replace />} />
           <Route path="/hq/aura-serato" element={<Navigate to="/hq/aura-music?tab=serato" replace />} />
           <Route path="/hq/aura-brain" element={<HqRoute path="/hq/aura-brain"><AuraEnterpriseBrainV1Page /></HqRoute>} />
