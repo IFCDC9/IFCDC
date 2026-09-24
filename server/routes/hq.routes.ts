@@ -909,10 +909,21 @@ router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), asyn
       Boolean(live.resolve === "ONLINE" || local?.resolveRunning || beat.resolveRunning);
     const previews = await listAuraResolvePreviews();
     const memory = await listAuraResolveCreativeMemory(12);
+    const memoryCompany =
+      (beat.creativeMemory as { company?: string; productionCompany?: string; productionIdentity?: string } | undefined)
+        ?.productionCompany ||
+      (beat.creativeMemory as { company?: string } | undefined)?.company ||
+      "IFCDC PRODUCTIONS";
     res.json({
       ok: true,
       publicExposure: false,
-      company: "IFCDC PRODUCTIONS",
+      company: memoryCompany,
+      productionCompany: "IFCDC PRODUCTIONS",
+      productionIdentity: "IFCDC PRODUCTION",
+      brandPromoted:
+        (beat.creativeMemory as { brandPromoted?: string } | undefined)?.brandPromoted ||
+        (current as { result?: { brandPromoted?: string } } | null)?.result?.brandPromoted ||
+        null,
       bridge: bridgeOnline ? "ONLINE" : "OFFLINE",
       resolve: resolveOnline ? "ONLINE" : "OFFLINE",
       resolveVersion: macOnline
@@ -947,7 +958,8 @@ router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), asyn
       errors: macOnline ? beat.errors || [] : [],
       notes: beat.notes || [
         "Publishing stays off until Founder approval.",
-        "IFCDC PRODUCTIONS applies automatically.",
+        "IFCDC PRODUCTIONS applies automatically to every project.",
+        "brandPromoted is the product/program — separate from the production company.",
       ],
       lastHeartbeat: node.lastSeenAt,
       heartbeatAgeMs: node.ageMs ?? null,
@@ -1026,11 +1038,22 @@ router.post("/aura/resolve/plan", hqAuthRequired, requireHQModule("aura"), async
     });
     return;
   }
-  await recordAuraResolveCreativeMemory("plan", { instruction, project: plan.project });
+  await recordAuraResolveCreativeMemory("plan", {
+    instruction,
+    project: plan.project,
+    company: "IFCDC PRODUCTIONS",
+    productionCompany: plan.productionCompany,
+    productionIdentity: plan.productionIdentity,
+    brandPromoted: plan.brandPromoted,
+  });
   const queued = await queueAuraResolveCommand(node.nodeId, "editor_plan", { instruction, publish: false });
   res.json({
     ok: true,
     publish: false,
+    company: "IFCDC PRODUCTIONS",
+    productionCompany: plan.productionCompany,
+    productionIdentity: plan.productionIdentity,
+    brandPromoted: plan.brandPromoted,
     plan,
     queued,
     message: "Plan ready. Start production to build the draft on the Production Mac.",
@@ -1057,7 +1080,14 @@ router.post("/aura/resolve/produce", hqAuthRequired, requireHQModule("aura"), as
     res.status(409).json({ ok: false, error: "Production Mac is not enrolled" });
     return;
   }
-  await recordAuraResolveCreativeMemory("produce", { instruction, project: plan.project, company: "IFCDC PRODUCTIONS" });
+  await recordAuraResolveCreativeMemory("produce", {
+    instruction,
+    project: plan.project,
+    company: "IFCDC PRODUCTIONS",
+    productionCompany: plan.productionCompany,
+    productionIdentity: plan.productionIdentity,
+    brandPromoted: plan.brandPromoted,
+  });
   const queued = await queueAuraResolveCommand(node.nodeId, "editor_run", {
     instruction,
     projectName: plan.project,
@@ -1069,6 +1099,9 @@ router.post("/aura/resolve/produce", hqAuthRequired, requireHQModule("aura"), as
     ok: true,
     publish: false,
     company: "IFCDC PRODUCTIONS",
+    productionCompany: plan.productionCompany,
+    productionIdentity: plan.productionIdentity,
+    brandPromoted: plan.brandPromoted,
     plan,
     queued,
     message: "IFCDC PRODUCTION queued on the Production Mac. Draft only.",

@@ -1,24 +1,39 @@
 /**
- * Creative memory for AURA Resolve — IFCDC PRODUCTIONS company retained permanently.
+ * Creative memory for AURA Resolve — IFCDC PRODUCTIONS global identity retained permanently.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
+import {
+  PRODUCTION_COMPANY,
+  PRODUCTION_IDENTITY,
+  PRODUCTION_CREDIT_LINE,
+  GLOBAL_IDENTITY_RULE,
+  ensureGlobalProductionIdentity,
+} from "../brand/production-identity.mjs";
 
 const ROOT = join(homedir(), "Library/Application Support/IFCDC/aura-resolve");
 const MEMORY_PATH = join(ROOT, "creative-memory.json");
 
-export const PRODUCTION_COMPANY = "IFCDC PRODUCTIONS";
+export { PRODUCTION_COMPANY, PRODUCTION_IDENTITY, PRODUCTION_CREDIT_LINE };
 
 const DEFAULT = {
-  version: 2,
+  version: 3,
   company: PRODUCTION_COMPANY,
+  productionCompany: PRODUCTION_COMPANY,
+  productionIdentity: PRODUCTION_IDENTITY,
   companyMemory: {
     name: PRODUCTION_COMPANY,
-    creditLine: "AN IFCDC PRODUCTION",
+    productionCompany: PRODUCTION_COMPANY,
+    productionIdentity: PRODUCTION_IDENTITY,
+    creditLine: PRODUCTION_CREDIT_LINE,
     applyAutomatically: true,
     retainedPermanently: true,
+    organizationWide: true,
+    notLimitedToBarbersApp: true,
+    visibleBrandingAutoBurn: false,
   },
+  permanentRules: [GLOBAL_IDENTITY_RULE],
   preferences: {
     pacing: "medium",
     transitions: "hard-cut-plus-brand-flash",
@@ -41,11 +56,33 @@ const DEFAULT = {
   gateHistory: [],
 };
 
+function ensurePermanentRule(list) {
+  const rules = Array.isArray(list) ? [...list] : [];
+  const without = rules.filter((r) => r?.id !== GLOBAL_IDENTITY_RULE.id);
+  return [GLOBAL_IDENTITY_RULE, ...without];
+}
+
 function normalize(raw) {
   const base = structuredClone(DEFAULT);
   const merged = { ...base, ...raw };
+  merged.version = Math.max(3, Number(raw.version) || 3);
   merged.company = PRODUCTION_COMPANY;
-  merged.companyMemory = { ...base.companyMemory, ...(raw.companyMemory || {}), name: PRODUCTION_COMPANY };
+  merged.productionCompany = PRODUCTION_COMPANY;
+  merged.productionIdentity = PRODUCTION_IDENTITY;
+  merged.companyMemory = {
+    ...base.companyMemory,
+    ...(raw.companyMemory || {}),
+    name: PRODUCTION_COMPANY,
+    productionCompany: PRODUCTION_COMPANY,
+    productionIdentity: PRODUCTION_IDENTITY,
+    creditLine: PRODUCTION_CREDIT_LINE,
+    applyAutomatically: true,
+    retainedPermanently: true,
+    organizationWide: true,
+    notLimitedToBarbersApp: true,
+    visibleBrandingAutoBurn: false,
+  };
+  merged.permanentRules = ensurePermanentRule(raw.permanentRules || base.permanentRules);
   merged.preferences = { ...base.preferences, ...(raw.preferences || {}) };
   merged.productions = raw.productions || [];
   merged.revisions = raw.revisions || [];
@@ -122,11 +159,24 @@ export function rememberGate(entry) {
 export function ensureCompanyMemory() {
   const memory = readCreativeMemory();
   memory.company = PRODUCTION_COMPANY;
+  memory.productionCompany = PRODUCTION_COMPANY;
+  memory.productionIdentity = PRODUCTION_IDENTITY;
   memory.companyMemory = {
     name: PRODUCTION_COMPANY,
-    creditLine: "AN IFCDC PRODUCTION",
+    productionCompany: PRODUCTION_COMPANY,
+    productionIdentity: PRODUCTION_IDENTITY,
+    creditLine: PRODUCTION_CREDIT_LINE,
     applyAutomatically: true,
     retainedPermanently: true,
+    organizationWide: true,
+    notLimitedToBarbersApp: true,
+    visibleBrandingAutoBurn: false,
   };
+  memory.permanentRules = ensurePermanentRule(memory.permanentRules);
+  try {
+    memory.productionsLibrary = ensureGlobalProductionIdentity({ forceCards: false });
+  } catch (err) {
+    memory.productionsLibraryError = String(err?.message || err);
+  }
   return writeCreativeMemory(memory);
 }

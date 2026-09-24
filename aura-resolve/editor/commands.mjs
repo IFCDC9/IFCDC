@@ -1,7 +1,17 @@
 /**
  * High-level AURA video commands. Plans Founder language into allowlisted Resolve steps.
  * Never publishes. Final release stays behind Founder approval.
+ * Every plan inherits IFCDC PRODUCTIONS identity by default.
  */
+
+import {
+  PRODUCTION_COMPANY,
+  PRODUCTION_IDENTITY,
+  PRODUCTION_CREDIT_LINE,
+  inferBrandPromoted,
+  inferProjectTitle,
+  projectMetadataDefaults,
+} from "../brand/production-identity.mjs";
 
 export const EDITOR_COMMANDS = [
   "create_project",
@@ -54,19 +64,23 @@ function formatFromText(lower) {
   return VERTICAL;
 }
 
-function projectNameFrom(lower) {
+function projectNameFrom(lower, brandPromoted) {
   if (/phase\s*4|p4|multi.?format|master/.test(lower)) return "IFCDC-AURA-BARBERS-PROMO-P4";
   if (/barber/.test(lower) && /promo|promotional|commercial|tiktok|draft|youtube/.test(lower)) {
     return "IFCDC-AURA-BARBERS-PROMO-P4";
   }
   if (/barber/.test(lower)) return "IFCDC-AURA-BARBERS-COMMERCIAL";
-  return "IFCDC-AURA-EDIT";
+  const slug = String(brandPromoted || "EDIT")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 28);
+  return `IFCDC-AURA-${slug || "EDIT"}`.slice(0, 40);
 }
-
-const COMPANY = "IFCDC PRODUCTIONS";
 
 /**
  * Turn a Founder instruction into a structured creative plan + executable steps.
+ * Always sets productionCompany + productionIdentity; brandPromoted is separate.
  */
 export function planInstruction(text, options = {}) {
   const instruction = String(text || "").trim();
@@ -74,22 +88,33 @@ export function planInstruction(text, options = {}) {
   const format = formatFromText(lower);
   const durationMatch = /(\d+)\s*-?\s*second/.exec(lower);
   const durationSeconds = durationMatch ? Number(durationMatch[1]) : /short|tiktok|promo/.test(lower) ? 12 : 30;
-  const project = options.projectName || projectNameFrom(lower);
+  const brandPromoted = options.brandPromoted || inferBrandPromoted(instruction);
+  const projectTitle = options.projectTitle || inferProjectTitle(instruction, brandPromoted);
+  const identityMeta = projectMetadataDefaults({
+    instruction,
+    project: options.projectName,
+    brandPromoted,
+  });
+  const project = options.projectName || projectNameFrom(lower, brandPromoted);
   const timeline = `${project}-TL`;
   const wantsMusic = /music|audio|soundtrack|bed/.test(lower);
-  const wantsBrand = /brand|logo|ifcdc|barber/.test(lower);
-  const wantsFade = /fade|smooth|ending|draft|promo|commercial/.test(lower);
-  const wantsTransition = /transition|promo|commercial|tiktok|draft|barber/.test(lower);
+  const wantsBrand = /brand|logo|ifcdc|barber|youth|training|promo|commercial/.test(lower);
+  const wantsFade = /fade|smooth|ending|draft|promo|commercial|training|video/.test(lower);
+  const wantsTransition = /transition|promo|commercial|tiktok|draft|barber|training/.test(lower);
   const wantsCaptions = /caption|subtitle/.test(lower);
   const wantsVoice = /voiceover|voice over|vo\b/.test(lower);
   const assets = options.assets || [];
+  const isBarbers = /barber/.test(lower);
+  const ctaDefault = isBarbers ? "Book in the IFCDC Barbers App" : `Learn more · ${brandPromoted}`;
 
-  const PURPOSE = /barber/.test(lower)
+  const PURPOSE = isBarbers
     ? "Promote the IFCDC Barbers App with approved brand assets"
-    : "Produce an IFCDC draft from approved assets";
+    : `Produce an IFCDC PRODUCTION promoting ${brandPromoted}`;
   const AUDIENCE = /tiktok|vertical|reel/.test(lower)
     ? "Short-form social (TikTok / Reels)"
-    : "IFCDC Founder review";
+    : /train/.test(lower)
+      ? "Internal / program audience"
+      : "IFCDC Founder review";
   const SCENES = [
     { id: "open", label: "Brand open", seconds: 2 },
     { id: "proof", label: "Product / service proof", seconds: Math.max(4, Math.floor(durationSeconds * 0.45)) },
@@ -98,7 +123,7 @@ export function planInstruction(text, options = {}) {
   ];
   const ASSETS_REQUIRED = [
     "IFCDC logo",
-    "Barbers App logo or store graphic",
+    isBarbers ? "Barbers App logo or store graphic" : `${brandPromoted} approved media`,
     "At least two approved stills or clips",
     wantsMusic ? "Approved IFCDC music bed or test tone" : null,
   ].filter(Boolean);
@@ -106,7 +131,15 @@ export function planInstruction(text, options = {}) {
   const steps = [];
   steps.push({
     command: "create_project",
-    payload: { name: project, frameRate: "24", width: format.width, height: format.height },
+    payload: {
+      name: project,
+      frameRate: "24",
+      width: format.width,
+      height: format.height,
+      productionCompany: PRODUCTION_COMPANY,
+      productionIdentity: PRODUCTION_IDENTITY,
+      brandPromoted,
+    },
   });
   steps.push({
     command: "import_assets",
@@ -138,19 +171,18 @@ export function planInstruction(text, options = {}) {
       command: "apply_branding",
       payload: {
         titleName: "Text",
-        titleText: "IFCDC Barbers App",
+        titleText: brandPromoted,
         logoPath: options.logoPath || null,
       },
     });
     steps.push({
       command: "add_title",
-      payload: { titleName: "Text", titleText: BRAND_HANDLES_CTA() },
+      payload: { titleName: "Text", titleText: ctaDefault },
     });
   }
 
   if (wantsMusic && options.musicPath) {
     steps.push({ command: "add_music", payload: { path: options.musicPath } });
-    // Fairlight ducking is not writable on this API; music bed is pre-ducked via ffmpeg.
   }
 
   if (wantsVoice && options.voicePath) {
@@ -158,11 +190,12 @@ export function planInstruction(text, options = {}) {
   }
 
   if (wantsCaptions) {
-    steps.push({ command: "add_captions", payload: { lines: ["IFCDC Barbers App", "Book today"] } });
+    steps.push({
+      command: "add_captions",
+      payload: { lines: [brandPromoted, ctaDefault].filter(Boolean) },
+    });
   }
 
-  // Visible fade: prefer placing generated fade media as a normal clip when already in shot order.
-  // Only emit fade_video when fade was not already interleaved into clipMediaNames.
   if (wantsFade && options.fadeMediaName && !clipNames.includes(options.fadeMediaName)) {
     steps.push({
       command: "fade_video",
@@ -170,10 +203,18 @@ export function planInstruction(text, options = {}) {
     });
   }
 
-  steps.push({
-    command: "add_title",
-    payload: { titleName: "Text", titleText: `AN IFCDC PRODUCTION · ${COMPANY}` },
-  });
+  // Credit title is metadata-aware; visible burn follows template/Founder — not forced every frame.
+  if (options.includeCreditTitle !== false) {
+    steps.push({
+      command: "add_title",
+      payload: {
+        titleName: "Text",
+        titleText: `${PRODUCTION_CREDIT_LINE} · ${PRODUCTION_COMPANY}`,
+        role: "production-credit",
+        autoBurn: false,
+      },
+    });
+  }
 
   steps.push({ command: "save_project", payload: {} });
   steps.push({
@@ -185,7 +226,14 @@ export function planInstruction(text, options = {}) {
 
   return {
     instruction,
-    company: COMPANY,
+    company: PRODUCTION_COMPANY,
+    productionCompany: PRODUCTION_COMPANY,
+    productionIdentity: PRODUCTION_IDENTITY,
+    PRODUCTION_COMPANY,
+    PRODUCTION_IDENTITY,
+    brandPromoted,
+    projectTitle,
+    projectMetadata: identityMeta,
     publish: false,
     founderApprovalRequiredForFinal: true,
     draftAllowedWithoutFinalApproval: true,
@@ -199,21 +247,26 @@ export function planInstruction(text, options = {}) {
     SCENES,
     ASSETS_REQUIRED,
     SHOT_ORDER: SCENES.map((scene) => scene.label),
-    TEXT_TITLES: ["IFCDC Barbers App", BRAND_HANDLES_CTA(), COMPANY],
-    PRODUCTION_CREDITS: { company: COMPANY, line: "AN IFCDC PRODUCTION" },
-    BRANDING: wantsBrand ? "IFCDC + Barbers App logos + production kit" : "none",
+    TEXT_TITLES: [brandPromoted, ctaDefault, PRODUCTION_COMPANY],
+    PRODUCTION_CREDITS: {
+      company: PRODUCTION_COMPANY,
+      productionCompany: PRODUCTION_COMPANY,
+      productionIdentity: PRODUCTION_IDENTITY,
+      line: PRODUCTION_CREDIT_LINE,
+      applyAutomatically: true,
+      visibleAutoBurn: false,
+      creditTemplate: identityMeta.creditTemplate,
+    },
+    BRANDING: wantsBrand ? `IFCDC production kit + ${brandPromoted}` : "none",
     MUSIC: wantsMusic ? "Approved IFCDC bed or test tone (ffmpeg pre-shaped)" : "none",
     VOICEOVER: wantsVoice ? "Requested" : "none",
     TRANSITIONS: wantsTransition ? "Visible brand-flash clips between scenes (API has no native dissolve)" : "cuts",
-    ENDING: wantsFade ? "Smooth fade-out + AN IFCDC PRODUCTION end card" : "hard end",
+    ENDING: wantsFade ? `Smooth fade-out + ${PRODUCTION_CREDIT_LINE} end card (when template asks)` : "hard end",
+    CTA: ctaDefault,
     RENDER_FORMAT: `${format.width}x${format.height} mp4 H264 draft`,
     steps,
     blockers: [],
   };
-}
-
-function BRAND_HANDLES_CTA() {
-  return "Book in the IFCDC Barbers App";
 }
 
 export function toResolveCall(step) {

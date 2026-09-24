@@ -457,6 +457,10 @@ async function runQueuedCommand(link, command) {
       ok: true,
       publish: false,
       company: "IFCDC PRODUCTIONS",
+      productionCompany: director.productionCompany || "IFCDC PRODUCTIONS",
+      productionIdentity: director.productionIdentity || "IFCDC PRODUCTION",
+      brandPromoted: director.brandPromoted || planned.brandPromoted || null,
+      projectTitle: director.projectTitle || planned.projectTitle || null,
       plan: { ...planned, ...director, steps: planned.steps },
       director,
       clone,
@@ -611,6 +615,7 @@ async function heartbeatOnce(link) {
       notes: [
         "Publishing stays off until Founder approval.",
         "Draft creative runs are available from HQ. Final/publish stays gated.",
+        "IFCDC PRODUCTIONS identity applies to every new project automatically.",
       ],
       lastSuccessfulCommand,
       brandKit: (() => {
@@ -632,6 +637,9 @@ async function heartbeatOnce(link) {
           const memory = readCreativeMemory();
           return {
             company: memory.company,
+            productionCompany: memory.productionCompany || memory.company,
+            productionIdentity: memory.productionIdentity || "IFCDC PRODUCTION",
+            permanentRules: (memory.permanentRules || []).map((r) => r.id),
             productions: (memory.productions || []).length,
             revisions: (memory.revisions || []).length,
             masters: (memory.masters || []).length,

@@ -22,6 +22,7 @@ import {
 } from "./memory.mjs";
 import { pickAssets, stageBrandKit } from "../brand/kit.mjs";
 import { ensureProductionKit, kitAsset, PRODUCTION_COMPANY as KIT_COMPANY } from "../brand/production-kit.mjs";
+import { ensureGlobalProductionIdentity } from "../brand/production-identity.mjs";
 import { clonePlan } from "../clone/pipeline.mjs";
 import { gatePayload } from "./gates.mjs";
 
@@ -280,6 +281,7 @@ export async function runCreativeProduction({
   mkdirSync(GENERATED, { recursive: true });
   mkdirSync(RENDERS, { recursive: true });
   ensureCompanyMemory();
+  ensureGlobalProductionIdentity({ forceCards: false });
   ensureProductionKit({ force: true });
   clonePlan(instruction);
 

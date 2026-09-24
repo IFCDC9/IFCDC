@@ -38,6 +38,9 @@ type Board = {
   publish?: boolean;
   distributionBlocked?: boolean;
   company?: string;
+  productionCompany?: string;
+  productionIdentity?: string;
+  brandPromoted?: string | null;
   errors?: string[];
   notes?: string[];
   lastHeartbeat?: string | null;
@@ -243,11 +246,15 @@ export default function AuraResolvePage() {
       `}</style>
 
       <header>
-        <div className="aura-company">{board?.company || "IFCDC PRODUCTIONS"}</div>
+        <div className="aura-company">{board?.productionCompany || board?.company || "IFCDC PRODUCTIONS"}</div>
         <h1>AURA Video Production</h1>
         <p className="hq-kpi-meta" style={{ margin: "0.25rem 0 0" }}>
           Phone control · Production Mac executes · publish stays off
         </p>
+        <div style={{ marginTop: 8 }}>
+          <span className="aura-pill">identity:{board?.productionIdentity || "IFCDC PRODUCTION"}</span>
+          {board?.brandPromoted ? <span className="aura-pill">brand:{board.brandPromoted}</span> : null}
+        </div>
       </header>
 
       <div className="aura-card">
@@ -380,7 +387,10 @@ export default function AuraResolvePage() {
           <div className="hq-kpi-meta">Creative director plan</div>
           <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
             {[
-              ["COMPANY", plan.company || "IFCDC PRODUCTIONS"],
+              ["PRODUCTION COMPANY", plan.productionCompany || plan.company || "IFCDC PRODUCTIONS"],
+              ["PRODUCTION IDENTITY", plan.productionIdentity || "IFCDC PRODUCTION"],
+              ["BRAND PROMOTED", plan.brandPromoted || "—"],
+              ["PROJECT TITLE", plan.projectTitle || "—"],
               ["CONCEPT", plan.CONCEPT],
               ["PURPOSE", plan.PURPOSE],
               ["AUDIENCE", plan.AUDIENCE],
@@ -403,7 +413,9 @@ export default function AuraResolvePage() {
 
       <div className="aura-status-grid">
         <List title="Production kit" lines={[
-          board?.brandKit?.company || "IFCDC PRODUCTIONS",
+          board?.productionCompany || board?.brandKit?.company || "IFCDC PRODUCTIONS",
+          board?.productionIdentity || "IFCDC PRODUCTION",
+          board?.brandPromoted ? `brand promoted: ${board.brandPromoted}` : "brand promoted: (set on plan)",
           board?.brandKit?.productionKitItems != null ? `${board.brandKit.productionKitItems} kit templates` : "syncing…",
           board?.brandKit?.assetCount != null ? `${board.brandKit.assetCount} staged assets` : "pending Mac sync",
           ...((board?.brandKit?.gaps || []).slice(0, 2)),
