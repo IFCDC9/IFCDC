@@ -968,12 +968,13 @@ router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), asyn
       previews,
       creativeMemory: memory,
       brandKit: beat.brandKit || null,
-      gate: beat.creativeMemory?.currentGate || "IDEA",
+      gate: beat.creativeMemory?.currentGate || "FOUNDER_IDEA",
       gateStates: [
-        "IDEA",
-        "PLAN",
-        "GENERATE",
-        "BUILD",
+        "FOUNDER_IDEA",
+        "AURA_PLAN",
+        "ASSET_SEARCH",
+        "GENERATION",
+        "RESOLVE_BUILD",
         "DRAFT",
         "HQ_PREVIEW",
         "FOUNDER_REVISION",
@@ -983,13 +984,13 @@ router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), asyn
       ],
       publish: false,
       distributionBlocked: true,
-      phase: "6B",
+      phase: 7,
       errors: macOnline ? beat.errors || [] : [],
       notes: beat.notes || [
         "Publishing stays off until Founder approval.",
         "IFCDC PRODUCTIONS applies automatically to every project.",
         "brandPromoted is the product/program — separate from the production company.",
-        "Phase 6B: Founder/official intake on HQ; generative video awaits Founder provider decision; never invent media.",
+        "Phase 7: autonomous production — Aura plans, searches, generates only missing media, builds in Resolve, returns draft. Founder does not operate Resolve or Cursor for normal production.",
       ],
       lastHeartbeat: node.lastSeenAt,
       heartbeatAgeMs: node.ageMs ?? null,
@@ -1277,7 +1278,7 @@ router.post("/aura/resolve/plan", hqAuthRequired, requireHQModule("aura"), async
     librarySearch: plan.LIBRARY_SEARCH,
     assetGaps: plan.ASSET_GAPS,
     queued,
-    message: "Phase 6 plan ready. Start production to generate configured assets / build the draft on the Production Mac.",
+    message: "Phase 7 plan ready. Start production for autonomous search → generate-missing → Resolve → HQ draft.",
   });
 });
 
@@ -1296,6 +1297,7 @@ router.post("/aura/resolve/produce", hqAuthRequired, requireHQModule("aura"), as
   );
   const { planAuraCreativeInstruction } = await import("../hq/auraResolveCreativePlanner");
   const plan = planAuraCreativeInstruction(instruction);
+  const projectName = String(req.body?.projectName || plan.project || "IFCDC-AURA-YOUTH-PROMO-P7");
   const node = await getAuraResolveNodeSnapshot();
   if (!node.nodeId) {
     res.status(409).json({ ok: false, error: "Production Mac is not enrolled" });
@@ -1303,29 +1305,35 @@ router.post("/aura/resolve/produce", hqAuthRequired, requireHQModule("aura"), as
   }
   await recordAuraResolveCreativeMemory("produce", {
     instruction,
-    project: plan.project,
+    project: projectName,
     company: "IFCDC PRODUCTIONS",
     productionCompany: plan.productionCompany,
     productionIdentity: plan.productionIdentity,
     brandPromoted: plan.brandPromoted,
+    phase: 7,
+    NATURAL_LANGUAGE_INTAKE: plan.NATURAL_LANGUAGE_INTAKE,
   });
   const queued = await queueAuraResolveCommand(node.nodeId, "editor_run", {
     instruction,
-    projectName: plan.project,
+    projectName,
     publish: false,
     draft: true,
+    autonomous: true,
+    phase: 7,
     masterFormatsAfter: req.body?.masterFormatsAfter === true,
   });
   res.json({
     ok: true,
     publish: false,
+    phase: 7,
     company: "IFCDC PRODUCTIONS",
     productionCompany: plan.productionCompany,
     productionIdentity: plan.productionIdentity,
     brandPromoted: plan.brandPromoted,
+    NATURAL_LANGUAGE_INTAKE: plan.NATURAL_LANGUAGE_INTAKE,
     plan,
     queued,
-    message: "IFCDC PRODUCTION queued on the Production Mac. Draft only.",
+    message: "Phase 7 autonomous IFCDC PRODUCTION queued on the Production Mac. Draft only.",
   });
 });
 
@@ -1359,7 +1367,7 @@ router.post("/aura/resolve/revise", hqAuthRequired, requireHQModule("aura"), asy
   const queued = await queueAuraResolveCommand(node.nodeId, "request_revision", {
     instruction,
     revisionNote,
-    projectName: req.body?.projectName || "IFCDC-AURA-BARBERS-PROMO-P4",
+    projectName: req.body?.projectName || "IFCDC-AURA-YOUTH-PROMO-P7",
     publish: false,
   });
   res.json({
@@ -1369,6 +1377,180 @@ router.post("/aura/resolve/revise", hqAuthRequired, requireHQModule("aura"), asy
     revision: parsed,
     queued,
     message: `Revision queued (${parsed.intents.join(", ")}). Draft only.`,
+  });
+});
+
+/** Phase 7 — conversational live status from real project records */
+router.post("/aura/resolve/status-ask", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const question = String(req.body?.question || req.body?.text || "what are you working on");
+  const { getAuraResolveNodeSnapshot, queueAuraResolveCommand, listAuraResolvePreviews, listAuraResolveJobs } =
+    await import("../hq/auraResolveProductionNode");
+  const node = await getAuraResolveNodeSnapshot();
+  const previews = await listAuraResolvePreviews();
+  const jobs = await listAuraResolveJobs(node.nodeId);
+  const current = jobs.find((j) => j.status === "claimed" || j.status === "queued") || jobs.find((j) => j.status === "complete");
+  const project = String(req.body?.project || current?.result?.project || "IFCDC-AURA-YOUTH-PROMO-P7");
+
+  // Prefer live Mac answer when online
+  if (node.nodeId && node.online) {
+    const queued = await queueAuraResolveCommand(node.nodeId, "autonomous_status", {
+      project,
+      jobId: req.body?.jobId || null,
+      question,
+      publish: false,
+    });
+    res.json({
+      ok: true,
+      publish: false,
+      phase: 7,
+      question,
+      queued,
+      fallback: {
+        productionMac: "ONLINE",
+        resolve: "queued_live_status",
+        latestDraft: previews[0] || null,
+        currentJob: current
+          ? { id: current.id, command: current.command, status: current.status }
+          : null,
+      },
+      message: "Live status queued on Production Mac.",
+    });
+    return;
+  }
+
+  const answer = [
+    `Working on: ${current ? `${current.command} (${current.status})` : "idle"}.`,
+    `Production Mac: ${node.online ? "ONLINE" : "OFFLINE"}.`,
+    `Latest draft: ${previews[0]?.name || "none"}.`,
+    `Credits: see cost ledger on Mac after produce.`,
+    `Needs approval: ${previews.length ? "yes — HQ preview available" : "no draft yet"}.`,
+    "publish=false.",
+  ].join(" ");
+
+  res.json({
+    ok: true,
+    publish: false,
+    phase: 7,
+    question,
+    answer,
+    productionMac: node.online ? "ONLINE" : "OFFLINE",
+    latestDraft: previews[0] || null,
+    currentJob: current || null,
+  });
+});
+
+/** Phase 7 — HQ preview loop decisions (publish stays false) */
+router.post("/aura/resolve/preview-decision", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  if (req.body?.publish === true) {
+    res.status(403).json({ ok: false, error: "publishing requires Founder approval and is not available", publish: false });
+    return;
+  }
+  const decision = String(req.body?.decision || "").toUpperCase();
+  const allowed = ["PLAY", "APPROVE", "REJECT", "REQUEST_REVISION", "CREATE_ALTERNATE", "CHANGE_FORMAT"];
+  if (!allowed.includes(decision)) {
+    res.status(400).json({ ok: false, error: `decision must be one of ${allowed.join(", ")}`, publish: false });
+    return;
+  }
+  const { getAuraResolveNodeSnapshot, queueAuraResolveCommand, recordAuraResolveCreativeMemory, getAuraResolvePreview } =
+    await import("../hq/auraResolveProductionNode");
+
+  if (decision === "PLAY") {
+    const previewId = String(req.body?.previewId || "");
+    const preview = previewId ? await getAuraResolvePreview(previewId) : null;
+    res.json({
+      ok: true,
+      decision: "PLAY",
+      publish: false,
+      previewId: previewId || null,
+      previewUrl: previewId ? `/api/hq/aura/resolve/preview/${previewId}` : null,
+      found: Boolean(preview),
+      message: preview ? "Play the HQ preview in the phone player." : "Select a preview id to play.",
+    });
+    return;
+  }
+
+  const node = await getAuraResolveNodeSnapshot();
+  if (!node.nodeId) {
+    res.status(409).json({ ok: false, error: "Production Mac is not enrolled", publish: false });
+    return;
+  }
+  await recordAuraResolveCreativeMemory("preview_decision", {
+    decision,
+    project: req.body?.projectName || req.body?.project || null,
+    previewId: req.body?.previewId || null,
+    revisionNote: req.body?.revisionNote || null,
+    publish: false,
+    phase: 7,
+  });
+
+  if (decision === "APPROVE" || decision === "REJECT") {
+    const queued = await queueAuraResolveCommand(node.nodeId, "preview_decision", {
+      decision,
+      project: req.body?.projectName || req.body?.project || "IFCDC-AURA-YOUTH-PROMO-P7",
+      previewId: req.body?.previewId || null,
+      publish: false,
+    });
+    res.json({
+      ok: true,
+      decision,
+      publish: false,
+      gate: decision === "APPROVE" ? "FOUNDER_APPROVAL" : "HQ_PREVIEW",
+      queued,
+      message:
+        decision === "APPROVE"
+          ? "Approval noted. Aura may NOT publish. DISTRIBUTION_AUTHORIZATION blocked."
+          : "Rejected. Request a revision to continue.",
+    });
+    return;
+  }
+
+  const queued = await queueAuraResolveCommand(node.nodeId, "preview_decision", {
+    decision,
+    instruction: req.body?.instruction || "",
+    revisionNote:
+      req.body?.revisionNote ||
+      (decision === "CHANGE_FORMAT"
+        ? "Make a YouTube version — keep everything else the same"
+        : decision === "CREATE_ALTERNATE"
+          ? "Create an alternate cut — keep brand and music"
+          : "Founder revision"),
+    projectName: req.body?.projectName || req.body?.project || "IFCDC-AURA-YOUTH-PROMO-P7",
+    jobId: req.body?.jobId || null,
+    publish: false,
+  });
+  res.json({
+    ok: true,
+    decision,
+    publish: false,
+    queued,
+    message: `${decision} queued on Production Mac. Draft only.`,
+  });
+});
+
+/** Phase 7 — resume persisted autonomous job without regenerating completed assets */
+router.post("/aura/resolve/resume", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  const jobId = String(req.body?.jobId || "").trim();
+  if (!jobId) {
+    res.status(400).json({ ok: false, error: "jobId required", publish: false });
+    return;
+  }
+  const { getAuraResolveNodeSnapshot, queueAuraResolveCommand } = await import("../hq/auraResolveProductionNode");
+  const node = await getAuraResolveNodeSnapshot();
+  if (!node.nodeId) {
+    res.status(409).json({ ok: false, error: "Production Mac is not enrolled", publish: false });
+    return;
+  }
+  const queued = await queueAuraResolveCommand(node.nodeId, "resume_autonomous_job", {
+    jobId,
+    publish: false,
+  });
+  res.json({
+    ok: true,
+    publish: false,
+    phase: 7,
+    jobId,
+    queued,
+    message: "Resume loaded from persisted state on Production Mac (no destructive outage).",
   });
 });
 

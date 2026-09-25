@@ -12,7 +12,9 @@ import { randomBytes } from "crypto";
 import { fileURLToPath } from "url";
 import { EDITOR_COMMANDS, planInstruction, toResolveCall } from "../editor/commands.mjs";
 import { clonePlan } from "../clone/pipeline.mjs";
-import { runCreativeProduction, runMultiFormatMastering, readRenderBytes } from "../editor/produce.mjs";
+import { runCreativeProduction, runMultiFormatMastering, readRenderBytes, conversationalStatus, resumeAutonomousJob, runSurgicalRevision } from "../editor/produce.mjs";
+import { parseFounderIntake } from "../editor/intake.mjs";
+import { readCostLedger, creditsUsedForProject } from "../editor/cost-ledger.mjs";
 import { stageBrandKit, readBrandKit } from "../brand/kit.mjs";
 import { ensureProductionKit, readProductionKit } from "../brand/production-kit.mjs";
 import { readCreativeMemory, ensureCompanyMemory } from "../editor/memory.mjs";
@@ -453,8 +455,9 @@ async function runQueuedCommand(link, command) {
   if (command.command === "editor_plan") {
     const instruction = command.args?.instruction || "";
     ensureCompanyMemory();
-    const director = directCreativeIdea(instruction, { projectName: command.args?.projectName });
-    const planned = planInstruction(instruction, { projectName: director.project });
+    const intake = parseFounderIntake(instruction, { projectName: command.args?.projectName });
+    const director = directCreativeIdea(instruction, { projectName: command.args?.projectName || intake.project });
+    const planned = planInstruction(instruction, { projectName: director.project || intake.project });
     const clone = clonePlan(instruction);
     const brand = stageBrandKit({ intoMedia: true });
     const productionKit = ensureProductionKit({ force: false });
@@ -462,12 +465,15 @@ async function runQueuedCommand(link, command) {
     await completeCommand(link, command.id, {
       ok: true,
       publish: false,
+      phase: 7,
       company: "IFCDC PRODUCTIONS",
       productionCompany: director.productionCompany || "IFCDC PRODUCTIONS",
       productionIdentity: director.productionIdentity || "IFCDC PRODUCTION",
-      brandPromoted: director.brandPromoted || planned.brandPromoted || null,
+      brandPromoted: director.brandPromoted || planned.brandPromoted || intake.brandPromoted || null,
       projectTitle: director.projectTitle || planned.projectTitle || null,
-      plan: { ...planned, ...director, steps: planned.steps },
+      NATURAL_LANGUAGE_INTAKE: intake.fields,
+      intake,
+      plan: { ...planned, ...director, ...intake, steps: planned.steps, NATURAL_LANGUAGE_INTAKE: intake.fields },
       director,
       clone,
       brandKit: brand,
@@ -481,8 +487,85 @@ async function runQueuedCommand(link, command) {
       commands: EDITOR_COMMANDS,
       memory: readCreativeMemory(),
     });
-    writeFileSync(join(ROOT, "last-command.json"), JSON.stringify({ command: "editor_plan", at: new Date().toISOString() }));
+    writeFileSync(join(ROOT, "last-command.json"), JSON.stringify({ command: "editor_plan", at: new Date().toISOString(), phase: 7 }));
     return;
+  }
+  if (command.command === "autonomous_status") {
+    const status = conversationalStatus({
+      project: command.args?.project || null,
+      jobId: command.args?.jobId || null,
+      boardHints: { productionMac: "ONLINE", resolve: "see_heartbeat" },
+    });
+    await completeCommand(link, command.id, status);
+    return;
+  }
+  if (command.command === "resume_autonomous_job") {
+    const resumed = resumeAutonomousJob(command.args?.jobId);
+    await completeCommand(link, command.id, { ...resumed, publish: false, phase: 7 });
+    return;
+  }
+  if (command.command === "preview_decision") {
+    const decision = String(command.args?.decision || "").toUpperCase();
+    const allowed = ["APPROVE", "REJECT", "REQUEST_REVISION", "CREATE_ALTERNATE", "CHANGE_FORMAT"];
+    if (!allowed.includes(decision)) {
+      await completeCommand(link, command.id, {
+        ok: false,
+        error: `decision must be one of ${allowed.join(", ")}`,
+        publish: false,
+      });
+      return;
+    }
+    if (decision === "APPROVE") {
+      ensureCompanyMemory();
+      const mem = readCreativeMemory();
+      // Record approval intent but do NOT publish
+      await completeCommand(link, command.id, {
+        ok: true,
+        decision: "APPROVE",
+        gate: "FOUNDER_APPROVAL",
+        publish: false,
+        message: "Founder approval noted. Aura may NOT publish. DISTRIBUTION_AUTHORIZATION still blocked.",
+        project: command.args?.project || null,
+        memoryCompany: mem.company,
+      });
+      return;
+    }
+    if (decision === "REJECT") {
+      await completeCommand(link, command.id, {
+        ok: true,
+        decision: "REJECT",
+        gate: "HQ_PREVIEW",
+        publish: false,
+        message: "Draft rejected. Provide a revision note to continue.",
+      });
+      return;
+    }
+    if (decision === "REQUEST_REVISION" || decision === "CHANGE_FORMAT" || decision === "CREATE_ALTERNATE") {
+      try {
+        setOpenAiMediaHqLink(link);
+        setRunwayMediaHqLink(link);
+        bootGenerationEngine({ hqLink: link });
+        const note =
+          command.args?.revisionNote ||
+          (decision === "CHANGE_FORMAT"
+            ? "Make a YouTube version — keep everything else the same"
+            : decision === "CREATE_ALTERNATE"
+              ? "Create an alternate cut — keep brand and music"
+              : command.args?.note || "Founder revision");
+        const produced = await runSurgicalRevision({
+          instruction: command.args?.instruction || "",
+          revisionNote: note,
+          project: command.args?.projectName || command.args?.project || "IFCDC-AURA-YOUTH-PROMO-P7",
+          jobId: command.args?.jobId || null,
+          askResolve: (action, payload) => askResolve(action, payload, action === "render" ? 60000 : 45000),
+          uploadPreview: (meta) => uploadPreviewToHq(link, meta),
+        });
+        await completeCommand(link, command.id, { ...produced, decision, publish: false });
+      } catch (error) {
+        await completeCommand(link, command.id, { ok: false, error: error.message, publish: false, decision });
+      }
+      return;
+    }
   }
   if (command.command === "master_formats") {
     if (command.args?.publish === true) {
@@ -722,10 +805,11 @@ async function heartbeatOnce(link) {
       errors: snap.apiError ? [snap.apiError] : [],
       notes: [
         "Publishing stays off until Founder approval.",
-        "Draft creative runs are available from HQ. Final/publish stays gated.",
+        "Phase 7 autonomous: Aura plans, searches library, generates only missing media, builds in Resolve, returns draft.",
         "IFCDC PRODUCTIONS identity applies to every new project automatically.",
-        "Phase 6: provider router + Founder identity onboarding; generate only when configured; never invent media.",
+        "Founder does not operate Resolve or Cursor for normal production.",
       ],
+      phase: 7,
       lastSuccessfulCommand,
       brandKit: (() => {
         try {
@@ -748,7 +832,7 @@ async function heartbeatOnce(link) {
           setOpenAiMediaHqLink(link);
           setRunwayMediaHqLink(link);
           bootGenerationEngine({ hqLink: link });
-          return { capabilities: capabilityStatus(), phase: "6C" };
+          return { capabilities: capabilityStatus(), phase: 7 };
         } catch {
           return null;
         }

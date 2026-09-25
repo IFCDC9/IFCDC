@@ -23,10 +23,11 @@ export const PIPELINE_STAGES = [
 ];
 
 export const APPROVAL_GATE_STATES = [
-  "IDEA",
-  "PLAN",
-  "GENERATE",
-  "BUILD",
+  "FOUNDER_IDEA",
+  "AURA_PLAN",
+  "ASSET_SEARCH",
+  "GENERATION",
+  "RESOLVE_BUILD",
   "DRAFT",
   "HQ_PREVIEW",
   "FOUNDER_REVISION",

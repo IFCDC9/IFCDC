@@ -26,6 +26,15 @@ import { buildProductionPipeline } from "../pipeline/production-pipeline.mjs";
 
 function projectNameFrom(lower, options = {}, brandPromoted = "EDIT") {
   if (options.projectName) return options.projectName;
+  if (/youth/.test(lower) && /promo|promotional|program/.test(lower)) return "IFCDC-AURA-YOUTH-PROMO-P7";
+  if (/phase\s*7|\bp7\b/.test(lower)) {
+    const slug = String(brandPromoted || "EDIT")
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 20);
+    return `IFCDC-AURA-${slug || "EDIT"}-P7`.slice(0, 40);
+  }
   if (/phase\s*4|p4|multi.?format|master/.test(lower)) return "IFCDC-AURA-BARBERS-PROMO-P4";
   if (/barber/.test(lower) && /promo|promotional|commercial|tiktok|draft|youtube/.test(lower)) {
     return options.preferExistingV1 ? "IFCDC-AURA-BARBERS-PROMO-V1" : "IFCDC-AURA-BARBERS-PROMO-P4";

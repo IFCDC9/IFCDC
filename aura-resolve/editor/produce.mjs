@@ -29,6 +29,12 @@ import { generateMissingAssets, bootGenerationEngine } from "../generation/engin
 import { buildProductionPipeline } from "../pipeline/production-pipeline.mjs";
 import { ensureFounderIdentityLibrary } from "../library/founder-identity.mjs";
 import { inventoryProductionKitSlots } from "../brand/production-kit-slots.mjs";
+import {
+  runAutonomousProduction,
+  runSurgicalRevision,
+  conversationalStatus,
+  resumeAutonomousJob,
+} from "./autonomous-orchestrator.mjs";
 
 const ROOT = join(homedir(), "Library/Application Support/IFCDC/aura-resolve");
 const MEDIA = join(ROOT, "media");
@@ -43,6 +49,21 @@ const PROTECTED_PROJECTS = new Set([
   "IFCDC-AURA-BARBERS-PROMO-V1",
   "IFCDC-NEXT LEVEL",
 ]);
+
+function wantsPhase7Autonomous(instruction, projectName) {
+  const lower = String(instruction || "").toLowerCase();
+  const proj = String(projectName || "").toUpperCase();
+  if (/phase\s*7|\bp7\b|autonomous|youth-promo-p7|youth.?program.?promo/i.test(lower)) return true;
+  if (/IFCDC-AURA-YOUTH-PROMO-P7|[-_]P7$/.test(proj)) return true;
+  // Founder NL production requests that should not require Cursor/Resolve operation
+  if (/create a short|generate only the missing|build it in resolve|return the draft/i.test(lower)) return true;
+  if (/youth/.test(lower) && /promo|promotional|program/.test(lower) && /branding|approved|missing media|resolve/i.test(lower)) {
+    return true;
+  }
+  return false;
+}
+
+export { runAutonomousProduction, runSurgicalRevision, conversationalStatus, resumeAutonomousJob };
 
 function runFfmpeg(args) {
   const result = spawnSync("ffmpeg", ["-y", ...args], { encoding: "utf8" });
@@ -302,39 +323,79 @@ export async function runCreativeProduction({
       })
     : director.revision;
 
-  // Format-only remasters reuse the existing V1/P4 master without a full rebuild.
+  // Format-only remasters: Barbers path reuses V1/P4; Phase 7 / other projects use surgical remaster of their own draft.
   if (revision?.remasterFromExisting && revision.format) {
-    const mastered = await runMultiFormatMastering({
-      sourceProject: "IFCDC-AURA-BARBERS-PROMO-V1",
-      formats: [revision.format],
-      uploadPreview,
-      projectName: projectName || "IFCDC-AURA-BARBERS-PROMO-P4",
-    });
-    rememberRevision({
-      at: new Date().toISOString(),
-      instruction,
-      revisionNote,
-      intents: revision.intents,
-      project: mastered.project || projectName || "IFCDC-AURA-BARBERS-PROMO-P4",
-      render: mastered.masters?.[0] || null,
-      masters: mastered.masters,
-      preferences: revision.preferences,
-      publish: false,
-      note: revisionNote,
-    });
-    return {
-      ok: mastered.ok,
-      publish: false,
-      mode: "format_remaster",
-      director,
-      revision,
-      ...mastered,
-    };
+    if (wantsPhase7Autonomous(instruction, projectName || director.project)) {
+      const surgical = await runSurgicalRevision({
+        instruction,
+        revisionNote,
+        project: projectName || director.project || "IFCDC-AURA-YOUTH-PROMO-P7",
+        uploadPreview,
+        askResolve,
+      });
+      if (surgical?.ok) {
+        return { ...surgical, director, revision, company: PRODUCTION_COMPANY, mode: "phase7_format_remaster" };
+      }
+    } else {
+      const mastered = await runMultiFormatMastering({
+        sourceProject: "IFCDC-AURA-BARBERS-PROMO-V1",
+        formats: [revision.format],
+        uploadPreview,
+        projectName: projectName || "IFCDC-AURA-BARBERS-PROMO-P4",
+      });
+      rememberRevision({
+        at: new Date().toISOString(),
+        instruction,
+        revisionNote,
+        intents: revision.intents,
+        project: mastered.project || projectName || "IFCDC-AURA-BARBERS-PROMO-P4",
+        render: mastered.masters?.[0] || null,
+        masters: mastered.masters,
+        preferences: revision.preferences,
+        publish: false,
+        note: revisionNote,
+      });
+      return {
+        ok: mastered.ok,
+        publish: false,
+        mode: "format_remaster",
+        director,
+        revision,
+        ...mastered,
+      };
+    }
   }
 
-  // Phase 5 generative path for non-Barbers projects: search → generate only if configured → plan-only otherwise.
+  // Phase 7 autonomous orchestration — search → reuse → generate only missing → Resolve → HQ draft.
   const lowerInstruction = String(instruction || "").toLowerCase();
   const isBarbersCommercial = /barber/.test(lowerInstruction);
+  if (wantsPhase7Autonomous(instruction, projectName || director.project)) {
+    // Surgical format/music revisions against an existing P7 draft skip full rebuild when possible.
+    if (
+      revisionNote &&
+      revision?.dryModificationPlan?.executableWithoutGenerator &&
+      revision?.dryModificationPlan?.executeAgainstExistingMaster
+    ) {
+      const surgical = await runSurgicalRevision({
+        instruction,
+        revisionNote,
+        project: projectName || director.project || "IFCDC-AURA-YOUTH-PROMO-P7",
+        uploadPreview,
+        askResolve,
+      });
+      if (surgical?.ok) return { ...surgical, director, revision, company: PRODUCTION_COMPANY };
+    }
+    return runAutonomousProduction({
+      instruction,
+      revisionNote,
+      projectName: projectName || director.project || "IFCDC-AURA-YOUTH-PROMO-P7",
+      askResolve,
+      uploadPreview,
+      allowRunwayIfMissing: true,
+    });
+  }
+
+  // Phase 5/6 generative path for other non-Barbers projects: search → generate only if configured → plan-only otherwise.
   if (!isBarbersCommercial) {
     const generative = await runGenerativeProduction({
       instruction,

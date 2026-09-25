@@ -1,13 +1,14 @@
 /**
- * Founder approval gate states for IFCDC Productions (Phase 5).
+ * Founder approval gate states for IFCDC Productions (Phase 7 autonomous).
  * DISTRIBUTION / publish stay blocked without an explicit Founder approval flag.
  */
 
 export const GATE_STATES = [
-  "IDEA",
-  "PLAN",
-  "GENERATE",
-  "BUILD",
+  "FOUNDER_IDEA",
+  "AURA_PLAN",
+  "ASSET_SEARCH",
+  "GENERATION",
+  "RESOLVE_BUILD",
   "DRAFT",
   "HQ_PREVIEW",
   "FOUNDER_REVISION",
@@ -16,27 +17,36 @@ export const GATE_STATES = [
   "DISTRIBUTION_AUTHORIZATION",
 ];
 
-/** Legacy aliases kept for older Mac heartbeat payloads */
+/** Legacy aliases kept for older Mac heartbeat / cloud payloads */
 export const GATE_ALIASES = {
+  IDEA: "FOUNDER_IDEA",
+  PLAN: "AURA_PLAN",
+  GENERATE: "GENERATION",
+  BUILD: "RESOLVE_BUILD",
   APPROVAL: "FOUNDER_APPROVAL",
   DISTRIBUTION: "DISTRIBUTION_AUTHORIZATION",
 };
 
 export function normalizeGate(state) {
-  const raw = String(state || "IDEA");
+  const raw = String(state || "FOUNDER_IDEA");
   if (GATE_STATES.includes(raw)) return raw;
   if (GATE_ALIASES[raw]) return GATE_ALIASES[raw];
+  if (raw === "IDEA") return "FOUNDER_IDEA";
+  if (raw === "PLAN") return "AURA_PLAN";
+  if (raw === "GENERATE") return "GENERATION";
+  if (raw === "BUILD") return "RESOLVE_BUILD";
   if (raw === "APPROVAL") return "FOUNDER_APPROVAL";
   if (raw === "DISTRIBUTION") return "DISTRIBUTION_AUTHORIZATION";
-  return "IDEA";
+  return "FOUNDER_IDEA";
 }
 
 export function nextGate(current, event) {
   const cur = normalizeGate(current);
   const map = {
-    planned: "PLAN",
-    generate: "GENERATE",
-    building: "BUILD",
+    planned: "AURA_PLAN",
+    searched: "ASSET_SEARCH",
+    generate: "GENERATION",
+    building: "RESOLVE_BUILD",
     drafted: "DRAFT",
     previewed: "HQ_PREVIEW",
     revised: "FOUNDER_REVISION",

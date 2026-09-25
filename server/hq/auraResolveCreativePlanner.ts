@@ -13,10 +13,11 @@ const IDENTITY = "IFCDC PRODUCTION";
 const CREDIT = "AN IFCDC PRODUCTION";
 
 export const GATE_STATES = [
-  "IDEA",
-  "PLAN",
-  "GENERATE",
-  "BUILD",
+  "FOUNDER_IDEA",
+  "AURA_PLAN",
+  "ASSET_SEARCH",
+  "GENERATION",
+  "RESOLVE_BUILD",
   "DRAFT",
   "HQ_PREVIEW",
   "FOUNDER_REVISION",
@@ -112,6 +113,15 @@ function inferProjectTitle(instruction: string, brandPromoted: string) {
 }
 
 function projectNameFrom(lower: string, brandPromoted: string) {
+  if (/youth/.test(lower) && /promo|promotional|program/.test(lower)) return "IFCDC-AURA-YOUTH-PROMO-P7";
+  if (/phase\s*7|\bp7\b/.test(lower)) {
+    const slug = String(brandPromoted || "EDIT")
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 20);
+    return `IFCDC-AURA-${slug || "EDIT"}-P7`.slice(0, 40);
+  }
   if (/phase\s*4|p4|multi.?format|master/.test(lower)) return "IFCDC-AURA-BARBERS-PROMO-P4";
   if (/barber/.test(lower) && /promo|promotional|commercial|tiktok|draft|youtube/.test(lower)) {
     return "IFCDC-AURA-BARBERS-PROMO-P4";
@@ -174,19 +184,57 @@ export function planAuraCreativeInstruction(text: string) {
   const durationSeconds = durationMatch
     ? Number(durationMatch[1])
     : /short|tiktok|promo|bumper/.test(lower)
-      ? 15
+      ? 10
       : 30;
   const brandPromoted = inferBrandPromoted(instruction);
   const projectTitle = inferProjectTitle(instruction, brandPromoted);
   const project = projectNameFrom(lower, brandPromoted);
   const timeline = `${project}-TL`;
   const isBarbers = /barber/.test(lower);
-  const wantsMusic = /music|audio|soundtrack|bed/.test(lower);
+  const wantsMusic = /music|audio|soundtrack|bed|aggressive/.test(lower) || /youth|promo|commercial/.test(lower);
   const wantsBrand = /brand|logo|ifcdc|barber|youth|training|promo|commercial|bumper/.test(lower);
   const wantsFade = /fade|smooth|ending|draft|promo|commercial|training|video|bumper/.test(lower);
-  const wantsTransition = /transition|promo|commercial|tiktok|draft|barber|training|bumper/.test(lower);
-  const cta = isBarbers ? "Book in the IFCDC Barbers App" : `Learn more · ${brandPromoted}`;
+  const wantsTransition = /transition|promo|commercial|tiktok|draft|barber|training|bumper|youth/.test(lower);
+  const cta = isBarbers
+    ? "Book in the IFCDC Barbers App"
+    : /youth/.test(lower)
+      ? "Join IFCDC youth programs"
+      : `Learn more · ${brandPromoted}`;
   const librarySearch = cloudLibrarySearch(instruction, brandPromoted);
+
+  const NATURAL_LANGUAGE_INTAKE = {
+    PROJECT_TYPE: /commercial/.test(lower)
+      ? "commercial"
+      : /train|bumper/.test(lower)
+        ? "training_bumper"
+        : /promo/.test(lower)
+          ? "promotional"
+          : "promotional",
+    TARGET_AUDIENCE:
+      format.label === "16:9"
+        ? "YouTube / landscape"
+        : /youth/.test(lower)
+          ? "Youth program participants + community"
+          : "Short-form social (TikTok / Reels)",
+    DURATION: `${durationSeconds}s`,
+    ASPECT_RATIO: format.label,
+    BRAND: brandPromoted,
+    STYLE: [/gold|brand/.test(lower) ? "gold_branding" : null, /aggressive/.test(lower) ? "aggressive" : null, /youth/.test(lower) ? "youth_program" : "ifcdc_branded"]
+      .filter(Boolean)
+      .join("+"),
+    SCENES: [
+      { id: "open", label: "Brand open / title card", order: 1 },
+      { id: "proof", label: "Program / product proof", order: 2 },
+      { id: "cta", label: "CTA + end credit", order: 3 },
+    ],
+    VOICE: /synthetic|tts|voice.?over/.test(lower) ? "synthetic_speech_if_requested" : "none",
+    MUSIC: /aggressive/.test(lower) ? "aggressive_bed" : wantsMusic ? "approved_ifcdc_bed_if_available" : "none",
+    CTA: cta,
+    PLATFORM: /tiktok/.test(lower) ? "tiktok" : /youtube/.test(lower) ? "youtube" : "short_form_social",
+    EXISTING_ASSETS_TO_USE: [] as string[],
+    NEW_ASSETS_REQUIRED: [] as string[],
+    FOUNDER_APPROVAL_REQUIRED: true,
+  };
 
   const SCENES = [
     { id: "open", label: "Brand open / title card", seconds: 2.2 },
@@ -360,7 +408,8 @@ export function planAuraCreativeInstruction(text: string) {
     publish: false,
     founderApprovalRequiredForFinal: true,
     draftAllowedWithoutFinalApproval: true,
-    gate: { gate: "PLAN", states: GATE_STATES, publish: false, distributionBlocked: true },
+    gate: { gate: "AURA_PLAN", states: GATE_STATES, publish: false, distributionBlocked: true },
+    NATURAL_LANGUAGE_INTAKE,
     CONCEPT: isBarbers
       ? "A polished IFCDC Barbers App promo produced as an IFCDC PRODUCTION with kit templates, captions, and company credit."
       : `An IFCDC PRODUCTION promoting ${brandPromoted}: ${projectTitle}.`,
@@ -441,8 +490,9 @@ export function planAuraCreativeInstruction(text: string) {
     RENDER_FORMAT: `${format.width}x${format.height} mp4 H264 draft`,
     formatsSupported: ["9:16", "16:9", "1:1"],
     steps,
-    phase: 5,
+    phase: 7,
     planOnlyUnlessGenerated: !isBarbers,
+    autonomous: true,
     clonePrep: {
       status: "ARCHITECTURE_READY",
       generationEngine: "NOT_EXECUTED_FOR_PERSON",

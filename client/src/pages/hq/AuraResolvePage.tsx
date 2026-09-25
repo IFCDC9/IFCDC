@@ -101,13 +101,14 @@ const OFFICIAL_SLOTS = [
 const DESIGNATION_SLOTS = [...FOUNDER_SLOTS, ...OFFICIAL_SLOTS];
 
 const SAMPLE =
-  "Aura, make a 15-second IFCDC youth programs training bumper.";
+  "Aura, create a short IFCDC youth-program promotional video using our approved branding. Generate only the missing media, build it in Resolve, render it, and return the draft to HQ.";
 
 const GATE_FLOW = [
-  "IDEA",
-  "PLAN",
-  "GENERATE",
-  "BUILD",
+  "FOUNDER_IDEA",
+  "AURA_PLAN",
+  "ASSET_SEARCH",
+  "GENERATION",
+  "RESOLVE_BUILD",
   "DRAFT",
   "HQ_PREVIEW",
   "FOUNDER_REVISION",
@@ -131,6 +132,9 @@ export default function AuraResolvePage() {
   const [providers, setProviders] = useState<Record<string, unknown> | null>(null);
   const [designateSlot, setDesignateSlot] = useState(DESIGNATION_SLOTS[0]);
   const [designateNote, setDesignateNote] = useState("");
+
+  const [statusAnswer, setStatusAnswer] = useState("");
+  const [autonomousJobId, setAutonomousJobId] = useState("");
 
   async function load() {
     const response = await fetch("/api/hq/aura/resolve/status", { credentials: "include" });
@@ -169,7 +173,7 @@ export default function AuraResolvePage() {
   }, [previews, selectedPreviewId]);
   const last = board?.lastSuccessfulCommand;
   const lastLabel = last && "command" in last ? last.command : "none";
-  const gate = board?.gate || "IDEA";
+  const gate = board?.gate || "FOUNDER_IDEA";
   const gateStates = board?.gateStates || GATE_FLOW;
   const kitSlots = board?.productionKitSlots?.slots || board?.brandKit?.productionKitSlots?.slots || [];
   const assetGaps = (plan?.ASSET_GAPS as Array<{ label?: string; capability?: string; status?: string; blocker?: string }> | undefined) || [];
@@ -198,17 +202,77 @@ export default function AuraResolvePage() {
 
   async function startProduction() {
     setBusy(true);
-    setNote("Starting draft production on the Production Mac…");
+    setNote("Starting Phase 7 autonomous production on the Production Mac…");
     try {
       const response = await fetch("/api/hq/aura/resolve/produce", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ instruction, publish: false }),
+        body: JSON.stringify({
+          instruction,
+          projectName: "IFCDC-AURA-YOUTH-PROMO-P7",
+          publish: false,
+        }),
       });
       const body = await response.json();
       setPlan(body.plan || plan);
-      setNote(body.message || (body.ok ? "Production queued." : body.error || "Production refused."));
+      if (body.queued?.id) setAutonomousJobId(String(body.queued.id));
+      setNote(body.message || (body.ok ? "Autonomous production queued." : body.error || "Production refused."));
+      void load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function askStatus() {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/hq/aura/resolve/status-ask", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: "what are you working on, how far, credits used, is Resolve online, show latest draft, what needs approval",
+          project: String(plan?.project || "IFCDC-AURA-YOUTH-PROMO-P7"),
+        }),
+      });
+      const body = await response.json();
+      setStatusAnswer(body.answer || body.message || JSON.stringify(body.fallback || body));
+      void load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function previewDecision(decision: string) {
+    setBusy(true);
+    setNote(`${decision}…`);
+    try {
+      const response = await fetch("/api/hq/aura/resolve/preview-decision", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          decision,
+          instruction,
+          revisionNote:
+            decision === "CHANGE_FORMAT"
+              ? "Make a YouTube version — keep everything else the same"
+              : decision === "REQUEST_REVISION"
+                ? revisionNote
+                : decision === "CREATE_ALTERNATE"
+                  ? "Create an alternate cut — keep brand and music"
+                  : undefined,
+          projectName: String(plan?.project || "IFCDC-AURA-YOUTH-PROMO-P7"),
+          previewId: latestPreview?.id || selectedPreviewId || undefined,
+          publish: false,
+        }),
+      });
+      const body = await response.json();
+      setNote(body.message || (body.ok ? `${decision} ok` : body.error || "Decision refused."));
+      if (decision === "PLAY" && body.previewUrl && latestPreview) {
+        setSelectedPreviewId(latestPreview.id);
+      }
       void load();
     } finally {
       setBusy(false);
@@ -297,7 +361,7 @@ export default function AuraResolvePage() {
         body: JSON.stringify({
           instruction,
           revisionNote,
-          projectName: String(plan?.project || "IFCDC-AURA-BARBERS-PROMO-P4"),
+          projectName: String(plan?.project || "IFCDC-AURA-YOUTH-PROMO-P7"),
           publish: false,
         }),
       });
@@ -394,12 +458,12 @@ export default function AuraResolvePage() {
         <div className="aura-company">{board?.productionCompany || board?.company || "IFCDC PRODUCTIONS"}</div>
         <h1>AURA Video Production</h1>
         <p className="hq-kpi-meta" style={{ margin: "0.25rem 0 0" }}>
-          Phone control · Production Mac executes · publish stays off · Phase 6C Runway video + Founder intake
+          Phone control · Phase 7 autonomous production · Mac executes · publish stays off
         </p>
         <div style={{ marginTop: 8 }}>
           <span className="aura-pill">identity:{board?.productionIdentity || "IFCDC PRODUCTION"}</span>
           {board?.brandPromoted ? <span className="aura-pill">brand:{board.brandPromoted}</span> : null}
-          <span className="aura-pill">phase:{board?.phase || "6C"}</span>
+          <span className="aura-pill">phase:{board?.phase || 7}</span>
         </div>
       </header>
 
@@ -539,12 +603,17 @@ export default function AuraResolvePage() {
         <div className="aura-actions" style={{ marginTop: 12 }}>
           <button type="button" className="hq-btn" disabled={busy} onClick={() => void planInstruction()}>Plan</button>
           <button type="button" className="hq-btn hq-btn-primary" disabled={busy} onClick={() => void startProduction()}>
-            Start production
+            Start autonomous production
+          </button>
+          <button type="button" className="hq-btn" disabled={busy} onClick={() => void askStatus()}>
+            Ask Aura status
           </button>
           <button type="button" className="hq-btn" disabled={busy} onClick={() => void masterFormats()}>
             Master 9:16 · 16:9 · 1:1
           </button>
         </div>
+        {statusAnswer ? <p className="aura-muted" style={{ marginTop: 10 }}>{statusAnswer}</p> : null}
+        {autonomousJobId ? <p className="aura-muted">queued job: {autonomousJobId}</p> : null}
       </div>
 
       <div className="aura-card">
@@ -667,9 +736,29 @@ export default function AuraResolvePage() {
               {latestPreview.project ? ` · ${latestPreview.project}` : ""}
             </div>
             <span className="aura-pill">publish:false</span>
+            <div className="aura-actions" style={{ marginTop: 10 }}>
+              <button type="button" className="hq-btn" disabled={busy || !latestPreview} onClick={() => void previewDecision("PLAY")}>
+                PLAY
+              </button>
+              <button type="button" className="hq-btn" disabled={busy || !latestPreview} onClick={() => void previewDecision("APPROVE")}>
+                APPROVE
+              </button>
+              <button type="button" className="hq-btn" disabled={busy || !latestPreview} onClick={() => void previewDecision("REJECT")}>
+                REJECT
+              </button>
+              <button type="button" className="hq-btn" disabled={busy || !latestPreview} onClick={() => void previewDecision("REQUEST_REVISION")}>
+                REQUEST REVISION
+              </button>
+              <button type="button" className="hq-btn" disabled={busy || !latestPreview} onClick={() => void previewDecision("CREATE_ALTERNATE")}>
+                CREATE ALTERNATE
+              </button>
+              <button type="button" className="hq-btn" disabled={busy || !latestPreview} onClick={() => void previewDecision("CHANGE_FORMAT")}>
+                CHANGE FORMAT
+              </button>
+            </div>
           </div>
         ) : (
-          <p className="aura-muted">No HQ draft yet. Plan → Start production for a generative bumper, or Master formats from the accepted promo.</p>
+          <p className="aura-muted">No HQ draft yet. Plan → Start autonomous production. Aura searches the library before generating.</p>
         )}
         <div className="hq-kpi-meta" style={{ marginTop: 12 }}>Job status</div>
         <p style={{ margin: "6px 0 0" }}>
@@ -699,6 +788,10 @@ export default function AuraResolvePage() {
               ["PRODUCTION IDENTITY", plan.productionIdentity || "IFCDC PRODUCTION"],
               ["BRAND PROMOTED", plan.brandPromoted || "—"],
               ["PROJECT TITLE", plan.projectTitle || "—"],
+              ["PROJECT TYPE", (plan.NATURAL_LANGUAGE_INTAKE as { PROJECT_TYPE?: string } | undefined)?.PROJECT_TYPE || "—"],
+              ["TARGET AUDIENCE", (plan.NATURAL_LANGUAGE_INTAKE as { TARGET_AUDIENCE?: string } | undefined)?.TARGET_AUDIENCE || plan.AUDIENCE],
+              ["ASPECT RATIO", (plan.NATURAL_LANGUAGE_INTAKE as { ASPECT_RATIO?: string } | undefined)?.ASPECT_RATIO || plan.FORMAT],
+              ["PLATFORM", (plan.NATURAL_LANGUAGE_INTAKE as { PLATFORM?: string } | undefined)?.PLATFORM || "—"],
               ["CONCEPT", plan.CONCEPT],
               ["PURPOSE", plan.PURPOSE],
               ["AUDIENCE", plan.AUDIENCE],
@@ -712,7 +805,8 @@ export default function AuraResolvePage() {
               ["TRANSITIONS", plan.TRANSITIONS],
               ["ENDING", plan.ENDING],
               ["RENDER", plan.RENDER_FORMAT],
-              ["PHASE", plan.phase || 5],
+              ["PHASE", plan.phase || 7],
+              ["FOUNDER APPROVAL REQUIRED", String((plan.NATURAL_LANGUAGE_INTAKE as { FOUNDER_APPROVAL_REQUIRED?: boolean } | undefined)?.FOUNDER_APPROVAL_REQUIRED ?? true)],
             ].map(([label, value]) => (
               <div key={String(label)}><strong>{label}:</strong> {String(value || "—")}</div>
             ))}
