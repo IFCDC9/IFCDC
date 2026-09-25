@@ -66,7 +66,7 @@ body:has(.hq-login-shell) {
 .hq-sidebar-user-name { font-weight: 600; color: var(--hq-text); margin-bottom: 0.15rem; }
 .hq-sidebar-user-role { color: var(--hq-gold-dim); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; }
 
-.hq-main { flex: 1; margin-left: var(--hq-sidebar-width); display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; min-width: 0; max-width: 100%; }
+.hq-main { flex: 1 1 auto; margin-left: var(--hq-sidebar-width); display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; min-width: 0; width: calc(100% - var(--hq-sidebar-width)); max-width: calc(100% - var(--hq-sidebar-width)); box-sizing: border-box; }
 .hq-topbar {
   height: var(--hq-topbar-height); background: var(--hq-black-soft);
   border-bottom: 1px solid var(--hq-gold-border);
@@ -267,7 +267,7 @@ button.hq-kpi-card--link { border-radius: var(--hq-radius); padding: 1.1rem 1.25
   .hq-sidebar { transform: translateX(-100%); }
   .hq-sidebar.open { transform: translateX(0); }
   .hq-sidebar-overlay.open { display: block; pointer-events: auto; }
-  .hq-main { margin-left: 0; }
+  .hq-main { margin-left: 0; width: 100%; max-width: 100%; }
   .hq-menu-toggle { display: flex; }
   .hq-content { padding: 1rem; }
   .hq-grid-2 { grid-template-columns: 1fr; }

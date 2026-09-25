@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import HQLayout from "../../layouts/HQLayout";
 
 type Job = {
   id: string;
@@ -132,6 +133,7 @@ export default function AuraResolvePage() {
   const [providers, setProviders] = useState<Record<string, unknown> | null>(null);
   const [designateSlot, setDesignateSlot] = useState(DESIGNATION_SLOTS[0]);
   const [designateNote, setDesignateNote] = useState("");
+  const [diagOpen, setDiagOpen] = useState(false);
 
   const [statusAnswer, setStatusAnswer] = useState("");
   const [autonomousJobId, setAutonomousJobId] = useState("");
@@ -164,6 +166,10 @@ export default function AuraResolvePage() {
     void loadProviders();
     const timer = window.setInterval(() => void load(), 4000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (window.matchMedia("(min-width: 1100px)").matches) setDiagOpen(true);
   }, []);
 
   const previews = board?.previews || [];
@@ -410,51 +416,69 @@ export default function AuraResolvePage() {
   }
 
   return (
+    <HQLayout title="AURA Video" subtitle="IFCDC PRODUCTIONS · Resolve HQ · publish stays off">
     <section className="aura-resolve-page">
       <style>{`
+        .aura-resolve-page, .aura-resolve-page * { box-sizing: border-box; }
         .aura-resolve-page {
-          display:grid; gap:0.85rem; max-width:720px; margin:0 auto; padding:0 0.25rem 2rem;
-          width:100%; box-sizing:border-box;
+          display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.85rem;
+          width: 100%; max-width: 100%; min-width: 0; margin: 0; overflow-x: clip;
         }
-        .aura-resolve-page h1 { margin:0; font-size:clamp(1.4rem, 5vw, 1.9rem); letter-spacing:0.02em; }
-        .aura-company { color:#C9A227; font-weight:700; font-size:0.85rem; letter-spacing:0.08em; text-transform:uppercase; }
-        .aura-status-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0.55rem; }
-        @media (min-width:640px) { .aura-status-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } }
-        .aura-card {
-          border:1px solid rgba(201,162,39,0.35); border-radius:14px; padding:0.85rem;
-          background:linear-gradient(160deg, rgba(20,16,8,0.92), rgba(8,8,8,0.88));
+        .aura-resolve-page h1 { margin: 0; font-size: clamp(1.35rem, 4.5vw, 1.85rem); overflow-wrap: anywhere; }
+        .aura-company { color: #C9A227; font-weight: 700; font-size: 0.85rem; letter-spacing: 0.08em; text-transform: uppercase; overflow-wrap: anywhere; }
+        .aura-card, .aura-block { min-width: 0; max-width: 100%; border: 1px solid rgba(201,162,39,0.35); border-radius: 14px; padding: 0.85rem; background: linear-gradient(160deg, rgba(20,16,8,0.92), rgba(8,8,8,0.88)); overflow-wrap: anywhere; word-break: break-word; }
+        .aura-kpis, .aura-status-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.55rem; min-width: 0; }
+        .aura-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; min-width: 0; max-width: 100%; }
+        .aura-actions .hq-btn { flex: 1 1 100%; min-width: 0; max-width: 100%; min-height: 48px; white-space: normal; text-align: center; justify-content: center; line-height: 1.25; }
+        .aura-resolve-page textarea, .aura-resolve-page select, .aura-resolve-page input[type="text"], .aura-resolve-page input[type="file"] {
+          display: block; width: 100%; max-width: 100%; min-width: 0; margin-top: 8px; min-height: 48px; border-radius: 12px;
+          border: 1px solid rgba(201,162,39,0.35); background: rgba(0,0,0,0.35); color: inherit; padding: 0.75rem; font-size: 16px;
         }
-        .aura-actions { display:flex; flex-wrap:wrap; gap:0.5rem; }
-        .aura-actions .hq-btn { flex:1 1 140px; min-height:48px; font-size:0.95rem; }
-        .aura-resolve-page textarea, .aura-resolve-page select, .aura-resolve-page input[type="text"] {
-          width:100%; margin-top:8px; min-height:48px; border-radius:12px; border:1px solid rgba(201,162,39,0.35);
-          background:rgba(0,0,0,0.35); color:inherit; padding:0.75rem; box-sizing:border-box; font-size:16px;
+        .aura-resolve-page textarea { min-height: 120px; resize: vertical; }
+        .aura-preview { width: 100%; max-width: 100%; min-width: 0; }
+        .aura-preview video { display: block; width: 100%; max-width: 100%; height: auto; max-height: min(70vh, 70dvh); object-fit: contain; border-radius: 12px; background: #000; }
+        .aura-muted { opacity: 0.8; font-size: 0.88rem; overflow-wrap: anywhere; word-break: break-word; }
+        .aura-pill { display: inline-block; max-width: 100%; padding: 0.35rem 0.55rem; border-radius: 999px; border: 1px solid rgba(201,162,39,0.45); font-size: 0.75rem; margin: 0.35rem 0.35rem 0 0; overflow-wrap: anywhere; word-break: break-word; white-space: normal; line-height: 1.35; }
+        .aura-gate { display: flex; flex-wrap: wrap; gap: 0.35rem; min-width: 0; max-width: 100%; }
+        .aura-gate span { flex: 0 1 auto; max-width: 100%; font-size: 0.68rem; padding: 0.4rem 0.5rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.12); opacity: 0.55; overflow-wrap: anywhere; line-height: 1.3; }
+        .aura-gate span.on { opacity: 1; border-color: #C9A227; color: #C9A227; font-weight: 700; }
+        .aura-preview-list { display: flex; flex-wrap: wrap; gap: 0.4rem; min-width: 0; max-width: 100%; }
+        .aura-preview-list button { flex: 1 1 8.5rem; min-width: 0; max-width: 100%; min-height: 44px; border-radius: 10px; border: 1px solid rgba(201,162,39,0.35); background: rgba(0,0,0,0.35); color: inherit; padding: 0.45rem 0.65rem; font-size: 0.78rem; overflow-wrap: anywhere; white-space: normal; text-align: left; }
+        .aura-preview-list button.active { border-color: #C9A227; color: #C9A227; }
+        .aura-queue { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; min-width: 0; margin-top: 0.45rem; }
+        .aura-queue > span { min-width: 0; flex: 1 1 12rem; overflow-wrap: anywhere; }
+        .aura-diagnostics { padding: 0; }
+        .aura-diagnostics > summary { cursor: pointer; min-height: 48px; padding: 0.85rem 1rem; font-weight: 700; color: #C9A227; }
+        .aura-diagnostics-body { padding: 0 0.85rem 0.85rem; min-width: 0; }
+        .aura-status { order: 1; } .aura-production { order: 2; } .aura-preview-block { order: 3; }
+        .aura-instruction { order: 4; } .aura-revision { order: 5; } .aura-decisions { order: 6; }
+        .aura-render { order: 7; } .aura-assets { order: 8; } .aura-diagnostics { order: 9; }
+        @media (min-width: 400px) { .aura-kpis, .aura-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        .aura-diag-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.55rem; min-width: 0; }
+        @media (min-width: 768px) {
+          .aura-actions .hq-btn { flex: 1 1 10.5rem; }
+          .aura-resolve-page { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+          .aura-status, .aura-decisions, .aura-diagnostics { grid-column: 1 / -1; }
+          .aura-diag-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
-        .aura-resolve-page textarea { min-height:120px; resize:vertical; }
-        .aura-preview video { width:100%; max-height:70vh; border-radius:12px; background:#000; }
-        .aura-muted { opacity:0.8; font-size:0.88rem; }
-        .aura-pill {
-          display:inline-block; padding:0.2rem 0.55rem; border-radius:999px;
-          border:1px solid rgba(201,162,39,0.45); font-size:0.72rem; margin-right:0.35rem; margin-top:0.35rem;
+        @media (min-width: 1100px) {
+          .aura-kpis, .aura-status-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+          .aura-resolve-page { max-width: 1440px; margin: 0 auto; grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); }
+          .aura-preview-block { grid-column: 1; }
         }
-        .aura-gate {
-          display:flex; flex-wrap:nowrap; gap:0.25rem; overflow-x:auto; -webkit-overflow-scrolling:touch;
-          padding-bottom:0.25rem;
+        @media (min-width: 1280px) { .aura-kpis, .aura-status-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+        @media (min-width: 1440px) { .aura-resolve-page { max-width: 1560px; } }
+        @media (orientation: landscape) and (max-height: 520px) {
+          .aura-resolve-page { grid-template-columns: minmax(0, 1fr); max-width: 100%; }
+          .aura-status, .aura-decisions, .aura-diagnostics, .aura-preview-block { grid-column: auto; }
+          .aura-status { order: 1; } .aura-production { order: 2; } .aura-preview-block { order: 3; }
+          .aura-instruction { order: 4; } .aura-revision { order: 5; } .aura-decisions { order: 6; }
+          .aura-render { order: 7; } .aura-assets { order: 8; } .aura-diagnostics { order: 9; }
+          .aura-actions .hq-btn { flex: 1 1 9.5rem; }
         }
-        .aura-gate span {
-          flex:0 0 auto; font-size:0.65rem; padding:0.35rem 0.45rem; border-radius:8px;
-          border:1px solid rgba(255,255,255,0.12); opacity:0.55; white-space:nowrap;
-        }
-        .aura-gate span.on { opacity:1; border-color:#C9A227; color:#C9A227; font-weight:700; }
-        .aura-preview-list { display:flex; gap:0.4rem; overflow-x:auto; padding:0.35rem 0; }
-        .aura-preview-list button {
-          flex:0 0 auto; min-height:44px; border-radius:10px; border:1px solid rgba(201,162,39,0.35);
-          background:rgba(0,0,0,0.35); color:inherit; padding:0.45rem 0.65rem; font-size:0.75rem;
-        }
-        .aura-preview-list button.active { border-color:#C9A227; color:#C9A227; }
       `}</style>
 
-      <header>
+      <header className="aura-card aura-status" data-aura-section="status">
         <div className="aura-company">{board?.productionCompany || board?.company || "IFCDC PRODUCTIONS"}</div>
         <h1>AURA Video Production</h1>
         <p className="hq-kpi-meta" style={{ margin: "0.25rem 0 0" }}>
@@ -467,7 +491,9 @@ export default function AuraResolvePage() {
         </div>
       </header>
 
-      <div className="aura-card">
+      <details className="aura-card aura-diagnostics" data-aura-section="diagnostics" open={diagOpen} onToggle={(event) => setDiagOpen(event.currentTarget.open)}>
+        <summary>Provider and technical diagnostics</summary>
+        <div className="aura-diagnostics-body">
         <div className="hq-kpi-meta">Generative providers (discovery)</div>
         <p className="aura-muted" style={{ margin: "6px 0 0" }}>
           CREDENTIAL_PRESENT / RUNWAY_API_KEY_PRESENT only — no secret values. Runway is PRIMARY video; OpenAI stays image + synthetic TTS.
@@ -500,9 +526,10 @@ export default function AuraResolvePage() {
             Prove text-to-video (Runway)
           </button>
         </div>
-      </div>
+        </div>
+      </details>
 
-      <div className="aura-card">
+      <div className="aura-card aura-assets" data-aura-section="assets">
         <div className="hq-kpi-meta">Founder identity intake</div>
         <p className="aura-muted" style={{ margin: "6px 0 0" }}>
           Explicit designation only. ORIGINAL_FOUNDER_MEDIA stays immutable and separate from GENERATED_FOUNDER_MEDIA.
@@ -558,7 +585,7 @@ export default function AuraResolvePage() {
         {designateNote ? <p className="aura-muted" style={{ marginTop: 8 }}>{designateNote}</p> : null}
       </div>
 
-      <div className="aura-card">
+      <div className="aura-card aura-status">
         <div className="hq-kpi-meta">Approval gate</div>
         <div className="aura-gate" style={{ marginTop: 8 }}>
           {gateStates.map((state) => (
@@ -572,7 +599,7 @@ export default function AuraResolvePage() {
         </div>
       </div>
 
-      <div className="aura-status-grid">
+      <div className="aura-status-grid aura-status">
         {[
           ["Bridge", board?.bridge],
           ["Resolve", board?.resolve],
@@ -588,10 +615,20 @@ export default function AuraResolvePage() {
         ))}
       </div>
 
-      <p style={{ margin: 0 }}>{note || board?.message}</p>
+      <p className="aura-muted aura-status" style={{ margin: 0 }}>{note || board?.message}</p>
 
-      <div className="aura-card">
-        <div className="hq-kpi-meta">Idea</div>
+      <section className="aura-card aura-production" data-aura-section="production">
+        <div className="hq-kpi-meta">Current production</div>
+        <p style={{ margin: "8px 0 0", fontWeight: 700 }}>{board?.project || "No project yet"}</p>
+        <p className="aura-muted" style={{ margin: "6px 0 0" }}>
+          Timeline: {board?.timeline || "none"}
+          {board?.currentJob ? ` · ${board.currentJob.command} · ${board.currentJob.status}` : " · no active job"}
+        </p>
+        {autonomousJobId ? <p className="aura-muted">Queued job: {autonomousJobId}</p> : null}
+      </section>
+
+      <div className="aura-card aura-instruction" data-aura-section="instruction">
+        <div className="hq-kpi-meta">Founder instruction</div>
         <textarea value={instruction} onChange={(event) => setInstruction(event.target.value)} rows={5} />
         <div className="hq-kpi-meta" style={{ marginTop: 12 }}>Asset focus</div>
         <select value={selectedAsset} onChange={(event) => setSelectedAsset(event.target.value)}>
@@ -616,7 +653,7 @@ export default function AuraResolvePage() {
         {autonomousJobId ? <p className="aura-muted">queued job: {autonomousJobId}</p> : null}
       </div>
 
-      <div className="aura-card">
+      <div className="aura-card aura-assets">
         <div className="hq-kpi-meta">Library search (search-before-generate)</div>
         <input type="text" value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} placeholder="Search categories…" />
         <p className="aura-muted" style={{ margin: "8px 0 0" }}>
@@ -635,7 +672,7 @@ export default function AuraResolvePage() {
       </div>
 
       {assetGaps.length || plan?.GENERATION ? (
-        <div className="aura-card">
+        <div className="aura-card aura-render" data-aura-section="render">
           <div className="hq-kpi-meta">Asset gaps / generation status</div>
           {assetGaps.length ? assetGaps.map((gap) => (
             <div key={`${gap.capability}-${gap.label}`} style={{ marginTop: 6 }}>
@@ -654,7 +691,7 @@ export default function AuraResolvePage() {
       ) : null}
 
       {pipelineStages.length ? (
-        <div className="aura-card">
+        <div className="aura-card aura-production">
           <div className="hq-kpi-meta">Idea → production pipeline</div>
           <div className="aura-gate" style={{ marginTop: 8 }}>
             {pipelineStages.map((stage) => (
@@ -667,7 +704,7 @@ export default function AuraResolvePage() {
       ) : null}
 
       {continuity ? (
-        <div className="aura-card">
+        <div className="aura-card aura-production">
           <div className="hq-kpi-meta">Continuity</div>
           <div style={{ marginTop: 8, display: "grid", gap: 4 }}>
             <div><strong>Aspect:</strong> {String((continuity as { aspectRatio?: string }).aspectRatio || "—")}</div>
@@ -678,8 +715,8 @@ export default function AuraResolvePage() {
         </div>
       ) : null}
 
-      <div className="aura-card">
-        <div className="hq-kpi-meta">Revision / format follow-up</div>
+      <div className="aura-card aura-revision" data-aura-section="revision">
+        <div className="hq-kpi-meta">Revision request</div>
         <textarea value={revisionNote} onChange={(event) => setRevisionNote(event.target.value)} rows={3} />
         <p className="aura-muted" style={{ margin: "8px 0 0" }}>
           Examples: darker scene · wardrobe · location · camera angle · smoother transition · replace generated clip · music harder · duck under voice · smooth fade · TikTok version · YouTube version · keep everything else the same
@@ -710,8 +747,8 @@ export default function AuraResolvePage() {
         </div>
       </div>
 
-      <div className="aura-card">
-        <div className="hq-kpi-meta">HQ preview / masters</div>
+      <div className="aura-card aura-preview-block" data-aura-section="preview">
+        <div className="hq-kpi-meta">Video preview</div>
         {previews.length ? (
           <div className="aura-preview-list">
             {previews.map((item) => (
@@ -736,38 +773,21 @@ export default function AuraResolvePage() {
               {latestPreview.project ? ` · ${latestPreview.project}` : ""}
             </div>
             <span className="aura-pill">publish:false</span>
-            <div className="aura-actions" style={{ marginTop: 10 }}>
-              <button type="button" className="hq-btn" disabled={busy || !latestPreview} onClick={() => void previewDecision("PLAY")}>
-                PLAY
-              </button>
-              <button type="button" className="hq-btn" disabled={busy || !latestPreview} onClick={() => void previewDecision("APPROVE")}>
-                APPROVE
-              </button>
-              <button type="button" className="hq-btn" disabled={busy || !latestPreview} onClick={() => void previewDecision("REJECT")}>
-                REJECT
-              </button>
-              <button type="button" className="hq-btn" disabled={busy || !latestPreview} onClick={() => void previewDecision("REQUEST_REVISION")}>
-                REQUEST REVISION
-              </button>
-              <button type="button" className="hq-btn" disabled={busy || !latestPreview} onClick={() => void previewDecision("CREATE_ALTERNATE")}>
-                CREATE ALTERNATE
-              </button>
-              <button type="button" className="hq-btn" disabled={busy || !latestPreview} onClick={() => void previewDecision("CHANGE_FORMAT")}>
-                CHANGE FORMAT
-              </button>
-            </div>
           </div>
         ) : (
           <p className="aura-muted">No HQ draft yet. Plan → Start autonomous production. Aura searches the library before generating.</p>
         )}
-        <div className="hq-kpi-meta" style={{ marginTop: 12 }}>Job status</div>
+      </div>
+
+      <section className="aura-card aura-render" data-aura-section="render">
+        <div className="hq-kpi-meta">Render / generation status</div>
         <p style={{ margin: "6px 0 0" }}>
           {board?.currentJob ? `${board.currentJob.command} · ${board.currentJob.status}` : "none"}
         </p>
         <div className="hq-kpi-meta" style={{ marginTop: 12 }}>Queue</div>
         {(board?.queue || []).length ? (
           (board?.queue || []).map((job) => (
-            <div key={job.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 6 }}>
+            <div key={job.id} className="aura-queue">
               <span>{job.command} · {job.status}</span>
               {job.status === "queued" ? (
                 <button type="button" className="hq-btn" onClick={() => void cancel(job.id)}>Cancel</button>
@@ -777,10 +797,22 @@ export default function AuraResolvePage() {
         ) : (
           <p className="aura-muted">none</p>
         )}
-      </div>
+      </section>
+
+      <section className="aura-card aura-decisions" data-aura-section="decisions">
+        <div className="hq-kpi-meta">Founder approval</div>
+        <div className="aura-actions" style={{ marginTop: 10 }}>
+          <button type="button" className="hq-btn" disabled={busy || !latestPreview} onClick={() => void previewDecision("PLAY")}>PLAY</button>
+          <button type="button" className="hq-btn hq-btn-primary" disabled={busy || !latestPreview} onClick={() => void previewDecision("APPROVE")}>APPROVE</button>
+          <button type="button" className="hq-btn" disabled={busy || !latestPreview} onClick={() => void previewDecision("REJECT")}>REJECT</button>
+          <button type="button" className="hq-btn" disabled={busy || !latestPreview} onClick={() => void previewDecision("REQUEST_REVISION")}>REQUEST REVISION</button>
+          <button type="button" className="hq-btn" disabled={busy || !latestPreview} onClick={() => void previewDecision("CREATE_ALTERNATE")}>CREATE ALTERNATE</button>
+          <button type="button" className="hq-btn" disabled={busy || !latestPreview} onClick={() => void previewDecision("CHANGE_FORMAT")}>CHANGE FORMAT</button>
+        </div>
+      </section>
 
       {plan ? (
-        <div className="aura-card">
+        <div className="aura-card aura-diagnostics">
           <div className="hq-kpi-meta">Creative director plan</div>
           <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
             {[
@@ -814,7 +846,7 @@ export default function AuraResolvePage() {
         </div>
       ) : null}
 
-      <div className="aura-status-grid">
+      <div className="aura-diag-grid aura-diagnostics">
         <List title="Production kit slots" lines={
           kitSlots.length
             ? kitSlots.map((s) => `${s.label}: ${s.status}${s.pathHint ? ` · ${s.pathHint}` : ""}`)
@@ -833,6 +865,7 @@ export default function AuraResolvePage() {
         <List title="Last successful command" lines={[String(lastLabel || "none")]} />
       </div>
     </section>
+    </HQLayout>
   );
 }
 
