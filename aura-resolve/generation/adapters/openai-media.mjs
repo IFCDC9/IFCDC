@@ -207,7 +207,11 @@ function buildAdapter(id, { proxyOnly = false } = {}) {
       };
     },
     async generate(capability, request = {}) {
-      if (request.person === true || /founder|face|likeness|clone/i.test(String(request.prompt || ""))) {
+      if (
+        request.person === true ||
+        /\b(founder|likeness|clone)\b/i.test(String(request.prompt || "")) ||
+        /\b(founder.?face|face.?reference|identity.?clone)\b/i.test(String(request.prompt || ""))
+      ) {
         return {
           ok: false,
           status: "ARCHITECTURE_READY",

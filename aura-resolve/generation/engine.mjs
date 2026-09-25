@@ -76,8 +76,8 @@ export async function generateMissingAssets(needs = [], context = {}) {
     const capability = need.capability || need.role;
     const person =
       need.person === true ||
-      /founder|face|voice.?clone|likeness|clone/i.test(String(capability || "")) ||
-      /founder|face|voice.?clone|likeness/i.test(String(need.label || ""));
+      /founder_voice_clone|founder_visual_clone|voice.?clone/i.test(String(capability || "")) ||
+      /\b(founder.?face|face.?reference|identity.?clone|likeness)\b/i.test(String(need.label || ""));
 
     if (person) {
       skipped.push({
