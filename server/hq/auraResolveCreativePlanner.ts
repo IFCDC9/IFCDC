@@ -236,7 +236,7 @@ export function planAuraCreativeInstruction(text: string) {
     searchedBeforeGenerate: true,
     inventMedia: false,
     willGenerateOnlyIfConfigured: true,
-    phase: 6,
+    phase: "6C",
     needs: librarySearch.expectedGaps,
     capabilities: {
       graphics_title_graphics: { status: "CONFIGURED_ON_MAC_IF_LOCAL_GRAPHICS", provider: "local-graphics" },
@@ -246,10 +246,31 @@ export function planAuraCreativeInstruction(text: string) {
         blocker: "MISSING_MODEL_ACCESS:image_generation until dall-e-3/gpt-image-1 callable",
       },
       image_editing: { status: "ARCHITECTURE_READY", blocker: "MISSING_PROVIDER_OR_MODEL:image_editing" },
-      video_generation: { status: "NOT_CONFIGURED", blocker: "MISSING_PROVIDER:video_generation" },
-      image_to_video: { status: "NOT_CONFIGURED", blocker: "MISSING_PROVIDER:image_to_video" },
-      text_to_video: { status: "NOT_CONFIGURED", blocker: "MISSING_PROVIDER:text_to_video" },
-      background_scene_broll: { status: "NOT_CONFIGURED", blocker: "MISSING_PROVIDER:background_scene_broll" },
+      video_generation: {
+        status: "PROVIDER_ROUTED_IF_RUNWAY_KEY",
+        provider: "runway|hq-runway-proxy",
+        blocker: "MISSING_CREDENTIAL:RUNWAY_API_KEY until PRESENT on HQ",
+      },
+      image_to_video: {
+        status: "PROVIDER_ROUTED_IF_RUNWAY_KEY",
+        provider: "runway|hq-runway-proxy",
+        blocker: "MISSING_CREDENTIAL:RUNWAY_API_KEY until PRESENT on HQ",
+      },
+      text_to_video: {
+        status: "PROVIDER_ROUTED_IF_RUNWAY_KEY",
+        provider: "runway|hq-runway-proxy",
+        blocker: "MISSING_CREDENTIAL:RUNWAY_API_KEY until PRESENT on HQ",
+      },
+      background_scene_broll: {
+        status: "PROVIDER_ROUTED_IF_RUNWAY_KEY",
+        provider: "runway|hq-runway-proxy",
+        blocker: "MISSING_CREDENTIAL:RUNWAY_API_KEY until PRESENT on HQ",
+      },
+      reference_continuity: {
+        status: "PROVIDER_ROUTED_IF_RUNWAY_KEY",
+        provider: "runway|hq-runway-proxy",
+        blocker: "NOT_AVAILABLE_ON_ACCOUNT until Runway reference endpoint accepts the key",
+      },
       voice_generation: {
         status: "PROVIDER_ROUTED_IF_OPENAI_TTS_ACCESS",
         provider: "openai|hq-openai-proxy",

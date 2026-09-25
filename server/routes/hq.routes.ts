@@ -115,11 +115,25 @@ router.use("/aura/ops", auraOpsVerifyRouter);
 router.use("/aura/music", auraMusicNodeRouter);
 
 router.get("/health", (_req: Request, res: Response) => {
+  // Presence flags only — never echo secret values.
+  let runwayPresent: "PRESENT" | "NOT_PRESENT" = "NOT_PRESENT";
+  try {
+    // Dynamic import avoided; sync presence check via env shape only.
+    const raw = String(process.env.RUNWAY_API_KEY || "").trim();
+    runwayPresent =
+      Boolean(raw) && raw.length >= 8 && !/placeholder|your[_-]?|xxx|replace/i.test(raw)
+        ? "PRESENT"
+        : "NOT_PRESENT";
+  } catch {
+    runwayPresent = "NOT_PRESENT";
+  }
   res.json({
     app: "ifcdc-headquarters",
     status: "healthy",
     version: "1.0.0",
     platform: "IFCDC Enterprise Operating System",
+    phase: "6C",
+    RUNWAY_API_KEY_PRESENT: runwayPresent,
   });
 });
 
@@ -1019,16 +1033,18 @@ router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), asyn
   }
 });
 
-/** Phase 6 — provider discovery (no secrets). */
+/** Phase 6 / 6C — provider discovery (no secrets). */
 router.get("/aura/resolve/providers", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
   try {
     const { discoverGenerativeProviders, listCloudGenerationJobs } = await import("../hq/auraResolveGenerativeProviders");
+    const { runwayApiKeyPresence } = await import("../hq/runwayVideoProvider");
     const deep = String(req.query.deep || "") === "1";
     const discovery = await discoverGenerativeProviders({ deep });
     res.json({
       ok: true,
-      phase: "6B",
+      phase: "6C",
       publish: false,
+      RUNWAY_API_KEY_PRESENT: runwayApiKeyPresence(),
       discovery,
       jobs: listCloudGenerationJobs(20),
     });
@@ -1038,7 +1054,7 @@ router.get("/aura/resolve/providers", hqAuthRequired, requireHQModule("aura"), a
   }
 });
 
-/** Phase 6 — cloud-side generation proof / HQ control (non-person only). */
+/** Phase 6 / 6C — cloud-side generation proof / HQ control (non-person only). */
 router.post("/aura/resolve/generate", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
   try {
     if (req.body?.publish === true) {
@@ -1053,18 +1069,51 @@ router.post("/aura/resolve/generate", hqAuthRequired, requireHQModule("aura"), a
       text: req.body?.text,
       title: req.body?.title,
       subtitle: req.body?.subtitle,
+      imageBase64: req.body?.imageBase64 || req.body?.request?.imageBase64,
+      imageMimeType: req.body?.imageMimeType || req.body?.request?.imageMimeType,
+      durationSeconds: req.body?.durationSeconds ?? req.body?.request?.durationSeconds ?? 2,
+      ratio: req.body?.ratio || req.body?.request?.ratio,
+      fileName: req.body?.fileName || req.body?.request?.fileName,
+      project: req.body?.project || req.body?.request?.project,
       person: false,
     });
+
+    // Queue Mac library + Resolve ingest for generated video (local file ingest; no extra Runway credits).
+    let macIngest: unknown = null;
+    if (result.ok && result.kind === "provider_video" && req.body?.ingestToMac !== false) {
+      try {
+        const { getAuraResolveNodeSnapshot, queueAuraResolveCommand } = await import("../hq/auraResolveProductionNode");
+        const node = await getAuraResolveNodeSnapshot();
+        if (node.nodeId && node.online && result.fileBase64) {
+          macIngest = await queueAuraResolveCommand(node.nodeId, "ingest_generated_media", {
+            fileName: result.fileName,
+            base64: result.fileBase64,
+            project: req.body?.project || "IFCDC-PHASE6C-RUNWAY",
+            instruction: String(req.body?.prompt || "").slice(0, 240),
+            durationSeconds: result.durationSeconds ?? 2,
+            // HQ already stored preview during generate — avoid duplicate upload unless asked.
+            uploadPreview: req.body?.reuploadPreview === true,
+            publish: false,
+          });
+        }
+      } catch {
+        macIngest = null;
+      }
+    }
+
     // Never return giant base64 to browser by default — keep metadata + job id.
     const { fileBase64, ...safe } = result as Record<string, unknown>;
     res.json({
       ok: Boolean(result.ok),
       publish: false,
-      phase: 6,
+      phase: "6C",
       ...safe,
       hasBytes: Boolean(fileBase64),
+      macIngest,
       message: result.ok
-        ? "Provider media written on HQ. Queue Start production on Mac for Resolve ingest + draft preview."
+        ? result.kind === "provider_video"
+          ? "Runway video written on HQ + HQ preview stored. Mac ingest queued when Production Mac is online."
+          : "Provider media written on HQ. Queue Start production on Mac for Resolve ingest + draft preview."
         : result.reason || result.blocker,
     });
   } catch (error) {

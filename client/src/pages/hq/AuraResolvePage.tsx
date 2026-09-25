@@ -148,7 +148,11 @@ export default function AuraResolvePage() {
     const response = await fetch("/api/hq/aura/resolve/providers", { credentials: "include" });
     if (!response.ok) return;
     const body = await response.json();
-    setProviders(body.discovery || body);
+    setProviders({
+      ...(body.discovery || body),
+      RUNWAY_API_KEY_PRESENT: body.RUNWAY_API_KEY_PRESENT || body.discovery?.RUNWAY_API_KEY_PRESENT,
+      providers: body.discovery?.providers || body.providers,
+    });
   }
 
   useEffect(() => {
@@ -215,6 +219,7 @@ export default function AuraResolvePage() {
     setBusy(true);
     setNote(`Requesting ${capability} from configured provider…`);
     try {
+      const isVideo = /video|broll|reference_continuity/i.test(capability);
       const response = await fetch("/api/hq/aura/resolve/generate", {
         method: "POST",
         credentials: "include",
@@ -223,10 +228,14 @@ export default function AuraResolvePage() {
           capability,
           title: "IFCDC youth programs",
           subtitle: "Training bumper",
+          project: "IFCDC-PHASE6C-RUNWAY",
+          durationSeconds: isVideo ? 2 : undefined,
           prompt:
             capability === "voice_generation"
               ? undefined
-              : "Non-person abstract IFCDC still: gold geometric shapes on deep black, no people, no faces.",
+              : isVideo
+                ? "Non-person abstract IFCDC gold and ivory geometric motion graphic on deep black. Slow elegant camera drift. No people, no faces, no readable logos."
+                : "Non-person abstract IFCDC still: gold geometric shapes on deep black, no people, no faces.",
           text:
             capability === "voice_generation"
               ? "IFCDC PRODUCTIONS presents a youth programs training bumper. This voice is synthetic."
@@ -237,10 +246,11 @@ export default function AuraResolvePage() {
       const body = await response.json();
       setNote(
         body.ok
-          ? `${capability} ok · job ${body.jobId || "—"} · file ${body.fileName || "—"} · then Start production for Resolve draft`
+          ? `${capability} ok · job ${body.jobId || "—"} · file ${body.fileName || "—"} · preview ${body.hqPreviewId || "—"} · credits ${body.CREDITS_USED ?? "—"}`
           : body.blocker || body.message || body.error || "Generation refused",
       );
       void loadProviders();
+      void load();
     } finally {
       setBusy(false);
     }
@@ -384,22 +394,22 @@ export default function AuraResolvePage() {
         <div className="aura-company">{board?.productionCompany || board?.company || "IFCDC PRODUCTIONS"}</div>
         <h1>AURA Video Production</h1>
         <p className="hq-kpi-meta" style={{ margin: "0.25rem 0 0" }}>
-          Phone control · Production Mac executes · publish stays off · Phase 6B Founder intake + provider audit
+          Phone control · Production Mac executes · publish stays off · Phase 6C Runway video + Founder intake
         </p>
         <div style={{ marginTop: 8 }}>
           <span className="aura-pill">identity:{board?.productionIdentity || "IFCDC PRODUCTION"}</span>
           {board?.brandPromoted ? <span className="aura-pill">brand:{board.brandPromoted}</span> : null}
-          <span className="aura-pill">phase:{board?.phase || "6B"}</span>
+          <span className="aura-pill">phase:{board?.phase || "6C"}</span>
         </div>
       </header>
 
       <div className="aura-card">
         <div className="hq-kpi-meta">Generative providers (discovery)</div>
         <p className="aura-muted" style={{ margin: "6px 0 0" }}>
-          CREDENTIAL_PRESENT / MODEL_ACCESS only — no secret values. Cursor not required once a provider exists.
+          CREDENTIAL_PRESENT / RUNWAY_API_KEY_PRESENT only — no secret values. Runway is PRIMARY video; OpenAI stays image + synthetic TTS.
         </p>
         <div style={{ marginTop: 8 }}>
-          {(((providers as { providers?: Array<Record<string, unknown>> } | null)?.providers) || []).slice(0, 6).map((p) => (
+          {(((providers as { providers?: Array<Record<string, unknown>> } | null)?.providers) || []).slice(0, 8).map((p) => (
             <div key={String(p.PROVIDER_NAME)} style={{ marginTop: 6 }}>
               <strong>{String(p.PROVIDER_NAME)}</strong>
               <div className="aura-muted">
@@ -408,6 +418,11 @@ export default function AuraResolvePage() {
             </div>
           ))}
           {!providers ? <p className="aura-muted">Loading provider inventory…</p> : null}
+          {(providers as { RUNWAY_API_KEY_PRESENT?: string } | null)?.RUNWAY_API_KEY_PRESENT ? (
+            <p className="aura-muted" style={{ marginTop: 8 }}>
+              RUNWAY_API_KEY_PRESENT={(providers as { RUNWAY_API_KEY_PRESENT?: string }).RUNWAY_API_KEY_PRESENT}
+            </p>
+          ) : null}
         </div>
         <div className="aura-actions" style={{ marginTop: 10 }}>
           <button type="button" className="hq-btn" disabled={busy} onClick={() => void loadProviders()}>Refresh providers</button>
@@ -416,6 +431,9 @@ export default function AuraResolvePage() {
           </button>
           <button type="button" className="hq-btn" disabled={busy} onClick={() => void runCloudGenerate("voice_generation")}>
             Prove synthetic voice (HQ)
+          </button>
+          <button type="button" className="hq-btn" disabled={busy} onClick={() => void runCloudGenerate("text_to_video")}>
+            Prove text-to-video (Runway)
           </button>
         </div>
       </div>

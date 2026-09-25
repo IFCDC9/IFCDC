@@ -4,7 +4,7 @@
  */
 import { createServer } from "http";
 import { spawnSync } from "child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, readdirSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, readdirSync, copyFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { connect } from "net";
@@ -25,6 +25,7 @@ import { inventoryProductionKitSlots } from "../brand/production-kit-slots.mjs";
 import { founderIdentityStatus, designateFounderMedia, founderIdentityOnboardingPublic } from "../library/founder-identity.mjs";
 import { readAssetLibraryPublic } from "../library/asset-library.mjs";
 import { setOpenAiMediaHqLink } from "../generation/adapters/openai-media.mjs";
+import { setRunwayMediaHqLink } from "../generation/adapters/runway-media.mjs";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.AURA_RESOLVE_BRIDGE_PORT || 4181);
@@ -512,6 +513,7 @@ async function runQueuedCommand(link, command) {
     }
     try {
       setOpenAiMediaHqLink(link);
+      setRunwayMediaHqLink(link);
       bootGenerationEngine({ hqLink: link });
       const revisionNote =
         command.command === "request_revision"
@@ -561,9 +563,81 @@ async function runQueuedCommand(link, command) {
   if (command.command === "provider_discovery") {
     try {
       setOpenAiMediaHqLink(link);
+      setRunwayMediaHqLink(link);
       bootGenerationEngine({ hqLink: link });
       const discovery = await discoverProviders();
-      await completeCommand(link, command.id, { ok: true, discovery, phase: 6 });
+      await completeCommand(link, command.id, { ok: true, discovery, phase: "6C" });
+    } catch (error) {
+      await completeCommand(link, command.id, { ok: false, error: error.message, publish: false });
+    }
+    return;
+  }
+  if (command.command === "ingest_generated_media") {
+    if (command.args?.publish === true) {
+      await completeCommand(link, command.id, {
+        ok: false,
+        error: "publishing requires Founder approval and is not available",
+        publish: false,
+      });
+      return;
+    }
+    try {
+      const { buildAssetLibraryIndex } = await import("../library/asset-library.mjs");
+      const { PRODUCTIONS_ROOT } = await import("../brand/production-identity.mjs");
+      const videoDir = join(PRODUCTIONS_ROOT, "GENERATED_FOUNDER_MEDIA", "video");
+      mkdirSync(videoDir, { recursive: true });
+      const fileName = String(command.args?.fileName || `runway-ingest-${Date.now().toString(36)}.mp4`).replace(
+        /[^a-zA-Z0-9._-]/g,
+        "_",
+      );
+      const dest = join(videoDir, fileName);
+      if (command.args?.base64) {
+        writeFileSync(dest, Buffer.from(String(command.args.base64), "base64"));
+      } else if (command.args?.sourcePath && existsSync(String(command.args.sourcePath))) {
+        copyFileSync(String(command.args.sourcePath), dest);
+      } else {
+        await completeCommand(link, command.id, {
+          ok: false,
+          error: "base64 or sourcePath required",
+          publish: false,
+        });
+        return;
+      }
+      const library = buildAssetLibraryIndex();
+      let resolveImport = null;
+      try {
+        const created = await askResolve("create_project", {
+          name: String(command.args?.project || "IFCDC-PHASE6C-RUNWAY"),
+        });
+        resolveImport = {
+          create_project: created,
+          import_media: await askResolve("import_media", { path: dest }),
+        };
+      } catch (error) {
+        resolveImport = { ok: false, error: error.message };
+      }
+      let preview = null;
+      if (command.args?.uploadPreview !== false) {
+        preview = await uploadPreviewToHq(link, {
+          path: dest,
+          name: fileName,
+          project: command.args?.project || "IFCDC-PHASE6C-RUNWAY",
+          instruction: command.args?.instruction || "Phase 6C Runway ingest",
+          duration: command.args?.durationSeconds ?? null,
+        });
+      }
+      await completeCommand(link, command.id, {
+        ok: true,
+        publish: false,
+        phase: "6C",
+        path: dest,
+        fileName,
+        libraryCount: library?.count ?? library?.items?.length ?? null,
+        resolveImport,
+        preview,
+        IFCDC_ASSET_LIBRARY_INGEST: "PASS",
+        RESOLVE_GENERATED_MEDIA_INGEST: resolveImport?.import_media?.ok === false ? "FAIL" : "PASS",
+      });
     } catch (error) {
       await completeCommand(link, command.id, { ok: false, error: error.message, publish: false });
     }
@@ -672,8 +746,9 @@ async function heartbeatOnce(link) {
       generation: (() => {
         try {
           setOpenAiMediaHqLink(link);
+          setRunwayMediaHqLink(link);
           bootGenerationEngine({ hqLink: link });
-          return { capabilities: capabilityStatus(), phase: 6 };
+          return { capabilities: capabilityStatus(), phase: "6C" };
         } catch {
           return null;
         }

@@ -14,24 +14,25 @@ import {
 } from "./registry.mjs";
 import { localGraphicsAdapter, localMusicStageAdapter } from "./adapters/local-graphics.mjs";
 import { openaiMediaAdapter, hqOpenaiProxyAdapter, setOpenAiMediaHqLink } from "./adapters/openai-media.mjs";
+import { runwayMediaAdapter, setRunwayMediaHqLink } from "./adapters/runway-media.mjs";
 import { createGenerationJob, runGenerationJob, listGenerationJobs } from "./jobs.mjs";
 
 let booted = false;
 
 export function bootGenerationEngine(opts = {}) {
-  if (opts.hqLink) setOpenAiMediaHqLink(opts.hqLink);
+  if (opts.hqLink) {
+    setOpenAiMediaHqLink(opts.hqLink);
+    setRunwayMediaHqLink(opts.hqLink);
+  }
   if (booted) return capabilityStatus();
   registerAdapter(localGraphicsAdapter);
   registerAdapter(localMusicStageAdapter);
   registerAdapter(openaiMediaAdapter);
   registerAdapter(hqOpenaiProxyAdapter);
+  registerAdapter(runwayMediaAdapter);
 
-  // Explicit unconfigured stubs for video / founder clone so HQ lists every capability honestly.
+  // Explicit unconfigured stubs for founder clone only — video uses runway-media when HQ link present.
   const stubCaps = [
-    "video_generation",
-    "image_to_video",
-    "text_to_video",
-    "background_scene_broll",
     "founder_voice_clone",
     "founder_visual_clone",
   ];
@@ -40,13 +41,11 @@ export function bootGenerationEngine(opts = {}) {
       id: `stub-${capability}`,
       configured: false,
       capabilities: [capability],
-      identityReference: /founder_/i.test(capability),
+      identityReference: true,
       async generate(cap) {
         return notConfiguredResult(
           cap,
-          capability.startsWith("founder_")
-            ? "Founder identity provider + approved source media required"
-            : `No video provider credential configured for ${cap}`,
+          "Founder identity provider + approved source media required",
         );
       },
       describe() {
@@ -57,6 +56,33 @@ export function bootGenerationEngine(opts = {}) {
         };
       },
     });
+  }
+  // Video stubs only when runway adapter is not yet linked (no HQ proxy).
+  if (!runwayMediaAdapter.configured) {
+    for (const capability of [
+      "video_generation",
+      "image_to_video",
+      "text_to_video",
+      "background_scene_broll",
+      "reference_continuity",
+    ]) {
+      registerAdapter({
+        id: `stub-${capability}`,
+        configured: false,
+        capabilities: [capability],
+        identityReference: false,
+        async generate(cap) {
+          return notConfiguredResult(cap, `No video provider credential configured for ${cap}`);
+        },
+        describe() {
+          return {
+            configured: false,
+            status: "NOT_CONFIGURED",
+            blocker: `MISSING_PROVIDER:${capability}`,
+          };
+        },
+      });
+    }
   }
   booted = true;
   return capabilityStatus();
@@ -175,4 +201,5 @@ export {
   runGenerationJob,
   listGenerationJobs,
   setOpenAiMediaHqLink,
+  setRunwayMediaHqLink,
 };

@@ -19,6 +19,7 @@ export const CAPABILITIES = [
   "image_to_video",
   "text_to_video",
   "background_scene_broll",
+  "reference_continuity",
   "graphics_title_graphics",
   "voice_generation",
   "founder_voice_clone",
@@ -33,6 +34,7 @@ export const PHASE6_CAPABILITY_ALIASES = {
   IMAGE_TO_VIDEO: "image_to_video",
   VIDEO_GENERATION: "video_generation",
   BROLL_GENERATION: "background_scene_broll",
+  REFERENCE_CONTINUITY: "reference_continuity",
   VOICE_GENERATION: "voice_generation",
   FOUNDER_VOICE: "founder_voice_clone",
   FOUNDER_VISUAL_GENERATION: "founder_visual_clone",
@@ -122,6 +124,11 @@ export function readRegistryConfig() {
         image_generation: ["openai-media", "hq-openai-proxy"],
         image_editing: ["openai-media", "hq-openai-proxy"],
         voice_generation: ["openai-media", "hq-openai-proxy"],
+        text_to_video: ["runway-media"],
+        image_to_video: ["runway-media"],
+        video_generation: ["runway-media"],
+        background_scene_broll: ["runway-media"],
+        reference_continuity: ["runway-media"],
       },
     };
     writeFileSync(REGISTRY_PATH, JSON.stringify(defaults, null, 2));

@@ -19,6 +19,14 @@ The planner inherits these without the Founder stating them. `brandPromoted` is 
 2. **Visible branding** — template + Founder direction; cards available, not auto-burned onto every frame
 3. **Brand promoted** — e.g. IFCDC Barbers App, IFCDC youth programs
 
+## Phase 6C — Runway video
+
+- `RUNWAY_API_KEY` lives on Render HQ only (`PRESENT` / `NOT_PRESENT` — never logged).
+- Runway is PRIMARY for text-to-video, image-to-video, B-roll, and reference/continuity when the account exposes it.
+- OpenAI remains image generation (`gpt-image-1`), image edit, and synthetic TTS only — never video.
+- Mac Production Node proxies video through HQ; local `.env` does not hold the Runway key.
+- `publish` stays `false`.
+
 ## On-disk library
 
 `~/Library/Application Support/IFCDC/aura-resolve/IFCDC-PRODUCTIONS/`
@@ -38,7 +46,8 @@ Phase 5 paths:
 ## Code
 
 - `aura-resolve/brand/production-identity.mjs`
-- `aura-resolve/generation/` — provider registry + adapters
+- `aura-resolve/generation/` — provider registry + adapters (`runway-media` via HQ proxy)
+- `server/hq/runwayVideoProvider.ts` — cloud Runway REST
 - `aura-resolve/pipeline/production-pipeline.mjs` — idea → master stages
 - `aura-resolve/library/` — asset library, continuity, founder identity
 - Creative memory permanent rule `IFCDC_PRODUCTIONS_GLOBAL_IDENTITY` (append-only preference history)
