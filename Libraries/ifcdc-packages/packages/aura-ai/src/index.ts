@@ -122,7 +122,7 @@ export function createAuraAI(config: AuraConfig) {
           };
           // gpt-image-* rejects response_format; dall-e still accepts b64_json.
           if (!isGptImage) params.response_format = "b64_json";
-          const response = await client.images.generate(params as Parameters<typeof client.images.generate>[0]);
+          const response = await client.images.generate(params as unknown as Parameters<typeof client.images.generate>[0]);
           const data = (response as { data?: Array<{ b64_json?: string | null; url?: string | null; revised_prompt?: string | null }> }).data;
           const item = data?.[0];
           let bytes: Buffer | null = null;
