@@ -1,27 +1,60 @@
 /**
- * Bootstrap + generate-missing-assets orchestration.
+ * Bootstrap + generate-missing-assets orchestration — Phase 6.
  */
-import { CAPABILITIES, capabilityStatus, generate, listAdapters, registerAdapter, notConfiguredResult } from "./registry.mjs";
+import {
+  CAPABILITIES,
+  capabilityStatus,
+  generate,
+  listAdapters,
+  registerAdapter,
+  notConfiguredResult,
+  healthCheckRegistry,
+  modelCapabilityRegistryPublic,
+  providersFor,
+} from "./registry.mjs";
 import { localGraphicsAdapter, localMusicStageAdapter } from "./adapters/local-graphics.mjs";
+import { openaiMediaAdapter, hqOpenaiProxyAdapter, setOpenAiMediaHqLink } from "./adapters/openai-media.mjs";
+import { createGenerationJob, runGenerationJob, listGenerationJobs } from "./jobs.mjs";
 
 let booted = false;
 
-export function bootGenerationEngine() {
+export function bootGenerationEngine(opts = {}) {
+  if (opts.hqLink) setOpenAiMediaHqLink(opts.hqLink);
   if (booted) return capabilityStatus();
   registerAdapter(localGraphicsAdapter);
   registerAdapter(localMusicStageAdapter);
-  // Explicit stubs so HQ can list every capability honestly.
-  for (const capability of CAPABILITIES) {
-    if (capability === "graphics_title_graphics" || capability === "music_sound_integration") continue;
+  registerAdapter(openaiMediaAdapter);
+  registerAdapter(hqOpenaiProxyAdapter);
+
+  // Explicit unconfigured stubs for video / founder clone so HQ lists every capability honestly.
+  const stubCaps = [
+    "video_generation",
+    "image_to_video",
+    "text_to_video",
+    "background_scene_broll",
+    "founder_voice_clone",
+    "founder_visual_clone",
+  ];
+  for (const capability of stubCaps) {
     registerAdapter({
       id: `stub-${capability}`,
       configured: false,
       capabilities: [capability],
+      identityReference: /founder_/i.test(capability),
       async generate(cap) {
-        return notConfiguredResult(cap);
+        return notConfiguredResult(
+          cap,
+          capability.startsWith("founder_")
+            ? "Founder identity provider + approved source media required"
+            : `No video provider credential configured for ${cap}`,
+        );
       },
       describe() {
-        return { configured: false, status: "NOT_CONFIGURED" };
+        return {
+          configured: false,
+          status: "NOT_CONFIGURED",
+          blocker: `MISSING_PROVIDER:${capability}`,
+        };
       },
     });
   }
@@ -62,24 +95,34 @@ export async function generateMissingAssets(needs = [], context = {}) {
       continue;
     }
 
-    const result = await generate(capability, {
-      ...context,
-      title: need.title || context.title,
-      subtitle: need.subtitle || context.subtitle,
-      outDir: context.outDir,
-      fileName: need.fileName,
-      width: context.width,
-      height: context.height,
+    // Persist job — bounded retry + failover inside runGenerationJob / generate().
+    const job = createGenerationJob({
+      capability,
+      request: {
+        ...context,
+        title: need.title || context.title,
+        subtitle: need.subtitle || context.subtitle,
+        prompt: need.prompt || context.prompt,
+        text: need.text || context.text,
+        outDir: context.outDir,
+        fileName: need.fileName,
+        width: context.width,
+        height: context.height,
+        person: false,
+      },
     });
 
+    const result = await runGenerationJob(job.id, generate);
+
     if (result.ok && result.path) {
-      generated.push({ ...need, ...result });
+      generated.push({ ...need, ...result, jobId: job.id });
     } else {
       missing.push({
         ...need,
         status: result.status || "NOT_CONFIGURED",
         blocker: result.blocker || result.reason || `MISSING_PROVIDER:${capability}`,
         result,
+        jobId: job.id,
       });
     }
   }
@@ -87,14 +130,49 @@ export async function generateMissingAssets(needs = [], context = {}) {
   return {
     at: new Date().toISOString(),
     company: "IFCDC PRODUCTIONS",
+    phase: 6,
     fake: false,
     capabilities: capabilityStatus(),
+    registry: modelCapabilityRegistryPublic(),
     adapters: listAdapters().filter((a) => !String(a.id).startsWith("stub-")),
     generated,
     missing,
     skipped,
     anyGenerated: generated.length > 0,
+    jobs: listGenerationJobs(12),
   };
 }
 
-export { CAPABILITIES, capabilityStatus, generate, listAdapters };
+export async function discoverProviders() {
+  bootGenerationEngine();
+  const health = await healthCheckRegistry();
+  return {
+    at: new Date().toISOString(),
+    phase: 6,
+    company: "IFCDC PRODUCTIONS",
+    inventory: health.providers.map((p) => ({
+      PROVIDER_NAME: p.health?.PROVIDER_NAME || p.id,
+      CAPABILITIES_AVAILABLE: p.capabilities,
+      CREDENTIAL_PRESENT: p.health?.CREDENTIAL_PRESENT || (p.configured ? "YES" : "NO"),
+      MODEL_ACCESS: p.health?.MODEL_ACCESS || "UNKNOWN",
+      INTEGRATION_STATUS: p.health?.INTEGRATION_STATUS || p.health?.status || "UNKNOWN",
+      blockers: p.health?.blockers || [],
+    })),
+    capabilities: health.capabilities,
+    registry: modelCapabilityRegistryPublic(),
+  };
+}
+
+export {
+  CAPABILITIES,
+  capabilityStatus,
+  generate,
+  listAdapters,
+  healthCheckRegistry,
+  modelCapabilityRegistryPublic,
+  providersFor,
+  createGenerationJob,
+  runGenerationJob,
+  listGenerationJobs,
+  setOpenAiMediaHqLink,
+};

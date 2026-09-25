@@ -60,12 +60,30 @@ type Board = {
   continuity?: Record<string, unknown> | null;
   assetLibrary?: { count?: number; categories?: string[] } | null;
   productionKitSlots?: { slots?: KitSlot[]; presentCount?: number; missingCount?: number } | null;
+  founderIdentity?: {
+    FOUNDATION_MEDIA_MISSING?: boolean;
+    designations?: {
+      slots?: { id: string; label: string; status: string; fileName?: string | null }[];
+      missingDesignations?: string[];
+    };
+  } | null;
   phase?: number;
   jobs?: Job[];
 };
 
 const SAMPLE =
   "Aura, make a 15-second IFCDC youth programs training bumper.";
+
+const DESIGNATION_SLOTS = [
+  "FOUNDER_FACE_REFERENCE",
+  "FOUNDER_BODY_REFERENCE",
+  "FOUNDER_VIDEO_REFERENCE",
+  "FOUNDER_VOICE_REFERENCE",
+  "OFFICIAL_GOLD_CIRCLE_LOGO",
+  "OFFICIAL_TRANSPARENT_LOGO",
+  "OFFICIAL_FONT",
+  "OFFICIAL_ANIMATED_LOGO",
+];
 
 const GATE_FLOW = [
   "IDEA",
@@ -92,6 +110,9 @@ export default function AuraResolvePage() {
   const [selectedPreviewId, setSelectedPreviewId] = useState("");
   const [finalApproved, setFinalApproved] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [providers, setProviders] = useState<Record<string, unknown> | null>(null);
+  const [designateSlot, setDesignateSlot] = useState(DESIGNATION_SLOTS[0]);
+  const [designateNote, setDesignateNote] = useState("");
 
   async function load() {
     const response = await fetch("/api/hq/aura/resolve/status", { credentials: "include" });
@@ -105,8 +126,16 @@ export default function AuraResolvePage() {
     if (!selectedPreviewId && body.previews?.[0]?.id) setSelectedPreviewId(body.previews[0].id);
   }
 
+  async function loadProviders() {
+    const response = await fetch("/api/hq/aura/resolve/providers", { credentials: "include" });
+    if (!response.ok) return;
+    const body = await response.json();
+    setProviders(body.discovery || body);
+  }
+
   useEffect(() => {
     void load();
+    void loadProviders();
     const timer = window.setInterval(() => void load(), 4000);
     return () => window.clearInterval(timer);
   }, []);
@@ -158,6 +187,71 @@ export default function AuraResolvePage() {
       const body = await response.json();
       setPlan(body.plan || plan);
       setNote(body.message || (body.ok ? "Production queued." : body.error || "Production refused."));
+      void load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runCloudGenerate(capability: string) {
+    setBusy(true);
+    setNote(`Requesting ${capability} from configured provider…`);
+    try {
+      const response = await fetch("/api/hq/aura/resolve/generate", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          capability,
+          title: "IFCDC youth programs",
+          subtitle: "Training bumper",
+          prompt:
+            capability === "voice_generation"
+              ? undefined
+              : "Non-person abstract IFCDC still: gold geometric shapes on deep black, no people, no faces.",
+          text:
+            capability === "voice_generation"
+              ? "IFCDC PRODUCTIONS presents a youth programs training bumper. This voice is synthetic."
+              : undefined,
+          publish: false,
+        }),
+      });
+      const body = await response.json();
+      setNote(
+        body.ok
+          ? `${capability} ok · job ${body.jobId || "—"} · file ${body.fileName || "—"} · then Start production for Resolve draft`
+          : body.blocker || body.message || body.error || "Generation refused",
+      );
+      void loadProviders();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function designateFile(file: File | null) {
+    if (!file) return;
+    setBusy(true);
+    setDesignateNote("Reading file for designation…");
+    try {
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+      const base64 = btoa(binary);
+      const response = await fetch("/api/hq/aura/resolve/founder-identity/designate", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slotId: designateSlot,
+          base64,
+          originalName: file.name,
+          mimeType: file.type || null,
+          publish: false,
+        }),
+      });
+      const body = await response.json();
+      setDesignateNote(body.message || body.error || (body.ok ? "Designation queued." : "Designation refused."));
       void load();
     } finally {
       setBusy(false);
@@ -272,14 +366,74 @@ export default function AuraResolvePage() {
         <div className="aura-company">{board?.productionCompany || board?.company || "IFCDC PRODUCTIONS"}</div>
         <h1>AURA Video Production</h1>
         <p className="hq-kpi-meta" style={{ margin: "0.25rem 0 0" }}>
-          Phone control · Production Mac executes · publish stays off · Phase 5 generative engine
+          Phone control · Production Mac executes · publish stays off · Phase 6 provider router
         </p>
         <div style={{ marginTop: 8 }}>
           <span className="aura-pill">identity:{board?.productionIdentity || "IFCDC PRODUCTION"}</span>
           {board?.brandPromoted ? <span className="aura-pill">brand:{board.brandPromoted}</span> : null}
-          <span className="aura-pill">phase:{board?.phase || 5}</span>
+          <span className="aura-pill">phase:{board?.phase || 6}</span>
         </div>
       </header>
+
+      <div className="aura-card">
+        <div className="hq-kpi-meta">Generative providers (discovery)</div>
+        <p className="aura-muted" style={{ margin: "6px 0 0" }}>
+          CREDENTIAL_PRESENT / MODEL_ACCESS only — no secret values. Cursor not required once a provider exists.
+        </p>
+        <div style={{ marginTop: 8 }}>
+          {(((providers as { providers?: Array<Record<string, unknown>> } | null)?.providers) || []).slice(0, 6).map((p) => (
+            <div key={String(p.PROVIDER_NAME)} style={{ marginTop: 6 }}>
+              <strong>{String(p.PROVIDER_NAME)}</strong>
+              <div className="aura-muted">
+                CREDENTIAL_PRESENT={String(p.CREDENTIAL_PRESENT)} · INTEGRATION_STATUS={String(p.INTEGRATION_STATUS)}
+              </div>
+            </div>
+          ))}
+          {!providers ? <p className="aura-muted">Loading provider inventory…</p> : null}
+        </div>
+        <div className="aura-actions" style={{ marginTop: 10 }}>
+          <button type="button" className="hq-btn" disabled={busy} onClick={() => void loadProviders()}>Refresh providers</button>
+          <button type="button" className="hq-btn" disabled={busy} onClick={() => void runCloudGenerate("image_generation")}>
+            Prove image (HQ)
+          </button>
+          <button type="button" className="hq-btn" disabled={busy} onClick={() => void runCloudGenerate("voice_generation")}>
+            Prove synthetic voice (HQ)
+          </button>
+        </div>
+      </div>
+
+      <div className="aura-card">
+        <div className="hq-kpi-meta">Founder identity onboarding</div>
+        <p className="aura-muted" style={{ margin: "6px 0 0" }}>
+          Explicit designation only. Never auto-designates existing files. Never overwrites originals. No face/voice generation.
+        </p>
+        <p style={{ margin: "8px 0 0" }}>
+          FOUNDATION_MEDIA_MISSING:{" "}
+          {String(
+            board?.founderIdentity?.FOUNDATION_MEDIA_MISSING ??
+              board?.clonePrep?.foundationMediaMissing ??
+              true,
+          )}
+        </p>
+        <div style={{ marginTop: 8 }}>
+          {(board?.founderIdentity?.designations?.slots || []).map((slot) => (
+            <span key={slot.id} className="aura-pill">{slot.id}:{slot.status}</span>
+          ))}
+        </div>
+        <div className="hq-kpi-meta" style={{ marginTop: 12 }}>Designate slot</div>
+        <select value={designateSlot} onChange={(event) => setDesignateSlot(event.target.value)}>
+          {DESIGNATION_SLOTS.map((slot) => (
+            <option key={slot} value={slot}>{slot}</option>
+          ))}
+        </select>
+        <input
+          type="file"
+          style={{ marginTop: 8, width: "100%" }}
+          disabled={busy}
+          onChange={(event) => void designateFile(event.target.files?.[0] || null)}
+        />
+        {designateNote ? <p className="aura-muted" style={{ marginTop: 8 }}>{designateNote}</p> : null}
+      </div>
 
       <div className="aura-card">
         <div className="hq-kpi-meta">Approval gate</div>

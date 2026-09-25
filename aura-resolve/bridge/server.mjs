@@ -20,10 +20,11 @@ import { directCreativeIdea } from "../editor/director.mjs";
 import { parseRevision } from "../editor/revision.mjs";
 import { gatePayload } from "../editor/gates.mjs";
 import { analyzeAssets } from "../editor/assets.mjs";
-import { bootGenerationEngine, capabilityStatus } from "../generation/engine.mjs";
+import { bootGenerationEngine, capabilityStatus, discoverProviders } from "../generation/engine.mjs";
 import { inventoryProductionKitSlots } from "../brand/production-kit-slots.mjs";
-import { founderIdentityStatus } from "../library/founder-identity.mjs";
+import { founderIdentityStatus, designateFounderMedia, founderIdentityOnboardingPublic } from "../library/founder-identity.mjs";
 import { readAssetLibraryPublic } from "../library/asset-library.mjs";
+import { setOpenAiMediaHqLink } from "../generation/adapters/openai-media.mjs";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.AURA_RESOLVE_BRIDGE_PORT || 4181);
@@ -510,6 +511,8 @@ async function runQueuedCommand(link, command) {
       return;
     }
     try {
+      setOpenAiMediaHqLink(link);
+      bootGenerationEngine({ hqLink: link });
       const revisionNote =
         command.command === "request_revision"
           ? command.args?.revisionNote || command.args?.note || "Founder revision"
@@ -534,6 +537,33 @@ async function runQueuedCommand(link, command) {
         }),
       );
       await completeCommand(link, command.id, produced);
+    } catch (error) {
+      await completeCommand(link, command.id, { ok: false, error: error.message, publish: false });
+    }
+    return;
+  }
+  if (command.command === "designate_founder_media") {
+    try {
+      const bytes = command.args?.base64 ? Buffer.from(String(command.args.base64), "base64") : null;
+      const result = designateFounderMedia({
+        slotId: command.args?.slotId,
+        bytes,
+        sourcePath: command.args?.sourcePath || null,
+        originalName: command.args?.originalName || null,
+        mimeType: command.args?.mimeType || null,
+      });
+      await completeCommand(link, command.id, result);
+    } catch (error) {
+      await completeCommand(link, command.id, { ok: false, error: error.message, publish: false });
+    }
+    return;
+  }
+  if (command.command === "provider_discovery") {
+    try {
+      setOpenAiMediaHqLink(link);
+      bootGenerationEngine({ hqLink: link });
+      const discovery = await discoverProviders();
+      await completeCommand(link, command.id, { ok: true, discovery, phase: 6 });
     } catch (error) {
       await completeCommand(link, command.id, { ok: false, error: error.message, publish: false });
     }
@@ -620,7 +650,7 @@ async function heartbeatOnce(link) {
         "Publishing stays off until Founder approval.",
         "Draft creative runs are available from HQ. Final/publish stays gated.",
         "IFCDC PRODUCTIONS identity applies to every new project automatically.",
-        "Phase 5: generate only when a provider is configured; never invent media.",
+        "Phase 6: provider router + Founder identity onboarding; generate only when configured; never invent media.",
       ],
       lastSuccessfulCommand,
       brandKit: (() => {
@@ -641,8 +671,16 @@ async function heartbeatOnce(link) {
       })(),
       generation: (() => {
         try {
-          bootGenerationEngine();
-          return { capabilities: capabilityStatus(), phase: 5 };
+          setOpenAiMediaHqLink(link);
+          bootGenerationEngine({ hqLink: link });
+          return { capabilities: capabilityStatus(), phase: 6 };
+        } catch {
+          return null;
+        }
+      })(),
+      founderIdentity: (() => {
+        try {
+          return founderIdentityOnboardingPublic();
         } catch {
           return null;
         }

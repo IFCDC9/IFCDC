@@ -58,6 +58,8 @@ export const AURA_RESOLVE_COMMANDS = [
   "request_revision",
   "master_formats",
   "resolve_status",
+  "designate_founder_media",
+  "provider_discovery",
 ] as const;
 
 const LOCAL_BRIDGE = "http://127.0.0.1:4181";

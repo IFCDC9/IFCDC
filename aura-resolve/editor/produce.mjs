@@ -701,13 +701,27 @@ export async function runGenerativeProduction({
   }
 
   const durationSeconds = Number(String(director.DURATION || "15").replace(/\D/g, "")) || 15;
+  const stamp = Date.now().toString(36);
   const needs = (director.GENERATION?.needs || []).map((need) => ({
     ...need,
     fileName:
       need.capability === "graphics_title_graphics"
-        ? `${project}-title-${Date.now().toString(36)}.png`
-        : need.fileName,
+        ? `${project}-title-${stamp}.png`
+        : need.capability === "image_generation"
+          ? `${project}-provider-image-${stamp}.png`
+          : need.capability === "voice_generation"
+            ? `${project}-tts-synthetic-${stamp}.mp3`
+            : need.fileName,
   }));
+
+  // Ensure image_generation is attempted when the planner listed it (Phase 6 provider pixels).
+  if (!needs.some((n) => n.capability === "image_generation")) {
+    needs.push({
+      capability: "image_generation",
+      label: "Provider image generation",
+      fileName: `${project}-provider-image-${stamp}.png`,
+    });
+  }
 
   const generation = await generateMissingAssets(needs, {
     outDir: join(GENERATED_LIBRARY, "images"),
@@ -716,7 +730,17 @@ export async function runGenerativeProduction({
     credit: "IFCDC PRODUCTIONS",
     width: format.width,
     height: format.height,
+    prompt: `Non-person abstract IFCDC still for ${director.brandPromoted || "IFCDC"}: gold geometric shapes on deep black, no people, no faces, no invented logos.`,
   });
+
+  // Voice outputs go under generated voice library when present.
+  for (const item of generation.generated || []) {
+    if (item.capability === "voice_generation" && item.path && existsSync(item.path)) {
+      mkdirSync(join(GENERATED_LIBRARY, "voice"), { recursive: true });
+      const dest = join(GENERATED_LIBRARY, "voice", item.file || basename(item.path));
+      if (item.path !== dest) copyFileSync(item.path, dest);
+    }
+  }
 
   const pipeline = buildProductionPipeline({
     instruction,
@@ -745,7 +769,7 @@ export async function runGenerativeProduction({
       company: PRODUCTION_COMPANY,
       instruction,
       project,
-      mode: "phase5_plan_only",
+      mode: "phase6_plan_only",
       generation,
       pipeline,
       publish: false,
@@ -756,7 +780,7 @@ export async function runGenerativeProduction({
     return {
       ok: true,
       publish: false,
-      mode: "phase5_plan_only",
+      mode: "phase6_plan_only",
       company: PRODUCTION_COMPANY,
       productionCompany: PRODUCTION_COMPANY,
       productionIdentity: "IFCDC PRODUCTION",
@@ -776,13 +800,16 @@ export async function runGenerativeProduction({
     };
   }
 
-  // Real non-person graphic exists — build a short bumper draft and return to HQ.
-  const graphic = generation.generated.find((g) => g.capability === "graphics_title_graphics" && g.path);
+  // Prefer provider-generated image pixels for Phase 6 proof; fall back to local title graphic for draft continuity.
+  const providerImage = generation.generated.find((g) => g.capability === "image_generation" && g.path);
+  const graphic =
+    providerImage ||
+    generation.generated.find((g) => g.capability === "graphics_title_graphics" && g.path);
   if (!graphic?.path || !existsSync(graphic.path)) {
     return {
       ok: false,
       publish: false,
-      mode: "phase5_generation_reported_without_file",
+      mode: "phase6_generation_reported_without_file",
       generation,
       director,
       inventedMedia: false,
@@ -868,10 +895,15 @@ export async function runGenerativeProduction({
     company: PRODUCTION_COMPANY,
     instruction,
     project,
-    mode: "phase5_generative_draft",
+    mode: "phase6_generative_draft",
     generation,
     render: { name: `${draftName}.mp4`, path: draftPath, duration, preview, format: format.label },
-    generatedGraphic: { name: graphic.file, kind: graphic.kind },
+    generatedGraphic: {
+      name: graphic.file,
+      kind: graphic.kind,
+      capability: graphic.capability,
+      provider: graphic.provider || null,
+    },
     publish: false,
     gate: "HQ_PREVIEW",
   };
@@ -883,7 +915,7 @@ export async function runGenerativeProduction({
   return {
     ok: Boolean(existsSync(draftPath)),
     publish: false,
-    mode: "phase5_generative_draft",
+    mode: "phase6_generative_draft",
     company: PRODUCTION_COMPANY,
     productionCompany: PRODUCTION_COMPANY,
     productionIdentity: "IFCDC PRODUCTION",
@@ -900,7 +932,10 @@ export async function runGenerativeProduction({
     resolveResults,
     inventedMedia: false,
     realGeneratedFile: graphic.file,
-    message: "Non-person title graphic generated, draft bumper built, preview returned to HQ. publish stays false.",
+    providerImageProof: Boolean(providerImage),
+    message: providerImage
+      ? "Provider image generated, draft bumper built, preview returned to HQ. publish stays false."
+      : "Local title graphic used for draft continuity (not IMAGE_GENERATION_PROOF). publish stays false.",
   };
 }
 

@@ -956,13 +956,13 @@ router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), asyn
       ],
       publish: false,
       distributionBlocked: true,
-      phase: 5,
+      phase: 6,
       errors: macOnline ? beat.errors || [] : [],
       notes: beat.notes || [
         "Publishing stays off until Founder approval.",
         "IFCDC PRODUCTIONS applies automatically to every project.",
         "brandPromoted is the product/program — separate from the production company.",
-        "Phase 5: generate only when a provider is configured; never invent media.",
+        "Phase 6: provider router + Founder identity onboarding; generate only when configured; never invent media.",
       ],
       lastHeartbeat: node.lastSeenAt,
       heartbeatAgeMs: node.ageMs ?? null,
@@ -974,6 +974,7 @@ router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), asyn
       continuity: beat.continuity || null,
       assetLibrary: beat.assetLibrary || null,
       productionKitSlots: beat.productionKitSlots || beat.brandKit?.productionKitSlots || null,
+      founderIdentity: beat.founderIdentity || null,
       clonePrep: beat.clonePrep || {
         status: "ARCHITECTURE_READY",
         generationEngine: "NOT_EXECUTED_FOR_PERSON",
@@ -1002,6 +1003,117 @@ router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), asyn
       queue: [],
       previews: [],
     });
+  }
+});
+
+/** Phase 6 — provider discovery (no secrets). */
+router.get("/aura/resolve/providers", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  try {
+    const { discoverGenerativeProviders, listCloudGenerationJobs } = await import("../hq/auraResolveGenerativeProviders");
+    const deep = String(req.query.deep || "") === "1";
+    const discovery = await discoverGenerativeProviders({ deep });
+    res.json({
+      ok: true,
+      phase: 6,
+      publish: false,
+      discovery,
+      jobs: listCloudGenerationJobs(20),
+    });
+  } catch (error) {
+    console.error("GET /aura/resolve/providers error:", error);
+    res.status(500).json({ ok: false, error: "Provider discovery unavailable" });
+  }
+});
+
+/** Phase 6 — cloud-side generation proof / HQ control (non-person only). */
+router.post("/aura/resolve/generate", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  try {
+    if (req.body?.publish === true) {
+      res.status(403).json({ ok: false, error: "publishing requires Founder approval and is not available", publish: false });
+      return;
+    }
+    const { executeCloudGeneration } = await import("../hq/auraResolveGenerativeProviders");
+    const capability = String(req.body?.capability || "image_generation");
+    const result = await executeCloudGeneration(capability, {
+      ...(req.body?.request || {}),
+      prompt: req.body?.prompt,
+      text: req.body?.text,
+      title: req.body?.title,
+      subtitle: req.body?.subtitle,
+      person: false,
+    });
+    // Never return giant base64 to browser by default — keep metadata + job id.
+    const { fileBase64, ...safe } = result as Record<string, unknown>;
+    res.json({
+      ok: Boolean(result.ok),
+      publish: false,
+      phase: 6,
+      ...safe,
+      hasBytes: Boolean(fileBase64),
+      message: result.ok
+        ? "Provider media written on HQ. Queue Start production on Mac for Resolve ingest + draft preview."
+        : result.reason || result.blocker,
+    });
+  } catch (error) {
+    console.error("POST /aura/resolve/generate error:", error);
+    res.status(500).json({ ok: false, error: "Generation failed" });
+  }
+});
+
+/** Phase 6 — Founder identity onboarding: queue designation to Production Mac. */
+router.post("/aura/resolve/founder-identity/designate", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
+  try {
+    if (req.body?.publish === true) {
+      res.status(403).json({ ok: false, publish: false, error: "publishing blocked" });
+      return;
+    }
+    const slotId = String(req.body?.slotId || "").trim();
+    if (!slotId) {
+      res.status(400).json({ ok: false, error: "slotId required" });
+      return;
+    }
+    const { getAuraResolveNodeSnapshot, queueAuraResolveCommand } = await import("../hq/auraResolveProductionNode");
+    const node = await getAuraResolveNodeSnapshot();
+    if (!node.nodeId) {
+      res.status(409).json({ ok: false, error: "Production Mac is not enrolled" });
+      return;
+    }
+    const queued = await queueAuraResolveCommand(node.nodeId, "designate_founder_media", {
+      slotId,
+      base64: req.body?.base64 || null,
+      originalName: req.body?.originalName || null,
+      mimeType: req.body?.mimeType || null,
+      publish: false,
+    });
+    res.json({
+      ok: true,
+      publish: false,
+      phase: 6,
+      queued,
+      message: `Designation queued for ${slotId}. Originals are never overwritten. No face/voice is generated.`,
+    });
+  } catch (error) {
+    console.error("POST /aura/resolve/founder-identity/designate error:", error);
+    res.status(500).json({ ok: false, error: "Designation queue failed" });
+  }
+});
+
+/** Production Mac → HQ OpenAI media proxy (node auth). */
+router.post("/aura/resolve/node/generate", async (req, res) => {
+  try {
+    const { authenticateAuraResolveNode } = await import("../hq/auraResolveProductionNode");
+    const node = await authenticateAuraResolveNode(req);
+    if (!node) {
+      res.status(401).json({ ok: false, error: "unauthorized" });
+      return;
+    }
+    const { executeCloudGeneration } = await import("../hq/auraResolveGenerativeProviders");
+    const capability = String(req.body?.capability || "");
+    const result = await executeCloudGeneration(capability, { ...(req.body?.request || {}), person: false });
+    res.json(result);
+  } catch (error) {
+    console.error("POST /aura/resolve/node/generate error:", error);
+    res.status(500).json({ ok: false, status: "FAILED", blocker: "PROVIDER_ERROR:hq_proxy" });
   }
 });
 
@@ -1072,7 +1184,7 @@ router.post("/aura/resolve/plan", hqAuthRequired, requireHQModule("aura"), async
     librarySearch: plan.LIBRARY_SEARCH,
     assetGaps: plan.ASSET_GAPS,
     queued,
-    message: "Phase 5 plan ready. Start production to generate configured assets / build the draft on the Production Mac.",
+    message: "Phase 6 plan ready. Start production to generate configured assets / build the draft on the Production Mac.",
   });
 });
 
