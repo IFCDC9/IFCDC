@@ -113,32 +113,44 @@ export function createAuraAI(config: AuraConfig) {
       let lastError = "no image model attempted";
       for (const imageModel of candidates) {
         try {
-          const response = await client.images.generate({
+          const isGptImage = /gpt-image/i.test(imageModel);
+          const params: Record<string, unknown> = {
             model: imageModel,
             prompt,
             n: 1,
-            size: (opts.size || "1024x1024") as "1024x1024",
-            // Prefer bytes so HQ never depends on a temporary CDN URL.
-            response_format: "b64_json" as const,
-          } as Parameters<typeof client.images.generate>[0]);
-          const data = (response as { data?: Array<{ b64_json?: string | null; revised_prompt?: string | null }> }).data;
+            size: opts.size || "1024x1024",
+          };
+          // gpt-image-* rejects response_format; dall-e still accepts b64_json.
+          if (!isGptImage) params.response_format = "b64_json";
+          const response = await client.images.generate(params as Parameters<typeof client.images.generate>[0]);
+          const data = (response as { data?: Array<{ b64_json?: string | null; url?: string | null; revised_prompt?: string | null }> }).data;
           const item = data?.[0];
-          const b64 = item?.b64_json;
-          if (!b64) {
+          let bytes: Buffer | null = null;
+          if (item?.b64_json) {
+            bytes = Buffer.from(item.b64_json, "base64");
+          } else if (item?.url) {
+            const fetched = await fetch(item.url);
+            if (!fetched.ok) {
+              lastError = `model ${imageModel} URL fetch failed HTTP ${fetched.status}`;
+              continue;
+            }
+            bytes = Buffer.from(await fetched.arrayBuffer());
+          }
+          if (!bytes?.length) {
             lastError = `model ${imageModel} returned no image bytes`;
             continue;
           }
           return {
             ok: true,
-            bytes: Buffer.from(b64, "base64"),
+            bytes,
             mimeType: "image/png",
             model: imageModel,
-            revisedPrompt: item.revised_prompt || undefined,
+            revisedPrompt: item?.revised_prompt || undefined,
           };
         } catch (error) {
           lastError = String((error as Error)?.message || error);
-          // Try next model on model_not_found / access errors.
-          if (/model|access|permission|not found|404|400/i.test(lastError)) continue;
+          // Try next model on model_not_found / access / param errors.
+          if (/model|access|permission|not found|404|400|Unknown parameter/i.test(lastError)) continue;
           return {
             ok: false,
             status: "PROVIDER_ERROR",
