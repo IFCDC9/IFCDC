@@ -1722,6 +1722,38 @@ router.post("/aura/resolve/node/preview", async (req, res) => {
   }
 });
 
+/** Correct a mislabeled HQ preview catalog entry without regenerating media. */
+router.post("/aura/resolve/node/preview/relabel", async (req, res) => {
+  try {
+    const { authenticateAuraResolveNode, relabelAuraResolvePreview } = await import("../hq/auraResolveProductionNode");
+    const node = await authenticateAuraResolveNode(req);
+    if (!node) {
+      res.status(401).json({ ok: false, error: "resolve node token rejected" });
+      return;
+    }
+    if (req.body?.publish === true) {
+      res.status(403).json({ ok: false, error: "publishing requires Founder approval and is not available", publish: false });
+      return;
+    }
+    const updated = await relabelAuraResolvePreview({
+      id: String(req.body?.id || ""),
+      name: String(req.body?.name || ""),
+      project: req.body?.project != null ? String(req.body.project) : null,
+      instruction: req.body?.instruction != null ? String(req.body.instruction) : null,
+    });
+    res.status(200).json(updated);
+  } catch (error) {
+    console.error("POST /aura/resolve/node/preview/relabel error:", error);
+    const message = error instanceof Error ? error.message : "Resolve preview relabel unavailable";
+    const status = /not found|required/i.test(message) ? 400 : 503;
+    res.status(status).json({
+      ok: false,
+      error: message,
+      publish: false,
+    });
+  }
+});
+
 /** AURA MUSIC Command Center payload for HQ UI (local status file or clear cloud offline). */
 router.get("/aura/music/command-center", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
   try {

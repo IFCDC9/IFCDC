@@ -550,6 +550,16 @@ function previewDir(): string {
   return dir;
 }
 
+
+function sanitizePreviewName(name: string): string {
+  return String(name || "draft.mp4")
+    .replace(/[—–]/g, "-")
+    .replace(/[^a-zA-Z0-9._\- ]+/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+}
+
 export async function storeAuraResolvePreview(opts: {
   name: string;
   project?: string | null;
@@ -560,12 +570,7 @@ export async function storeAuraResolvePreview(opts: {
   size?: number;
 }) {
   // Keep Founder-facing titles readable (spaces / en–em dashes); still strip path-unsafe chars.
-  const safeName = String(opts.name || "draft.mp4")
-    .replace(/[—–]/g, "-")
-    .replace(/[^a-zA-Z0-9._\- ]+/g, "_")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 120);
+  const safeName = sanitizePreviewName(opts.name);
   const id = `arp_${crypto.randomBytes(8).toString("hex")}`;
   const bytes = Buffer.from(String(opts.base64 || ""), "base64");
   if (!bytes.length) throw new Error("preview payload empty");
@@ -676,6 +681,87 @@ export async function getAuraResolvePreview(id: string) {
       contentType: row.content_type,
       size: row.size,
       bytes: fs.readFileSync(row.path),
+    };
+  });
+}
+
+/** Correct HQ preview catalog labels without touching original Mac media bytes. */
+export async function relabelAuraResolvePreview(opts: {
+  id: string;
+  name: string;
+  project?: string | null;
+  instruction?: string | null;
+}) {
+  const id = String(opts.id || "").trim();
+  if (!id) throw new Error("preview id required");
+  const safeName = sanitizePreviewName(opts.name);
+  if (!safeName) throw new Error("preview name required");
+
+  return withResolveDb("relabelAuraResolvePreview", async (db) => {
+    const row = (await db.get(
+      `SELECT id, name, project, instruction, path, size, duration, content_type, created_at
+       FROM aura_resolve_previews WHERE id = ?`,
+      id
+    )) as {
+      id: string;
+      name: string;
+      project: string | null;
+      instruction: string | null;
+      path: string;
+      size: number;
+      duration: number | null;
+      content_type: string;
+      created_at: string;
+    } | undefined;
+    if (!row) throw new Error("preview not found");
+
+    let nextPath = row.path;
+    if (fs.existsSync(row.path)) {
+      const dir = path.dirname(row.path);
+      const candidate = path.join(dir, `${id}-${safeName}`);
+      if (candidate !== row.path) {
+        // Rename catalog file only — do not rewrite bytes.
+        fs.renameSync(row.path, candidate);
+        nextPath = candidate;
+      }
+    }
+
+    await db.run(
+      `UPDATE aura_resolve_previews
+       SET name = ?, project = ?, instruction = ?, path = ?
+       WHERE id = ?`,
+      safeName,
+      opts.project !== undefined ? opts.project : row.project,
+      opts.instruction !== undefined ? opts.instruction : row.instruction,
+      nextPath,
+      id
+    );
+
+    await db.run(
+      `INSERT INTO aura_resolve_creative_memory (id, kind, payload_json, created_at) VALUES (?, ?, ?, ?)`,
+      `arm_${crypto.randomBytes(6).toString("hex")}`,
+      "preview_relabel",
+      JSON.stringify({
+        previewId: id,
+        previousName: row.name,
+        previousProject: row.project,
+        name: safeName,
+        project: opts.project !== undefined ? opts.project : row.project,
+        publish: false,
+      }),
+      new Date().toISOString()
+    );
+
+    return {
+      ok: true as const,
+      id,
+      name: safeName,
+      project: opts.project !== undefined ? opts.project : row.project,
+      instruction: opts.instruction !== undefined ? opts.instruction : row.instruction,
+      size: row.size,
+      duration: row.duration,
+      publish: false,
+      previewUrl: `/api/hq/aura/resolve/preview/${id}`,
     };
   });
 }
