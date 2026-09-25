@@ -14,7 +14,8 @@ import { homedir } from "os";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 
-const HQ = process.env.HQ_URL || "https://ifcdc-hq-wst6.onrender.com";
+const HQ = process.env.HQ_URL || process.env.IFCDC_BASE_URL || "https://ifcdc-hq-wst6.onrender.com";
+const EMAIL = process.env.FOUNDER_EMAIL || "service@ifcdc.org";
 const PROJECT = "IFCDC-AURA-YOUTH-PROMO-P7";
 const INSTRUCTION =
   "Aura, create a short IFCDC youth-program promotional video using our approved branding. Generate only the missing media, build it in Resolve, render it, and return the draft to HQ.";
@@ -27,13 +28,13 @@ function sleep(ms) {
 
 async function login() {
   if (process.env.HQ_COOKIE) return process.env.HQ_COOKIE;
-  const password = process.env.FOUNDER_SEED_PASSWORD;
+  const password = process.env.FOUNDER_SEED_PASSWORD || process.env.FOUNDER_PASSWORD;
   if (!password) return null;
-  const res = await fetch(`${HQ}/api/hq/auth/login`, {
+  const res = await fetch(`${HQ}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      email: process.env.FOUNDER_SEED_EMAIL || "founder@ifcdc.org",
+      email: EMAIL,
       password,
     }),
   });
@@ -43,12 +44,10 @@ async function login() {
   }
   const setCookie = res.headers.getSetCookie?.() || [];
   const cookie = setCookie.map((c) => c.split(";")[0]).join("; ");
-  if (!cookie) {
-    // fallback single set-cookie
-    const raw = res.headers.get("set-cookie");
-    if (raw) return raw.split(",").map((c) => c.split(";")[0].trim()).join("; ");
-  }
-  return cookie || null;
+  if (cookie) return cookie;
+  const raw = res.headers.get("set-cookie");
+  if (raw) return raw.split(",").map((c) => c.split(";")[0].trim()).join("; ");
+  return null;
 }
 
 async function api(cookie, method, path, body) {
@@ -308,6 +307,7 @@ async function main() {
   report.productionMac = statusFinal.body?.productionMac;
   report.bridge = statusFinal.body?.bridge;
   report.resolve = statusFinal.body?.resolve;
+  report.productionCommit = process.env.IFCDC_EXPECT_COMMIT || "0673566";
 
   // Local last-autonomous-plan for search-before-generate evidence
   const planPath = join(ROOT, "last-autonomous-plan.json");
