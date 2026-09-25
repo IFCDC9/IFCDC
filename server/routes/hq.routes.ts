@@ -1441,90 +1441,96 @@ router.post("/aura/resolve/status-ask", hqAuthRequired, requireHQModule("aura"),
 
 /** Phase 7 — HQ preview loop decisions (publish stays false) */
 router.post("/aura/resolve/preview-decision", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
-  if (req.body?.publish === true) {
-    res.status(403).json({ ok: false, error: "publishing requires Founder approval and is not available", publish: false });
-    return;
-  }
-  const decision = String(req.body?.decision || "").toUpperCase();
-  const allowed = ["PLAY", "APPROVE", "REJECT", "REQUEST_REVISION", "CREATE_ALTERNATE", "CHANGE_FORMAT"];
-  if (!allowed.includes(decision)) {
-    res.status(400).json({ ok: false, error: `decision must be one of ${allowed.join(", ")}`, publish: false });
-    return;
-  }
-  const { getAuraResolveNodeSnapshot, queueAuraResolveCommand, recordAuraResolveCreativeMemory, getAuraResolvePreview } =
-    await import("../hq/auraResolveProductionNode");
+  try {
+    if (req.body?.publish === true) {
+      res.status(403).json({ ok: false, error: "publishing requires Founder approval and is not available", publish: false });
+      return;
+    }
+    const decision = String(req.body?.decision || "").toUpperCase();
+    const allowed = ["PLAY", "APPROVE", "REJECT", "REQUEST_REVISION", "CREATE_ALTERNATE", "CHANGE_FORMAT"];
+    if (!allowed.includes(decision)) {
+      res.status(400).json({ ok: false, error: `decision must be one of ${allowed.join(", ")}`, publish: false });
+      return;
+    }
+    const { getAuraResolveNodeSnapshot, queueAuraResolveCommand, recordAuraResolveCreativeMemory, getAuraResolvePreview } =
+      await import("../hq/auraResolveProductionNode");
 
-  if (decision === "PLAY") {
-    const previewId = String(req.body?.previewId || "");
-    const preview = previewId ? await getAuraResolvePreview(previewId) : null;
-    res.json({
-      ok: true,
-      decision: "PLAY",
+    if (decision === "PLAY") {
+      const previewId = String(req.body?.previewId || "");
+      const preview = previewId ? await getAuraResolvePreview(previewId) : null;
+      res.json({
+        ok: true,
+        decision: "PLAY",
+        publish: false,
+        previewId: previewId || null,
+        previewUrl: previewId ? `/api/hq/aura/resolve/preview/${previewId}` : null,
+        found: Boolean(preview),
+        message: preview ? "Play the HQ preview in the phone player." : "Select a preview id to play.",
+      });
+      return;
+    }
+
+    const node = await getAuraResolveNodeSnapshot();
+    if (!node.nodeId) {
+      res.status(409).json({ ok: false, error: "Production Mac is not enrolled", publish: false });
+      return;
+    }
+    await recordAuraResolveCreativeMemory("preview_decision", {
+      decision,
+      project: req.body?.projectName || req.body?.project || null,
+      previewId: req.body?.previewId || null,
+      revisionNote: req.body?.revisionNote || null,
       publish: false,
-      previewId: previewId || null,
-      previewUrl: previewId ? `/api/hq/aura/resolve/preview/${previewId}` : null,
-      found: Boolean(preview),
-      message: preview ? "Play the HQ preview in the phone player." : "Select a preview id to play.",
+      phase: 7,
     });
-    return;
-  }
 
-  const node = await getAuraResolveNodeSnapshot();
-  if (!node.nodeId) {
-    res.status(409).json({ ok: false, error: "Production Mac is not enrolled", publish: false });
-    return;
-  }
-  await recordAuraResolveCreativeMemory("preview_decision", {
-    decision,
-    project: req.body?.projectName || req.body?.project || null,
-    previewId: req.body?.previewId || null,
-    revisionNote: req.body?.revisionNote || null,
-    publish: false,
-    phase: 7,
-  });
+    if (decision === "APPROVE" || decision === "REJECT") {
+      const queued = await queueAuraResolveCommand(node.nodeId, "preview_decision", {
+        decision,
+        project: req.body?.projectName || req.body?.project || "IFCDC-AURA-YOUTH-PROMO-P7",
+        previewId: req.body?.previewId || null,
+        publish: false,
+      });
+      res.json({
+        ok: true,
+        decision,
+        publish: false,
+        gate: decision === "APPROVE" ? "FOUNDER_APPROVAL" : "HQ_PREVIEW",
+        queued,
+        message:
+          decision === "APPROVE"
+            ? "Approval noted. Aura may NOT publish. DISTRIBUTION_AUTHORIZATION blocked."
+            : "Rejected. Request a revision to continue.",
+      });
+      return;
+    }
 
-  if (decision === "APPROVE" || decision === "REJECT") {
     const queued = await queueAuraResolveCommand(node.nodeId, "preview_decision", {
       decision,
-      project: req.body?.projectName || req.body?.project || "IFCDC-AURA-YOUTH-PROMO-P7",
-      previewId: req.body?.previewId || null,
+      instruction: req.body?.instruction || "",
+      revisionNote:
+        req.body?.revisionNote ||
+        (decision === "CHANGE_FORMAT"
+          ? "Make a YouTube version — keep everything else the same"
+          : decision === "CREATE_ALTERNATE"
+            ? "Create an alternate cut — keep brand and music"
+            : "Founder revision"),
+      projectName: req.body?.projectName || req.body?.project || "IFCDC-AURA-YOUTH-PROMO-P7",
+      jobId: req.body?.jobId || null,
       publish: false,
     });
     res.json({
       ok: true,
       decision,
       publish: false,
-      gate: decision === "APPROVE" ? "FOUNDER_APPROVAL" : "HQ_PREVIEW",
       queued,
-      message:
-        decision === "APPROVE"
-          ? "Approval noted. Aura may NOT publish. DISTRIBUTION_AUTHORIZATION blocked."
-          : "Rejected. Request a revision to continue.",
+      message: `${decision} queued on Production Mac. Draft only.`,
     });
-    return;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("POST /aura/resolve/preview-decision error:", error);
+    res.status(500).json({ ok: false, error: message, publish: false });
   }
-
-  const queued = await queueAuraResolveCommand(node.nodeId, "preview_decision", {
-    decision,
-    instruction: req.body?.instruction || "",
-    revisionNote:
-      req.body?.revisionNote ||
-      (decision === "CHANGE_FORMAT"
-        ? "Make a YouTube version — keep everything else the same"
-        : decision === "CREATE_ALTERNATE"
-          ? "Create an alternate cut — keep brand and music"
-          : "Founder revision"),
-    projectName: req.body?.projectName || req.body?.project || "IFCDC-AURA-YOUTH-PROMO-P7",
-    jobId: req.body?.jobId || null,
-    publish: false,
-  });
-  res.json({
-    ok: true,
-    decision,
-    publish: false,
-    queued,
-    message: `${decision} queued on Production Mac. Draft only.`,
-  });
 });
 
 /** Phase 7 — resume persisted autonomous job without regenerating completed assets */

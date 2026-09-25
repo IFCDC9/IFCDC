@@ -264,8 +264,8 @@ button.hq-kpi-card--link { border-radius: var(--hq-radius); padding: 1.1rem 1.25
 
 @media (max-width: 1024px) { .hq-grid-main-side { grid-template-columns: 1fr; } }
 @media (max-width: 768px) {
-  .hq-sidebar { transform: translateX(-100%); }
-  .hq-sidebar.open { transform: translateX(0); }
+  .hq-sidebar { transform: translateX(-100%); pointer-events: none; }
+  .hq-sidebar.open { transform: translateX(0); pointer-events: auto; }
   .hq-sidebar-overlay.open { display: block; pointer-events: auto; }
   .hq-main { margin-left: 0; width: 100%; max-width: 100%; }
   .hq-menu-toggle { display: flex; }

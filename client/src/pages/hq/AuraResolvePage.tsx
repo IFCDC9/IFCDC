@@ -253,11 +253,14 @@ export default function AuraResolvePage() {
   async function previewDecision(decision: string) {
     setBusy(true);
     setNote(`${decision}…`);
+    const ctrl = new AbortController();
+    const timer = window.setTimeout(() => ctrl.abort(), 20_000);
     try {
       const response = await fetch("/api/hq/aura/resolve/preview-decision", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
+        signal: ctrl.signal,
         body: JSON.stringify({
           decision,
           instruction,
@@ -274,13 +277,21 @@ export default function AuraResolvePage() {
           publish: false,
         }),
       });
-      const body = await response.json();
-      setNote(body.message || (body.ok ? `${decision} ok` : body.error || "Decision refused."));
-      if (decision === "PLAY" && body.previewUrl && latestPreview) {
-        setSelectedPreviewId(latestPreview.id);
+      const body = await response.json().catch(() => ({} as { message?: string; ok?: boolean; error?: string; previewUrl?: string }));
+      if (!response.ok) {
+        setNote(body.error || body.message || `${decision} failed (${response.status}).`);
+      } else {
+        setNote(body.message || (body.ok ? `${decision} ok` : body.error || "Decision refused."));
+        if (decision === "PLAY" && body.previewUrl && latestPreview) {
+          setSelectedPreviewId(latestPreview.id);
+        }
+        void load();
       }
-      void load();
+    } catch (err) {
+      const aborted = err instanceof DOMException && err.name === "AbortError";
+      setNote(aborted ? `${decision} timed out — try again.` : `${decision} failed — ${(err as Error)?.message || "network error"}`);
     } finally {
+      window.clearTimeout(timer);
       setBusy(false);
     }
   }
@@ -422,7 +433,7 @@ export default function AuraResolvePage() {
         .aura-resolve-page, .aura-resolve-page * { box-sizing: border-box; }
         .aura-resolve-page {
           display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.85rem;
-          width: 100%; max-width: 100%; min-width: 0; margin: 0; overflow-x: clip;
+          width: 100%; max-width: 100%; min-width: 0; margin: 0; overflow-x: hidden;
         }
         .aura-resolve-page h1 { margin: 0; font-size: clamp(1.35rem, 4.5vw, 1.85rem); overflow-wrap: anywhere; }
         .aura-company { color: #C9A227; font-weight: 700; font-size: 0.85rem; letter-spacing: 0.08em; text-transform: uppercase; overflow-wrap: anywhere; }

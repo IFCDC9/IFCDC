@@ -61,6 +61,11 @@ export const AURA_RESOLVE_COMMANDS = [
   "designate_founder_media",
   "provider_discovery",
   "ingest_generated_media",
+  // Phase 7 HQ preview loop — Mac bridge handles these; missing allowlist entries
+  // made APPROVE/REJECT throw with no HTTP response and left the phone UI busy-locked.
+  "preview_decision",
+  "autonomous_status",
+  "resume_autonomous_job",
 ] as const;
 
 const LOCAL_BRIDGE = "http://127.0.0.1:4181";
