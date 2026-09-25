@@ -354,9 +354,9 @@ export async function executeCloudGeneration(capabilityRaw: string, request: Rec
         ).trim();
         const size =
           Number(request.height) > Number(request.width)
-            ? "1024x1792"
+            ? "1024x1536"
             : Number(request.width) > Number(request.height)
-              ? "1792x1024"
+              ? "1536x1024"
               : "1024x1024";
         const gen = await client.generateImage({ prompt, size: size as "1024x1024" });
         (job.attempts as unknown[]).push({ n: i + 1, ok: gen.ok, status: gen.ok ? "GENERATED" : gen.status });

@@ -41,7 +41,7 @@ export const DEFAULT_AURA_SYSTEM_PROMPT = `You are AURA, the AI assistant for th
 You provide helpful, accurate, and community-focused responses.
 Always maintain a professional, supportive, and inclusive tone.`;
 
-const DEFAULT_IMAGE_MODELS = ["gpt-image-1", "dall-e-3", "dall-e-2"];
+const DEFAULT_IMAGE_MODELS = ["gpt-image-1", "dall-e-3"];
 const DEFAULT_TTS_MODELS = ["gpt-4o-mini-tts", "tts-1-hd", "tts-1"];
 
 function envModel(name: string, fallback: string | null = null): string | null {
@@ -111,57 +111,83 @@ export function createAuraAI(config: AuraConfig) {
         (m, i, arr): m is string => Boolean(m) && arr.indexOf(m) === i,
       );
       let lastError = "no image model attempted";
+      const attemptLog: string[] = [];
       for (const imageModel of candidates) {
-        try {
-          const params: Record<string, unknown> = {
-            model: imageModel,
-            prompt,
-            n: 1,
-            size: opts.size || "1024x1024",
-          };
-          // Current OpenAI image endpoints reject response_format on gpt-image and some dall-e paths.
-          // Prefer native b64 when present; otherwise fetch URL bytes.
-          const response = await client.images.generate(params as unknown as Parameters<typeof client.images.generate>[0]);
-          const data = (response as { data?: Array<{ b64_json?: string | null; url?: string | null; revised_prompt?: string | null }> }).data;
-          const item = data?.[0];
-          let bytes: Buffer | null = null;
-          if (item?.b64_json) {
-            bytes = Buffer.from(item.b64_json, "base64");
-          } else if (item?.url) {
-            const fetched = await fetch(item.url);
-            if (!fetched.ok) {
-              lastError = `model ${imageModel} URL fetch failed HTTP ${fetched.status}`;
+        const sizeCandidates = (() => {
+          const requested = opts.size || "1024x1024";
+          if (/gpt-image/i.test(imageModel)) {
+            // gpt-image uses 1024x1024 / 1024x1536 / 1536x1024 (not 1792).
+            if (requested === "1024x1792" || requested === "1024x1536") return ["1024x1536", "1024x1024"];
+            if (requested === "1792x1024" || requested === "1536x1024") return ["1536x1024", "1024x1024"];
+            return ["1024x1024", "1024x1536", "1536x1024"];
+          }
+          if (/dall-e-3/i.test(imageModel)) {
+            if (requested === "1024x1536") return ["1024x1792", "1024x1024"];
+            if (requested === "1536x1024") return ["1792x1024", "1024x1024"];
+            return [requested, "1024x1024", "1024x1792", "1792x1024"].filter(
+              (s, i, arr) => arr.indexOf(s) === i,
+            );
+          }
+          // dall-e-2: square only
+          return ["1024x1024"];
+        })();
+
+        for (const size of sizeCandidates) {
+          try {
+            const params: Record<string, unknown> = {
+              model: imageModel,
+              prompt,
+              n: 1,
+              size,
+            };
+            // Current OpenAI image endpoints reject response_format on gpt-image and some dall-e paths.
+            // Prefer native b64 when present; otherwise fetch URL bytes.
+            const response = await client.images.generate(params as unknown as Parameters<typeof client.images.generate>[0]);
+            const data = (response as { data?: Array<{ b64_json?: string | null; url?: string | null; revised_prompt?: string | null }> }).data;
+            const item = data?.[0];
+            let bytes: Buffer | null = null;
+            if (item?.b64_json) {
+              bytes = Buffer.from(item.b64_json, "base64");
+            } else if (item?.url) {
+              const fetched = await fetch(item.url);
+              if (!fetched.ok) {
+                lastError = `model ${imageModel} URL fetch failed HTTP ${fetched.status}`;
+                attemptLog.push(`${imageModel}@${size}:${lastError}`);
+                continue;
+              }
+              bytes = Buffer.from(await fetched.arrayBuffer());
+            }
+            if (!bytes?.length) {
+              lastError = `model ${imageModel} returned no image bytes`;
+              attemptLog.push(`${imageModel}@${size}:${lastError}`);
               continue;
             }
-            bytes = Buffer.from(await fetched.arrayBuffer());
+            return {
+              ok: true,
+              bytes,
+              mimeType: "image/png",
+              model: imageModel,
+              revisedPrompt: item?.revised_prompt || undefined,
+            };
+          } catch (error) {
+            lastError = String((error as Error)?.message || error);
+            attemptLog.push(`${imageModel}@${size}:${lastError.slice(0, 120)}`);
+            if (/model|access|permission|not found|404|400|Unknown parameter|does not exist|invalid/i.test(lastError)) {
+              continue;
+            }
+            return {
+              ok: false,
+              status: "PROVIDER_ERROR",
+              reason: lastError.slice(0, 400),
+              blocker: `PROVIDER_ERROR:openai:image_generation`,
+            };
           }
-          if (!bytes?.length) {
-            lastError = `model ${imageModel} returned no image bytes`;
-            continue;
-          }
-          return {
-            ok: true,
-            bytes,
-            mimeType: "image/png",
-            model: imageModel,
-            revisedPrompt: item?.revised_prompt || undefined,
-          };
-        } catch (error) {
-          lastError = String((error as Error)?.message || error);
-          // Try next model on model_not_found / access / param errors.
-          if (/model|access|permission|not found|404|400|Unknown parameter/i.test(lastError)) continue;
-          return {
-            ok: false,
-            status: "PROVIDER_ERROR",
-            reason: lastError.slice(0, 400),
-            blocker: `PROVIDER_ERROR:openai:image_generation`,
-          };
         }
       }
       return {
         ok: false,
         status: "MODEL_ACCESS_DENIED",
-        reason: lastError.slice(0, 400),
+        reason: `${lastError.slice(0, 240)} | attempts=${attemptLog.slice(0, 8).join(" || ")}`.slice(0, 400),
         blocker: "MISSING_MODEL_ACCESS:image_generation (need dall-e-3 / gpt-image-1 on AURA_OPENAI_API_KEY)",
       };
     },
