@@ -229,10 +229,7 @@ export function createAuraAI(config: AuraConfig) {
             n: 1,
             size: opts.size || "1024x1024",
           };
-          // gpt-image rejects response_format; dall-e-2 accepts b64_json
-          if (/dall-e-2/i.test(imageModel)) {
-            params.response_format = "b64_json";
-          }
+          // images.edit rejects response_format on current OpenAI accounts (same as generate).
           if (opts.maskBytes?.length) {
             params.mask = await toFile(opts.maskBytes, "mask.png", { type: "image/png" });
           }
