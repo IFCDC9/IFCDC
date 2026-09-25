@@ -113,15 +113,14 @@ export function createAuraAI(config: AuraConfig) {
       let lastError = "no image model attempted";
       for (const imageModel of candidates) {
         try {
-          const isGptImage = /gpt-image/i.test(imageModel);
           const params: Record<string, unknown> = {
             model: imageModel,
             prompt,
             n: 1,
             size: opts.size || "1024x1024",
           };
-          // gpt-image-* rejects response_format; dall-e still accepts b64_json.
-          if (!isGptImage) params.response_format = "b64_json";
+          // Current OpenAI image endpoints reject response_format on gpt-image and some dall-e paths.
+          // Prefer native b64 when present; otherwise fetch URL bytes.
           const response = await client.images.generate(params as unknown as Parameters<typeof client.images.generate>[0]);
           const data = (response as { data?: Array<{ b64_json?: string | null; url?: string | null; revised_prompt?: string | null }> }).data;
           const item = data?.[0];
