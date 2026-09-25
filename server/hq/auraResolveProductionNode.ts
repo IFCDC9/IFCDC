@@ -559,7 +559,13 @@ export async function storeAuraResolvePreview(opts: {
   base64: string;
   size?: number;
 }) {
-  const safeName = String(opts.name || "draft.mp4").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120);
+  // Keep Founder-facing titles readable (spaces / en–em dashes); still strip path-unsafe chars.
+  const safeName = String(opts.name || "draft.mp4")
+    .replace(/[—–]/g, "-")
+    .replace(/[^a-zA-Z0-9._\- ]+/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
   const id = `arp_${crypto.randomBytes(8).toString("hex")}`;
   const bytes = Buffer.from(String(opts.base64 || ""), "base64");
   if (!bytes.length) throw new Error("preview payload empty");
