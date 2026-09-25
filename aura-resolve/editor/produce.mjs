@@ -883,8 +883,11 @@ export async function runGenerativeProduction({
         height: format.height,
       });
       resolveResults.push({ action: "create_project", ...created });
-      const imported = await askResolve("import_media", { paths: [openClip, endClip, draftPath] });
-      resolveResults.push({ action: "import_media", ...imported });
+      for (const mediaPath of [openClip, endClip, draftPath]) {
+        if (!mediaPath || !existsSync(mediaPath)) continue;
+        const imported = await askResolve("import_media", { path: mediaPath });
+        resolveResults.push({ action: "import_media", path: mediaPath, ...imported });
+      }
     } catch (error) {
       resolveResults.push({ action: "resolve_place", ok: false, error: error.message });
     }
