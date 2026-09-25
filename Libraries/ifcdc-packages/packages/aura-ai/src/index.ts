@@ -22,7 +22,9 @@ export type MediaCapabilityProbe = {
     image_generation: "YES" | "NO" | "UNKNOWN";
     image_editing: "YES" | "NO" | "UNKNOWN";
     voice_generation: "YES" | "NO" | "UNKNOWN";
-    video_generation: "YES" | "NO";
+    video_generation: "YES" | "NO" | "UNKNOWN";
+    text_to_video: "YES" | "NO" | "UNKNOWN";
+    image_to_video: "YES" | "NO" | "UNKNOWN";
   };
   CAPABILITIES_AVAILABLE: string[];
   INTEGRATION_STATUS: "READY" | "PARTIAL" | "NOT_CONFIGURED" | "ERROR";
@@ -31,7 +33,9 @@ export type MediaCapabilityProbe = {
     imageEdit?: string | null;
     voice?: string | null;
     chat?: string | null;
+    video?: string | null;
   };
+  interestingModels?: string[];
   blockers: string[];
   /** Never includes secret values */
   note: string;
@@ -208,41 +212,64 @@ export function createAuraAI(config: AuraConfig) {
           blocker: "MISSING_INPUT:image_editing",
         };
       }
-      const imageModel = opts.model || envModel("AURA_IMAGE_EDIT_MODEL") || "dall-e-2";
-      try {
-        const imageFile = await toFile(opts.imageBytes, "source.png", { type: "image/png" });
-        const params: Record<string, unknown> = {
-          model: imageModel,
-          image: imageFile,
-          prompt,
-          n: 1,
-          size: opts.size || "1024x1024",
-          response_format: "b64_json",
-        };
-        if (opts.maskBytes?.length) {
-          params.mask = await toFile(opts.maskBytes, "mask.png", { type: "image/png" });
-        }
-        const response = await client.images.edit(params as unknown as Parameters<typeof client.images.edit>[0]);
-        const data = (response as { data?: Array<{ b64_json?: string | null }> }).data;
-        const b64 = data?.[0]?.b64_json;
-        if (!b64) {
+      const candidates = [
+        opts.model,
+        envModel("AURA_IMAGE_EDIT_MODEL"),
+        "gpt-image-1",
+        "dall-e-2",
+      ].filter((m, i, arr): m is string => Boolean(m) && arr.indexOf(m) === i);
+      let lastError = "no image edit model attempted";
+      for (const imageModel of candidates) {
+        try {
+          const imageFile = await toFile(opts.imageBytes, "source.png", { type: "image/png" });
+          const params: Record<string, unknown> = {
+            model: imageModel,
+            image: imageFile,
+            prompt,
+            n: 1,
+            size: opts.size || "1024x1024",
+          };
+          // gpt-image rejects response_format; dall-e-2 accepts b64_json
+          if (/dall-e-2/i.test(imageModel)) {
+            params.response_format = "b64_json";
+          }
+          if (opts.maskBytes?.length) {
+            params.mask = await toFile(opts.maskBytes, "mask.png", { type: "image/png" });
+          }
+          const response = await client.images.edit(params as unknown as Parameters<typeof client.images.edit>[0]);
+          const data = (response as { data?: Array<{ b64_json?: string | null; url?: string | null }> }).data;
+          const item = data?.[0];
+          let bytes: Buffer | null = null;
+          if (item?.b64_json) {
+            bytes = Buffer.from(item.b64_json, "base64");
+          } else if (item?.url) {
+            const fetched = await fetch(item.url);
+            if (fetched.ok) bytes = Buffer.from(await fetched.arrayBuffer());
+          }
+          if (!bytes?.length) {
+            lastError = `model ${imageModel} edit returned no image bytes`;
+            continue;
+          }
+          return { ok: true, bytes, mimeType: "image/png", model: imageModel };
+        } catch (error) {
+          lastError = String((error as Error)?.message || error);
+          if (/model_not_found|insufficient|permission|does not exist|not found|404|400|Unknown parameter/i.test(lastError)) {
+            continue;
+          }
           return {
             ok: false,
             status: "PROVIDER_ERROR",
-            reason: "edit returned no image bytes",
+            reason: lastError.slice(0, 400),
             blocker: "PROVIDER_ERROR:openai:image_editing",
           };
         }
-        return { ok: true, bytes: Buffer.from(b64, "base64"), mimeType: "image/png", model: imageModel };
-      } catch (error) {
-        const reason = String((error as Error)?.message || error).slice(0, 400);
-        return {
-          ok: false,
-          status: /model|access|permission|not found/i.test(reason) ? "MODEL_ACCESS_DENIED" : "PROVIDER_ERROR",
-          reason,
-          blocker: "MISSING_MODEL_ACCESS:image_editing (need images.edit on AURA_OPENAI_API_KEY)",
-        };
       }
+      return {
+        ok: false,
+        status: "MODEL_ACCESS_DENIED",
+        reason: lastError.slice(0, 400),
+        blocker: "MISSING_MODEL_ACCESS:image_editing (need images.edit on AURA_OPENAI_API_KEY)",
+      };
     },
 
     /**
@@ -310,16 +337,20 @@ export function createAuraAI(config: AuraConfig) {
       const models: MediaCapabilityProbe["models"] = {
         chat: model,
         image: envModel("AURA_IMAGE_MODEL"),
-        imageEdit: envModel("AURA_IMAGE_EDIT_MODEL") || "dall-e-2",
+        imageEdit: envModel("AURA_IMAGE_EDIT_MODEL"),
         voice: envModel("AURA_TTS_MODEL"),
+        video: envModel("AURA_VIDEO_MODEL"),
       };
       const access: MediaCapabilityProbe["MODEL_ACCESS"] = {
         chat: "UNKNOWN",
         image_generation: "UNKNOWN",
         image_editing: "UNKNOWN",
         voice_generation: "UNKNOWN",
-        video_generation: "NO",
+        video_generation: "UNKNOWN",
+        text_to_video: "UNKNOWN",
+        image_to_video: "UNKNOWN",
       };
+      let interestingModels: string[] = [];
 
       if (!config.apiKey) {
         return {
@@ -331,6 +362,8 @@ export function createAuraAI(config: AuraConfig) {
             image_editing: "NO",
             voice_generation: "NO",
             video_generation: "NO",
+            text_to_video: "NO",
+            image_to_video: "NO",
           },
           CAPABILITIES_AVAILABLE: [],
           INTEGRATION_STATUS: "NOT_CONFIGURED",
@@ -344,15 +377,32 @@ export function createAuraAI(config: AuraConfig) {
         const listed = await client.models.list();
         const ids = new Set<string>();
         for await (const m of listed) ids.add(m.id);
+        interestingModels = [...ids]
+          .filter((id) => /image|dall|gpt-image|tts|sora|video|audio|whisper|omni|edit/i.test(id))
+          .sort();
         access.chat = [...ids].some((id) => /gpt|o1|o3|chat/i.test(id)) ? "YES" : "UNKNOWN";
-        const imageHit = DEFAULT_IMAGE_MODELS.find((id) => ids.has(id)) || [...ids].find((id) => /dall-e|gpt-image|image/i.test(id));
-        const voiceHit = DEFAULT_TTS_MODELS.find((id) => ids.has(id)) || [...ids].find((id) => /tts|audio/i.test(id));
+        const imageHit =
+          DEFAULT_IMAGE_MODELS.find((id) => ids.has(id)) ||
+          [...ids].find((id) => /dall-e|gpt-image/i.test(id));
+        const voiceHit =
+          DEFAULT_TTS_MODELS.find((id) => ids.has(id)) || [...ids].find((id) => /tts/i.test(id));
+        const videoHit =
+          ["sora-2", "sora", "sora-turbo"].find((id) => ids.has(id)) ||
+          [...ids].find((id) => /sora|video.?generat/i.test(id));
         if (imageHit) {
           access.image_generation = "YES";
           models.image = models.image || imageHit;
-          access.image_editing = ids.has("dall-e-2") || /dall-e-2|gpt-image/i.test(imageHit) ? "YES" : "UNKNOWN";
+          // images.edit: dall-e-2 classic; gpt-image-1 also supports edit on many accounts
+          if (ids.has("dall-e-2") || /gpt-image/i.test(imageHit) || ids.has("gpt-image-1")) {
+            access.image_editing = "YES";
+            models.imageEdit = models.imageEdit || (ids.has("gpt-image-1") ? "gpt-image-1" : ids.has("dall-e-2") ? "dall-e-2" : imageHit);
+          } else {
+            access.image_editing = "NO";
+            blockers.push("MISSING_MODEL_ACCESS:image_editing");
+          }
         } else {
           access.image_generation = "NO";
+          access.image_editing = "NO";
           blockers.push("MISSING_MODEL_ACCESS:image_generation");
         }
         if (voiceHit) {
@@ -362,7 +412,18 @@ export function createAuraAI(config: AuraConfig) {
           access.voice_generation = "NO";
           blockers.push("MISSING_MODEL_ACCESS:voice_generation");
         }
-        blockers.push("MISSING_PROVIDER:video_generation");
+        if (videoHit) {
+          access.video_generation = "YES";
+          access.text_to_video = "YES";
+          // image-to-video support is model-dependent; mark UNKNOWN until a successful call
+          access.image_to_video = "UNKNOWN";
+          models.video = models.video || videoHit;
+        } else {
+          access.video_generation = "NO";
+          access.text_to_video = "NO";
+          access.image_to_video = "NO";
+          blockers.push("MISSING_MODEL_ACCESS:video_generation (no sora/video model on this key)");
+        }
       } catch (error) {
         const reason = String((error as Error)?.message || error);
         if (/401|invalid api key|authentication/i.test(reason)) {
@@ -376,6 +437,8 @@ export function createAuraAI(config: AuraConfig) {
               image_editing: "NO",
               voice_generation: "NO",
               video_generation: "NO",
+              text_to_video: "NO",
+              image_to_video: "NO",
             },
             CAPABILITIES_AVAILABLE: [],
             INTEGRATION_STATUS: "ERROR",
@@ -409,8 +472,9 @@ export function createAuraAI(config: AuraConfig) {
         CAPABILITIES_AVAILABLE: available,
         INTEGRATION_STATUS: available.length ? (blockers.length ? "PARTIAL" : "READY") : "NOT_CONFIGURED",
         models,
+        interestingModels,
         blockers,
-        note: "OpenAI text provider may also expose image/TTS models; video remains unconfigured.",
+        note: "Models-list probe only (no secret values). Video YES only if a video/sora model id is listed for this key.",
       };
     },
   };

@@ -117,6 +117,8 @@ export async function discoverGenerativeProviders(opts?: { deep?: boolean }) {
           image_editing: "UNKNOWN",
           voice_generation: "UNKNOWN",
           video_generation: "NO",
+          text_to_video: "NO",
+          image_to_video: "NO",
         },
         CAPABILITIES_AVAILABLE: [],
         INTEGRATION_STATUS: "ERROR",
@@ -175,9 +177,11 @@ export async function discoverGenerativeProviders(opts?: { deep?: boolean }) {
     | {
         MODEL_ACCESS?: Record<string, string>;
         CREDENTIAL_PRESENT?: string;
+        models?: Record<string, string | null | undefined>;
       }
     | undefined;
   const access = openai?.MODEL_ACCESS || {};
+  const openaiModels = openai?.models || {};
 
   const capabilityRegistry = Object.fromEntries(
     PHASE6_CAPABILITIES.map((cap) => {
@@ -210,14 +214,38 @@ export async function discoverGenerativeProviders(opts?: { deep?: boolean }) {
           {
             status: ok ? "PROVIDER_CONFIGURED" : "ARCHITECTURE_READY",
             provider: openaiCred ? "openai" : null,
+            model: openaiModels.imageEdit || null,
             internal,
             identityReference: false,
             aspectRatios: ["1:1"],
+            availability: ok ? "callable" : "no_or_unknown_edit_access",
             blocker: ok
               ? null
               : openaiCred
                 ? "MISSING_MODEL_ACCESS:image_editing"
                 : "MISSING_CREDENTIAL:AURA_OPENAI_API_KEY",
+          },
+        ];
+      }
+      if (cap === "TEXT_TO_VIDEO" || cap === "IMAGE_TO_VIDEO" || cap === "VIDEO_GENERATION" || cap === "BROLL_GENERATION") {
+        const videoOk = access.video_generation === "YES";
+        const t2vOk = access.text_to_video === "YES";
+        const i2vOk = access.image_to_video === "YES";
+        const ok =
+          cap === "TEXT_TO_VIDEO" ? t2vOk : cap === "IMAGE_TO_VIDEO" ? i2vOk : videoOk;
+        return [
+          cap,
+          {
+            status: ok ? "PROVIDER_CONFIGURED" : "ARCHITECTURE_READY",
+            provider: ok ? "openai" : null,
+            model: openaiModels.video || null,
+            internal,
+            identityReference: false,
+            availability: ok ? "listed_on_key" : "no_video_model_on_key",
+            blocker: ok
+              ? null
+              : "MISSING_MODEL_ACCESS:video (OpenAI) + MISSING_PROVIDER:runway|luma|replicate credential",
+            EXTERNAL_VIDEO_PROVIDER_REQUIRED: ok ? "NO" : "YES",
           },
         ];
       }
@@ -265,20 +293,124 @@ export async function discoverGenerativeProviders(opts?: { deep?: boolean }) {
     }),
   );
 
+  const phase6bCapabilityAudit = [
+    {
+      CAPABILITY: "IMAGE_GENERATION",
+      CURRENT_OPENAI_SUPPORT: access.image_generation === "YES" ? "YES" : "NO",
+      MODEL: openaiModels.image || null,
+      ACCESS_AVAILABLE: access.image_generation === "YES" ? "YES" : "NO",
+      ADDITIONAL_PROVIDER_REQUIRED: access.image_generation === "YES" ? "NO" : "YES",
+      REASON:
+        access.image_generation === "YES"
+          ? "PRESERVED_PHASE6_PASS (gpt-image-1 path)"
+          : "No image model listed on configured key",
+    },
+    {
+      CAPABILITY: "IMAGE_EDITING",
+      CURRENT_OPENAI_SUPPORT: access.image_editing === "YES" ? "YES" : "NO",
+      MODEL: openaiModels.imageEdit || null,
+      ACCESS_AVAILABLE: access.image_editing === "YES" ? "YES" : "NO",
+      ADDITIONAL_PROVIDER_REQUIRED: access.image_editing === "YES" ? "NO" : "YES",
+      REASON:
+        access.image_editing === "YES"
+          ? "images.edit model listed (gpt-image-1 and/or dall-e-2)"
+          : "No images.edit-capable model on configured key",
+    },
+    {
+      CAPABILITY: "TEXT_TO_VIDEO",
+      CURRENT_OPENAI_SUPPORT: access.text_to_video === "YES" ? "YES" : "NO",
+      MODEL: openaiModels.video || null,
+      ACCESS_AVAILABLE: access.text_to_video === "YES" ? "YES" : "NO",
+      ADDITIONAL_PROVIDER_REQUIRED: access.text_to_video === "YES" ? "NO" : "YES",
+      REASON:
+        access.text_to_video === "YES"
+          ? "Video/sora model listed on key"
+          : "No OpenAI video/sora model on this key",
+    },
+    {
+      CAPABILITY: "IMAGE_TO_VIDEO",
+      CURRENT_OPENAI_SUPPORT: access.image_to_video === "YES" ? "YES" : access.image_to_video === "UNKNOWN" ? "UNKNOWN" : "NO",
+      MODEL: openaiModels.video || null,
+      ACCESS_AVAILABLE: access.image_to_video === "YES" ? "YES" : "NO",
+      ADDITIONAL_PROVIDER_REQUIRED: access.image_to_video === "YES" ? "NO" : "YES",
+      REASON:
+        access.image_to_video === "YES"
+          ? "Confirmed image-to-video on key"
+          : "OpenAI image-to-video not confirmed on this key",
+    },
+    {
+      CAPABILITY: "VIDEO_GENERATION",
+      CURRENT_OPENAI_SUPPORT: access.video_generation === "YES" ? "YES" : "NO",
+      MODEL: openaiModels.video || null,
+      ACCESS_AVAILABLE: access.video_generation === "YES" ? "YES" : "NO",
+      ADDITIONAL_PROVIDER_REQUIRED: access.video_generation === "YES" ? "NO" : "YES",
+      REASON:
+        access.video_generation === "YES"
+          ? "Video model listed on key"
+          : "No OpenAI video model; external provider required for generative video/B-roll",
+    },
+    {
+      CAPABILITY: "GENERATED_BROLL",
+      CURRENT_OPENAI_SUPPORT: access.video_generation === "YES" ? "PARTIAL" : "NO",
+      MODEL: openaiModels.video || null,
+      ACCESS_AVAILABLE: access.video_generation === "YES" ? "YES" : "NO",
+      ADDITIONAL_PROVIDER_REQUIRED: access.video_generation === "YES" ? "NO" : "YES",
+      REASON: "B-roll requires callable video generation; stills alone are not B-roll video",
+    },
+    {
+      CAPABILITY: "FOUNDER_VISUAL_GENERATION",
+      CURRENT_OPENAI_SUPPORT: "NO",
+      MODEL: null,
+      ACCESS_AVAILABLE: "NO",
+      ADDITIONAL_PROVIDER_REQUIRED: "YES",
+      REASON: "Blocked until Founder reference designation + identity provider (no HeyGen/D-ID credential)",
+    },
+    {
+      CAPABILITY: "FOUNDER_VOICE_GENERATION",
+      CURRENT_OPENAI_SUPPORT: "NO",
+      MODEL: null,
+      ACCESS_AVAILABLE: "NO",
+      ADDITIONAL_PROVIDER_REQUIRED: "YES",
+      REASON: "Synthetic TTS preserved; Founder voice clone needs designated voice ref + clone provider",
+    },
+    {
+      CAPABILITY: "OPENAI_VOICE_GENERATION",
+      CURRENT_OPENAI_SUPPORT: access.voice_generation === "YES" ? "YES" : "NO",
+      MODEL: openaiModels.voice || null,
+      ACCESS_AVAILABLE: access.voice_generation === "YES" ? "YES" : "NO",
+      ADDITIONAL_PROVIDER_REQUIRED: access.voice_generation === "YES" ? "NO" : "YES",
+      REASON:
+        access.voice_generation === "YES"
+          ? "PRESERVED_PHASE6_PASS (gpt-4o-mini-tts / tts path — synthetic only)"
+          : "No TTS model listed on configured key",
+    },
+  ];
+
+  const videoAccess = access.video_generation === "YES";
   return {
     at: new Date().toISOString(),
-    phase: 6,
+    phase: "6B",
     company: "IFCDC PRODUCTIONS",
     credentialInventory: inventory,
     providers,
     MODEL_CAPABILITY_REGISTRY: capabilityRegistry,
+    PHASE_6B_CAPABILITY_AUDIT: phase6bCapabilityAudit,
+    EXTERNAL_VIDEO_PROVIDER_REQUIRED: videoAccess ? "NO" : "YES",
+    RECOMMENDED_VIDEO_PROVIDER: videoAccess ? null : "runway",
+    RECOMMENDATION_REASON: videoAccess
+      ? "OpenAI video model listed on configured key — prefer OpenAI first"
+      : "Runway is already named in the Phase 6 router, has mature text-to-video + image-to-video API (Gen-4 Turbo / Gen-4.5), camera/reference controls, and clear API credit pricing for commercial IFCDC PRODUCTIONS drafts. Luma is a strong alternative for Dream Machine quality; Replicate is better as a multi-model fallback than a primary video vendor.",
+    ESTIMATED_PROVIDER_COST_STRUCTURE: videoAccess
+      ? "n/a — OpenAI video on existing key"
+      : "Runway API credits ≈ $0.01/credit; Gen-4 Turbo ≈ 5 credits/sec (~$0.05/sec, ~$0.25 per 5s); Gen-4.5 ≈ 12 credits/sec (~$0.12/sec). API credits are separate from web subscriptions. Commercial use typically requires a paid Runway plan/terms — Founder must approve before any account or spend.",
+    READY_FOR_FOUNDER_PROVIDER_DECISION: "YES",
     router: {
       status: "ARCHITECTURE_READY",
       interface: "capability → approved adapter chain → failover → precise dependency",
       replaceable: true,
       hardCodedVendor: false,
     },
-    note: "Report uses CREDENTIAL_PRESENT YES/NO only — no secret values.",
+    note: "Report uses CREDENTIAL_PRESENT YES/NO only — no secret values. Do not subscribe until Founder decides.",
   };
 }
 
@@ -423,13 +555,69 @@ export async function executeCloudGeneration(capabilityRaw: string, request: Rec
       }
 
       if (capability === "image_editing") {
+        let sourceBytes: Buffer | null = null;
+        if (request.imageBase64) {
+          try {
+            sourceBytes = Buffer.from(String(request.imageBase64), "base64");
+          } catch {
+            sourceBytes = null;
+          }
+        }
+        if (!sourceBytes?.length && request.imagePath && typeof request.imagePath === "string") {
+          const safeName = path.basename(request.imagePath);
+          const candidate = path.join(outDir, safeName);
+          if (fs.existsSync(candidate)) sourceBytes = fs.readFileSync(candidate);
+        }
+        // Prefer an already-generated non-person HQ still if no source supplied
+        if (!sourceBytes?.length) {
+          const existing = fs
+            .readdirSync(outDir)
+            .filter((n) => /^openai-image-.*\.png$/i.test(n))
+            .sort()
+            .reverse()[0];
+          if (existing) sourceBytes = fs.readFileSync(path.join(outDir, existing));
+        }
+        if (!sourceBytes?.length) {
+          const result = {
+            ok: false,
+            status: "ARCHITECTURE_READY",
+            blocker: "MISSING_INPUT:image_editing",
+            reason: "Image edit requires source image bytes (upload imageBase64 or prior openai-image-*.png)",
+          };
+          persistJob({ ...job, status: "FAILED_DEPENDENCY", result });
+          return { ...result, jobId };
+        }
+        const prompt = String(
+          request.prompt ||
+            "Non-person abstract edit: shift gold accents slightly warmer on black geometric shapes. No people, no faces, no readable logos.",
+        ).trim();
+        const gen = await client.editImage({ prompt, imageBytes: sourceBytes });
+        (job.attempts as unknown[]).push({ n: i + 1, ok: gen.ok, status: gen.ok ? "GENERATED" : gen.status });
+        if (!gen.ok) {
+          if (/NOT_CONFIGURED|MODEL_ACCESS|MISSING_/i.test(gen.blocker)) {
+            persistJob({ ...job, status: "FAILED_DEPENDENCY", result: gen });
+            return { ...gen, jobId };
+          }
+          continue;
+        }
+        const fileName = String(request.fileName || `openai-edit-${Date.now().toString(36)}.png`);
+        const filePath = path.join(outDir, fileName);
+        fs.writeFileSync(filePath, gen.bytes);
         const result = {
-          ok: false,
-          status: "ARCHITECTURE_READY",
-          blocker: "MISSING_INPUT_OR_MODEL_ACCESS:image_editing",
-          reason: "Image edit requires source image bytes + images.edit model access",
+          ok: true,
+          status: "GENERATED",
+          capability,
+          provider: "openai",
+          providerModel: gen.model,
+          fileName,
+          path: filePath,
+          fileBase64: gen.bytes.toString("base64"),
+          mimeType: gen.mimeType,
+          kind: "provider_image_edit",
+          bytes: gen.bytes.length,
+          fake: false,
         };
-        persistJob({ ...job, status: "FAILED_DEPENDENCY", result });
+        persistJob({ ...job, status: "SUCCEEDED", result: { ...result, fileBase64: `[omitted ${gen.bytes.length} bytes]` } });
         return { ...result, jobId };
       }
 

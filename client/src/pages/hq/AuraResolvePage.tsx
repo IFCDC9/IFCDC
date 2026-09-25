@@ -62,28 +62,46 @@ type Board = {
   productionKitSlots?: { slots?: KitSlot[]; presentCount?: number; missingCount?: number } | null;
   founderIdentity?: {
     FOUNDATION_MEDIA_MISSING?: boolean;
+    ORIGINAL_FOUNDER_MEDIA?: string;
+    GENERATED_FOUNDER_MEDIA?: string;
+    founder?: Record<string, string>;
+    official?: Record<string, string>;
     designations?: {
-      slots?: { id: string; label: string; status: string; fileName?: string | null }[];
+      slots?: {
+        id: string;
+        label: string;
+        status: string;
+        group?: string;
+        awaiting?: string | null;
+        fileName?: string | null;
+      }[];
       missingDesignations?: string[];
+      missingFounder?: string[];
+      missingOfficial?: string[];
     };
   } | null;
-  phase?: number;
+  phase?: number | string;
   jobs?: Job[];
 };
 
-const SAMPLE =
-  "Aura, make a 15-second IFCDC youth programs training bumper.";
-
-const DESIGNATION_SLOTS = [
+const FOUNDER_SLOTS = [
   "FOUNDER_FACE_REFERENCE",
   "FOUNDER_BODY_REFERENCE",
   "FOUNDER_VIDEO_REFERENCE",
   "FOUNDER_VOICE_REFERENCE",
+] as const;
+
+const OFFICIAL_SLOTS = [
   "OFFICIAL_GOLD_CIRCLE_LOGO",
   "OFFICIAL_TRANSPARENT_LOGO",
   "OFFICIAL_FONT",
   "OFFICIAL_ANIMATED_LOGO",
-];
+] as const;
+
+const DESIGNATION_SLOTS = [...FOUNDER_SLOTS, ...OFFICIAL_SLOTS];
+
+const SAMPLE =
+  "Aura, make a 15-second IFCDC youth programs training bumper.";
 
 const GATE_FLOW = [
   "IDEA",
@@ -366,12 +384,12 @@ export default function AuraResolvePage() {
         <div className="aura-company">{board?.productionCompany || board?.company || "IFCDC PRODUCTIONS"}</div>
         <h1>AURA Video Production</h1>
         <p className="hq-kpi-meta" style={{ margin: "0.25rem 0 0" }}>
-          Phone control · Production Mac executes · publish stays off · Phase 6 provider router
+          Phone control · Production Mac executes · publish stays off · Phase 6B Founder intake + provider audit
         </p>
         <div style={{ marginTop: 8 }}>
           <span className="aura-pill">identity:{board?.productionIdentity || "IFCDC PRODUCTION"}</span>
           {board?.brandPromoted ? <span className="aura-pill">brand:{board.brandPromoted}</span> : null}
-          <span className="aura-pill">phase:{board?.phase || 6}</span>
+          <span className="aura-pill">phase:{board?.phase || "6B"}</span>
         </div>
       </header>
 
@@ -403,28 +421,51 @@ export default function AuraResolvePage() {
       </div>
 
       <div className="aura-card">
-        <div className="hq-kpi-meta">Founder identity onboarding</div>
+        <div className="hq-kpi-meta">Founder identity intake</div>
         <p className="aura-muted" style={{ margin: "6px 0 0" }}>
-          Explicit designation only. Never auto-designates existing files. Never overwrites originals. No face/voice generation.
+          Explicit designation only. ORIGINAL_FOUNDER_MEDIA stays immutable and separate from GENERATED_FOUNDER_MEDIA.
+          Never auto-designates. No face/voice generation until designation + Founder-approved provider.
         </p>
         <p style={{ margin: "8px 0 0" }}>
           FOUNDATION_MEDIA_MISSING:{" "}
-          {String(
-            board?.founderIdentity?.FOUNDATION_MEDIA_MISSING ??
-              board?.clonePrep?.foundationMediaMissing ??
-              true,
-          )}
+          {String(board?.founderIdentity?.FOUNDATION_MEDIA_MISSING ?? true)}
         </p>
         <div style={{ marginTop: 8 }}>
-          {(board?.founderIdentity?.designations?.slots || []).map((slot) => (
-            <span key={slot.id} className="aura-pill">{slot.id}:{slot.status}</span>
-          ))}
+          {FOUNDER_SLOTS.map((id) => {
+            const slot = (board?.founderIdentity?.designations?.slots || []).find((s) => s.id === id);
+            const status = slot?.status || "MISSING";
+            const label = status === "DESIGNATED"
+              ? `DESIGNATED:${slot?.fileName || "yes"}`
+              : "MISSING / awaiting Founder designation";
+            return <span key={id} className="aura-pill">{id}:{label}</span>;
+          })}
         </div>
-        <div className="hq-kpi-meta" style={{ marginTop: 12 }}>Designate slot</div>
+        <div className="hq-kpi-meta" style={{ marginTop: 14 }}>Official asset intake</div>
+        <p className="aura-muted" style={{ margin: "6px 0 0" }}>
+          Gold-circle logo, transparent logo, official font, animated logo — Founder upload only. Do not invent assets.
+        </p>
+        <div style={{ marginTop: 8 }}>
+          {OFFICIAL_SLOTS.map((id) => {
+            const slot = (board?.founderIdentity?.designations?.slots || []).find((s) => s.id === id);
+            const status = slot?.status || "MISSING_FOR_FOUNDER_UPLOAD";
+            const label = status === "DESIGNATED"
+              ? `DESIGNATED:${slot?.fileName || "yes"}`
+              : "MISSING_FOR_FOUNDER_UPLOAD";
+            return <span key={id} className="aura-pill">{id}:{label}</span>;
+          })}
+        </div>
+        <div className="hq-kpi-meta" style={{ marginTop: 12 }}>Upload + classify</div>
         <select value={designateSlot} onChange={(event) => setDesignateSlot(event.target.value)}>
-          {DESIGNATION_SLOTS.map((slot) => (
-            <option key={slot} value={slot}>{slot}</option>
-          ))}
+          <optgroup label="Founder references">
+            {FOUNDER_SLOTS.map((slot) => (
+              <option key={slot} value={slot}>{slot}</option>
+            ))}
+          </optgroup>
+          <optgroup label="Official assets">
+            {OFFICIAL_SLOTS.map((slot) => (
+              <option key={slot} value={slot}>{slot}</option>
+            ))}
+          </optgroup>
         </select>
         <input
           type="file"

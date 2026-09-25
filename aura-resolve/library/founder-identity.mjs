@@ -225,20 +225,29 @@ export function founderDesignationStatus() {
       label: slot.label,
       kind: slot.kind,
       official: Boolean(slot.official),
-      status: present ? "DESIGNATED" : "FOUNDATION_MEDIA_MISSING",
+      status: present
+        ? "DESIGNATED"
+        : slot.official
+          ? "MISSING_FOR_FOUNDER_UPLOAD"
+          : "MISSING",
+      awaiting: present
+        ? null
+        : slot.official
+          ? "MISSING_FOR_FOUNDER_UPLOAD"
+          : "awaiting Founder designation",
       fileName: entry?.fileName || files[0]?.name || null,
       designatedAt: entry?.designatedAt || null,
       neverOverwrite: true,
     };
   });
-  const missing = slots.filter((s) => s.status === "FOUNDATION_MEDIA_MISSING").map((s) => s.id);
+  const missing = slots.filter((s) => s.status === "MISSING" || s.status === "MISSING_FOR_FOUNDER_UPLOAD").map((s) => s.id);
   return {
-    phase: 6,
+    phase: "6B",
     company: "IFCDC PRODUCTIONS",
     ORIGINAL_FOUNDER_MEDIA: "IFCDC-PRODUCTIONS/ORIGINAL_FOUNDER_MEDIA",
     GENERATED_FOUNDER_MEDIA: "IFCDC-PRODUCTIONS/GENERATED_FOUNDER_MEDIA",
     slots,
-    foundationMediaMissing: missing.length === DESIGNATION_SLOTS.filter((s) => !s.official).length,
+    foundationMediaMissing: slots.filter((s) => !s.official && s.status === "MISSING").length > 0,
     missingDesignations: missing,
     visualContinuityOperational: false,
     voiceIntegrationOperational: false,

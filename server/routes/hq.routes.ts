@@ -909,6 +909,19 @@ router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), asyn
       Boolean(live.resolve === "ONLINE" || local?.resolveRunning || beat.resolveRunning);
     const previews = await listAuraResolvePreviews();
     const memory = await listAuraResolveCreativeMemory(12);
+    const { getFounderIntakeStatus } = await import("../hq/auraResolveFounderIntake");
+    const cloudIntake = getFounderIntakeStatus();
+    const macFounder = beat.founderIdentity || null;
+    const founderIdentity = {
+      ...cloudIntake,
+      // Mac heartbeat designations remain informational; HQ cloud is the phone intake source of truth.
+      macHeartbeat: macFounder
+        ? {
+            FOUNDATION_MEDIA_MISSING: Boolean(macFounder.FOUNDATION_MEDIA_MISSING),
+            slots: macFounder.designations?.slots || macFounder.designations || null,
+          }
+        : null,
+    };
     const memoryCompany =
       (beat.creativeMemory as { company?: string; productionCompany?: string; productionIdentity?: string } | undefined)
         ?.productionCompany ||
@@ -956,13 +969,13 @@ router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), asyn
       ],
       publish: false,
       distributionBlocked: true,
-      phase: 6,
+      phase: "6B",
       errors: macOnline ? beat.errors || [] : [],
       notes: beat.notes || [
         "Publishing stays off until Founder approval.",
         "IFCDC PRODUCTIONS applies automatically to every project.",
         "brandPromoted is the product/program — separate from the production company.",
-        "Phase 6: provider router + Founder identity onboarding; generate only when configured; never invent media.",
+        "Phase 6B: Founder/official intake on HQ; generative video awaits Founder provider decision; never invent media.",
       ],
       lastHeartbeat: node.lastSeenAt,
       heartbeatAgeMs: node.ageMs ?? null,
@@ -974,7 +987,7 @@ router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), asyn
       continuity: beat.continuity || null,
       assetLibrary: beat.assetLibrary || null,
       productionKitSlots: beat.productionKitSlots || beat.brandKit?.productionKitSlots || null,
-      founderIdentity: beat.founderIdentity || null,
+      founderIdentity,
       clonePrep: beat.clonePrep || {
         status: "ARCHITECTURE_READY",
         generationEngine: "NOT_EXECUTED_FOR_PERSON",
@@ -1014,7 +1027,7 @@ router.get("/aura/resolve/providers", hqAuthRequired, requireHQModule("aura"), a
     const discovery = await discoverGenerativeProviders({ deep });
     res.json({
       ok: true,
-      phase: 6,
+      phase: "6B",
       publish: false,
       discovery,
       jobs: listCloudGenerationJobs(20),
@@ -1060,7 +1073,7 @@ router.post("/aura/resolve/generate", hqAuthRequired, requireHQModule("aura"), a
   }
 });
 
-/** Phase 6 — Founder identity onboarding: queue designation to Production Mac. */
+/** Phase 6B — Founder / official asset intake: store on HQ; optionally mirror to Production Mac. */
 router.post("/aura/resolve/founder-identity/designate", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
   try {
     if (req.body?.publish === true) {
@@ -1072,29 +1085,60 @@ router.post("/aura/resolve/founder-identity/designate", hqAuthRequired, requireH
       res.status(400).json({ ok: false, error: "slotId required" });
       return;
     }
-    const { getAuraResolveNodeSnapshot, queueAuraResolveCommand } = await import("../hq/auraResolveProductionNode");
-    const node = await getAuraResolveNodeSnapshot();
-    if (!node.nodeId) {
-      res.status(409).json({ ok: false, error: "Production Mac is not enrolled" });
-      return;
-    }
-    const queued = await queueAuraResolveCommand(node.nodeId, "designate_founder_media", {
+    const { designateFounderIntake, getFounderIntakeStatus } = await import("../hq/auraResolveFounderIntake");
+    const stored = designateFounderIntake({
       slotId,
       base64: req.body?.base64 || null,
       originalName: req.body?.originalName || null,
       mimeType: req.body?.mimeType || null,
-      publish: false,
     });
+    if (!stored.ok) {
+      res.status(400).json({ ok: false, publish: false, phase: "6B", ...stored });
+      return;
+    }
+
+    let macQueued: unknown = null;
+    try {
+      const { getAuraResolveNodeSnapshot, queueAuraResolveCommand } = await import("../hq/auraResolveProductionNode");
+      const node = await getAuraResolveNodeSnapshot();
+      if (node.nodeId && node.online) {
+        macQueued = await queueAuraResolveCommand(node.nodeId, "designate_founder_media", {
+          slotId,
+          base64: req.body?.base64 || null,
+          originalName: req.body?.originalName || null,
+          mimeType: req.body?.mimeType || null,
+          publish: false,
+        });
+      }
+    } catch {
+      macQueued = null;
+    }
+
     res.json({
       ok: true,
       publish: false,
-      phase: 6,
-      queued,
-      message: `Designation queued for ${slotId}. Originals are never overwritten. No face/voice is generated.`,
+      phase: "6B",
+      generationExecuted: false,
+      stored,
+      macQueued,
+      founderIdentity: getFounderIntakeStatus(),
+      message: macQueued
+        ? `Designated ${slotId} on HQ and queued Mac mirror. Originals are never overwritten. No face/voice is generated.`
+        : `Designated ${slotId} on HQ. Production Mac offline/unenrolled — cloud original stored. No face/voice is generated.`,
     });
   } catch (error) {
     console.error("POST /aura/resolve/founder-identity/designate error:", error);
-    res.status(500).json({ ok: false, error: "Designation queue failed" });
+    res.status(500).json({ ok: false, error: "Designation failed" });
+  }
+});
+
+router.get("/aura/resolve/founder-identity", hqAuthRequired, requireHQModule("aura"), async (_req, res) => {
+  try {
+    const { getFounderIntakeStatus } = await import("../hq/auraResolveFounderIntake");
+    res.json({ ok: true, phase: "6B", publish: false, founderIdentity: getFounderIntakeStatus() });
+  } catch (error) {
+    console.error("GET /aura/resolve/founder-identity error:", error);
+    res.status(500).json({ ok: false, error: "Founder identity status unavailable" });
   }
 });
 
