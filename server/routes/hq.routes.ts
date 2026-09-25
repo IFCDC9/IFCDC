@@ -945,37 +945,48 @@ router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), asyn
       gateStates: [
         "IDEA",
         "PLAN",
+        "GENERATE",
         "BUILD",
         "DRAFT",
         "HQ_PREVIEW",
         "FOUNDER_REVISION",
-        "APPROVAL",
+        "FOUNDER_APPROVAL",
         "MASTER",
-        "DISTRIBUTION",
+        "DISTRIBUTION_AUTHORIZATION",
       ],
       publish: false,
       distributionBlocked: true,
+      phase: 5,
       errors: macOnline ? beat.errors || [] : [],
       notes: beat.notes || [
         "Publishing stays off until Founder approval.",
         "IFCDC PRODUCTIONS applies automatically to every project.",
         "brandPromoted is the product/program — separate from the production company.",
+        "Phase 5: generate only when a provider is configured; never invent media.",
       ],
       lastHeartbeat: node.lastSeenAt,
       heartbeatAgeMs: node.ageMs ?? null,
       heartbeatTtlMs: node.heartbeatTtlMs ?? 45_000,
       lastSuccessfulCommand: beat.lastSuccessfulCommand || jobs.find((job) => job.status === "complete") || null,
       jobs,
-      clonePrep: {
+      generation: beat.generation || null,
+      pipeline: beat.pipeline || null,
+      continuity: beat.continuity || null,
+      assetLibrary: beat.assetLibrary || null,
+      productionKitSlots: beat.productionKitSlots || beat.brandKit?.productionKitSlots || null,
+      clonePrep: beat.clonePrep || {
         status: "ARCHITECTURE_READY",
-        generationEngine: "NOT_EXECUTED",
+        generationEngine: "NOT_EXECUTED_FOR_PERSON",
         founderIdentityLibrary: "READY_FOR_APPROVED_UPLOADS",
+        ORIGINAL_FOUNDER_MEDIA: "IFCDC-PRODUCTIONS/ORIGINAL_FOUNDER_MEDIA",
+        GENERATED_FOUNDER_MEDIA: "IFCDC-PRODUCTIONS/GENERATED_FOUNDER_MEDIA",
         approvedPhotosVideoVoice: "WAITING_FOR_APPROVED_MEDIA",
         generatedScenesTakes: "STORAGE_READY_NO_GENERATION",
         identityConsistency: "DEFINED",
         wardrobeEnvironment: "REFERENCE_DIRS_READY",
         roleTransformation: "REFERENCE_DIRS_READY",
         provenance: "ACTIVE",
+        foundationMediaMissing: true,
       },
     });
   } catch (error) {
@@ -1055,8 +1066,13 @@ router.post("/aura/resolve/plan", hqAuthRequired, requireHQModule("aura"), async
     productionIdentity: plan.productionIdentity,
     brandPromoted: plan.brandPromoted,
     plan,
+    pipeline: plan.PIPELINE,
+    generation: plan.GENERATION,
+    continuity: plan.CONTINUITY,
+    librarySearch: plan.LIBRARY_SEARCH,
+    assetGaps: plan.ASSET_GAPS,
     queued,
-    message: "Plan ready. Start production to build the draft on the Production Mac.",
+    message: "Phase 5 plan ready. Start production to generate configured assets / build the draft on the Production Mac.",
   });
 });
 
@@ -1129,7 +1145,12 @@ router.post("/aura/resolve/revise", hqAuthRequired, requireHQModule("aura"), asy
     res.status(409).json({ ok: false, error: "Production Mac is not enrolled" });
     return;
   }
-  await recordAuraResolveCreativeMemory("revision", { instruction, revisionNote, intents: parsed.intents });
+  await recordAuraResolveCreativeMemory("revision", {
+    instruction,
+    revisionNote,
+    intents: parsed.intents,
+    dryModificationPlan: parsed.dryModificationPlan,
+  });
   const queued = await queueAuraResolveCommand(node.nodeId, "request_revision", {
     instruction,
     revisionNote,

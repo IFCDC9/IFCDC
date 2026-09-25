@@ -71,15 +71,82 @@ export function parseRevision(note, context = {}) {
     intents.push("change_scene");
   }
 
+  if (/darker\s*(scene|look|grade|shot)|make\s*(it|the\s*scene)\s*darker/.test(lower)) {
+    intents.push("darker_scene");
+    prefs.color = "darker";
+  }
+  if (/wardrobe|outfit|clothing|clothes/.test(lower)) {
+    intents.push("wardrobe");
+  }
+  if (/location|environment|set\s*dressing|background\s*scene/.test(lower)) {
+    intents.push("location");
+  }
+  if (/camera\s*angle|angle\s*change|wider|tighter\s*framing|close[\s-]?up/.test(lower)) {
+    intents.push("camera_angle");
+  }
+  if (/smoother\s*transition|smooth(er)?\s*transition|soften\s*transition/.test(lower)) {
+    intents.push("smoother_transition");
+    prefs.transitions = "smoother-brand-flash";
+  }
+  if (/replace\s*(the\s*)?generated|swap\s*(the\s*)?generated|new\s*generated\s*clip/.test(lower)) {
+    intents.push("replace_generated_clip");
+  }
+  if (/music\s*harder|harder\s*music|more\s*energy|punchier\s*music|drive\s*the\s*music/.test(lower)) {
+    intents.push("music_harder");
+    prefs.music = "ifcdc-bed-harder";
+    musicVolume = Math.max(musicVolume, 0.38);
+    prefs.musicVolume = musicVolume;
+  }
+  if (/duck\s*(under|the)?\s*voice|duck\s*under\s*vo|voice\s*priority/.test(lower)) {
+    intents.push("duck_under_voice");
+    prefs.ducking = "duck-under-voice";
+  }
+  if (/smooth\s*fade|smoother\s*fade|fade\s*smooth/.test(lower)) {
+    intents.push("smooth_fade");
+    fadeSeconds = Math.max(fadeSeconds, 1.8);
+    endingStyle = "smooth-fade-to-black";
+    prefs.fadeSeconds = fadeSeconds;
+    prefs.endings = endingStyle;
+  }
+  if (/keep\s*everything\s*else|only\s*change|leave\s*the\s*rest/.test(lower)) {
+    intents.push("keep_everything_else");
+  }
+
   if (!intents.length) {
     intents.push("general_revision");
   }
 
+  const needsGenerator = intents.some((i) =>
+    /wardrobe|location|camera_angle|replace_generated_clip|darker_scene/.test(i),
+  );
   const isFormatOnly =
-    intents.every((i) => /_version$/.test(i)) ||
-    (intents.includes("youtube_version") && intents.length === 1) ||
-    (intents.includes("tiktok_version") && intents.length === 1) ||
-    (intents.includes("square_version") && intents.length === 1);
+    intents.every((i) => /_version$|keep_everything_else/.test(i)) ||
+    (intents.includes("youtube_version") && intents.filter((i) => i !== "keep_everything_else").length === 1) ||
+    (intents.includes("tiktok_version") && intents.filter((i) => i !== "keep_everything_else").length === 1) ||
+    (intents.includes("square_version") && intents.filter((i) => i !== "keep_everything_else").length === 1);
+
+  const executableWithoutGenerator = intents.every((i) =>
+    /_version$|music_down|music_up|music_harder|smoother_ending|smooth_fade|shorten_opening|add_logo|duck_under_voice|smoother_transition|keep_everything_else|general_revision/.test(
+      i,
+    ),
+  );
+
+  const dryModificationPlan = {
+    targetsOnlyRequestedComponent: true,
+    intents,
+    keepEverythingElse: intents.includes("keep_everything_else") || intents.length === 1,
+    formatChange: format || null,
+    musicVolume,
+    fadeSeconds,
+    openSeconds,
+    endingStyle,
+    needsGenerator,
+    executableWithoutGenerator,
+    executeAgainstExistingMaster: isFormatOnly || (executableWithoutGenerator && !needsGenerator),
+    blockedIfMissingGenerator: needsGenerator
+      ? intents.filter((i) => /wardrobe|location|camera_angle|replace_generated_clip|darker_scene/.test(i))
+      : [],
+  };
 
   return {
     note: text,
@@ -91,6 +158,7 @@ export function parseRevision(note, context = {}) {
     endingStyle,
     preferences: prefs,
     remasterFromExisting: isFormatOnly,
+    dryModificationPlan,
     projectName: context.projectName || null,
     gate: "FOUNDER_REVISION",
     gateStates: GATE_STATES,

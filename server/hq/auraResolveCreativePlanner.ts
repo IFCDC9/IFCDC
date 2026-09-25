@@ -2,6 +2,7 @@
  * Cloud-side creative planner (mirrors aura-resolve/editor/director + commands).
  * Used when HQ cannot reach the Mac loopback bridge for plan preview.
  * Every plan inherits IFCDC PRODUCTIONS identity by default; brandPromoted is separate.
+ * Phase 5: full pipeline object, search-before-generate gaps, continuity, kit slots, NL revisions.
  */
 
 const VERTICAL = { width: 1080, height: 1920, label: "9:16" };
@@ -11,16 +12,56 @@ const COMPANY = "IFCDC PRODUCTIONS";
 const IDENTITY = "IFCDC PRODUCTION";
 const CREDIT = "AN IFCDC PRODUCTION";
 
-const GATE_STATES = [
+export const GATE_STATES = [
   "IDEA",
   "PLAN",
+  "GENERATE",
   "BUILD",
   "DRAFT",
   "HQ_PREVIEW",
   "FOUNDER_REVISION",
-  "APPROVAL",
+  "FOUNDER_APPROVAL",
   "MASTER",
-  "DISTRIBUTION",
+  "DISTRIBUTION_AUTHORIZATION",
+];
+
+export const PIPELINE_STAGES = [
+  "FOUNDER_IDEA",
+  "CREATIVE_BRIEF",
+  "SCRIPT",
+  "SCENE_BREAKDOWN",
+  "SHOT_LIST",
+  "ASSET_INVENTORY",
+  "GENERATE_MISSING_ASSETS",
+  "CONTINUITY",
+  "VOICE_MUSIC_SOUND",
+  "RESOLVE_TIMELINE",
+  "EDIT",
+  "COLOR_AUDIO_GRAPHICS",
+  "DRAFT",
+  "HQ_PREVIEW",
+  "REVISION",
+  "APPROVAL",
+  "FINAL_MASTER",
+];
+
+export const LIBRARY_CATEGORIES = [
+  "Founder",
+  "IFCDC",
+  "Barbers App",
+  "Programs",
+  "Youth",
+  "Community",
+  "Music",
+  "Logos",
+  "Branding",
+  "Voice",
+  "Sound Effects",
+  "B-roll",
+  "Generated Images",
+  "Generated Video",
+  "Finished Productions",
+  "Templates",
 ];
 
 function formatFromText(lower: string) {
@@ -49,7 +90,7 @@ export function inferBrandPromoted(instruction: string): string {
   const cleaned = String(instruction || "")
     .replace(/^aura[,:\s]*/i, "")
     .replace(/^(make|create|produce|shoot|edit)\s+(a|an|the)?\s*/i, "")
-    .replace(/\b(short|vertical|tiktok|youtube|promo|promotional|commercial|video|film)\b/gi, " ")
+    .replace(/\b(short|vertical|tiktok|youtube|promo|promotional|commercial|video|film|bumper)\b/gi, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 80);
@@ -60,6 +101,7 @@ export function inferBrandPromoted(instruction: string): string {
 function inferProjectTitle(instruction: string, brandPromoted: string) {
   const lower = String(instruction || "").toLowerCase();
   if (/barber/.test(lower) && /commercial|promo/.test(lower)) return "IFCDC Barbers App Commercial";
+  if (/bumper/.test(lower)) return `${brandPromoted} Training Bumper`;
   if (/train/.test(lower)) return `${brandPromoted} Training Video`;
   if (/music\s*video/.test(lower)) return `${brandPromoted} Music Video`;
   if (/documentar/.test(lower)) return `${brandPromoted} Documentary`;
@@ -83,22 +125,68 @@ function projectNameFrom(lower: string, brandPromoted: string) {
   return `IFCDC-AURA-${slug || "EDIT"}`.slice(0, 40);
 }
 
+function cloudLibrarySearch(instruction: string, brandPromoted: string) {
+  const lower = instruction.toLowerCase();
+  const query = [brandPromoted, /youth/i.test(lower) ? "youth" : "", "logo", "template"].filter(Boolean).join(" ");
+  // Cloud mirror: categories + expected gaps. Live Mac search runs on the Production node.
+  const expectedGaps = [
+    {
+      capability: "graphics_title_graphics",
+      label: `${brandPromoted} title / bumper graphic`,
+      status: "MAY_GENERATE_IF_LOCAL_GRAPHICS_CONFIGURED",
+    },
+    {
+      capability: "background_scene_broll",
+      label: "Youth / training B-roll or approved still",
+      status: "MISSING_PROVIDER:background_scene_broll",
+    },
+    {
+      capability: "video_generation",
+      label: "Generated motion bumper",
+      status: "MISSING_PROVIDER:video_generation",
+    },
+    {
+      capability: "image_generation",
+      label: "Model image generation",
+      status: "MISSING_PROVIDER:image_generation",
+    },
+    {
+      capability: "voice_generation",
+      label: "Voice generation",
+      status: "MISSING_PROVIDER:voice_generation",
+    },
+  ];
+  return {
+    query,
+    searchedBeforeGenerate: true,
+    categories: LIBRARY_CATEGORIES,
+    matchCount: null,
+    note: "Live search executes on the Production Mac asset library; HQ lists categories + exact missing capabilities.",
+    expectedGaps,
+  };
+}
+
 export function planAuraCreativeInstruction(text: string) {
   const instruction = String(text || "").trim();
   const lower = instruction.toLowerCase();
   const format = formatFromText(lower);
   const durationMatch = /(\d+)\s*-?\s*second/.exec(lower);
-  const durationSeconds = durationMatch ? Number(durationMatch[1]) : /short|tiktok|promo/.test(lower) ? 12 : 30;
+  const durationSeconds = durationMatch
+    ? Number(durationMatch[1])
+    : /short|tiktok|promo|bumper/.test(lower)
+      ? 15
+      : 30;
   const brandPromoted = inferBrandPromoted(instruction);
   const projectTitle = inferProjectTitle(instruction, brandPromoted);
   const project = projectNameFrom(lower, brandPromoted);
   const timeline = `${project}-TL`;
   const isBarbers = /barber/.test(lower);
   const wantsMusic = /music|audio|soundtrack|bed/.test(lower);
-  const wantsBrand = /brand|logo|ifcdc|barber|youth|training|promo|commercial/.test(lower);
-  const wantsFade = /fade|smooth|ending|draft|promo|commercial|training|video/.test(lower);
-  const wantsTransition = /transition|promo|commercial|tiktok|draft|barber|training/.test(lower);
+  const wantsBrand = /brand|logo|ifcdc|barber|youth|training|promo|commercial|bumper/.test(lower);
+  const wantsFade = /fade|smooth|ending|draft|promo|commercial|training|video|bumper/.test(lower);
+  const wantsTransition = /transition|promo|commercial|tiktok|draft|barber|training|bumper/.test(lower);
   const cta = isBarbers ? "Book in the IFCDC Barbers App" : `Learn more · ${brandPromoted}`;
+  const librarySearch = cloudLibrarySearch(instruction, brandPromoted);
 
   const SCENES = [
     { id: "open", label: "Brand open / title card", seconds: 2.2 },
@@ -121,6 +209,61 @@ export function planAuraCreativeInstruction(text: string) {
     projectTitle,
     credit: CREDIT,
     lines: [COMPANY, "presents", projectTitle, CREDIT],
+  };
+
+  const continuity = {
+    characterIdentity: { subject: "non-person / brand-led unless Founder clone approved", founderClone: false },
+    wardrobe: { locked: false },
+    hairstyle: { locked: false },
+    accessories: { locked: false },
+    environment: { locked: false },
+    lighting: { description: "IFCDC gold accent on black / ivory" },
+    camera: { framing: format.label },
+    color: { palette: ["#C9A227", "#0B0B0B", "#F5F0E6"] },
+    aspectRatio: format.label,
+    props: { items: [] },
+    brand: {
+      productionCompany: COMPANY,
+      productionIdentity: IDENTITY,
+      brandPromoted,
+      visibleAutoBurn: false,
+    },
+    voice: { cloneApproved: false },
+    sceneOrder: SCENES.map((s, i) => ({ order: i + 1, id: s.id, label: s.label })),
+  };
+
+  const generation = {
+    searchedBeforeGenerate: true,
+    inventMedia: false,
+    willGenerateOnlyIfConfigured: true,
+    needs: librarySearch.expectedGaps,
+    capabilities: {
+      graphics_title_graphics: { status: "CONFIGURED_ON_MAC_IF_LOCAL_GRAPHICS", provider: "local-graphics" },
+      image_generation: { status: "NOT_CONFIGURED", blocker: "MISSING_PROVIDER:image_generation" },
+      image_editing: { status: "NOT_CONFIGURED", blocker: "MISSING_PROVIDER:image_editing" },
+      video_generation: { status: "NOT_CONFIGURED", blocker: "MISSING_PROVIDER:video_generation" },
+      image_to_video: { status: "NOT_CONFIGURED", blocker: "MISSING_PROVIDER:image_to_video" },
+      text_to_video: { status: "NOT_CONFIGURED", blocker: "MISSING_PROVIDER:text_to_video" },
+      voice_generation: { status: "NOT_CONFIGURED", blocker: "MISSING_PROVIDER:voice_generation" },
+      founder_voice_clone: {
+        status: "ARCHITECTURE_READY",
+        blocker: "FOUNDATION_MEDIA_MISSING + MISSING_PROVIDER:founder_voice_clone",
+      },
+      founder_visual_clone: {
+        status: "ARCHITECTURE_READY",
+        blocker: "FOUNDATION_MEDIA_MISSING + MISSING_PROVIDER:founder_visual_clone",
+      },
+      music_sound_integration: { status: "CONFIGURED_ON_MAC_IF_APPROVED_BED", provider: "local-music-stage" },
+    },
+  };
+
+  const pipeline = {
+    version: 1,
+    stages: PIPELINE_STAGES,
+    currentStage: "ASSET_INVENTORY",
+    auraMay: ["plan", "generate_if_configured", "edit", "render_drafts", "alternatives", "requested_revisions"],
+    auraMayNot: ["publish", "distribution_authorization"],
+    publish: false,
   };
 
   const steps = [
@@ -207,7 +350,7 @@ export function planAuraCreativeInstruction(text: string) {
         ? "YouTube / landscape"
         : format.label === "1:1"
           ? "Square social"
-          : /train/.test(lower)
+          : /train|bumper/.test(lower)
             ? "Internal / program audience"
             : "Short-form social (TikTok / Reels)",
     DURATION: `${durationSeconds}s`,
@@ -223,6 +366,27 @@ export function planAuraCreativeInstruction(text: string) {
       wantsMusic ? "Approved IFCDC music bed or test tone" : null,
       "IFCDC Production Kit templates (auto-composed if missing)",
     ].filter(Boolean),
+    ASSET_GAPS: librarySearch.expectedGaps,
+    LIBRARY_SEARCH: librarySearch,
+    GENERATION: generation,
+    PIPELINE: pipeline,
+    CONTINUITY: continuity,
+    PRODUCTION_KIT_SLOTS: {
+      note: "Live PRESENT/MISSING inventory is computed on the Production Mac",
+      slots: [
+        "gold-circle-logo",
+        "transparent-logos",
+        "official-fonts",
+        "opening-card",
+        "closing-card",
+        "lower-thirds",
+        "animated-logo",
+        "title-cta-templates",
+        "vertical-template",
+        "landscape-template",
+        "square-template",
+      ],
+    },
     SHOT_ORDER: SCENES.map((scene) => scene.label),
     TEXT_TITLES: [brandPromoted, cta, COMPANY],
     PRODUCTION_CREDITS: {
@@ -245,17 +409,22 @@ export function planAuraCreativeInstruction(text: string) {
     RENDER_FORMAT: `${format.width}x${format.height} mp4 H264 draft`,
     formatsSupported: ["9:16", "16:9", "1:1"],
     steps,
+    phase: 5,
+    planOnlyUnlessGenerated: !isBarbers,
     clonePrep: {
       status: "ARCHITECTURE_READY",
-      generationEngine: "NOT_EXECUTED",
+      generationEngine: "NOT_EXECUTED_FOR_PERSON",
       founderIdentityLibrary: "READY_FOR_APPROVED_UPLOADS",
+      ORIGINAL_FOUNDER_MEDIA: "IFCDC-PRODUCTIONS/ORIGINAL_FOUNDER_MEDIA",
+      GENERATED_FOUNDER_MEDIA: "IFCDC-PRODUCTIONS/GENERATED_FOUNDER_MEDIA",
       approvedPhotosVideoVoice: "WAITING_FOR_APPROVED_MEDIA",
       generatedScenesTakes: "STORAGE_READY_NO_GENERATION",
       identityConsistency: "DEFINED",
       wardrobeEnvironment: "REFERENCE_DIRS_READY",
       roleTransformation: "REFERENCE_DIRS_READY",
       provenance: "ACTIVE",
-      note: "Clone pipeline is architecture/storage/provenance only. No generator runs.",
+      foundationMediaMissing: true,
+      note: "Clone pipeline is architecture/storage/provenance only. No person generator runs without approved provider + approved source.",
     },
   };
 }
@@ -275,9 +444,49 @@ export function parseAuraRevisionNote(note: string) {
     intents.push("square_version");
   }
   if (/music\s*down|quieter|turn\s*(the\s*)?music\s*down|lower\s*(the\s*)?music/.test(lower)) intents.push("music_down");
-  if (/smoother\s*ending|ending\s*smoother|smooth(er)?\s*(the\s*)?end|fade\s*(out\s*)?longer/.test(lower)) intents.push("smoother_ending");
+  if (/music\s*harder|harder\s*music|more\s*energy|punchier\s*music/.test(lower)) intents.push("music_harder");
+  if (/smoother\s*ending|ending\s*smoother|smooth(er)?\s*(the\s*)?end|fade\s*(out\s*)?longer/.test(lower)) {
+    intents.push("smoother_ending");
+  }
+  if (/smooth\s*fade|smoother\s*fade/.test(lower)) intents.push("smooth_fade");
   if (/shorten\s*(the\s*)?open|tighten\s*(the\s*)?open/.test(lower)) intents.push("shorten_opening");
   if (/add\s*(the\s*)?logo/.test(lower)) intents.push("add_logo");
+  if (/darker\s*(scene|look|grade)/.test(lower)) intents.push("darker_scene");
+  if (/wardrobe|outfit|clothing/.test(lower)) intents.push("wardrobe");
+  if (/location|environment/.test(lower)) intents.push("location");
+  if (/camera\s*angle|wider|tighter\s*framing|close[\s-]?up/.test(lower)) intents.push("camera_angle");
+  if (/smoother\s*transition|smooth(er)?\s*transition/.test(lower)) intents.push("smoother_transition");
+  if (/replace\s*(the\s*)?generated|swap\s*(the\s*)?generated/.test(lower)) intents.push("replace_generated_clip");
+  if (/duck\s*(under|the)?\s*voice|duck\s*under\s*vo/.test(lower)) intents.push("duck_under_voice");
+  if (/keep\s*everything\s*else|only\s*change|leave\s*the\s*rest/.test(lower)) intents.push("keep_everything_else");
   if (!intents.length) intents.push("general_revision");
-  return { note, intents, format, publish: false, gate: "FOUNDER_REVISION" };
+
+  const needsGenerator = intents.some((i) =>
+    /wardrobe|location|camera_angle|replace_generated_clip|darker_scene/.test(i),
+  );
+  const executableWithoutGenerator = intents.every((i) =>
+    /_version$|music_down|music_up|music_harder|smoother_ending|smooth_fade|shorten_opening|add_logo|duck_under_voice|smoother_transition|keep_everything_else|general_revision/.test(
+      i,
+    ),
+  );
+
+  return {
+    note,
+    intents,
+    format,
+    publish: false,
+    gate: "FOUNDER_REVISION",
+    dryModificationPlan: {
+      targetsOnlyRequestedComponent: true,
+      intents,
+      keepEverythingElse: intents.includes("keep_everything_else") || intents.length === 1,
+      formatChange: format,
+      needsGenerator,
+      executableWithoutGenerator,
+      executeAgainstExistingMaster: !needsGenerator && executableWithoutGenerator,
+      blockedIfMissingGenerator: needsGenerator
+        ? intents.filter((i) => /wardrobe|location|camera_angle|replace_generated_clip|darker_scene/.test(i))
+        : [],
+    },
+  };
 }

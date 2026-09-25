@@ -20,6 +20,10 @@ import { directCreativeIdea } from "../editor/director.mjs";
 import { parseRevision } from "../editor/revision.mjs";
 import { gatePayload } from "../editor/gates.mjs";
 import { analyzeAssets } from "../editor/assets.mjs";
+import { bootGenerationEngine, capabilityStatus } from "../generation/engine.mjs";
+import { inventoryProductionKitSlots } from "../brand/production-kit-slots.mjs";
+import { founderIdentityStatus } from "../library/founder-identity.mjs";
+import { readAssetLibraryPublic } from "../library/asset-library.mjs";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.AURA_RESOLVE_BRIDGE_PORT || 4181);
@@ -616,18 +620,51 @@ async function heartbeatOnce(link) {
         "Publishing stays off until Founder approval.",
         "Draft creative runs are available from HQ. Final/publish stays gated.",
         "IFCDC PRODUCTIONS identity applies to every new project automatically.",
+        "Phase 5: generate only when a provider is configured; never invent media.",
       ],
       lastSuccessfulCommand,
       brandKit: (() => {
         try {
           const kit = readBrandKit();
           const prod = readProductionKit();
+          const slots = inventoryProductionKitSlots({ forceCompose: false });
           return {
             assetCount: (kit.staged || kit.assets || []).filter((item) => item.available !== false).length,
             gaps: kit.gaps || [],
             productionKitItems: (prod.items || []).length,
             company: prod.company || "IFCDC PRODUCTIONS",
+            productionKitSlots: slots,
           };
+        } catch {
+          return null;
+        }
+      })(),
+      generation: (() => {
+        try {
+          bootGenerationEngine();
+          return { capabilities: capabilityStatus(), phase: 5 };
+        } catch {
+          return null;
+        }
+      })(),
+      assetLibrary: (() => {
+        try {
+          const lib = readAssetLibraryPublic();
+          return { count: lib.count, categories: lib.categories };
+        } catch {
+          return null;
+        }
+      })(),
+      productionKitSlots: (() => {
+        try {
+          return inventoryProductionKitSlots({ forceCompose: false });
+        } catch {
+          return null;
+        }
+      })(),
+      clonePrep: (() => {
+        try {
+          return founderIdentityStatus();
         } catch {
           return null;
         }
@@ -644,6 +681,7 @@ async function heartbeatOnce(link) {
             revisions: (memory.revisions || []).length,
             masters: (memory.masters || []).length,
             preferences: memory.preferences || {},
+            preferencesHistoryCount: (memory.preferencesHistory || []).length,
             currentGate: memory.currentGate || null,
           };
         } catch {

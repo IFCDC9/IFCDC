@@ -47,7 +47,19 @@ const DEFAULT = {
     formats: ["9:16", "16:9", "1:1"],
     templates: ["ifcdc-production-kit"],
     captions: true,
+    visualStyle: null,
+    fonts: null,
+    logoPlacement: null,
+    introOutro: null,
+    cta: null,
+    camera: null,
+    color: null,
   },
+  /** Append-only — never overwrite earlier approved preference entries */
+  preferencesHistory: [],
+  successes: [],
+  rejections: [],
+  revisionHistory: [],
   editorialDecisions: [],
   productions: [],
   revisions: [],
@@ -84,6 +96,10 @@ function normalize(raw) {
   };
   merged.permanentRules = ensurePermanentRule(raw.permanentRules || base.permanentRules);
   merged.preferences = { ...base.preferences, ...(raw.preferences || {}) };
+  merged.preferencesHistory = Array.isArray(raw.preferencesHistory) ? raw.preferencesHistory : [];
+  merged.successes = Array.isArray(raw.successes) ? raw.successes : [];
+  merged.rejections = Array.isArray(raw.rejections) ? raw.rejections : [];
+  merged.revisionHistory = Array.isArray(raw.revisionHistory) ? raw.revisionHistory : [];
   merged.productions = raw.productions || [];
   merged.revisions = raw.revisions || [];
   merged.masters = raw.masters || [];
@@ -91,6 +107,33 @@ function normalize(raw) {
   merged.editorialDecisions = raw.editorialDecisions || [];
   merged.gateHistory = raw.gateHistory || [];
   return merged;
+}
+
+/**
+ * Append-only preference record. Updates the effective preferences object
+ * but NEVER deletes or rewrites earlier approved preference history entries.
+ */
+export function appendPreference(entry) {
+  const memory = readCreativeMemory();
+  const record = {
+    id: `pref_${Date.now().toString(36)}`,
+    at: new Date().toISOString(),
+    approved: entry.approved === true,
+    kind: entry.kind || "preference",
+    payload: entry.payload || entry.preferences || {},
+    note: entry.note || null,
+  };
+  memory.preferencesHistory = [record, ...(memory.preferencesHistory || [])].slice(0, 200);
+  if (entry.preferences && typeof entry.preferences === "object") {
+    memory.preferences = { ...memory.preferences, ...entry.preferences };
+  }
+  if (entry.success) {
+    memory.successes = [{ at: record.at, ...entry.success }, ...(memory.successes || [])].slice(0, 80);
+  }
+  if (entry.rejection) {
+    memory.rejections = [{ at: record.at, ...entry.rejection }, ...(memory.rejections || [])].slice(0, 80);
+  }
+  return writeCreativeMemory(memory);
 }
 
 export function readCreativeMemory() {
@@ -122,7 +165,28 @@ export function rememberProduction(entry) {
 export function rememberRevision(entry) {
   const memory = readCreativeMemory();
   memory.revisions = [entry, ...(memory.revisions || [])].slice(0, 40);
+  memory.revisionHistory = [
+    {
+      at: entry.at || new Date().toISOString(),
+      note: entry.note || entry.revisionNote || null,
+      intents: entry.intents || [],
+      project: entry.project || null,
+    },
+    ...(memory.revisionHistory || []),
+  ].slice(0, 80);
   if (entry.preferences) {
+    // Append-only history first, then update effective prefs — never wipe prior approved entries.
+    memory.preferencesHistory = [
+      {
+        id: `pref_${Date.now().toString(36)}`,
+        at: new Date().toISOString(),
+        approved: false,
+        kind: "revision_preference",
+        payload: entry.preferences,
+        note: entry.note || entry.revisionNote || null,
+      },
+      ...(memory.preferencesHistory || []),
+    ].slice(0, 200);
     memory.preferences = { ...memory.preferences, ...entry.preferences };
   }
   return writeCreativeMemory(memory);

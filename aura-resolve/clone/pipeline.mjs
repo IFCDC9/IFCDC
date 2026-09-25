@@ -43,9 +43,11 @@ export function ensureCloneArchitecture() {
     separation: {
       originals: CLONE_DIRS.originals,
       generated: CLONE_DIRS.generated,
+      ORIGINAL_FOUNDER_MEDIA: "IFCDC-PRODUCTIONS/ORIGINAL_FOUNDER_MEDIA",
+      GENERATED_FOUNDER_MEDIA: "IFCDC-PRODUCTIONS/GENERATED_FOUNDER_MEDIA",
       rule: "Founder identity originals stay protected and separate from generated media.",
     },
-    note: "Architecture and storage only. No face/voice generator is called.",
+    note: "Architecture and storage only. No face/voice generator is called without approved provider + approved source.",
   };
   writeFileSync(readme, JSON.stringify(doc, null, 2));
   return doc;
@@ -106,7 +108,7 @@ export function clonePlan(instruction) {
     founderApprovalRequired: true,
     usesExistingResolveBridge: true,
     status: "ARCHITECTURE_READY",
-    generationEngine: "NOT_EXECUTED",
+    generationEngine: "NOT_EXECUTED_FOR_PERSON",
     architecture,
     inventory,
     provenance,
@@ -114,20 +116,23 @@ export function clonePlan(instruction) {
       founderIdentityLibrary: {
         status: "READY_FOR_APPROVED_UPLOADS",
         path: CLONE_DIRS.originals,
-        note: "Approved Founder photos / video / voice only. Empty until Founder supplies.",
+        ORIGINAL_FOUNDER_MEDIA: "IFCDC-PRODUCTIONS/ORIGINAL_FOUNDER_MEDIA",
+        GENERATED_FOUNDER_MEDIA: "IFCDC-PRODUCTIONS/GENERATED_FOUNDER_MEDIA",
+        note: "Approved Founder photos / video / voice only. Empty until Founder supplies designated approved media under IFCDC productions trees.",
       },
       approvedPhotosVideoVoice: {
         status: inventory.originals.length ? "HAS_FILES" : "WAITING_FOR_APPROVED_MEDIA",
         count: inventory.originals.length,
-        note: "Creative draft runs never import Founder-identity assets automatically.",
+        note: "Creative draft runs never import Founder-identity assets automatically. Do not copy from Photos library.",
       },
       generatedScenesTakes: {
         status: "STORAGE_READY_NO_GENERATION",
         path: CLONE_DIRS.generatedScenes,
-        note: "Scene / take generation stays off. Directory exists for future approved outputs only.",
+        note: "Person scene / take generation stays off. Directory exists for future approved outputs only.",
       },
       identityConsistency: {
         status: "DEFINED",
+        records: ["face", "body", "voice", "wardrobe", "location", "role", "camera", "expression", "movement", "continuity"],
         note: "Likeness locks will reference approved originals only when a generator is enabled later.",
       },
       wardrobeEnvironment: {
@@ -151,7 +156,7 @@ export function clonePlan(instruction) {
       { id: "source", label: "Approved Founder photos and video only", path: CLONE_DIRS.originals },
       { id: "identity", label: "Lock face, voice, and likeness to those approved sources" },
       { id: "roles", label: "Role / wardrobe / environment references", path: CLONE_DIRS.references },
-      { id: "generate-off", label: "Generation engine remains NOT_EXECUTED" },
+      { id: "generate-off", label: "Person generation engine remains NOT_EXECUTED without approved provider + source" },
       { id: "review-assets", label: "Founder accepts or rejects each future generated clip" },
       { id: "resolve", label: "Import accepted clips into the Resolve timeline" },
       { id: "finish", label: "Branding, music, captions, transitions, IFCDC PRODUCTIONS credit" },
@@ -163,7 +168,7 @@ export function clonePlan(instruction) {
       id: "approved-generator",
       status: "NOT_CONFIGURED",
       execution: "DISABLED",
-      note: "No generation model is called. Accepted files are the only assets Resolve will import.",
+      note: "No person generation model is called. Accepted files are the only assets Resolve will import.",
     },
     instruction: String(instruction || ""),
   };

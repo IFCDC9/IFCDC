@@ -22,14 +22,19 @@ import {
 } from "./memory.mjs";
 import { pickAssets, stageBrandKit } from "../brand/kit.mjs";
 import { ensureProductionKit, kitAsset, PRODUCTION_COMPANY as KIT_COMPANY } from "../brand/production-kit.mjs";
-import { ensureGlobalProductionIdentity } from "../brand/production-identity.mjs";
+import { ensureGlobalProductionIdentity, PRODUCTIONS_ROOT } from "../brand/production-identity.mjs";
 import { clonePlan } from "../clone/pipeline.mjs";
 import { gatePayload } from "./gates.mjs";
+import { generateMissingAssets, bootGenerationEngine } from "../generation/engine.mjs";
+import { buildProductionPipeline } from "../pipeline/production-pipeline.mjs";
+import { ensureFounderIdentityLibrary } from "../library/founder-identity.mjs";
+import { inventoryProductionKitSlots } from "../brand/production-kit-slots.mjs";
 
 const ROOT = join(homedir(), "Library/Application Support/IFCDC/aura-resolve");
 const MEDIA = join(ROOT, "media");
 const RENDERS = join(ROOT, "renders");
 const GENERATED = join(MEDIA, "generated");
+const GENERATED_LIBRARY = join(PRODUCTIONS_ROOT, "GENERATED_FOUNDER_MEDIA");
 const MASTERS = join(RENDERS, "masters");
 
 const PROTECTED_PROJECTS = new Set([
@@ -325,6 +330,22 @@ export async function runCreativeProduction({
       revision,
       ...mastered,
     };
+  }
+
+  // Phase 5 generative path for non-Barbers projects: search → generate only if configured → plan-only otherwise.
+  const lowerInstruction = String(instruction || "").toLowerCase();
+  const isBarbersCommercial = /barber/.test(lowerInstruction);
+  if (!isBarbersCommercial) {
+    const generative = await runGenerativeProduction({
+      instruction,
+      director,
+      revision,
+      revisionNote,
+      uploadPreview,
+      askResolve,
+      projectName: projectName || director.project,
+    });
+    if (generative) return generative;
   }
 
   const kit = stageBrandKit({ intoMedia: true });
@@ -643,6 +664,243 @@ export async function runCreativeProduction({
     },
     assetIntelligence: director.ASSET_REQUIREMENTS,
     clone: clonePlan(instruction),
+  };
+}
+
+/**
+ * Phase 5 generative production for non-person / non-Barbers ideas.
+ * Generates only configured non-person assets (e.g. title graphic).
+ * Never invents media. Never synthesizes a face/voice.
+ */
+export async function runGenerativeProduction({
+  instruction,
+  director,
+  revision = null,
+  revisionNote = null,
+  uploadPreview = null,
+  askResolve = null,
+  projectName = null,
+} = {}) {
+  bootGenerationEngine();
+  ensureFounderIdentityLibrary();
+  mkdirSync(join(GENERATED_LIBRARY, "images"), { recursive: true });
+  mkdirSync(join(GENERATED_LIBRARY, "video"), { recursive: true });
+  mkdirSync(GENERATED, { recursive: true });
+  mkdirSync(RENDERS, { recursive: true });
+
+  const format = revision?.format || director.format || VERTICAL;
+  const project = projectName || director.project || "IFCDC-AURA-GENERATIVE";
+  if (PROTECTED_PROJECTS.has(project)) {
+    return {
+      ok: false,
+      publish: false,
+      mode: "blocked_protected_project",
+      error: `Refusing to overwrite protected project ${project}`,
+      director,
+    };
+  }
+
+  const durationSeconds = Number(String(director.DURATION || "15").replace(/\D/g, "")) || 15;
+  const needs = (director.GENERATION?.needs || []).map((need) => ({
+    ...need,
+    fileName:
+      need.capability === "graphics_title_graphics"
+        ? `${project}-title-${Date.now().toString(36)}.png`
+        : need.fileName,
+  }));
+
+  const generation = await generateMissingAssets(needs, {
+    outDir: join(GENERATED_LIBRARY, "images"),
+    title: director.brandPromoted || "IFCDC",
+    subtitle: /bumper|train/i.test(instruction) ? "Training bumper" : director.projectTitle || "",
+    credit: "IFCDC PRODUCTIONS",
+    width: format.width,
+    height: format.height,
+  });
+
+  const pipeline = buildProductionPipeline({
+    instruction,
+    brandPromoted: director.brandPromoted,
+    projectTitle: director.projectTitle,
+    project,
+    format,
+    durationSeconds,
+    script: director.SCRIPT,
+    scenes: director.SCENE_PLAN,
+    shotList: director.SHOT_LIST,
+    assetInventory: director.ASSET_REQUIREMENTS,
+    librarySearch: director.LIBRARY_SEARCH,
+    continuity: director.CONTINUITY,
+    creativeMemory: readCreativeMemory(),
+    generation,
+  });
+
+  const kitSlots = inventoryProductionKitSlots({ forceCompose: false });
+  rememberGate({ gate: generation.anyGenerated ? "GENERATE" : "PLAN", at: new Date().toISOString(), project });
+
+  // Plan-only: no configured generation that produced a real file.
+  if (!generation.anyGenerated) {
+    const record = {
+      at: new Date().toISOString(),
+      company: PRODUCTION_COMPANY,
+      instruction,
+      project,
+      mode: "phase5_plan_only",
+      generation,
+      pipeline,
+      publish: false,
+      gate: "PLAN",
+    };
+    rememberProduction(record);
+    writeFileSync(join(ROOT, "last-creative-plan.json"), JSON.stringify({ director, pipeline, generation }, null, 2));
+    return {
+      ok: true,
+      publish: false,
+      mode: "phase5_plan_only",
+      company: PRODUCTION_COMPANY,
+      productionCompany: PRODUCTION_COMPANY,
+      productionIdentity: "IFCDC PRODUCTION",
+      brandPromoted: director.brandPromoted,
+      gate: gatePayload("PLAN"),
+      plan: { ...director, project, PIPELINE: pipeline, GENERATION: generation },
+      director,
+      pipeline,
+      generation,
+      assetGaps: generation.missing,
+      productionKitSlots: kitSlots,
+      clone: clonePlan(instruction),
+      message:
+        "Pipeline planned and queued. Missing generators listed exactly — no media invented. Start again when a provider is configured, or supply approved assets.",
+      render: null,
+      inventedMedia: false,
+    };
+  }
+
+  // Real non-person graphic exists — build a short bumper draft and return to HQ.
+  const graphic = generation.generated.find((g) => g.capability === "graphics_title_graphics" && g.path);
+  if (!graphic?.path || !existsSync(graphic.path)) {
+    return {
+      ok: false,
+      publish: false,
+      mode: "phase5_generation_reported_without_file",
+      generation,
+      director,
+      inventedMedia: false,
+    };
+  }
+
+  const endCard = kitAsset("end-card", format.label);
+  const openSeconds = Math.min(8, Math.max(4, durationSeconds * 0.55));
+  const endSeconds = Math.max(2.5, durationSeconds - openSeconds);
+  const openClip = join(GENERATED, `${project}-open.mp4`);
+  const endClip = join(GENERATED, `${project}-end.mp4`);
+  const fadePath = join(GENERATED, `${project}-fade.mp4`);
+  pngToClip(graphic.path, openClip, {
+    seconds: openSeconds,
+    width: format.width,
+    height: format.height,
+  });
+  if (endCard?.path || endCard?.mediaPath) {
+    pngToClip(endCard.mediaPath || endCard.path, endClip, {
+      seconds: endSeconds,
+      width: format.width,
+      height: format.height,
+      fadeOut: true,
+    });
+  } else {
+    stillToClip(graphic.path, endClip, {
+      seconds: endSeconds,
+      width: format.width,
+      height: format.height,
+      fadeOut: true,
+    });
+  }
+  makeFadeBlack(fadePath, { ...format, seconds: 1.1 });
+
+  const draftName = `${project}-DRAFT`;
+  const draftPath = join(RENDERS, `${draftName}.mp4`);
+  // Concat open + end + fade into a single draft without overwriting V1/P4.
+  const listFile = join(GENERATED, `${project}-concat.txt`);
+  writeFileSync(
+    listFile,
+    [openClip, endClip, fadePath].map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join("\n"),
+  );
+  runFfmpeg(["-f", "concat", "-safe", "0", "-i", listFile, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", "-movflags", "+faststart", draftPath]);
+
+  // Also stage generated video under GENERATED_FOUNDER_MEDIA (separate from originals).
+  const stagedVideo = join(GENERATED_LIBRARY, "video", `${draftName}.mp4`);
+  copyFileSync(draftPath, stagedVideo);
+
+  const duration = probeDuration(draftPath);
+  let preview = null;
+  if (typeof uploadPreview === "function") {
+    preview = await uploadPreview({
+      name: `${draftName}.mp4`,
+      path: draftPath,
+      duration,
+      project,
+      instruction,
+      publish: false,
+      format: format.label,
+    });
+  }
+
+  // Best-effort place through Resolve when askResolve is available — never required for HQ preview.
+  const resolveResults = [];
+  if (typeof askResolve === "function") {
+    try {
+      const created = await askResolve("create_project", {
+        name: project,
+        frameRate: "24",
+        width: format.width,
+        height: format.height,
+      });
+      resolveResults.push({ action: "create_project", ...created });
+      const imported = await askResolve("import_media", { paths: [openClip, endClip, draftPath] });
+      resolveResults.push({ action: "import_media", ...imported });
+    } catch (error) {
+      resolveResults.push({ action: "resolve_place", ok: false, error: error.message });
+    }
+  }
+
+  const record = {
+    at: new Date().toISOString(),
+    company: PRODUCTION_COMPANY,
+    instruction,
+    project,
+    mode: "phase5_generative_draft",
+    generation,
+    render: { name: `${draftName}.mp4`, path: draftPath, duration, preview, format: format.label },
+    generatedGraphic: { name: graphic.file, kind: graphic.kind },
+    publish: false,
+    gate: "HQ_PREVIEW",
+  };
+  rememberProduction(record);
+  rememberGate({ gate: "HQ_PREVIEW", at: record.at, project });
+  writeFileSync(join(ROOT, "last-creative-plan.json"), JSON.stringify({ director, pipeline, generation, record }, null, 2));
+  writeFileSync(join(ROOT, "last-creative-results.json"), JSON.stringify({ resolveResults, preview }, null, 2));
+
+  return {
+    ok: Boolean(existsSync(draftPath)),
+    publish: false,
+    mode: "phase5_generative_draft",
+    company: PRODUCTION_COMPANY,
+    productionCompany: PRODUCTION_COMPANY,
+    productionIdentity: "IFCDC PRODUCTION",
+    brandPromoted: director.brandPromoted,
+    gate: gatePayload("HQ_PREVIEW"),
+    plan: { ...director, project, PIPELINE: pipeline, GENERATION: generation, render: record.render },
+    director,
+    pipeline,
+    generation,
+    productionKitSlots: kitSlots,
+    clone: clonePlan(instruction),
+    render: record.render,
+    preview,
+    resolveResults,
+    inventedMedia: false,
+    realGeneratedFile: graphic.file,
+    message: "Non-person title graphic generated, draft bumper built, preview returned to HQ. publish stays false.",
   };
 }
 
