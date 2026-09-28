@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import HQLayout from "../../layouts/HQLayout";
 
 type Job = {
@@ -137,6 +137,14 @@ export default function AuraResolvePage() {
 
   const [statusAnswer, setStatusAnswer] = useState("");
   const [autonomousJobId, setAutonomousJobId] = useState("");
+  const previewRef = useRef<HTMLVideoElement | null>(null);
+
+  function watchPreview() {
+    const video = previewRef.current;
+    if (!video) return;
+    video.muted = false;
+    void video.play().catch(() => setNote("WATCH could not start playback."));
+  }
 
   async function load() {
     const response = await fetch("/api/hq/aura/resolve/status", { credentials: "include" });
@@ -777,7 +785,12 @@ export default function AuraResolvePage() {
         ) : null}
         {latestPreview ? (
           <div className="aura-preview" style={{ marginTop: 8 }}>
-            <video key={latestPreview.id} controls playsInline src={latestPreview.previewUrl} />
+            <div className="aura-actions" style={{ marginBottom: 8 }}>
+              <button type="button" className="hq-btn hq-btn-primary" onClick={watchPreview}>
+                WATCH
+              </button>
+            </div>
+            <video ref={previewRef} key={latestPreview.id} controls playsInline preload="metadata" src={latestPreview.previewUrl} />
             <div className="aura-muted" style={{ marginTop: 8 }}>
               {latestPreview.name}
               {latestPreview.duration != null ? ` · ${Number(latestPreview.duration).toFixed(1)}s` : ""}

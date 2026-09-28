@@ -10,6 +10,7 @@
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
+import type { Request, Response } from "express";
 import sqlite3 from "sqlite3";
 import { open, Database } from "sqlite";
 import { getBackupDir, getDataDir, getDbPath, getReportsDir } from "../config/dataPaths";
@@ -683,6 +684,53 @@ export async function getAuraResolvePreview(id: string) {
       bytes: fs.readFileSync(row.path),
     };
   });
+}
+
+/** Stream an existing HQ preview. Honors Range so the player can seek without rewriting the file. */
+export async function streamAuraResolvePreview(id: string, req: Request, res: Response): Promise<boolean> {
+  const row = await withResolveDb("streamAuraResolvePreview", async (db) => {
+    return (await db.get(
+      `SELECT id, name, content_type, path FROM aura_resolve_previews WHERE id = ?`,
+      id
+    )) as { id: string; name: string; content_type: string; path: string } | undefined;
+  });
+  if (!row || !fs.existsSync(row.path)) return false;
+  const bytes = fs.statSync(row.path).size;
+  const filename = String(row.name || "preview.mp4").replace(/"/g, "");
+  res.setHeader("Content-Type", row.content_type || "video/mp4");
+  res.setHeader("Accept-Ranges", "bytes");
+  res.setHeader("Cache-Control", "private, max-age=60");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+
+  const header = req.headers.range;
+  const range = Array.isArray(header) ? header[0] : header;
+  if (range) {
+    const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+    if (!match || bytes <= 0) {
+      res.status(416).setHeader("Content-Range", `bytes */${bytes}`);
+      res.end();
+      return true;
+    }
+    let start = match[1] ? parseInt(match[1], 10) : 0;
+    let end = match[2] ? parseInt(match[2], 10) : bytes - 1;
+    if (Number.isNaN(start) || Number.isNaN(end) || start > end || start >= bytes) {
+      res.status(416).setHeader("Content-Range", `bytes */${bytes}`);
+      res.end();
+      return true;
+    }
+    end = Math.min(end, bytes - 1);
+    res.status(206);
+    res.setHeader("Content-Range", `bytes ${start}-${end}/${bytes}`);
+    res.setHeader("Content-Length", String(end - start + 1));
+    fs.createReadStream(row.path, { start, end }).pipe(res);
+    return true;
+  }
+
+  res.status(200);
+  res.setHeader("Content-Length", String(bytes));
+  fs.createReadStream(row.path).pipe(res);
+  return true;
 }
 
 /** Correct HQ preview catalog labels without touching original Mac media bytes. */

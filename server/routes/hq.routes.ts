@@ -1591,17 +1591,18 @@ router.post("/aura/resolve/master-formats", hqAuthRequired, requireHQModule("aur
 });
 
 router.get("/aura/resolve/preview/:id", hqAuthRequired, requireHQModule("aura"), async (req, res) => {
-  const { getAuraResolvePreview } = await import("../hq/auraResolveProductionNode");
-  const preview = await getAuraResolvePreview(String(req.params.id));
-  if (!preview) {
-    res.status(404).json({ ok: false, error: "preview not found" });
-    return;
+  try {
+    const { streamAuraResolvePreview } = await import("../hq/auraResolveProductionNode");
+    const streamed = await streamAuraResolvePreview(String(req.params.id), req, res);
+    if (!streamed && !res.headersSent) {
+      res.status(404).json({ ok: false, error: "preview not found" });
+    }
+  } catch (error) {
+    console.error("GET /aura/resolve/preview error:", error);
+    if (!res.headersSent) {
+      res.status(503).json({ ok: false, error: "preview unavailable" });
+    }
   }
-  res.setHeader("Content-Type", preview.contentType);
-  res.setHeader("Content-Length", String(preview.size));
-  res.setHeader("Content-Disposition", `inline; filename="${preview.name}"`);
-  res.setHeader("Cache-Control", "private, max-age=60");
-  res.send(preview.bytes);
 });
 
 router.post("/aura/resolve/node/claim", async (req, res) => {
