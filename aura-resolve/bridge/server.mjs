@@ -17,7 +17,7 @@ import { parseFounderIntake } from "../editor/intake.mjs";
 import { readCostLedger, creditsUsedForProject } from "../editor/cost-ledger.mjs";
 import { stageBrandKit, readBrandKit } from "../brand/kit.mjs";
 import { ensureProductionKit, readProductionKit } from "../brand/production-kit.mjs";
-import { readCreativeMemory, ensureCompanyMemory } from "../editor/memory.mjs";
+import { readCreativeMemory, ensureEditingMemoryWithHq } from "../editor/memory.mjs";
 import { directCreativeIdea } from "../editor/director.mjs";
 import { parseRevision } from "../editor/revision.mjs";
 import { gatePayload } from "../editor/gates.mjs";
@@ -454,7 +454,8 @@ let commandWorker = Promise.resolve();
 async function runQueuedCommand(link, command) {
   if (command.command === "editor_plan") {
     const instruction = command.args?.instruction || "";
-    ensureCompanyMemory();
+    // Edit-session start: pull Founder video-editing rules from HQ (source of truth).
+    const hqMemory = await ensureEditingMemoryWithHq(link);
     const intake = parseFounderIntake(instruction, { projectName: command.args?.projectName });
     const director = directCreativeIdea(instruction, { projectName: command.args?.projectName || intake.project });
     const planned = planInstruction(instruction, { projectName: director.project || intake.project });
@@ -486,6 +487,13 @@ async function runQueuedCommand(link, command) {
       gate: gatePayload("PLAN"),
       commands: EDITOR_COMMANDS,
       memory: readCreativeMemory(),
+      hqFounderRulesSync: {
+        ok: hqMemory.ok,
+        source: hqMemory.source,
+        applied: hqMemory.applied || [],
+        hqUrl: hqMemory.hqUrl || null,
+        localPreserved: hqMemory.localPreserved !== false,
+      },
     });
     writeFileSync(join(ROOT, "last-command.json"), JSON.stringify({ command: "editor_plan", at: new Date().toISOString(), phase: 7 }));
     return;
@@ -516,7 +524,7 @@ async function runQueuedCommand(link, command) {
       return;
     }
     if (decision === "APPROVE") {
-      ensureCompanyMemory();
+      const hqMemory = await ensureEditingMemoryWithHq(link);
       const mem = readCreativeMemory();
       // Record approval intent but do NOT publish
       await completeCommand(link, command.id, {
@@ -527,6 +535,11 @@ async function runQueuedCommand(link, command) {
         message: "Founder approval noted. Aura may NOT publish. DISTRIBUTION_AUTHORIZATION still blocked.",
         project: command.args?.project || null,
         memoryCompany: mem.company,
+        hqFounderRulesSync: {
+          ok: hqMemory.ok,
+          source: hqMemory.source,
+          applied: hqMemory.applied || [],
+        },
       });
       return;
     }
@@ -542,6 +555,7 @@ async function runQueuedCommand(link, command) {
     }
     if (decision === "REQUEST_REVISION" || decision === "CHANGE_FORMAT" || decision === "CREATE_ALTERNATE") {
       try {
+        const hqMemory = await ensureEditingMemoryWithHq(link);
         setOpenAiMediaHqLink(link);
         setRunwayMediaHqLink(link);
         bootGenerationEngine({ hqLink: link });
@@ -560,7 +574,16 @@ async function runQueuedCommand(link, command) {
           askResolve: (action, payload) => askResolve(action, payload, action === "render" ? 60000 : 45000),
           uploadPreview: (meta) => uploadPreviewToHq(link, meta),
         });
-        await completeCommand(link, command.id, { ...produced, decision, publish: false });
+        await completeCommand(link, command.id, {
+          ...produced,
+          decision,
+          publish: false,
+          hqFounderRulesSync: {
+            ok: hqMemory.ok,
+            source: hqMemory.source,
+            applied: hqMemory.applied || [],
+          },
+        });
       } catch (error) {
         await completeCommand(link, command.id, { ok: false, error: error.message, publish: false, decision });
       }
@@ -595,6 +618,7 @@ async function runQueuedCommand(link, command) {
       return;
     }
     try {
+      const hqMemory = await ensureEditingMemoryWithHq(link);
       setOpenAiMediaHqLink(link);
       setRunwayMediaHqLink(link);
       bootGenerationEngine({ hqLink: link });
@@ -621,7 +645,15 @@ async function runQueuedCommand(link, command) {
           project: produced.plan?.project || produced.masters?.[0]?.name,
         }),
       );
-      await completeCommand(link, command.id, produced);
+      await completeCommand(link, command.id, {
+        ...produced,
+        hqFounderRulesSync: {
+          ok: hqMemory.ok,
+          source: hqMemory.source,
+          applied: hqMemory.applied || [],
+          hqUrl: hqMemory.hqUrl || null,
+        },
+      });
     } catch (error) {
       await completeCommand(link, command.id, { ok: false, error: error.message, publish: false });
     }

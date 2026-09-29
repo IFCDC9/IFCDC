@@ -1385,13 +1385,37 @@ router.post("/aura/resolve/status-ask", hqAuthRequired, requireHQModule("aura"),
   const question = String(req.body?.question || req.body?.text || "what are you working on");
   const { getAuraResolveNodeSnapshot, queueAuraResolveCommand, listAuraResolvePreviews, listAuraResolveJobs } =
     await import("../hq/auraResolveProductionNode");
+  const { answerStatusAskFromCreativeMemory } = await import("../hq/auraResolveCreativeMemoryRecall");
   const node = await getAuraResolveNodeSnapshot();
   const previews = await listAuraResolvePreviews();
   const jobs = await listAuraResolveJobs(node.nodeId);
   const current = jobs.find((j) => j.status === "claimed" || j.status === "queued") || jobs.find((j) => j.status === "complete");
   const project = String(req.body?.project || current?.result?.project || "IFCDC-AURA-YOUTH-PROMO-P7");
 
-  // Prefer live Mac answer when online
+  // Founder video-editing rules live in HQ creative memory — answer from HQ, not Mac JSON.
+  const memoryAsk = await answerStatusAskFromCreativeMemory(question);
+  if (memoryAsk.handled) {
+    res.json({
+      ok: true,
+      publish: false,
+      phase: 7,
+      question,
+      answer: memoryAsk.answer,
+      source: "hq_aura_resolve_creative_memory",
+      creativeMemoryHits: memoryAsk.hits.map((h) => ({
+        recordId: h.recordId,
+        permanentRuleId: h.permanentRuleId,
+        createdAt: h.createdAt,
+      })),
+      creativeMemoryCount: memoryAsk.creativeMemoryCount,
+      productionMac: node.online ? "ONLINE" : "OFFLINE",
+      latestDraft: previews[0] || null,
+      currentJob: current || null,
+    });
+    return;
+  }
+
+  // Prefer live Mac answer when online (operational status only)
   if (node.nodeId && node.online) {
     const queued = await queueAuraResolveCommand(node.nodeId, "autonomous_status", {
       project,
@@ -1668,6 +1692,40 @@ router.post("/aura/resolve/node/heartbeat", async (req, res) => {
       error: error instanceof Error ? error.message : "Resolve heartbeat unavailable",
       commands: [],
       publicExposure: false,
+    });
+  }
+});
+
+/**
+ * Production Mac / fresh device: pull Founder video-editing rules from HQ creative memory.
+ * Same table as GET /aura/resolve/status → creativeMemory. Does not publish or render.
+ */
+router.get("/aura/resolve/node/creative-memory", async (req, res) => {
+  try {
+    const { authenticateAuraResolveNode, listAuraResolveCreativeMemory } = await import(
+      "../hq/auraResolveProductionNode"
+    );
+    const { extractFounderVideoEditingRules } = await import("../hq/auraResolveCreativeMemoryRecall");
+    const node = await authenticateAuraResolveNode(req);
+    if (!node) {
+      res.status(401).json({ ok: false, error: "resolve node token rejected" });
+      return;
+    }
+    const creativeMemory = await listAuraResolveCreativeMemory(40);
+    const founderVideoEditingRules = extractFounderVideoEditingRules(creativeMemory);
+    res.json({
+      ok: true,
+      publish: false,
+      source: "aura_resolve_creative_memory",
+      creativeMemory,
+      founderVideoEditingRules,
+    });
+  } catch (error) {
+    console.error("GET /aura/resolve/node/creative-memory error:", error);
+    res.status(503).json({
+      ok: false,
+      error: error instanceof Error ? error.message : "Resolve creative memory unavailable",
+      publish: false,
     });
   }
 });

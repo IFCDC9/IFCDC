@@ -133,6 +133,44 @@ export async function retrieveOrganizationalMemory(
     });
   }
 
+  // Wire HQ Resolve creative memory (Founder video-editing rules) into intelligence memory.
+  try {
+    const {
+      loadFounderVideoEditingRulesFromHq,
+      questionWantsFounderVideoEditingRules,
+      formatFounderVideoEditingRulesAnswer,
+      FOUNDER_VIDEO_EDITING_RULE_ID,
+    } = await import("./auraResolveCreativeMemoryRecall");
+    const wantsEditing =
+      questionWantsFounderVideoEditingRules(q) ||
+      /video|edit|watermark|framing|resolve|production|preview/i.test(q);
+    if (wantsEditing) {
+      const { hits } = await loadFounderVideoEditingRulesFromHq(40);
+      for (const hit of hits) {
+        const citation: MemoryCitation = {
+          source: "aura_resolve_creative_memory",
+          title: `Founder video-editing rules (${hit.permanentRuleId})`,
+          sourceType: "resolve_creative_memory",
+          recordId: hit.recordId,
+          excerpt: formatFounderVideoEditingRulesAnswer([hit]).slice(0, 280),
+          verified: true,
+        };
+        citations.push(citation);
+        facts.push({
+          kind: "fact",
+          statement: formatFounderVideoEditingRulesAnswer([hit]).slice(0, 600),
+          citation,
+          module: "aura_resolve_creative_memory",
+        });
+        if (hit.permanentRuleId === FOUNDER_VIDEO_EDITING_RULE_ID) {
+          /* prefer this hit; already newest-first from extractor */
+        }
+      }
+    }
+  } catch {
+    /* creative memory optional if Resolve tables unavailable */
+  }
+
   const recommendations: MemoryRecommendation[] = [];
   if (opts?.includeTechHealth !== false && /health|system|deploy|integration|technical/i.test(q)) {
     try {

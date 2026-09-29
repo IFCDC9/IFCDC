@@ -1,7 +1,8 @@
 /**
  * Creative memory for AURA Resolve — IFCDC PRODUCTIONS global identity retained permanently.
+ * Founder video-editing permanent rules are sourced from HQ creative memory when available.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import {
@@ -15,7 +16,9 @@ import {
 const ROOT = join(homedir(), "Library/Application Support/IFCDC/aura-resolve");
 const MEMORY_PATH = join(ROOT, "creative-memory.json");
 
-export { PRODUCTION_COMPANY, PRODUCTION_IDENTITY, PRODUCTION_CREDIT_LINE };
+export { PRODUCTION_COMPANY, PRODUCTION_IDENTITY, PRODUCTION_CREDIT_LINE, MEMORY_PATH, ROOT as MEMORY_ROOT };
+
+export const FOUNDER_VIDEO_EDITING_RULE_ID = "IFCDC_VIDEO_EDITING_FOUNDER_RULES_20260928";
 
 const DEFAULT = {
   version: 3,
@@ -154,6 +157,156 @@ export function writeCreativeMemory(next) {
   const normalized = normalize(next);
   writeFileSync(MEMORY_PATH, JSON.stringify(normalized, null, 2));
   return normalized;
+}
+
+/**
+ * Merge HQ Founder video-editing permanent rules into local memory.
+ * Does not wipe local file contents — HQ wins only for matching Founder rule ids.
+ */
+export function mergeHqFounderVideoEditingRules(memory, hqHits = []) {
+  const next = normalize(memory || readCreativeMemory());
+  const localRules = Array.isArray(next.permanentRules) ? [...next.permanentRules] : [];
+  const applied = [];
+
+  for (const hit of hqHits) {
+    const rule = hit?.permanentRule;
+    const ruleId = hit?.permanentRuleId || rule?.id;
+    if (!rule || !ruleId) continue;
+    const hqRule = {
+      ...rule,
+      id: ruleId,
+      retainedPermanently: true,
+      organizationWide: true,
+      hqRecordId: hit.recordId || null,
+      hqCreatedAt: hit.createdAt || null,
+      hqSource: "aura_resolve_creative_memory",
+      updatedAt: hit.createdAt || new Date().toISOString(),
+    };
+    const idx = localRules.findIndex((r) => r?.id === ruleId);
+    if (idx >= 0) localRules[idx] = { ...localRules[idx], ...hqRule };
+    else localRules.push(hqRule);
+    applied.push({
+      permanentRuleId: ruleId,
+      recordId: hit.recordId || null,
+      createdAt: hit.createdAt || null,
+    });
+
+    // Prefer HQ rule fields into effective preferences when present (does not wipe history).
+    const rules = hqRule.rules && typeof hqRule.rules === "object" ? hqRule.rules : {};
+    const prefPatch = {};
+    if (rules.musicToPicture) prefPatch.musicToPicture = rules.musicToPicture;
+    if (rules.watermarkCircularAlpha) prefPatch.watermarkCircularAlpha = rules.watermarkCircularAlpha;
+    if (rules.framingFitFirst) {
+      prefPatch.framingFitFirst = rules.framingFitFirst;
+      prefPatch.framing = "fit-first-blur-pad-no-head-crop-no-stretch";
+    }
+    if (rules.storyStructure) prefPatch.structure = "beginning-development-ending";
+    if (Object.keys(prefPatch).length) {
+      next.preferences = { ...next.preferences, ...prefPatch };
+    }
+  }
+
+  next.permanentRules = ensurePermanentRule(localRules);
+  next.hqFounderRulesSync = {
+    at: new Date().toISOString(),
+    source: "aura_resolve_creative_memory",
+    applied,
+  };
+  return { memory: next, applied };
+}
+
+/**
+ * Pull Founder video-editing rules from HQ (node creative-memory API) and merge into local memory.
+ * Preserves the local creative-memory.json file; HQ is source of truth for Founder editing rules.
+ */
+export async function loadEditingRulesFromHq(link, { fetchFn = fetch, timeoutMs = 8000 } = {}) {
+  const localExisted = existsSync(MEMORY_PATH);
+  const localStat = localExisted ? statSync(MEMORY_PATH) : null;
+  const memoryBefore = readCreativeMemory();
+
+  if (!link?.hqUrl || !link?.token || !link?.nodeId) {
+    return {
+      ok: false,
+      error: "hq_link_missing",
+      source: "local_only",
+      memory: memoryBefore,
+      applied: [],
+      localPreserved: true,
+      localPath: MEMORY_PATH,
+      localExisted,
+      localBytes: localStat?.size ?? null,
+    };
+  }
+
+  const url = `${String(link.hqUrl).replace(/\/$/, "")}/api/hq/aura/resolve/node/creative-memory`;
+  let body;
+  try {
+    const response = await fetchFn(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${link.token}`,
+        "x-aura-resolve-node-id": link.nodeId,
+        Accept: "application/json",
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: `hq_creative_memory_${response.status}`,
+        source: "local_only",
+        memory: memoryBefore,
+        applied: [],
+        localPreserved: true,
+        localPath: MEMORY_PATH,
+        localExisted,
+        hqUrl: url,
+      };
+    }
+    body = await response.json();
+  } catch (err) {
+    return {
+      ok: false,
+      error: String(err?.message || err),
+      source: "local_only",
+      memory: memoryBefore,
+      applied: [],
+      localPreserved: true,
+      localPath: MEMORY_PATH,
+      localExisted,
+      hqUrl: url,
+    };
+  }
+
+  const hits = Array.isArray(body?.founderVideoEditingRules) ? body.founderVideoEditingRules : [];
+  const { memory: merged, applied } = mergeHqFounderVideoEditingRules(memoryBefore, hits);
+  // Preserve file: rewrite merged permanentRules/preferences only — full document kept otherwise.
+  const written = writeCreativeMemory(merged);
+  const afterStat = existsSync(MEMORY_PATH) ? statSync(MEMORY_PATH) : null;
+
+  return {
+    ok: true,
+    source: "hq",
+    hqUrl: url,
+    memory: written,
+    applied,
+    founderVideoEditingRules: hits,
+    creativeMemoryCount: Array.isArray(body?.creativeMemory) ? body.creativeMemory.length : 0,
+    localPreserved: true,
+    localPath: MEMORY_PATH,
+    localExisted,
+    localBytesBefore: localStat?.size ?? null,
+    localBytesAfter: afterStat?.size ?? null,
+    publish: false,
+  };
+}
+
+/**
+ * Session/edit start: keep company identity local, then pull Founder editing rules from HQ.
+ */
+export async function ensureEditingMemoryWithHq(link, opts = {}) {
+  ensureCompanyMemory();
+  return loadEditingRulesFromHq(link, opts);
 }
 
 export function rememberProduction(entry) {
