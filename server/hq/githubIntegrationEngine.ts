@@ -27,6 +27,8 @@ export type GitHubIntegrationSnapshot = {
   apiReachable: boolean;
   latencyMs?: number;
   message: string;
+  /** How the probe authenticated. Public read is valid for IFCDC9/IFCDC. */
+  tokenStatus?: "accepted" | "absent" | "rejected";
 };
 
 export type GitHubIntegrationDetail = {
@@ -52,13 +54,14 @@ function githubToken(): string | null {
   return token || null;
 }
 
-function githubHeaders(token: string): Record<string, string> {
-  return {
-    Authorization: `Bearer ${token}`,
+function githubHeaders(token: string | null): Record<string, string> {
+  const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
     "User-Agent": "IFCDC-Headquarters",
   };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
 }
 
 function liveDeployCommit(): string | null {
@@ -149,7 +152,7 @@ export function buildGitHubDetails(snapshot: GitHubIntegrationSnapshot): GitHubI
   ];
 }
 
-async function githubFetch<T>(path: string, token: string): Promise<{ ok: boolean; status: number; data: T | null }> {
+async function githubFetch<T>(path: string, token: string | null): Promise<{ ok: boolean; status: number; data: T | null }> {
   const res = await fetch(`${GITHUB_API}${path}`, {
     headers: githubHeaders(token),
     signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
@@ -159,6 +162,114 @@ async function githubFetch<T>(path: string, token: string): Promise<{ ok: boolea
   return { ok: true, status: res.status, data };
 }
 
+type GithubRepoPayload = {
+  full_name: string;
+  default_branch: string;
+  pushed_at: string;
+  archived: boolean;
+  disabled: boolean;
+};
+
+type GithubCommitPayload = {
+  sha: string;
+  commit: { author?: { date?: string }; committer?: { date?: string } };
+};
+
+function unavailableSnapshot(
+  fullName: string,
+  branch: string,
+  message: string,
+  tokenStatus: GitHubIntegrationSnapshot["tokenStatus"],
+  latencyMs?: number,
+  apiReachable = false
+): GitHubIntegrationSnapshot {
+  return {
+    repository: fullName,
+    branch,
+    latestCommit: null,
+    latestCommitFull: null,
+    latestCommitAt: null,
+    lastPushAt: null,
+    repositoryHealth: "unavailable",
+    deploymentStatus: "unknown",
+    liveCommit: liveDeployCommit(),
+    defaultBranch: null,
+    archived: false,
+    apiReachable,
+    latencyMs,
+    message,
+    tokenStatus,
+  };
+}
+
+function snapshotFromProbe(
+  fullName: string,
+  branch: string,
+  repoRes: { ok: boolean; status: number; data: GithubRepoPayload | null },
+  commitRes: { ok: boolean; data: GithubCommitPayload | null },
+  rateRes: { ok: boolean },
+  latencyMs: number,
+  tokenStatus: NonNullable<GitHubIntegrationSnapshot["tokenStatus"]>,
+  note?: string
+): GitHubIntegrationSnapshot {
+  if (!repoRes.ok) {
+    const authHint = repoRes.status === 401 ? " — token invalid or expired" : repoRes.status === 404 ? " — repo not found or no access" : "";
+    return unavailableSnapshot(
+      fullName,
+      branch,
+      `GitHub API error ${repoRes.status}${authHint}${note ? ` · ${note}` : ""}`,
+      tokenStatus,
+      latencyMs,
+      rateRes.ok
+    );
+  }
+
+  const repoData = repoRes.data;
+  const commitData = commitRes.data;
+  const latestCommitFull = commitData?.sha ?? null;
+  const latestCommit = latestCommitFull?.slice(0, 7) ?? null;
+  const latestCommitAt =
+    commitData?.commit?.committer?.date ?? commitData?.commit?.author?.date ?? null;
+  const lastPushAt = repoData?.pushed_at ?? latestCommitAt;
+  const liveCommit = liveDeployCommit();
+  const deploymentStatus = compareDeployment(latestCommitFull, liveCommit);
+  const repositoryHealth = repositoryHealthFromRepo(repoData, branch, repoRes.ok);
+  const healthMsg =
+    repositoryHealth === "healthy" && deploymentStatus === "aligned"
+      ? `GitHub connected · ${fullName}@${branch} · deploy aligned (${latestCommit})`
+      : repositoryHealth === "healthy"
+        ? `GitHub connected · ${fullName}@${branch} · ${deploymentLabel(deploymentStatus, liveCommit, latestCommit)}`
+        : `GitHub ${healthLabel(repositoryHealth).toLowerCase()} · ${fullName}`;
+
+  return {
+    repository: repoData?.full_name ?? fullName,
+    branch,
+    latestCommit,
+    latestCommitFull,
+    latestCommitAt,
+    lastPushAt,
+    repositoryHealth,
+    deploymentStatus,
+    liveCommit,
+    defaultBranch: repoData?.default_branch ?? null,
+    archived: Boolean(repoData?.archived),
+    apiReachable: rateRes.ok || repoRes.ok,
+    latencyMs,
+    message: note ? `${healthMsg} · ${note}` : healthMsg,
+    tokenStatus,
+  };
+}
+
+async function probeGithub(owner: string, repo: string, branch: string, token: string | null) {
+  const started = Date.now();
+  const [repoRes, commitRes, rateRes] = await Promise.all([
+    githubFetch<GithubRepoPayload>(`/repos/${owner}/${repo}`, token),
+    githubFetch<GithubCommitPayload>(`/repos/${owner}/${repo}/commits/${encodeURIComponent(branch)}`, token),
+    githubFetch<{ rate?: { remaining?: number } }>(`/rate_limit`, token),
+  ]);
+  return { repoRes, commitRes, rateRes, latencyMs: Date.now() - started };
+}
+
 export async function fetchGitHubIntegrationSnapshot(): Promise<GitHubIntegrationSnapshot> {
   const owner = githubOwner();
   const repo = githubRepo();
@@ -166,115 +277,66 @@ export async function fetchGitHubIntegrationSnapshot(): Promise<GitHubIntegratio
   const fullName = `${owner}/${repo}`;
   const token = githubToken();
 
-  if (!token) {
-    return {
-      repository: fullName,
-      branch,
-      latestCommit: null,
-      latestCommitFull: null,
-      latestCommitAt: null,
-      lastPushAt: null,
-      repositoryHealth: "unavailable",
-      deploymentStatus: "unknown",
-      liveCommit: liveDeployCommit(),
-      defaultBranch: null,
-      archived: false,
-      apiReachable: false,
-      message: "GITHUB_TOKEN not set on Render",
-    };
-  }
-
-  const started = Date.now();
   try {
-    const [repoRes, commitRes, rateRes] = await Promise.all([
-      githubFetch<{
-        full_name: string;
-        default_branch: string;
-        pushed_at: string;
-        archived: boolean;
-        disabled: boolean;
-      }>(`/repos/${owner}/${repo}`, token),
-      githubFetch<{
-        sha: string;
-        commit: { author?: { date?: string }; committer?: { date?: string } };
-      }>(`/repos/${owner}/${repo}/commits/${encodeURIComponent(branch)}`, token),
-      githubFetch<{ rate?: { remaining?: number } }>(`/rate_limit`, token),
-    ]);
-
-    const latencyMs = Date.now() - started;
-    const apiReachable = rateRes.ok || repoRes.ok;
-    const repoData = repoRes.data;
-    const commitData = commitRes.data;
-
-    if (!repoRes.ok) {
-      const authHint = repoRes.status === 401 ? " — token invalid or expired" : repoRes.status === 404 ? " — repo not found or no access" : "";
-      return {
-        repository: fullName,
+    if (!token) {
+      const pub = await probeGithub(owner, repo, branch, null);
+      return snapshotFromProbe(
+        fullName,
         branch,
-        latestCommit: null,
-        latestCommitFull: null,
-        latestCommitAt: null,
-        lastPushAt: null,
-        repositoryHealth: "unavailable",
-        deploymentStatus: "unknown",
-        liveCommit: liveDeployCommit(),
-        defaultBranch: null,
-        archived: false,
-        apiReachable,
-        latencyMs,
-        message: `GitHub API error ${repoRes.status}${authHint}`,
-      };
+        pub.repoRes,
+        pub.commitRes,
+        pub.rateRes,
+        pub.latencyMs,
+        "absent",
+        pub.repoRes.ok ? "public API (GITHUB_TOKEN absent)" : "GITHUB_TOKEN not set on Render"
+      );
     }
 
-    const latestCommitFull = commitData?.sha ?? null;
-    const latestCommit = latestCommitFull?.slice(0, 7) ?? null;
-    const latestCommitAt =
-      commitData?.commit?.committer?.date ?? commitData?.commit?.author?.date ?? null;
-    const lastPushAt = repoData?.pushed_at ?? latestCommitAt;
-    const liveCommit = liveDeployCommit();
-    const deploymentStatus = compareDeployment(latestCommitFull, liveCommit);
-    const repositoryHealth = repositoryHealthFromRepo(repoData, branch, repoRes.ok);
+    const authed = await probeGithub(owner, repo, branch, token);
+    if (authed.repoRes.ok) {
+      return snapshotFromProbe(
+        fullName,
+        branch,
+        authed.repoRes,
+        authed.commitRes,
+        authed.rateRes,
+        authed.latencyMs,
+        "accepted"
+      );
+    }
 
-    const healthMsg =
-      repositoryHealth === "healthy" && deploymentStatus === "aligned"
-        ? `GitHub connected · ${fullName}@${branch} · deploy aligned (${latestCommit})`
-        : repositoryHealth === "healthy"
-          ? `GitHub connected · ${fullName}@${branch} · ${deploymentLabel(deploymentStatus, liveCommit, latestCommit)}`
-          : `GitHub ${healthLabel(repositoryHealth).toLowerCase()} · ${fullName}`;
+    // A bad Authorization header makes GitHub reject even public repos. Retry anonymously.
+    const pub = await probeGithub(owner, repo, branch, null);
+    if (pub.repoRes.ok) {
+      return snapshotFromProbe(
+        fullName,
+        branch,
+        pub.repoRes,
+        pub.commitRes,
+        pub.rateRes,
+        authed.latencyMs + pub.latencyMs,
+        "rejected",
+        `GITHUB_TOKEN rejected (HTTP ${authed.repoRes.status}); public API used`
+      );
+    }
 
-    return {
-      repository: repoData?.full_name ?? fullName,
+    return snapshotFromProbe(
+      fullName,
       branch,
-      latestCommit,
-      latestCommitFull,
-      latestCommitAt,
-      lastPushAt,
-      repositoryHealth,
-      deploymentStatus,
-      liveCommit,
-      defaultBranch: repoData?.default_branch ?? null,
-      archived: Boolean(repoData?.archived),
-      apiReachable,
-      latencyMs,
-      message: healthMsg,
-    };
+      authed.repoRes,
+      authed.commitRes,
+      authed.rateRes,
+      authed.latencyMs,
+      "rejected",
+      "public API also failed"
+    );
   } catch (err) {
-    return {
-      repository: fullName,
+    return unavailableSnapshot(
+      fullName,
       branch,
-      latestCommit: null,
-      latestCommitFull: null,
-      latestCommitAt: null,
-      lastPushAt: null,
-      repositoryHealth: "unavailable",
-      deploymentStatus: "unknown",
-      liveCommit: liveDeployCommit(),
-      defaultBranch: null,
-      archived: false,
-      apiReachable: false,
-      latencyMs: Date.now() - started,
-      message: err instanceof Error ? err.message : "GitHub probe failed",
-    };
+      err instanceof Error ? err.message : "GitHub probe failed",
+      token ? "rejected" : "absent"
+    );
   }
 }
 
@@ -282,9 +344,11 @@ export function resolveGitHubHubStatus(
   snapshot: GitHubIntegrationSnapshot,
   tokenConfigured: boolean
 ): "connected" | "configured" | "degraded" | "not_configured" {
-  if (!tokenConfigured) return "not_configured";
+  if (snapshot.repositoryHealth === "healthy" && snapshot.apiReachable && snapshot.latestCommit) {
+    return "connected";
+  }
+  if (!tokenConfigured && !snapshot.apiReachable) return "not_configured";
   if (!snapshot.apiReachable || snapshot.repositoryHealth === "unavailable") return "degraded";
-  if (snapshot.repositoryHealth === "healthy" && snapshot.latestCommit) return "connected";
   if (snapshot.apiReachable) return "configured";
   return "degraded";
 }

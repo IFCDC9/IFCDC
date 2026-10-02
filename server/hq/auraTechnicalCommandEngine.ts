@@ -301,6 +301,17 @@ export async function buildTechnicalCommandBriefing(): Promise<TechBriefing> {
         detail: github.message,
       });
     }
+    if (github.tokenStatus === "rejected" && github.repositoryHealth !== "unavailable") {
+      findings.push({
+        id: "github-token-rejected",
+        module: "github",
+        title: "GitHub token rejected",
+        status: "warning",
+        severity: "medium",
+        detail: github.message,
+        recommendedFix: "Replace GITHUB_TOKEN on Render with a fine-grained PAT: Contents Read on IFCDC9/IFCDC. Do not paste the token into chat.",
+      });
+    }
   } else {
     findings.push({
       id: "github-timeout",

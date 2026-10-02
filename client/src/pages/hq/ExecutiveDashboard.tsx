@@ -339,6 +339,9 @@ const ExecutiveDashboard: React.FC = () => {
   const pillar = (id: string) => commandHealth?.pillars.find((p) => p.id === id);
   const financialHealth = pillar("financial")?.score ?? analyticsData?.finance.financialHealthScore ?? 0;
   const systemHealth = pillar("system");
+  const technicalFromCommand = Boolean(systemHealth?.meta?.startsWith("Tech Command"));
+  const technicalSystemScore = technicalFromCommand ? systemHealth?.score ?? null : null;
+  const technicalSystemLabel = technicalSystemScore != null ? `${Math.round(technicalSystemScore)}/100` : "—/100";
   const operationalHealth = pillar("operational");
   const securityHealth = pillar("security");
   const integrationHealth = pillar("integration");
@@ -368,7 +371,8 @@ const ExecutiveDashboard: React.FC = () => {
           <p className="hq-founder-hero-tagline">{formatExecutiveTagline(user)}</p>
         </div>
         <div className="hq-founder-hero-meta">
-          <StatusBadge label={`Health ${healthScoreLabel}`} variant={(healthScore ?? 0) >= 80 ? "success" : (healthScore ?? 0) >= 60 ? "warning" : "danger"} />
+          <StatusBadge label={`Organization Performance ${healthScoreLabel}`} variant={(healthScore ?? 0) >= 80 ? "success" : (healthScore ?? 0) >= 60 ? "warning" : "danger"} />
+          <StatusBadge label={`Technical System Health ${technicalSystemLabel}`} variant={technicalSystemScore == null ? "warning" : technicalSystemScore >= 85 ? "success" : technicalSystemScore >= 60 ? "warning" : "danger"} />
           <StatusBadge label={user?.enterpriseRoleLabel ?? "Founder"} variant="gold" />
           <HqLiveIndicator intervalSec={0} connected={realtimeConnected} />
         </div>
@@ -410,12 +414,12 @@ const ExecutiveDashboard: React.FC = () => {
       <div className="hq-executive-health-strip hq-fade-in" aria-label="Enterprise health at a glance">
         <HqWidgetErrorBoundary label="Health strip">
         <div className={`hq-executive-health-card hq-health-${pillar("organization")?.status ?? "unknown"}`}>
-          <span className="hq-executive-health-label">Organization Health</span>
+          <span className="hq-executive-health-label">Organization Performance</span>
           <span className="hq-executive-health-value">{formatPillarScore(pillar("organization")?.score ?? healthScore, healthLoading)}/100</span>
           <span className="hq-executive-health-meta">{pillar("organization")?.grade ?? health?.grade ?? "Composite"}</span>
         </div>
         <div className={`hq-executive-health-card hq-health-${systemHealth?.status ?? "unknown"}`}>
-          <span className="hq-executive-health-label">System Health</span>
+          <span className="hq-executive-health-label">Technical System Health</span>
           <span className="hq-executive-health-value">{formatPillarScore(systemHealth?.score, healthLoading)}/100</span>
           <span className="hq-executive-health-meta">
             {systemHealth?.meta ??
@@ -458,8 +462,8 @@ const ExecutiveDashboard: React.FC = () => {
 
       <HqWidgetErrorBoundary label="KPI summary">
       <div className="hq-kpi-grid hq-founder-kpi-grid hq-fade-in">
-        <KpiCard label="Organization Health" value={healthScoreLabel} icon={Activity} variant={(healthScore ?? 0) >= 80 ? "success" : (healthScore ?? 0) >= 60 ? "warning" : healthScore == null ? "muted" : "danger"} meta={health?.grade ?? "Composite score"} />
-        <KpiCard label="System Health" value={`${formatPillarScore(systemHealth?.score, healthLoading)}/100`} icon={Monitor} variant={(systemHealth?.score ?? 0) >= 80 ? "success" : (systemHealth?.score ?? 0) >= 60 ? "warning" : "danger"} meta={systemHealth?.meta ?? "Tech + apps"} />
+        <KpiCard label="Organization Performance" value={healthScoreLabel} icon={Activity} variant={(healthScore ?? 0) >= 80 ? "success" : (healthScore ?? 0) >= 60 ? "warning" : healthScore == null ? "muted" : "danger"} meta={health?.grade ?? "Composite score"} />
+        <KpiCard label="Technical System Health" value={technicalFromCommand ? technicalSystemLabel : `${formatPillarScore(systemHealth?.score, healthLoading)}/100`} icon={Monitor} variant={(technicalSystemScore ?? systemHealth?.score ?? 0) >= 80 ? "success" : (technicalSystemScore ?? systemHealth?.score ?? 0) >= 60 ? "warning" : "danger"} meta={systemHealth?.meta ?? "Tech Command"} />
         <KpiCard label="Financial Health" value={`${formatPillarScore(financialHealth, healthLoading)}/100`} icon={TrendingUp} variant={financialHealth >= 70 ? "success" : "warning"} meta={pillar("financial")?.meta ?? formatCurrency(analyticsData?.finance.cashFlow ?? 0)} />
         <KpiCard label="Operational Health" value={`${formatPillarScore(operationalHealth?.score, healthLoading)}/100`} icon={FileText} variant={(operationalHealth?.score ?? 0) >= 80 ? "success" : "warning"} meta={operationalHealth?.meta ?? `${grantsActive} active grants`} />
         <KpiCard label="Security Status" value={`${formatPillarScore(securityHealth?.score, healthLoading)}/100`} icon={Shield} variant={(securityHealth?.score ?? 0) >= 80 ? "success" : "warning"} meta={securityHealth?.meta ?? "Channels"} />
