@@ -10,7 +10,7 @@ import crypto from "crypto";
 import { getDb } from "../db";
 import { getBuildInfo } from "../buildInfo";
 import { checkIfcdcServices } from "../lib/ifcdc";
-import { getEmailDeliveryStatus, probeResendSender } from "../lib/notifications";
+import { buildTransactionalEmailFindings, probeTransactionalEmail } from "../lib/transactionalEmail";
 import { logHqAudit } from "./hqAuditLog";
 import { createLeadershipAlert } from "./criticalAlerts";
 import { fetchGitHubIntegrationSnapshot } from "./githubIntegrationEngine";
@@ -253,7 +253,7 @@ export async function buildTechnicalCommandBriefing(): Promise<TechBriefing> {
     withTimeout(buildIntegrationsHubSafe(), 8_000, null),
     withTimeout(checkIfcdcServices(), 3_000, {} as Record<string, boolean>),
     withTimeout(buildExecutiveHealthSummary(), 4_000, null),
-    withTimeout(probeResendSender(), 4_000, null),
+    withTimeout(probeTransactionalEmail(), 4_000, null),
     Promise.resolve(getTwilioEnvStatus()),
     withTimeout(getFounderPhoneReadiness(), 2_000, null),
   ]);
@@ -335,37 +335,18 @@ export async function buildTechnicalCommandBriefing(): Promise<TechBriefing> {
   });
   if (liveCommit) recentUpdates.push(`Render live commit ${liveCommit}`);
 
-  const emailStatus = getEmailDeliveryStatus();
-  if (!emailStatus.configured) {
+  if (!emailProbe) {
     findings.push({
-      id: "resend-missing",
-      module: "resend",
-      title: "RESEND_API_KEY missing",
-      status: "failed",
-      severity: "critical",
-      detail: "Founder OTP and HQ email cannot send.",
-      recommendedFix: "Set RESEND_API_KEY on Render and redeploy.",
-      needsFounderApproval: true,
-    });
-  } else if (emailProbe && !emailProbe.ok) {
-    findings.push({
-      id: "resend-domain",
-      module: "resend",
-      title: "Resend sender domain issue",
-      status: "degraded",
-      severity: "high",
-      detail: emailProbe.error || `From ${emailProbe.from} may be unverified`,
-      recommendedFix: "Verify ifcdc.org in Resend, or keep verified-domain fallback.",
+      id: "transactional-email-health",
+      module: "email",
+      title: "Transactional Email Health",
+      status: "warning",
+      severity: "medium",
+      detail: "Transactional email probe timed out.",
+      recommendedFix: "Retry the Technical Command briefing. Postmark remains primary when POSTMARK_SERVER_TOKEN is set.",
     });
   } else {
-    findings.push({
-      id: "resend-ok",
-      module: "resend",
-      title: "Resend email ready",
-      status: "ok",
-      severity: "low",
-      detail: `From ${emailStatus.from}`,
-    });
+    findings.push(...buildTransactionalEmailFindings(emailProbe));
   }
 
   if (!twilio.ready) {
@@ -558,7 +539,7 @@ export function wantsTechnicalCommand(message: string): boolean {
   if (!m) return false;
   return (
     /\b(technical command|tech command|system (report|health|status)|platform (health|status)|hq health|check (the )?(entire )?system|smoke test|failed (deploy|deployment|api|apis)|render deploy|compare github|integrations?\b.*\b(check|status)|broken button|what needs my attention|what should be fixed|incident report|repair task|tech briefing|is (ifcdc )?hq healthy|apis? timing out|pages? crashing|security warning)\b/i.test(m)
-    || /\b(check|inspect|diagnose|audit)\b.*\b(render|github|twilio|openai|paypal|resend|grants\.gov|sam\.gov|mission control|grant center)\b/i.test(m)
+    || /\b(check|inspect|diagnose|audit)\b.*\b(render|github|twilio|openai|paypal|resend|postmark|transactional email|grants\.gov|sam\.gov|mission control|grant center)\b/i.test(m)
     || /\bwhy\b.*\b(page|api|button|deploy|integration)\b.*\b(fail|broken|down|error)/i.test(m)
   );
 }
@@ -575,7 +556,7 @@ function classifyTechIntent(command: string): {
     || /\brepair task\b/i.test(command)
     || /\bincident report\b/i.test(command);
   const focusIntegrations = /\bintegration/i.test(command)
-    || /\b(twilio|openai|paypal|resend|grants\.gov|sam\.gov|github|render)\b/i.test(command);
+    || /\b(twilio|openai|paypal|resend|postmark|transactional email|grants\.gov|sam\.gov|github|render)\b/i.test(command);
   const focusDeploy = /\b(deploy|render|github|commit|aligned|alignment)\b/i.test(command);
   const focusApis = /\b(api|timeout|502|endpoint|smoke)\b/i.test(command);
   let action = "briefing";
@@ -735,7 +716,7 @@ export async function handleTechnicalCommand(opts: {
           }`;
   } else if (intent.focusIntegrations) {
     const degraded = briefing.findings.filter((f) => f.module === "integrations" && f.status !== "ok");
-    findings = degraded.length ? degraded : briefing.findings.filter((f) => ["twilio", "resend", "github", "integrations"].includes(f.module));
+    findings = degraded.length ? degraded : briefing.findings.filter((f) => ["twilio", "resend", "email", "github", "integrations"].includes(f.module));
     reply =
       opts.channel === "sms"
         ? `Integrations: ${findings.filter((f) => f.status !== "ok").map((f) => f.title).slice(0, 4).join(" | ") || "no degraded integrations"}`

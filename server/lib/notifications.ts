@@ -1,7 +1,9 @@
 /**
- * HQ notification dispatch — Resend email + Twilio SMS (inline).
+ * HQ notification dispatch — Postmark primary, Resend legacy fallback, Twilio SMS.
  * Never calls a localhost microservice in production by default.
+ * POSTMARK_SERVER_TOKEN is read from the environment and is never logged.
  */
+import { sendTransactionalEmail, type TransactionalEmailCategory } from "./transactionalEmail";
 import {
   createNotificationService,
   createTwilioSmsProvider,
@@ -67,12 +69,27 @@ export function getEmailDeliveryStatus(): {
   };
 }
 
+function emailCategoryFromMetadata(metadata: NotificationPayload["metadata"]): TransactionalEmailCategory {
+  const raw = typeof metadata?.emailCategory === "string" ? metadata.emailCategory : "";
+  const allowed: TransactionalEmailCategory[] = [
+    "account_verification",
+    "password_reset",
+    "booking_confirmation",
+    "booking_change",
+    "booking_cancellation",
+    "receipt",
+    "system_alert",
+    "security_alert",
+    "application_notification",
+    "hq_operational",
+  ];
+  return (allowed as string[]).includes(raw) ? raw as TransactionalEmailCategory : "hq_operational";
+}
+
+/** Legacy name kept. Transport is Postmark first, then the existing Resend path. */
 function createResendEmailProvider() {
-  const apiKey = resolveResendApiKey();
-  if (!apiKey) return undefined;
   return {
     async send(payload: NotificationPayload): Promise<HqDeliveryResult> {
-      const verified = await resolveVerifiedResendFromEmail();
       const text = payload.body;
       let html =
         typeof payload.metadata?.html === "string" && payload.metadata.html.trim()
@@ -94,64 +111,13 @@ function createResendEmailProvider() {
             .replace(/\n/g, "<br>");
         }
       }
-      try {
-        console.log(
-          `[email] Resend send → to=${payload.to} from=${verified.from} subject=${payload.subject ?? "(none)"}`
-            + (verified.usedFallback ? " (verified-domain fallback)" : ""),
-        );
-        const res = await fetch("https://api.resend.com/emails", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            from: verified.from,
-            to: [payload.to],
-            subject: payload.subject ?? "IFCDC Headquarters",
-            text,
-            html,
-          }),
-          signal: AbortSignal.timeout(12_000),
-        });
-        const data = (await res.json().catch(() => ({}))) as {
-          id?: string;
-          message?: string;
-          name?: string;
-          error?: string;
-          statusCode?: number;
-        };
-        if (!res.ok) {
-          const err =
-            data.message
-            || data.error
-            || data.name
-            || `Resend error ${res.status}`;
-          console.error(`[email] Resend failed status=${res.status}: ${err}`, JSON.stringify(data));
-          return {
-            success: false,
-            error: err,
-            providerCode: data.name || data.statusCode || res.status,
-            providerStatus: res.status,
-            providerResponse: data as Record<string, unknown>,
-          };
-        }
-        console.log(`[email] Resend ok id=${data.id ?? "unknown"}`);
-        return {
-          success: true,
-          messageId: data.id,
-          providerStatus: res.status,
-          providerResponse: {
-            ...(data as Record<string, unknown>),
-            fromUsed: verified.from,
-            usedFallback: verified.usedFallback,
-          },
-        };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Email send failed";
-        console.error(`[email] Resend exception: ${message}`);
-        return { success: false, error: message, providerResponse: { exception: message } };
-      }
+      return sendTransactionalEmail({
+        to: payload.to,
+        subject: payload.subject ?? "IFCDC Headquarters",
+        text,
+        html,
+        category: emailCategoryFromMetadata(payload.metadata),
+      });
     },
   };
 }
@@ -207,6 +173,17 @@ async function sendViaMicroservice(payload: NotificationPayload): Promise<Notifi
 }
 
 export async function sendHqNotification(payload: NotificationPayload): Promise<NotificationResult> {
+  // Email stays on the HQ transactional path (Postmark, then Resend). SMS may still use the remote service.
+  if (payload.channel === "email") {
+    const local = await createLocalNotificationService().send(payload);
+    if (local.success) return local;
+    const noProvider = /not configured|no transactional email provider/i.test(local.error || "");
+    if (noProvider) {
+      const remote = await sendViaMicroservice(payload);
+      if (remote?.success) return remote;
+    }
+    return local;
+  }
   const remote = await sendViaMicroservice(payload);
   if (remote?.success) return remote;
   // Rebuild each send so runtime env (Render) is always current.
@@ -284,23 +261,13 @@ export async function resolveVerifiedResendFromEmail(): Promise<{
   };
 }
 
-/** Direct Resend path for security-critical Founder OTP (skips microservice). */
+/** Security-critical Founder OTP. Postmark first; Resend fallback if Postmark is down or unset. */
 export async function sendFounderSecurityEmail(opts: {
   to: string;
   subject: string;
   body: string;
   html?: string;
 }): Promise<HqDeliveryResult> {
-  const apiKey = resolveResendApiKey();
-  if (!apiKey) {
-    return {
-      success: false,
-      error: "RESEND_API_KEY is not configured on Headquarters (Render env)",
-      providerCode: "missing_api_key",
-    };
-  }
-
-  const verified = await resolveVerifiedResendFromEmail();
   const text = opts.body;
   let html = opts.html || "";
   if (!html) {
@@ -319,75 +286,13 @@ export async function sendFounderSecurityEmail(opts: {
     }
   }
 
-  try {
-    console.log(
-      `[email] Resend Founder → to=${opts.to} from=${verified.from}`
-      + (verified.usedFallback ? ` (fallback; configured=${verified.configuredFrom})` : "")
-    );
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: verified.from,
-        to: [opts.to],
-        subject: opts.subject,
-        text,
-        html,
-      }),
-      signal: AbortSignal.timeout(12_000),
-    });
-    const data = (await res.json().catch(() => ({}))) as {
-      id?: string;
-      message?: string;
-      name?: string;
-      error?: string;
-    };
-    if (!res.ok) {
-      const err = data.message || data.error || data.name || `Resend error ${res.status}`;
-      console.error(`[email] Resend failed status=${res.status}: ${err}`, JSON.stringify(data));
-      return {
-        success: false,
-        error: err,
-        providerCode: data.name || res.status,
-        providerStatus: res.status,
-        providerResponse: {
-          ...data,
-          resendProbe: verified.probe,
-          fromUsed: verified.from,
-          configuredFrom: verified.configuredFrom,
-          usedFallback: verified.usedFallback,
-        },
-      };
-    }
-    console.log(`[email] Resend ok id=${data.id ?? "unknown"} from=${verified.from}`);
-    return {
-      success: true,
-      messageId: data.id,
-      providerStatus: res.status,
-      providerResponse: {
-        ...data,
-        resendProbe: verified.probe,
-        fromUsed: verified.from,
-        configuredFrom: verified.configuredFrom,
-        usedFallback: verified.usedFallback,
-      },
-    };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Email send failed";
-    console.error(`[email] Resend exception: ${message}`);
-    return {
-      success: false,
-      error: message,
-      providerResponse: {
-        exception: message,
-        resendProbe: verified.probe,
-        fromUsed: verified.from,
-      },
-    };
-  }
+  return sendTransactionalEmail({
+    to: opts.to,
+    subject: opts.subject,
+    text,
+    html,
+    category: "security_alert",
+  });
 }
 
 function twilioErrorFields(err: unknown): {

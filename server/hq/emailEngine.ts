@@ -1,8 +1,9 @@
 /**
  * IFCDC Headquarters Production Email Engine
  *
- * Branded HTML (black/gold/white) + verified Resend sender + AURA personalization.
- * Transport stays on the existing Resend path — no new microservice/package.
+ * Branded HTML (black/gold/white) + AURA personalization.
+ * Transport is Postmark when POSTMARK_SERVER_TOKEN is set, then the existing Resend path.
+ * No new microservice or package.
  */
 import {
   resolveResendFromEmail,
@@ -10,6 +11,7 @@ import {
   probeResendSender,
   type HqDeliveryResult,
 } from "../lib/notifications";
+import { sendTransactionalEmail, type TransactionalEmailCategory } from "../lib/transactionalEmail";
 import { auraExecutiveChat } from "../lib/ifcdc";
 import { HQ_EMAIL_BRAND, htmlToPlainText } from "./emailBrand";
 import {
@@ -29,6 +31,7 @@ export type SendBrandedEmailInput = {
   textOverride?: string;
   subjectOverride?: string;
   replyTo?: string;
+  category?: TransactionalEmailCategory;
 };
 
 export type SenderAuthStatus = {
@@ -240,63 +243,26 @@ async function resendSend(opts: {
   text: string;
   html: string;
   replyTo?: string;
+  category?: TransactionalEmailCategory;
 }): Promise<HqDeliveryResult & { from?: string; usedFallback?: boolean; senderAuth?: SenderAuthStatus }> {
-  const apiKey = resolveResendApiKeyLocal();
-  if (!apiKey) {
-    return { success: false, error: "RESEND_API_KEY is not configured on Headquarters (Render env)" };
-  }
-
-  const verified = await resolveVerifiedResendFromEmail();
-  try {
-    console.log(
-      `[email-engine] Resend → to=${opts.to.join(",")} from=${verified.from} subject=${opts.subject}`
-        + (verified.usedFallback ? ` (fallback from ${verified.configuredFrom})` : ""),
-    );
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: verified.from,
-        to: opts.to,
-        subject: opts.subject,
-        text: opts.text,
-        html: opts.html,
-        ...(opts.replyTo ? { reply_to: opts.replyTo } : {}),
-      }),
-      signal: AbortSignal.timeout(15_000),
-    });
-    const data = (await res.json().catch(() => ({}))) as {
-      id?: string;
-      message?: string;
-      name?: string;
-      error?: string;
-    };
-    if (!res.ok) {
-      return {
-        success: false,
-        error: data.message || data.error || data.name || `Resend error ${res.status}`,
-        providerCode: data.name || res.status,
-        providerStatus: res.status,
-        providerResponse: data as Record<string, unknown>,
-        from: verified.from,
-        usedFallback: verified.usedFallback,
-      };
-    }
-    return {
-      success: true,
-      messageId: data.id,
-      providerStatus: res.status,
-      providerResponse: data as Record<string, unknown>,
-      from: verified.from,
-      usedFallback: verified.usedFallback,
-    };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Email send failed";
-    return { success: false, error: message, from: verified.from, usedFallback: verified.usedFallback };
-  }
+  const sent = await sendTransactionalEmail({
+    to: opts.to,
+    subject: opts.subject,
+    text: opts.text,
+    html: opts.html,
+    replyTo: opts.replyTo,
+    category: opts.category || "hq_operational",
+  });
+  return {
+    success: sent.success,
+    messageId: sent.messageId,
+    error: sent.error,
+    providerCode: sent.providerCode,
+    providerStatus: sent.providerStatus,
+    providerResponse: sent.providerResponse,
+    from: sent.from,
+    usedFallback: sent.usedFallback,
+  };
 }
 
 /** Render a catalog template and send via verified Resend From. */
@@ -327,6 +293,7 @@ export async function sendBrandedEmail(input: SendBrandedEmailInput): Promise<
     text,
     html,
     replyTo: input.replyTo || HQ_EMAIL_BRAND.supportEmail,
+    category: input.category,
   });
 
   return {
@@ -464,6 +431,7 @@ export async function sendAuraGeneratedEmail(input: AuraEmailComposeInput & { to
     text: composed.text,
     html: composed.html,
     replyTo: HQ_EMAIL_BRAND.supportEmail,
+    category: "hq_operational",
   });
   return {
     ...send,
@@ -483,10 +451,30 @@ export async function sendWelcomeEmail(opts: {
   return sendBrandedEmail({
     to: opts.to,
     templateId: "welcome",
+    category: "account_verification",
     template: {
       recipientName: opts.name,
       fields: { email: opts.to, role: opts.role || "Member" },
       cta: { label: "Sign in to Headquarters", href: `${HQ_EMAIL_BRAND.publicUrl()}/login` },
+    },
+  });
+}
+
+export async function sendAccountVerificationEmail(opts: {
+  to: string;
+  name?: string;
+  verifyUrl: string;
+}): Promise<HqDeliveryResult> {
+  return sendBrandedEmail({
+    to: opts.to,
+    templateId: "generic",
+    category: "account_verification",
+    subjectOverride: "Verify your IFCDC account",
+    template: {
+      recipientName: opts.name,
+      message: "Confirm this email address to finish setting up your IFCDC account. The link expires shortly. If you did not create an account, you can ignore this message.",
+      fields: { headline: "Verify your account", email: opts.to },
+      cta: { label: "Verify email", href: opts.verifyUrl },
     },
   });
 }
@@ -499,6 +487,7 @@ export async function sendPasswordResetEmail(opts: {
   return sendBrandedEmail({
     to: opts.to,
     templateId: "password_reset",
+    category: "password_reset",
     template: {
       recipientName: opts.name,
       fields: { email: opts.to },
@@ -519,6 +508,7 @@ export async function sendBookingConfirmationEmail(opts: {
   return sendBrandedEmail({
     to: opts.to,
     templateId: "booking_confirmation",
+    category: "booking_confirmation",
     template: {
       recipientName: opts.name,
       message: opts.message,
@@ -526,6 +516,84 @@ export async function sendBookingConfirmationEmail(opts: {
         service: opts.service,
         when: opts.when,
         location: opts.location,
+        reference: opts.reference,
+      },
+    },
+  });
+}
+
+export async function sendBookingChangeEmail(opts: {
+  to: string;
+  name?: string;
+  service?: string;
+  when?: string;
+  location?: string;
+  reference?: string;
+  message?: string;
+}): Promise<HqDeliveryResult> {
+  return sendBrandedEmail({
+    to: opts.to,
+    templateId: "generic",
+    category: "booking_change",
+    subjectOverride: "Your IFCDC booking was updated",
+    template: {
+      recipientName: opts.name,
+      message: opts.message || `Hello ${opts.name || "there"}, your IFCDC booking has been updated.`,
+      fields: {
+        headline: "Booking updated",
+        service: opts.service,
+        when: opts.when,
+        location: opts.location,
+        reference: opts.reference,
+      },
+    },
+  });
+}
+
+export async function sendBookingCancellationEmail(opts: {
+  to: string;
+  name?: string;
+  service?: string;
+  when?: string;
+  reference?: string;
+  message?: string;
+}): Promise<HqDeliveryResult> {
+  return sendBrandedEmail({
+    to: opts.to,
+    templateId: "generic",
+    category: "booking_cancellation",
+    subjectOverride: "Your IFCDC booking was cancelled",
+    template: {
+      recipientName: opts.name,
+      message: opts.message || `Hello ${opts.name || "there"}, your IFCDC booking has been cancelled.`,
+      fields: {
+        headline: "Booking cancelled",
+        service: opts.service,
+        when: opts.when,
+        reference: opts.reference,
+      },
+    },
+  });
+}
+
+export async function sendReceiptEmail(opts: {
+  to: string;
+  name?: string;
+  amount?: string;
+  reference?: string;
+  message?: string;
+}): Promise<HqDeliveryResult> {
+  return sendBrandedEmail({
+    to: opts.to,
+    templateId: "generic",
+    category: "receipt",
+    subjectOverride: "Your IFCDC receipt",
+    template: {
+      recipientName: opts.name,
+      message: opts.message || "A receipt from IFCDC Headquarters is attached in this message.",
+      fields: {
+        headline: "Receipt",
+        amount: opts.amount,
         reference: opts.reference,
       },
     },
@@ -543,6 +611,7 @@ export async function sendAppointmentReminderEmail(opts: {
   return sendBrandedEmail({
     to: opts.to,
     templateId: "appointment_reminder",
+    category: "booking_confirmation",
     template: {
       recipientName: opts.name,
       message: opts.message,
@@ -562,6 +631,7 @@ export async function sendApprovalEmail(opts: {
   return sendBrandedEmail({
     to: opts.to,
     templateId: opts.approved ? "approval_notification" : "denial_notification",
+    category: "application_notification",
     template: {
       message: opts.message,
       fields: {
@@ -587,6 +657,7 @@ export async function sendGrantNotificationEmail(opts: {
   return sendBrandedEmail({
     to: opts.to,
     templateId: "grant_notification",
+    category: "application_notification",
     template: {
       message: opts.message,
       fields: {
@@ -615,6 +686,7 @@ export async function sendContactFormEmail(opts: {
   return sendBrandedEmail({
     to: opts.to || HQ_EMAIL_BRAND.supportEmail,
     templateId: "contact_form",
+    category: "hq_operational",
     template: {
       message: opts.message,
       fields: {
@@ -639,6 +711,7 @@ export async function sendExecutiveAlertEmail(opts: {
   return sendBrandedEmail({
     to: opts.to,
     templateId: "executive_alert",
+    category: "system_alert",
     template: {
       message: opts.message,
       fields: {
@@ -663,6 +736,7 @@ export async function sendDailyReportEmail(opts: {
   return sendBrandedEmail({
     to: opts.to,
     templateId: "daily_report",
+    category: "hq_operational",
     template: {
       message: opts.message,
       fields: {
