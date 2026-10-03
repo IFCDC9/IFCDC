@@ -26,6 +26,8 @@ export type TransactionalSendResult = {
   providerStatus?: string | number;
   providerResponse?: Record<string, unknown>;
   provider: "postmark" | "resend" | "none";
+  /** True only when Resend accepted the message because Postmark was missing or its send failed. */
+  fallbackUsed?: boolean;
   from?: string;
   usedFallback?: boolean;
   suppressed?: boolean;
@@ -148,6 +150,35 @@ export function resolveTransactionalFromAddress(): string {
 
 export function transactionalSenderEmail(): string {
   return extractEmail(resolveTransactionalFromAddress()) || APPROVED_SENDER;
+}
+
+/** Record which transport accepted the message. Does not choose the provider. */
+export function transportAcceptance(result: Pick<TransactionalSendResult, "provider" | "fallbackUsed" | "from">): {
+  provider: "POSTMARK" | "RESEND" | "NONE";
+  fallbackUsed: boolean;
+  from: string | null;
+} {
+  const provider = result.provider === "postmark"
+    ? "POSTMARK"
+    : result.provider === "resend"
+      ? "RESEND"
+      : "NONE";
+  return {
+    provider,
+    fallbackUsed: result.fallbackUsed === true,
+    from: result.from || null,
+  };
+}
+
+function recordTransport(result: TransactionalSendResult, fallbackUsed: boolean): TransactionalSendResult {
+  const recorded = { ...result, fallbackUsed };
+  if (recorded.success && (recorded.provider === "postmark" || recorded.provider === "resend")) {
+    const acceptance = transportAcceptance(recorded);
+    console.log(
+      `[email] transport provider=${acceptance.provider} fallbackUsed=${acceptance.fallbackUsed ? "YES" : "NO"} id=${recorded.messageId ?? "none"}`,
+    );
+  }
+  return recorded;
 }
 
 function liveTransportPermitted(): boolean {
@@ -627,7 +658,7 @@ export async function sendTransactionalEmail(input: {
     primary.category = category;
     if (primary.success) {
       recentSuccessKeys.set(key, now);
-      return primary;
+      return recordTransport(primary, false);
     }
     console.error(`[email] Postmark primary failed; trying Resend fallback. ${primary.error || "send failed"}`);
     const fallback = await sendViaResend({
@@ -640,20 +671,20 @@ export async function sendTransactionalEmail(input: {
     fallback.category = category;
     if (fallback.success) {
       recentSuccessKeys.set(key, now);
-      return fallback;
+      return recordTransport(fallback, true);
     }
     if (!readResendApiKey()) {
-      return {
+      return recordTransport({
         ...primary,
         error: redactEmailSecrets(primary.error || "Postmark send failed and Resend is not configured"),
         category,
-      };
+      }, false);
     }
-    return {
+    return recordTransport({
       ...fallback,
       error: redactEmailSecrets(fallback.error || primary.error || "Transactional email failed"),
       category,
-    };
+    }, false);
   }
 
   const fallback = await sendViaResend({
@@ -665,5 +696,5 @@ export async function sendTransactionalEmail(input: {
   });
   fallback.category = category;
   if (fallback.success) recentSuccessKeys.set(key, now);
-  return fallback;
+  return recordTransport(fallback, fallback.success === true);
 }

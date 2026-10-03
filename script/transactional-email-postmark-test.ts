@@ -115,6 +115,8 @@ test("Postmark is selected when the server token is set", async () => {
     });
     assert.equal(result.success, true);
     assert.equal(result.provider, "postmark");
+    assert.equal(result.provider.toUpperCase(), "POSTMARK");
+    assert.equal(result.fallbackUsed, false);
     assert.equal(result.from?.includes("service@ifcdc.org"), true);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url.includes("api.postmarkapp.com/email"), true);
@@ -146,8 +148,46 @@ test("Resend is used when the Postmark token is absent", async () => {
     });
     assert.equal(result.success, true);
     assert.equal(result.provider, "resend");
+    assert.equal(result.provider.toUpperCase(), "RESEND");
+    assert.equal(result.fallbackUsed, true);
     assert.equal(calls.some((call) => call.url.includes("api.postmarkapp.com")), false);
     assert.equal(calls.some((call) => call.url.includes("api.resend.com/emails")), true);
+    assertNoTokenLeak(resendKey, result.error, JSON.stringify(result.providerResponse || {}));
+  } finally {
+    calls.restore();
+  }
+});
+
+test("Resend fallback after a Postmark send failure records RESEND and fallbackUsed", async () => {
+  const token = fakeCredential("pm-test");
+  const resendKey = fakeCredential("re-test");
+  process.env.POSTMARK_SERVER_TOKEN = token;
+  process.env.RESEND_API_KEY = resendKey;
+  const calls = installFetch(async (url) => {
+    if (url.includes("api.postmarkapp.com/email")) {
+      return jsonResponse(422, { ErrorCode: 10, Message: "Postmark rejected the message" });
+    }
+    if (url.includes("api.resend.com/domains")) {
+      return jsonResponse(200, { data: [{ name: "ifcdc.org", status: "verified" }] });
+    }
+    if (url.includes("api.resend.com/emails")) {
+      return jsonResponse(200, { id: "re-fallback-1" });
+    }
+    throw new Error(`unexpected url ${url}`);
+  }, token);
+  try {
+    const result = await sendTransactionalEmail({
+      to: "member@example.com",
+      subject: "IFCDC HQ operational notice",
+      text: "Operational notice body",
+      category: "hq_operational",
+    });
+    assert.equal(result.success, true);
+    assert.equal(result.provider.toUpperCase(), "RESEND");
+    assert.equal(result.fallbackUsed, true);
+    assert.equal(calls.some((call) => call.url.includes("api.postmarkapp.com/email")), true);
+    assert.equal(calls.some((call) => call.url.includes("api.resend.com/emails")), true);
+    assertNoTokenLeak(token, result.error, JSON.stringify(result.providerResponse || {}));
     assertNoTokenLeak(resendKey, result.error, JSON.stringify(result.providerResponse || {}));
   } finally {
     calls.restore();

@@ -203,30 +203,31 @@ router.get("/email/status", async (req: Request, res: Response) => {
     if (!allowed) {
       liveTest = { success: false, error: "liveTest only allowed to service@ifcdc.org / MASTER_OWNER_EMAIL" };
     } else {
-      const { resolveVerifiedResendFromEmail } = await import("../lib/notifications");
-      const verified = await resolveVerifiedResendFromEmail();
+      const { transportAcceptance } = await import("../lib/transactionalEmail");
       const send = await sendFounderSecurityEmail({
         to,
         subject: "IFCDC HQ — live email delivery test",
         body:
           "This is a live production delivery test from IFCDC Headquarters.\n\n"
-          + "If you received this message, Resend accepted the send and mailbox delivery succeeded.\n"
-          + `From: ${verified.from}\n`
+          + "If you received this message, the transactional transport accepted the send.\n"
           + `Time: ${new Date().toISOString()}\n`,
       });
+      const transport = transportAcceptance(send);
       liveTest = {
         success: send.success,
         messageId: send.messageId || null,
         error: send.error || null,
+        provider: transport.provider,
+        fallbackUsed: transport.fallbackUsed,
         providerCode: send.providerCode || null,
         providerStatus: send.providerStatus || null,
-        from: verified.from,
-        usedFallback: verified.usedFallback,
+        from: transport.from,
+        usedFallback: transport.fallbackUsed,
         to,
         at: new Date().toISOString(),
       };
       console.info(
-        `[email] liveTest → to=${to} success=${send.success} messageId=${send.messageId || "none"} error=${send.error || "none"}`,
+        `[email] liveTest provider=${transport.provider} fallbackUsed=${transport.fallbackUsed ? "YES" : "NO"} to=${to} success=${send.success} messageId=${send.messageId || "none"} error=${send.error || "none"}`,
       );
     }
   }
@@ -359,7 +360,8 @@ router.post("/email/domain/verify", hqAuthRequired, async (req: Request, res: Re
 });
 
 router.post("/email/live-send", async (req: Request, res: Response) => {
-  const { sendFounderSecurityEmail, resolveVerifiedResendFromEmail } = await import("../lib/notifications");
+  const { sendFounderSecurityEmail } = await import("../lib/notifications");
+  const { transportAcceptance } = await import("../lib/transactionalEmail");
   const to = String(req.body?.to || "service@ifcdc.org").trim().toLowerCase();
   const allowed =
     to === "service@ifcdc.org"
@@ -377,22 +379,24 @@ router.post("/email/live-send", async (req: Request, res: Response) => {
     return res.status(400).json({ success: false, error: "body/message is required" });
   }
 
-  const verified = await resolveVerifiedResendFromEmail();
   const send = await sendFounderSecurityEmail({ to, subject, body });
+  const transport = transportAcceptance(send);
   const payload = {
     success: send.success,
     messageId: send.messageId || null,
     error: send.error || null,
+    provider: transport.provider,
+    fallbackUsed: transport.fallbackUsed,
     providerCode: send.providerCode || null,
     providerStatus: send.providerStatus || null,
-    from: verified.from,
-    usedFallback: verified.usedFallback,
+    from: transport.from,
+    usedFallback: transport.fallbackUsed,
     to,
     subject,
     at: new Date().toISOString(),
   };
   console.info(
-    `[email] live-send → to=${to} from=${verified.from} success=${send.success} messageId=${send.messageId || "none"}`,
+    `[email] live-send provider=${transport.provider} fallbackUsed=${transport.fallbackUsed ? "YES" : "NO"} to=${to} from=${transport.from || "none"} success=${send.success} messageId=${send.messageId || "none"}`,
   );
   return res.status(send.success ? 200 : 502).json(payload);
 });
