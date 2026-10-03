@@ -403,7 +403,19 @@ export async function buildTechnicalCommandBriefing(): Promise<TechBriefing> {
       (i) => i.status === "degraded" || i.health?.healthy === false
     );
     const notConfigured = integrations.filter((i) => i.status === "not_configured");
-    for (const item of degradedList.slice(0, 8)) {
+    const postmarkHealthy = findings.some(
+      (f) =>
+        f.id === "transactional-email-health"
+        && f.status === "ok"
+        && f.detail.startsWith("Postmark primary.")
+    );
+    const legacyResend = postmarkHealthy
+      ? degradedList.find((i) => i.id === "resend")
+      : undefined;
+    const scoredDegraded = legacyResend
+      ? degradedList.filter((i) => i.id !== "resend")
+      : degradedList;
+    for (const item of scoredDegraded.slice(0, 8)) {
       findings.push({
         id: `integration-${item.id}`,
         module: "integrations",
@@ -414,7 +426,17 @@ export async function buildTechnicalCommandBriefing(): Promise<TechBriefing> {
         recommendedFix: `Open Integrations Hub and retest ${item.id}.`,
       });
     }
-    if (!degradedList.length) {
+    if (legacyResend) {
+      findings.push({
+        id: "integration-resend",
+        module: "integrations",
+        title: "Email (Resend) LEGACY / NON-CRITICAL",
+        status: "ok",
+        severity: "low",
+        detail: `LEGACY / NON-CRITICAL. Resend is a non-primary fallback while Postmark is healthy. ${legacyResend.health?.message || "Resend provider check is not a production dependency."}`,
+      });
+    }
+    if (!scoredDegraded.length) {
       findings.push({
         id: "integrations-ok",
         module: "integrations",
