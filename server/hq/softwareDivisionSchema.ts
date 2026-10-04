@@ -1,6 +1,8 @@
 import { getDb } from "../db";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
+import { SOFTWARE_DIVISION_APPS } from "./appRegistry";
+import { HQ_INHERITED_SERVICES } from "./softwareDivisionFramework";
 
 export interface RegisteredAppRow {
   id: string;
@@ -36,6 +38,41 @@ export async function ensureSoftwareDivisionTables() {
     );
     CREATE INDEX IF NOT EXISTS idx_hq_registered_apps_status ON hq_registered_apps(status);
   `);
+  await ensureProductionLockedRegistryVisibility();
+}
+
+/**
+ * Visibility only. Production-locked catalog apps can appear in hq_registered_apps
+ * without opening register, update, delete, rotate, or deploy. Barbers stays locked.
+ * Other catalog apps are not inserted.
+ */
+export async function ensureProductionLockedRegistryVisibility(): Promise<void> {
+  const barbers = SOFTWARE_DIVISION_APPS.find((app) => app.id === "barbers");
+  if (!barbers?.locked) return;
+
+  const db = await getDb();
+  const existing = await db.get("SELECT id FROM hq_registered_apps WHERE id = ?", "barbers");
+  if (existing) return;
+
+  const discardedKey = crypto.randomBytes(32).toString("hex");
+  const hash = await bcrypt.hash(discardedKey, 10);
+  const healthUrl = process.env.HQ_BARBERS_HEALTH_URL?.trim() || barbers.healthUrl;
+  const now = new Date().toISOString();
+  const inherited = HQ_INHERITED_SERVICES.map((service) => service.id);
+
+  await db.run(
+    `INSERT INTO hq_registered_apps
+     (id, name, description, health_url, launch_url, status, api_key_prefix, api_key_hash, inherited_services, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, NULL, 'locked', 'locked', ?, ?, NULL, ?, ?)`,
+    barbers.id,
+    barbers.name,
+    barbers.description,
+    healthUrl,
+    hash,
+    JSON.stringify(inherited),
+    now,
+    now
+  );
 }
 
 export function generateAppApiKey(appId: string): string {
@@ -56,14 +93,14 @@ export async function registerSoftwareApp(input: {
   inheritedServices?: string[];
   createdBy?: string;
 }): Promise<{ app: RegisteredAppRow; apiKey: string }> {
+  if (input.id === "barbers") {
+    throw new Error("The Barbers App is production locked and cannot be re-registered");
+  }
+
   const db = await getDb();
   const existing = await db.get("SELECT id FROM hq_registered_apps WHERE id = ?", input.id);
   if (existing) {
     throw new Error("An application with this ID is already registered");
-  }
-
-  if (input.id === "barbers") {
-    throw new Error("The Barbers App is production locked and cannot be re-registered");
   }
 
   const apiKey = generateAppApiKey(input.id);

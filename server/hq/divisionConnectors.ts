@@ -2,7 +2,7 @@
  * IFCDC Headquarters — Division Connector Registry
  * Software Division, Economic Development, and Case Management HQ connectors.
  */
-import { buildSoftwareDivisionFramework } from "./softwareDivisionFramework";
+import { HQ_INHERITED_SERVICES } from "./softwareDivisionFramework";
 import { SOFTWARE_DIVISION_APPS } from "./appRegistry";
 
 export interface DivisionConnector {
@@ -27,14 +27,16 @@ const BASE_HQ_ENDPOINTS = {
 };
 
 export function buildSoftwareDivisionConnectors(): DivisionConnector[] {
-  const framework = buildSoftwareDivisionFramework();
+  // Use the static service contract. Do not call buildSoftwareDivisionFramework()
+  // here — that builder includes this manifest and the two calls recurse.
+  const inheritedServiceIds = HQ_INHERITED_SERVICES.map((s) => s.id);
   return SOFTWARE_DIVISION_APPS.map((app) => ({
     id: app.id,
     name: app.name,
     divisionType: "software_app" as const,
     status: app.status === "mvp" ? "beta" as const : (app.status as DivisionConnector["status"]),
     independentlyDeployable: true,
-    inheritedServices: framework.inheritedServices.map((s) => s.id),
+    inheritedServices: inheritedServiceIds,
     integrationEndpoints: {
       ...BASE_HQ_ENDPOINTS,
       health: app.healthUrl,
