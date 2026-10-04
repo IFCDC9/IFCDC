@@ -63,8 +63,30 @@ export interface ExecutiveDepartment {
   health: string;
 }
 
+export interface BarbersSnapshotSection {
+  status: "ok" | "unavailable" | "not_configured";
+  count: number | null;
+  emptyBecause: "source_returned_zero" | "closed_day" | null;
+  unavailableReason: string | null;
+  items: Record<string, string | number | boolean | null>[];
+}
+
+export interface BarbersOperationsSnapshot {
+  todayBookings: BarbersSnapshotSection;
+  upcomingBookings: BarbersSnapshotSection;
+  openings: BarbersSnapshotSection;
+  shopStatus: BarbersSnapshotSection;
+  reschedules: BarbersSnapshotSection;
+  cancellations: BarbersSnapshotSection;
+  exceptions: BarbersSnapshotSection;
+  refreshedAt: string | null;
+  sourceHealth: "ok" | "unavailable" | "not_configured";
+  source: { host: string };
+}
+
 export const operationsApi = {
   overview: () => apiFetch<OperationsOverview>("/overview"),
+  barbersSnapshot: () => apiFetch<BarbersOperationsSnapshot>("/barbers-snapshot"),
   commandCenterV3: () => apiFetch<Record<string, unknown>>("/command-center/v3/platform"),
   tasks: (status?: string) => apiFetch<{ tasks: Record<string, unknown>[] }>(`/tasks${status ? `?status=${status}` : ""}`),
   createTask: (body: Record<string, unknown>) =>

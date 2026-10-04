@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Package, Truck, Building, Shield, Calendar, AlertTriangle, Wrench, Home } from "lucide-react";
 import HQLayout from "../../layouts/HQLayout";
-import { operationsApi } from "../../api/operationsApi";
+import { operationsApi, type BarbersSnapshotSection } from "../../api/operationsApi";
 import { KpiCard } from "../../components/hq/KpiCard";
 import { HqPanel } from "../../components/hq/HqPanel";
 import { StatusBadge } from "../../components/hq/StatusBadge";
@@ -20,10 +20,24 @@ const MODULE_LINKS = [
   { label: "Housing Programs", path: "/hq/housing", icon: Home, key: "housing" as const },
 ];
 
+function snapshotValue(section: BarbersSnapshotSection | undefined): string {
+  if (!section || section.status !== "ok" || section.count == null) {
+    return section?.status === "unavailable" ? "Unavailable" : "Not connected";
+  }
+  if (section.count === 0 && section.emptyBecause === "closed_day") return "0 closed";
+  return String(section.count);
+}
+
 const OperationsCenterPage: React.FC = () => {
   const overview = useQuery({
     queryKey: ["ops-overview"],
     queryFn: operationsApi.overview,
+    staleTime: 45_000,
+    retry: 1,
+  });
+  const barbersSnapshot = useQuery({
+    queryKey: ["ops-barbers-snapshot"],
+    queryFn: operationsApi.barbersSnapshot,
     staleTime: 45_000,
     retry: 1,
   });
@@ -60,6 +74,87 @@ const OperationsCenterPage: React.FC = () => {
 
       <div style={{ marginBottom: "1.25rem" }}>
         <OperationsPhase3CommandCenter />
+      </div>
+
+      <div id="barbers-snapshot" style={{ marginBottom: "1.25rem" }}>
+        <HqPanel
+          title="Barbers operations"
+          subtitle="Read-only production snapshot. Headquarters housing, fleet, and program counts stay separate."
+        >
+          {barbersSnapshot.isLoading && <p className="hq-muted-text">Reading Barbers…</p>}
+          {barbersSnapshot.isError && (
+            <p className="hq-muted-text">Barbers snapshot did not load. Headquarters operations above are unchanged.</p>
+          )}
+          {barbersSnapshot.data && (
+            <>
+              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.75rem", flexWrap: "wrap" }}>
+                <StatusBadge
+                  label={
+                    barbersSnapshot.data.sourceHealth === "ok"
+                      ? "Source healthy"
+                      : barbersSnapshot.data.sourceHealth === "not_configured"
+                        ? "Booking ledger not connected"
+                        : "Source unavailable"
+                  }
+                  variant={
+                    barbersSnapshot.data.sourceHealth === "ok"
+                      ? "success"
+                      : barbersSnapshot.data.sourceHealth === "not_configured"
+                        ? "warning"
+                        : "danger"
+                  }
+                />
+                <span className="hq-muted-text">
+                  {barbersSnapshot.data.source.host || "No Barbers host"}
+                  {barbersSnapshot.data.refreshedAt
+                    ? ` · refreshed ${new Date(barbersSnapshot.data.refreshedAt).toLocaleString()}`
+                    : " · no successful refresh"}
+                </span>
+              </div>
+              <div className="hq-kpi-grid">
+                <KpiCard label="Today's bookings" value={snapshotValue(barbersSnapshot.data.todayBookings)} icon={Calendar} />
+                <KpiCard label="Upcoming bookings" value={snapshotValue(barbersSnapshot.data.upcomingBookings)} icon={Calendar} />
+                <KpiCard label="Openings" value={snapshotValue(barbersSnapshot.data.openings)} icon={Calendar} variant="gold" />
+                <KpiCard label="Shop status" value={snapshotValue(barbersSnapshot.data.shopStatus)} icon={Building} />
+                <KpiCard label="Reschedules" value={snapshotValue(barbersSnapshot.data.reschedules)} icon={Calendar} />
+                <KpiCard label="Cancellations" value={snapshotValue(barbersSnapshot.data.cancellations)} icon={AlertTriangle} />
+                <KpiCard label="Exceptions" value={snapshotValue(barbersSnapshot.data.exceptions)} icon={AlertTriangle} variant="warning" />
+              </div>
+              {[
+                barbersSnapshot.data.todayBookings,
+                barbersSnapshot.data.upcomingBookings,
+                barbersSnapshot.data.openings,
+                barbersSnapshot.data.shopStatus,
+                barbersSnapshot.data.reschedules,
+                barbersSnapshot.data.cancellations,
+                barbersSnapshot.data.exceptions,
+              ].some((section) => section.unavailableReason) && (
+                <ul className="hq-activity-list" style={{ margin: "0.75rem 0 0", padding: 0, listStyle: "none" }}>
+                  {[
+                    ["Today's bookings", barbersSnapshot.data.todayBookings],
+                    ["Upcoming bookings", barbersSnapshot.data.upcomingBookings],
+                    ["Openings", barbersSnapshot.data.openings],
+                    ["Shop status", barbersSnapshot.data.shopStatus],
+                    ["Reschedules", barbersSnapshot.data.reschedules],
+                    ["Cancellations", barbersSnapshot.data.cancellations],
+                    ["Exceptions", barbersSnapshot.data.exceptions],
+                  ].map(([label, section]) => {
+                    const row = section as BarbersSnapshotSection;
+                    if (!row.unavailableReason) return null;
+                    return (
+                      <li key={String(label)} className="hq-activity-item">
+                        <div className="hq-activity-content">
+                          <div className="hq-activity-title">{String(label)}</div>
+                          <div className="hq-activity-detail">{row.unavailableReason}</div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </>
+          )}
+        </HqPanel>
       </div>
 
       <div className="hq-kpi-grid hq-fade-in" style={{ marginBottom: "1.25rem" }}>

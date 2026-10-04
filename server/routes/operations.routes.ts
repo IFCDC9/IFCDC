@@ -8,6 +8,7 @@ import {
   createOpsTask,
   updateOpsTask,
 } from "../hq/operationsCommandEngine";
+import { loadBarbersOperationsSnapshot, mapBarbersOperationsSnapshot } from "../hq/barbersOperationsSnapshot";
 import {
   ensureExecutiveOperationsFoundation,
   buildExecutiveOperationsDashboard,
@@ -42,6 +43,21 @@ router.get("/overview", async (_req, res) => {
   } catch (error) {
     console.error("GET /operations/overview error:", error);
     res.json({ ...EMPTY_OPERATIONS_OVERVIEW });
+  }
+});
+
+/** Read-only Barbers production snapshot. Does not replace Headquarters program counts. */
+router.get("/barbers-snapshot", async (_req, res) => {
+  try {
+    res.json(await loadBarbersOperationsSnapshot());
+  } catch (error) {
+    console.error("GET /operations/barbers-snapshot error:", error instanceof Error ? error.name : "snapshot_failed");
+    res.json(mapBarbersOperationsSnapshot({
+      host: "unavailable",
+      healthOk: false,
+      readKeyConfigured: false,
+      ledger: "failed",
+    }));
   }
 });
 

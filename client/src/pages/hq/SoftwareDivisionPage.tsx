@@ -335,6 +335,11 @@ const SoftwareDivisionPage: React.FC = () => {
                     <div key={svc.id} className="hq-framework-service-card">
                       <div className="hq-framework-service-name">{svc.name}</div>
                       <code className="hq-framework-endpoint">{svc.endpoint}</code>
+                      {svc.id === "operations" && (
+                        <Link to="/hq/operations#barbers-snapshot" className="hq-framework-endpoint">
+                          Barbers snapshot
+                        </Link>
+                      )}
                     </div>
                   ))}
                 </div>
