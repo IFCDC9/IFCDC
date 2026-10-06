@@ -82,6 +82,7 @@ export interface BarbersOperationsSnapshot {
   refreshedAt: string | null;
   sourceHealth: "ok" | "unavailable" | "not_configured";
   source: { host: string };
+  responseTimeMs: number | null;
 }
 
 export const operationsApi = {

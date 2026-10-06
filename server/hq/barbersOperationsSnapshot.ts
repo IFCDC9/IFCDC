@@ -27,6 +27,8 @@ export interface BarbersOperationsSnapshot {
   refreshedAt: string | null;
   sourceHealth: SourceHealth;
   source: { host: string };
+  /** Elapsed time of this snapshot request. Null when no request was sent. */
+  responseTimeMs: number | null;
 }
 
 export interface BarbersSlotDay {
@@ -49,13 +51,16 @@ export interface BarbersSnapshotReads {
   shops?: unknown;
   /** Ignored. Headquarters appointments must never fill this snapshot. */
   hqAppointments?: unknown;
+  /** Measured by the snapshot client. Not taken from the Barbers body. */
+  responseTimeMs?: number | null;
 }
 
 const CANCELLED = new Set(["cancelled", "canceled", "cancelled_by_customer", "canceled_by_customer"]);
 const EXCEPTION_STATUSES = new Set(["no_show", "failed", "payment_failed", "error"]);
 const READ_TOKEN_ENV = "HQ_BARBERS_SNAPSHOT_READ_TOKEN";
 const READ_HEADER = "x-ifcdc-hq-read-token";
-const FETCH_TIMEOUT_MS = 4500;
+/** Abort for this Barbers snapshot request only. Other HQ fetches keep their own timeouts. */
+export const BARBERS_SNAPSHOT_FETCH_TIMEOUT_MS = 35000;
 const MAX_ITEMS = 40;
 const PRIVATE_KEY = /phone|email|paypal|card|cvv|ssn|password|secret|token|customer|payment|refund/i;
 const BUSINESS_TZ = "America/New_York";
@@ -79,6 +84,11 @@ export function barbersOriginFromHealthUrl(healthUrl: string | undefined): { ori
   } catch {
     return null;
   }
+}
+
+function recordedResponseTime(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.round(value));
 }
 
 function section(
@@ -192,6 +202,7 @@ export function mapBarbersOperationsSnapshot(reads: BarbersSnapshotReads): Barbe
       refreshedAt: null,
       sourceHealth: missingConfig ? "not_configured" : "unavailable",
       source: { host },
+      responseTimeMs: recordedResponseTime(reads.responseTimeMs),
     };
   }
 
@@ -291,6 +302,7 @@ export function mapBarbersOperationsSnapshot(reads: BarbersSnapshotReads): Barbe
     refreshedAt,
     sourceHealth,
     source: { host },
+    responseTimeMs: recordedResponseTime(reads.responseTimeMs),
   };
 }
 
@@ -347,7 +359,11 @@ function remoteSection(value: unknown): SnapshotSection {
   return section("ok", row.count, null, items, emptyBecause);
 }
 
-export function normalizeRemoteBarbersSnapshot(body: unknown, host: string): BarbersOperationsSnapshot {
+export function normalizeRemoteBarbersSnapshot(
+  body: unknown,
+  host: string,
+  responseTimeMs: number | null = null,
+): BarbersOperationsSnapshot {
   const row = asRecord(redactValue(body)) ?? {};
   const snapshot = {} as BarbersOperationsSnapshot;
   for (const key of SECTION_KEYS) {
@@ -357,6 +373,7 @@ export function normalizeRemoteBarbersSnapshot(body: unknown, host: string): Bar
   snapshot.sourceHealth = health === "ok" || health === "unavailable" || health === "not_configured" ? health : "unavailable";
   snapshot.refreshedAt = text(row.refreshedAt) || null;
   snapshot.source = { host: host || "unconfigured" };
+  snapshot.responseTimeMs = recordedResponseTime(responseTimeMs);
   if (snapshot.sourceHealth !== "ok") {
     for (const key of SECTION_KEYS) {
       if (snapshot[key].status === "ok") continue;
@@ -407,7 +424,8 @@ export async function loadBarbersOperationsSnapshot(options: LoadOptions = {}): 
   }
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), BARBERS_SNAPSHOT_FETCH_TIMEOUT_MS);
+  const started = Date.now();
   try {
     const payload = await readJson(
       fetchImpl,
@@ -415,6 +433,7 @@ export async function loadBarbersOperationsSnapshot(options: LoadOptions = {}): 
       { Accept: "application/json", [READ_HEADER]: readToken },
       controller.signal,
     );
+    const responseTimeMs = Date.now() - started;
     if (!payload || payload.status !== 200) {
       return mapBarbersOperationsSnapshot({
         now: (options.now ?? new Date()).toISOString(),
@@ -422,9 +441,10 @@ export async function loadBarbersOperationsSnapshot(options: LoadOptions = {}): 
         healthOk: false,
         readKeyConfigured: true,
         ledger: "failed",
+        responseTimeMs,
       });
     }
-    return normalizeRemoteBarbersSnapshot(payload.body, origin.host);
+    return normalizeRemoteBarbersSnapshot(payload.body, origin.host, responseTimeMs);
   } finally {
     clearTimeout(timer);
   }
