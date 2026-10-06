@@ -340,6 +340,11 @@ const SoftwareDivisionPage: React.FC = () => {
                           Barbers snapshot
                         </Link>
                       )}
+                      {svc.id === "grants" && (
+                        <Link to="/hq/grants#founder-funding-view" className="hq-framework-endpoint">
+                          Founder funding view
+                        </Link>
+                      )}
                     </div>
                   ))}
                 </div>

@@ -307,6 +307,7 @@ export const grantsApi = {
   pipeline: () => apiFetch<{ pipeline: { stage: string; count: number; value: number }[]; pipelineValue: number; winRate: number }>("/pipeline"),
 
   opportunities: () => apiFetch<{ opportunities: GrantOpportunity[] }>("/opportunities"),
+  founderFundingView: () => apiFetch<Record<string, unknown>>("/founder-funding-view"),
   createOpportunity: (data: Partial<GrantOpportunity>) =>
     apiFetch("/opportunities", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
 

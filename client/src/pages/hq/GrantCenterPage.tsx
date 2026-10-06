@@ -21,6 +21,7 @@ import {
 } from "../../components/hq/grants/GrantFoundationDashboard";
 import { fmtGrantDeadline } from "../../utils/grantFormat";
 import { GrantReadOnlyBanner } from "../../components/hq/grants/GrantReadOnlyBanner";
+import { GrantFounderFundingPanel } from "../../components/hq/grants/GrantFounderFundingPanel";
 import { GrantQueryBoundary } from "../../components/hq/grants/GrantQueryBoundary";
 import { GrantSubNav } from "../../components/hq/grants/GrantSubNav";
 import { HqDataUnavailable } from "../../components/hq/HqDataUnavailable";
@@ -327,6 +328,10 @@ const GrantCenterPage: React.FC = () => {
       </nav>
 
       <GrantReadOnlyBanner />
+
+      <div id="founder-funding-view" style={{ marginBottom: "1.25rem" }}>
+        <GrantFounderFundingPanel />
+      </div>
 
       {dashboard.isError && (
         <HqDataUnavailable

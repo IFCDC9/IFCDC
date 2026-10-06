@@ -1,0 +1,119 @@
+import React from "react";
+import { useQuery } from "@tanstack/react-query";
+import { grantsApi } from "../../../api/grantsApi";
+import { HqPanel } from "../HqPanel";
+import { formatCurrency } from "../../../utils/safeFormat";
+
+type Field<T> = { status: "available"; value: T } | { status: "unavailable"; value: null };
+
+interface FundingRow {
+  id: string;
+  title: string;
+  funder: string | null;
+  eligibility: Field<string>;
+  programMatch: Field<{ slug: string; label: string; matchedTerms: string[] }>;
+  barbersWorkforceRelevant: Field<boolean>;
+  fundingAmount: Field<{ min: number | null; max: number | null }>;
+  deadline: Field<string>;
+  renewable: Field<true>;
+  proposalStatus: Field<string>;
+  budgetStatus: Field<{ state: "recorded"; totalRequested: number | null }>;
+  founderApprovalStatus: Field<string>;
+  submissionReadiness: Field<"ready">;
+  awardStatus: Field<{ status: string; amount: number | null }>;
+  complianceStatus: Field<string>;
+}
+
+interface FundingView {
+  readOnly: true;
+  libraryCount: number;
+  priority: FundingRow[];
+}
+
+function shown(value: string | null | undefined): string {
+  return value && value.trim() ? value : "Unavailable";
+}
+
+function fieldText<T>(field: Field<T> | undefined, format: (value: T) => string): string {
+  if (!field || field.status !== "available") return "Unavailable";
+  return format(field.value);
+}
+
+function amountText(field: FundingRow["fundingAmount"]): string {
+  return fieldText(field, (value) => {
+    const max = value.max;
+    const min = value.min;
+    if (typeof max === "number") return formatCurrency(max);
+    if (typeof min === "number") return formatCurrency(min);
+    return "Unavailable";
+  });
+}
+
+export const GrantFounderFundingPanel: React.FC = () => {
+  const view = useQuery({
+    queryKey: ["grant-founder-funding-view"],
+    queryFn: grantsApi.founderFundingView,
+  });
+  const data = view.data as FundingView | undefined;
+  const rows = data?.priority ?? [];
+
+  return (
+    <HqPanel
+      title="Founder funding view"
+      subtitle="Read-only ranking of the existing Grant Center library. Nothing is submitted or approved from this panel."
+    >
+      {view.isLoading && <p className="hq-muted-text">Reading the local grant library…</p>}
+      {view.isError && (
+        <p className="hq-muted-text">{(view.error as Error).message || "Founder funding view unavailable"}</p>
+      )}
+      {data && (
+        <>
+          <p className="hq-muted-text">{data.libraryCount} opportunities in the existing library. Highest-priority rows are listed first.</p>
+          <table className="hq-table hq-table-compact">
+            <thead>
+              <tr>
+                <th>Opportunity</th>
+                <th>Match</th>
+                <th>Barbers / workforce</th>
+                <th>Amount</th>
+                <th>Deadline</th>
+                <th>Renewable</th>
+                <th>Proposal</th>
+                <th>Budget</th>
+                <th>Founder approval</th>
+                <th>Readiness</th>
+                <th>Award</th>
+                <th>Compliance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.id}>
+                  <td>
+                    <div>{row.title}</div>
+                    <div className="hq-muted-text">{shown(row.funder)}</div>
+                    <div className="hq-muted-text">{fieldText(row.eligibility, (value) => value)}</div>
+                  </td>
+                  <td>{fieldText(row.programMatch, (value) => value.label)}</td>
+                  <td>{fieldText(row.barbersWorkforceRelevant, (value) => (value ? "Relevant" : "No workforce match"))}</td>
+                  <td>{amountText(row.fundingAmount)}</td>
+                  <td>{fieldText(row.deadline, (value) => value.slice(0, 10))}</td>
+                  <td>{fieldText(row.renewable, () => "Recurring record")}</td>
+                  <td>{fieldText(row.proposalStatus, (value) => value)}</td>
+                  <td>{fieldText(row.budgetStatus, (value) => (value.totalRequested != null ? formatCurrency(value.totalRequested) : "Recorded"))}</td>
+                  <td>{fieldText(row.founderApprovalStatus, (value) => value)}</td>
+                  <td>{fieldText(row.submissionReadiness, (value) => value)}</td>
+                  <td>{fieldText(row.awardStatus, (value) => value.status)}</td>
+                  <td>{fieldText(row.complianceStatus, (value) => value)}</td>
+                </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr><td colSpan={12} className="hq-muted-text">No opportunities are stored in the local library.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </>
+      )}
+    </HqPanel>
+  );
+};

@@ -111,6 +111,7 @@ import {
   FUNDING_PIPELINE_LABELS,
 } from "../hq/grantFundingPipelineEngine";
 import { buildDivisionConnectorManifest } from "../hq/divisionConnectors";
+import { loadFounderFundingView } from "../hq/grantFounderFundingView";
 import {
   listPipelineAutomationRules,
   listPipelineAutomationLog,
@@ -366,6 +367,16 @@ router.get("/integrations", async (_req, res) => {
 
 router.get("/overview", async (_req, res) => {
   res.json(await buildGrantExecutiveDashboard());
+});
+
+/** Read-only Founder funding summary. Does not submit, approve, or fetch SAM.gov / Grants.gov. */
+router.get("/founder-funding-view", async (_req, res) => {
+  try {
+    res.json(await loadFounderFundingView());
+  } catch (error) {
+    console.error("GET /grants/founder-funding-view error:", error instanceof Error ? error.name : "founder_funding_view_failed");
+    res.status(500).json({ error: "Founder funding view unavailable" });
+  }
 });
 
 // ——— Grant Center Enterprise Platform ———
