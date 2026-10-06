@@ -3,6 +3,7 @@
  * Ranks the existing local opportunity library. Reads stored rows only.
  */
 import { getDb } from "../db";
+import { excludeQuarantinedOpportunitySql, isQuarantinedQaOpportunity } from "./grantQaFixtureQuarantine";
 import { IFCDC_FUNDING_DIVISIONS } from "./grantFundingEngine";
 
 const MATCH_SLUGS = [
@@ -323,7 +324,7 @@ export function buildFounderFundingView(source: FounderFundingSource): FounderFu
   const renewals = source.renewals ?? [];
   const barbersSlugs = new Set(["barbers", "workforce_development"]);
 
-  const opportunities = source.opportunities.map((opportunity) => {
+  const opportunities = source.opportunities.filter((opportunity) => !isQuarantinedQaOpportunity(opportunity.id)).map((opportunity) => {
     const id = text(opportunity.id);
     const haystack = searchable(opportunity);
     const matches = programs.map((program) => {
@@ -476,7 +477,7 @@ export async function loadFounderFundingView(now = new Date()): Promise<FounderF
     db.all(`SELECT id, title, funder, description, amount_min, amount_max,
       award_floor, award_ceiling, estimated_funding, max_individual_award, total_program_funding,
       status, deadline, close_date, posted_date, updated_at, requirements, division_slugs, program_areas, eligibility
-      FROM grant_opportunities`),
+      FROM grant_opportunities WHERE 1=1${excludeQuarantinedOpportunitySql("id")}`),
     db.all("SELECT id, opportunity_id, status, founder_approval_status, ready_to_submit, updated_at FROM grant_applications"),
     db.all("SELECT application_id, total_requested, line_items FROM grant_proposal_budgets"),
     db.all("SELECT id, opportunity_id, application_id, amount, status, renewal_of_award_id FROM grant_awards"),

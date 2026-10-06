@@ -5,6 +5,7 @@ import crypto from "crypto";
 import { getDb } from "../db";
 import { logGrantActivity } from "./grantsSchema";
 import { productionGrantOpportunitySqlFilter } from "./grantProductionPolicy";
+import { excludeQuarantinedLinkedOpportunitySql, excludeQuarantinedOpportunitySql } from "./grantQaFixtureQuarantine";
 import {
   enrichAllOpportunities,
   enrichMissingDeadlines,
@@ -122,11 +123,12 @@ export async function syncAllPipelineStages(): Promise<number> {
   const now = new Date().toISOString();
   let updated = 0;
   const prodFilter = productionGrantOpportunitySqlFilter();
+  const quarantine = excludeQuarantinedOpportunitySql("id");
 
   const closed = await db.run(
     `UPDATE grant_opportunities SET status = 'closed', pipeline_stage = 'closed', updated_at = ?
      WHERE deadline IS NOT NULL AND deadline < date('now') AND status IN ('open','active','researching')
-     AND pipeline_stage NOT IN ('awarded','closed')${prodFilter}`,
+     AND pipeline_stage NOT IN ('awarded','closed')${prodFilter}${quarantine}`,
     now
   );
   updated += closed.changes ?? 0;
@@ -141,7 +143,8 @@ export async function syncAllPipelineStages(): Promise<number> {
        WHEN funding_status = 'reviewing' THEN 'matched'
        ELSE pipeline_stage
      END, updated_at = ?
-     WHERE pipeline_stage IS NULL OR funding_status IN ('awarded','declined','denied','submitted','eligible','reviewing')${prodFilter}`,
+     WHERE 1=1${quarantine}
+       AND (pipeline_stage IS NULL OR funding_status IN ('awarded','declined','denied','submitted','eligible','reviewing')${prodFilter})`,
     now
   );
   updated += fromFunding.changes ?? 0;
@@ -151,7 +154,7 @@ export async function syncAllPipelineStages(): Promise<number> {
      WHERE status IN ('open','active','researching') AND pipeline_stage IN ('discovered','matched')
      AND id IN (
        SELECT opportunity_id FROM grant_opportunity_scores WHERE composite_score >= 75
-     )${prodFilter}`,
+     )${prodFilter}${quarantine}`,
     now
   );
   updated += qualified.changes ?? 0;
@@ -161,14 +164,14 @@ export async function syncAllPipelineStages(): Promise<number> {
      WHERE status IN ('open','active','researching') AND pipeline_stage = 'discovered'
      AND id IN (
        SELECT opportunity_id FROM grant_opportunity_scores WHERE composite_score >= 55 AND composite_score < 75
-     )${prodFilter}`,
+     )${prodFilter}${quarantine}`,
     now
   );
   updated += matched.changes ?? 0;
 
   const discovered = await db.run(
     `UPDATE grant_opportunities SET pipeline_stage = 'discovered', updated_at = ?
-     WHERE pipeline_stage IS NULL AND status IN ('open','active','researching')${prodFilter}`,
+     WHERE pipeline_stage IS NULL AND status IN ('open','active','researching')${prodFilter}${quarantine}`,
     now
   );
   updated += discovered.changes ?? 0;
@@ -193,7 +196,8 @@ export async function syncAllPipelineStages(): Promise<number> {
            ELSE lifecycle_stage
          END
        ),
-       updated_at = ?`,
+       updated_at = ?
+     WHERE 1=1${excludeQuarantinedLinkedOpportunitySql("opportunity_id")}`,
     now
   );
   updated += apps.changes ?? 0;
@@ -677,7 +681,7 @@ export async function runPipelineNotificationScan(): Promise<number> {
 
   const newMatches = (await db.all(`
     SELECT id, title, funder FROM grant_opportunities
-    WHERE pipeline_stage IN ('matched','qualified') AND updated_at >= datetime('now', '-24 hours')
+    WHERE pipeline_stage IN ('matched','qualified') AND updated_at >= datetime('now', '-24 hours')${excludeQuarantinedOpportunitySql("id")}
     ORDER BY updated_at DESC LIMIT 10
   `)) as { id: string; title: string; funder: string }[];
 
@@ -687,7 +691,7 @@ export async function runPipelineNotificationScan(): Promise<number> {
 
   const deadlines = (await db.all(`
     SELECT id, title, deadline FROM grant_opportunities
-    WHERE deadline IS NOT NULL AND deadline <= date('now', '+7 days') AND deadline >= date('now') AND status IN ('open','active')
+    WHERE deadline IS NOT NULL AND deadline <= date('now', '+7 days') AND deadline >= date('now') AND status IN ('open','active')${excludeQuarantinedOpportunitySql("id")}
   `)) as { id: string; title: string; deadline: string }[];
 
   for (const d of deadlines) {
@@ -695,7 +699,8 @@ export async function runPipelineNotificationScan(): Promise<number> {
   }
 
   const needApproval = (await db.all(`
-    SELECT id, title FROM grant_applications WHERE pipeline_stage = 'founder_approval' OR (founder_approval_status = 'pending' AND status = 'draft')
+    SELECT id, title FROM grant_applications
+    WHERE (pipeline_stage = 'founder_approval' OR (founder_approval_status = 'pending' AND status = 'draft'))${excludeQuarantinedLinkedOpportunitySql("opportunity_id")}
   `)) as { id: string; title: string }[];
 
   for (const a of needApproval) {
@@ -704,7 +709,7 @@ export async function runPipelineNotificationScan(): Promise<number> {
 
   const recentAwards = (await db.all(`
     SELECT a.id, a.title FROM grant_applications a
-    WHERE a.status = 'awarded' AND a.updated_at >= datetime('now', '-7 days')
+    WHERE a.status = 'awarded' AND a.updated_at >= datetime('now', '-7 days')${excludeQuarantinedLinkedOpportunitySql("a.opportunity_id")}
   `)) as { id: string; title: string }[];
 
   for (const a of recentAwards) {
@@ -713,7 +718,7 @@ export async function runPipelineNotificationScan(): Promise<number> {
 
   const submitted = (await db.all(`
     SELECT id, title, portal_confirmation_id, submitted_at FROM grant_applications
-    WHERE status IN ('submitted', 'under_review') AND submitted_at >= datetime('now', '-14 days')
+    WHERE status IN ('submitted', 'under_review') AND submitted_at >= datetime('now', '-14 days')${excludeQuarantinedLinkedOpportunitySql("opportunity_id")}
   `)) as { id: string; title: string; portal_confirmation_id: string | null; submitted_at: string }[];
 
   for (const a of submitted) {
@@ -737,7 +742,7 @@ export async function runPipelineNotificationScan(): Promise<number> {
     WHERE status = 'submitted'
       AND submitted_at IS NOT NULL
       AND submitted_at <= datetime('now', '-30 days')
-      AND submitted_at >= datetime('now', '-90 days')
+      AND submitted_at >= datetime('now', '-90 days')${excludeQuarantinedLinkedOpportunitySql("opportunity_id")}
   `)) as { id: string; title: string; submitted_at: string }[];
 
   for (const a of aging) {
