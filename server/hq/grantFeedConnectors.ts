@@ -525,10 +525,59 @@ async function fetchCorporateCsrFeed(): Promise<NormalizedGrantOpportunity[]> {
   return programs;
 }
 
+/** Credentials alone do not authorize a SAM.gov call. */
+export function isSamGovSyncEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const value = String(env.SAM_GOV_ENABLED ?? "").trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes";
+}
+
+/** Selects the existing SAM probe only when the enable flag and credentials are both present. */
+export function samGovStatusProbe(
+  env: NodeJS.ProcessEnv = process.env,
+): typeof probeSamGovEntityLive | null {
+  if (!isSamGovSyncEnabled(env)) return null;
+  const apiKey = String(env.SAM_GOV_API_KEY ?? "").trim();
+  const uei = String(env.SAM_GOV_UEI ?? env.IFCDC_SAM_UEI ?? "").trim();
+  if (!apiKey || !uei) return null;
+  return probeSamGovEntityLive;
+}
+
+/** Shared provider list for unscoped sync and for callers that still name sam_gov. */
+export function resolveGrantFeedProviders(
+  requested?: GrantFeedProvider[],
+  env: NodeJS.ProcessEnv = process.env,
+): GrantFeedProvider[] {
+  const providers = requested ? [...requested] : defaultGrantFeedProviders(env);
+  if (samGovStatusProbe(env)) return providers;
+  return providers.filter((provider) => provider !== "sam_gov");
+}
+
+/** Default feed list. Grants.gov stays included with no SAM flag. */
+export function defaultGrantFeedProviders(env: NodeJS.ProcessEnv = process.env): GrantFeedProvider[] {
+  const providers: GrantFeedProvider[] = ["grants_gov", "foundation_directory"];
+  const apiKey = String(env.SAM_GOV_API_KEY ?? "").trim();
+  const uei = String(env.SAM_GOV_UEI ?? env.IFCDC_SAM_UEI ?? "").trim();
+  if (isSamGovSyncEnabled(env) && apiKey && uei) providers.push("sam_gov");
+  if (allowStaticCsrFeedSync()) providers.push("corporate_csr");
+  return providers;
+}
+
 /** SAM.gov entity verification status (org readiness, not opportunities) */
-async function syncSamGovStatus(): Promise<FeedSyncResult> {
-  const uei = (process.env.SAM_GOV_UEI ?? process.env.IFCDC_SAM_UEI ?? "").trim();
+export async function syncSamGovStatus(): Promise<FeedSyncResult> {
   const syncedAt = new Date().toISOString();
+  if (!samGovStatusProbe()) {
+    return {
+      provider: "sam_gov",
+      status: "skipped",
+      imported: 0,
+      updated: 0,
+      error: isSamGovSyncEnabled()
+        ? "SAM.gov credentials are not configured"
+        : "SAM_GOV_ENABLED is not set",
+      syncedAt,
+    };
+  }
+  const uei = (process.env.SAM_GOV_UEI ?? process.env.IFCDC_SAM_UEI ?? "").trim();
   if (!uei) {
     const result = { status: "skipped" as const, imported: 0, updated: 0, error: "SAM_GOV_UEI not configured" };
     await recordFeedSync("sam_gov", result);
@@ -746,14 +795,7 @@ async function syncProvider(
 
 export async function syncGrantFeeds(opts?: { providers?: GrantFeedProvider[] }): Promise<FeedSyncResult[]> {
   await ensureGrantFeedSyncTables();
-  const defaultProviders: GrantFeedProvider[] = ["grants_gov", "foundation_directory"];
-  if (process.env.SAM_GOV_API_KEY && (process.env.SAM_GOV_UEI || process.env.IFCDC_SAM_UEI)) {
-    defaultProviders.push("sam_gov");
-  }
-  if (allowStaticCsrFeedSync()) {
-    defaultProviders.push("corporate_csr");
-  }
-  const providers = opts?.providers ?? defaultProviders;
+  const providers = resolveGrantFeedProviders(opts?.providers);
   const results: FeedSyncResult[] = [];
 
   if (providers.includes("grants_gov")) {

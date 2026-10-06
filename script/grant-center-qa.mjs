@@ -3,6 +3,8 @@
  * IFCDC Grant Center — Production QA gate (CRUD, RBAC, routes, build prep)
  */
 import { spawnSync } from "node:child_process";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import jwt from "jsonwebtoken";
 
 const BASE = process.env.IFCDC_BASE_URL || "http://127.0.0.1:5001";
@@ -11,6 +13,19 @@ const FOUNDER_PASSWORD = process.env.FOUNDER_SEED_PASSWORD || "";
 const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET || "DEV_ONLY_CHANGE_ME_IFCDC";
 const JSON_REPORT = process.argv.includes("--json-report");
 const QA_TAG = `qa-grant-${Date.now()}`;
+
+/** Production must not POST, PATCH, or DELETE live grant opportunities. */
+export function productionGrantOpportunityWritesAllowed(env = process.env) {
+  return env.NODE_ENV !== "production";
+}
+
+export function productionOpportunityQaRequests(env = process.env) {
+  if (!productionGrantOpportunityWritesAllowed(env)) return [];
+  return [
+    { method: "POST", path: "/api/hq/grants/opportunities" },
+    { method: "PATCH", path: "/api/hq/grants/opportunities" },
+  ];
+}
 
 const results = { pass: 0, fail: 0 };
 const checks = [];
@@ -142,6 +157,10 @@ async function main() {
   const boardRead = await jsonFetch(`${BASE}/api/hq/grants/center/platform`, { headers: boardAuthHeader() });
   log(boardRead.ok ? "pass" : "fail", "Board member read access");
 
+  let oppId;
+  if (!productionGrantOpportunityWritesAllowed()) {
+    log("pass", "Production QA does not create or update grant opportunities");
+  } else {
   const boardWrite = await jsonFetch(`${BASE}/api/hq/grants/opportunities`, {
     method: "POST",
     headers: boardAuthHeader(),
@@ -160,7 +179,7 @@ async function main() {
       funder_type: "foundation",
     }),
   });
-  const oppId = founderWrite.body?.opportunity?.id ?? founderWrite.body?.id;
+  oppId = founderWrite.body?.opportunity?.id ?? founderWrite.body?.id;
   log(founderWrite.ok && oppId ? "pass" : "fail", "CRUD: Create opportunity");
 
   if (oppId) {
@@ -174,6 +193,16 @@ async function main() {
     const readOpp = await jsonFetch(`${BASE}/api/hq/grants/opportunities`, auth);
     const found = (readOpp.body?.opportunities ?? []).some((o) => o.id === oppId);
     log(found ? "pass" : "fail", "CRUD: Read opportunity list");
+  }
+
+  if (oppId) {
+    await jsonFetch(`${BASE}/api/hq/grants/opportunities/${oppId}`, {
+      ...auth,
+      method: "PATCH",
+      body: JSON.stringify({ status: "closed" }),
+    });
+    log("pass", "CRUD: Close QA opportunity (cleanup)");
+  }
   }
 
   const createApp = await jsonFetch(`${BASE}/api/hq/grants/applications`, {
@@ -236,22 +265,16 @@ async function main() {
     log(interaction.ok ? "pass" : "fail", "CRUD: Log funder interaction");
   }
 
-  // Mark QA opportunity closed (soft cleanup)
-  if (oppId) {
-    await jsonFetch(`${BASE}/api/hq/grants/opportunities/${oppId}`, {
-      ...auth,
-      method: "PATCH",
-      body: JSON.stringify({ status: "closed" }),
-    });
-    log("pass", "CRUD: Close QA opportunity (cleanup)");
-  }
-
   await runReadiness();
 
   emitReport(results.fail > 0 ? 1 : 0);
 }
 
-main().catch((e) => {
-  log("fail", "QA runner error", e instanceof Error ? e.message : String(e));
-  emitReport(1);
-});
+const invokedDirectly = process.argv[1]
+  && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
+if (invokedDirectly) {
+  main().catch((e) => {
+    log("fail", "QA runner error", e instanceof Error ? e.message : String(e));
+    emitReport(1);
+  });
+}

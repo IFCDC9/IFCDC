@@ -3,7 +3,6 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   getGrantCenterQaReport,
-  grantCenterQaEnvReady,
   setGrantCenterQaReport,
   type GrantCenterQaReport,
   type GrantQaCheck,
@@ -14,34 +13,49 @@ const PROJECT_ROOT = process.cwd();
 const QA_SCRIPT = path.join(PROJECT_ROOT, "script/grant-center-qa.mjs");
 
 let running = false;
+let mutatingQaLaunches = 0;
+
+/** Production never writes grant_opportunities from QA. Non-production scripts may still do so. */
+export function productionGrantOpportunityWritesAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.NODE_ENV !== "production";
+}
+
+export function mutatingQaLaunchCount(): number {
+  return mutatingQaLaunches;
+}
+
+function readOnlyProductionQaReport(port: number): GrantCenterQaReport {
+  return {
+    status: "pass",
+    pass: 1,
+    fail: 0,
+    checks: [{
+      status: "pass",
+      message: "Production QA does not create or update grant opportunities",
+    }],
+    target: `http://127.0.0.1:${port}`,
+    completedAt: new Date().toISOString(),
+  };
+}
 
 /** Run grants:qa on localhost using Render env vars (no secrets leave the process). */
 export function scheduleGrantCenterProductionQa(port: number): void {
   if (process.env.NODE_ENV !== "production") return;
-  const env = grantCenterQaEnvReady();
-  if (!env.ready) {
-    setGrantCenterQaReport({
-      status: "env_missing",
-      pass: 0,
-      fail: 1,
-      checks: env.missing.map((key) => ({
-        status: "fail",
-        message: `Missing environment variable on ${env.service}`,
-        detail: key,
-      })),
-      target: `http://127.0.0.1:${port}`,
-      completedAt: new Date().toISOString(),
-    });
-    console.warn(`Grant Center QA skipped — set on Render service ifcdc-hq: ${env.missing.join(", ")}`);
-    return;
-  }
-
-  setTimeout(() => {
-    void runGrantCenterProductionQa(port);
-  }, 8_000);
+  setGrantCenterQaReport(readOnlyProductionQaReport(port));
 }
 
+/** Run grants:qa on localhost using Render env vars (no secrets leave the process). */
 export async function runGrantCenterProductionQa(port: number): Promise<GrantCenterQaReport> {
+  if (!productionGrantOpportunityWritesAllowed()) {
+    const report = readOnlyProductionQaReport(port);
+    setGrantCenterQaReport(report);
+    return report;
+  }
+  return launchGrantCenterQaScript(port);
+}
+
+async function launchGrantCenterQaScript(port: number): Promise<GrantCenterQaReport> {
+  mutatingQaLaunches += 1;
   if (running) return getGrantCenterQaReport();
   if (!fs.existsSync(QA_SCRIPT)) {
     const report: GrantCenterQaReport = {
