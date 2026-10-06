@@ -37,8 +37,18 @@ export interface FounderOpportunityInput {
   eligibility?: string | null;
   status?: string | null;
   deadline?: string | null;
+  closeDate?: string | null;
+  postedDate?: string | null;
+  updatedAt?: string | null;
   amountMin?: number | null;
   amountMax?: number | null;
+  awardFloor?: number | null;
+  awardCeiling?: number | null;
+  estimatedFunding?: number | null;
+  maxIndividualAward?: number | null;
+  totalProgramFunding?: number | null;
+  /** Explicit stored flag only. A title that says "renew" is not evidence. */
+  renewalFlag?: boolean | null;
   programAreas?: string[] | null;
   divisionSlugs?: string[] | null;
   requirements?: string | null;
@@ -65,6 +75,7 @@ export interface FounderAwardInput {
   applicationId?: string | null;
   amount?: number | null;
   status?: string | null;
+  renewalOfAwardId?: string | null;
 }
 
 export interface FounderComplianceInput {
@@ -95,6 +106,31 @@ export interface FounderFundingSource {
   programs?: FounderProgramProfile[];
 }
 
+export type FounderFreshnessLabel =
+  | "NEW"
+  | "UPDATED"
+  | "ACTIVE"
+  | "CLOSING SOON"
+  | "EXPIRED"
+  | "RENEWABLE";
+
+export interface FounderAwardRange {
+  label: "Award Range";
+  min: number | null;
+  max: number | null;
+}
+
+export interface FounderIndividualAward {
+  label: "Maximum Individual Award";
+  amount: number;
+}
+
+export interface FounderProgramFunding {
+  label: "Estimated/Total Program Funding";
+  estimated: number | null;
+  totalProgram: number | null;
+}
+
 export interface FounderFundingOpportunityView {
   id: string;
   title: string;
@@ -104,7 +140,12 @@ export interface FounderFundingOpportunityView {
   programMatch: FounderField<{ slug: string; label: string; matchedTerms: string[] }>;
   barbersWorkforceRelevant: FounderField<boolean>;
   fundingAmount: FounderField<{ min: number | null; max: number | null }>;
+  awardRange: FounderField<FounderAwardRange>;
+  maximumIndividualAward: FounderField<FounderIndividualAward>;
+  estimatedProgramFunding: FounderField<FounderProgramFunding>;
   deadline: FounderField<string>;
+  deadlineSource: "deadline" | "close_date" | null;
+  freshness: FounderField<FounderFreshnessLabel[]>;
   renewable: FounderField<true>;
   proposalStatus: FounderField<string>;
   budgetStatus: FounderField<{ state: "recorded"; totalRequested: number | null }>;
@@ -187,6 +228,82 @@ function deadlineValue(raw: string | null | undefined): string | null {
   return Number.isFinite(parsed) ? value : null;
 }
 
+function positiveAmount(value: unknown): number | null {
+  const amount = finiteNumber(value);
+  return amount != null && amount > 0 ? amount : null;
+}
+
+/**
+ * Freshness uses stored dates only. The window is 14 days, the same near-deadline
+ * window grantIntelligenceEngine already uses (daysUntilDeadline <= 14).
+ * Calendar days are America/New_York.
+ * NEW: posted_date is within the last 14 days, including today.
+ * UPDATED: updated_at is within the last 14 days and the row is not NEW.
+ * CLOSING SOON: the source deadline is today through 14 days ahead.
+ * EXPIRED: the source deadline is before today in America/New_York.
+ * ACTIVE: none of NEW, UPDATED, CLOSING SOON, or EXPIRED apply, and a stored
+ * deadline is more than 14 days ahead or the stored status is open or posted.
+ * RENEWABLE: a grant_renewals row, an award renewal_of_award_id, or renewalFlag.
+ * The word "renew" in a title is not evidence.
+ */
+const FRESHNESS_WINDOW_DAYS = 14;
+
+function nyCalendarDay(date: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function calendarDay(raw: string | null | undefined): string | null {
+  const value = text(raw);
+  if (!value) return null;
+  const ymd = value.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (ymd) return ymd[1];
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return null;
+  return nyCalendarDay(new Date(parsed));
+}
+
+function dayNumber(day: string): number {
+  const [year, month, date] = day.split("-").map(Number);
+  return Math.floor(Date.UTC(year, month - 1, date) / 86400000);
+}
+
+function freshnessLabels(input: {
+  now: Date;
+  postedDate?: string | null;
+  updatedAt?: string | null;
+  deadline?: string | null;
+  status?: string | null;
+  renewable: boolean;
+}): FounderFreshnessLabel[] {
+  const today = dayNumber(nyCalendarDay(input.now));
+  const posted = calendarDay(input.postedDate);
+  const updated = calendarDay(input.updatedAt);
+  const deadline = calendarDay(input.deadline);
+  const age = (day: string | null) => (day == null ? null : today - dayNumber(day));
+  const postedAge = age(posted);
+  const updatedAge = age(updated);
+  const daysUntil = deadline == null ? null : dayNumber(deadline) - today;
+  const labels: FounderFreshnessLabel[] = [];
+  const isNew = postedAge != null && postedAge >= 0 && postedAge <= FRESHNESS_WINDOW_DAYS;
+  const isUpdated = !isNew && updatedAge != null && updatedAge >= 0 && updatedAge <= FRESHNESS_WINDOW_DAYS;
+  const expired = daysUntil != null && daysUntil < 0;
+  const closingSoon = daysUntil != null && daysUntil >= 0 && daysUntil <= FRESHNESS_WINDOW_DAYS;
+  if (expired) labels.push("EXPIRED");
+  if (closingSoon) labels.push("CLOSING SOON");
+  if (isNew) labels.push("NEW");
+  if (isUpdated) labels.push("UPDATED");
+  const openStatus = /^(open|posted)$/i.test(text(input.status));
+  const active = !expired && !closingSoon && !isNew && !isUpdated && ((daysUntil != null && daysUntil > FRESHNESS_WINDOW_DAYS) || openStatus);
+  if (active) labels.push("ACTIVE");
+  if (input.renewable) labels.push("RENEWABLE");
+  return labels;
+}
+
 function latestApplication(
   opportunityId: string,
   applications: FounderApplicationInput[],
@@ -222,12 +339,20 @@ export function buildFounderFundingView(source: FounderFundingSource): FounderFu
       : null;
     const award = awards.find((row) => text(row.opportunityId) === id || (application && text(row.applicationId) === application.id)) ?? null;
     const complianceRow = award ? compliance.find((row) => row.awardId === award.id) ?? null : null;
-    const renewable = renewals.some((row) =>
-      text(row.newOpportunityId) === id || (award && text(row.originalAwardId) === award.id),
-    );
-    const amountMin = finiteNumber(opportunity.amountMin);
-    const amountMax = finiteNumber(opportunity.amountMax);
-    const deadline = deadlineValue(opportunity.deadline);
+    const renewable = opportunity.renewalFlag === true
+      || Boolean(text(award?.renewalOfAwardId))
+      || renewals.some((row) => text(row.newOpportunityId) === id || (award && text(row.originalAwardId) === award.id));
+    const normalizedMin = positiveAmount(opportunity.amountMin);
+    const normalizedMax = positiveAmount(opportunity.amountMax);
+    const rangeMin = normalizedMin ?? positiveAmount(opportunity.awardFloor);
+    const rangeMax = normalizedMax ?? positiveAmount(opportunity.awardCeiling);
+    const individualAward = positiveAmount(opportunity.maxIndividualAward);
+    const estimatedFunding = positiveAmount(opportunity.estimatedFunding);
+    const totalProgramFunding = positiveAmount(opportunity.totalProgramFunding);
+    const storedDeadline = deadlineValue(opportunity.deadline);
+    const closeDate = deadlineValue(opportunity.closeDate);
+    const deadline = storedDeadline ?? closeDate;
+    const deadlineSource = storedDeadline ? "deadline" as const : closeDate ? "close_date" as const : null;
     const eligibility = text(opportunity.eligibility);
     const approval = text(application?.founderApprovalStatus);
     const proposal = text(application?.status);
@@ -243,14 +368,16 @@ export function buildFounderFundingView(source: FounderFundingSource): FounderFu
     if (best) attentionBecause.push("Program match on the existing Barbers and workforce profile");
     if (workforceHit) attentionBecause.push("Barbers or workforce-development terms matched");
     if (deadline) attentionBecause.push("Deadline is stored");
-    if (amountMin != null || amountMax != null) attentionBecause.push("Funding amount is stored");
+    if (rangeMin != null || rangeMax != null || individualAward != null || estimatedFunding != null || totalProgramFunding != null) {
+      attentionBecause.push("Funding amount is stored");
+    }
     if (!application || !DECIDED_APPROVAL.has(approval)) attentionBecause.push("Founder approval is not a recorded decision");
 
     let priorityScore = 0;
     if (workforceHit) priorityScore += 40;
     else if (best) priorityScore += 15;
     if (!application || !DECIDED_APPROVAL.has(approval)) priorityScore += 25;
-    const amount = amountMax ?? amountMin;
+    const amount = rangeMax ?? rangeMin ?? individualAward ?? estimatedFunding ?? totalProgramFunding;
     if (amount != null && amount > 0) priorityScore += Math.min(30, Math.round(Math.log10(amount + 1) * 6));
     if (deadline) {
       const days = (Date.parse(deadline) - now.getTime()) / 86400000;
@@ -267,10 +394,35 @@ export function buildFounderFundingView(source: FounderFundingSource): FounderFu
         ? available({ slug: best.program.slug, label: best.program.label, matchedTerms: best.matchedTerms })
         : unavailable<{ slug: string; label: string; matchedTerms: string[] }>(),
       barbersWorkforceRelevant: haystack ? available(workforceHit) : unavailable<boolean>(),
-      fundingAmount: amountMin == null && amountMax == null
+      fundingAmount: rangeMin == null && rangeMax == null
         ? unavailable<{ min: number | null; max: number | null }>()
-        : available({ min: amountMin, max: amountMax }),
+        : available({ min: rangeMin, max: rangeMax }),
+      awardRange: rangeMin == null && rangeMax == null
+        ? unavailable<FounderAwardRange>()
+        : available({ label: "Award Range" as const, min: rangeMin, max: rangeMax }),
+      maximumIndividualAward: individualAward == null
+        ? unavailable<FounderIndividualAward>()
+        : available({ label: "Maximum Individual Award" as const, amount: individualAward }),
+      estimatedProgramFunding: estimatedFunding == null && totalProgramFunding == null
+        ? unavailable<FounderProgramFunding>()
+        : available({
+          label: "Estimated/Total Program Funding" as const,
+          estimated: estimatedFunding,
+          totalProgram: totalProgramFunding,
+        }),
       deadline: deadline ? available(deadline) : unavailable<string>(),
+      deadlineSource,
+      freshness: (() => {
+        const labels = freshnessLabels({
+          now,
+          postedDate: opportunity.postedDate,
+          updatedAt: opportunity.updatedAt,
+          deadline,
+          status: opportunity.status,
+          renewable,
+        });
+        return labels.length ? available(labels) : unavailable<FounderFreshnessLabel[]>();
+      })(),
       renewable: renewable ? available(true as const) : unavailable<true>(),
       proposalStatus: proposal ? available(proposal) : unavailable<string>(),
       budgetStatus: budgetRecorded
@@ -321,10 +473,13 @@ function jsonList(value: unknown): string[] {
 export async function loadFounderFundingView(now = new Date()): Promise<FounderFundingView> {
   const db = await getDb();
   const [opportunityRows, applicationRows, budgetRows, awardRows, complianceRows, renewalRows] = await Promise.all([
-    db.all("SELECT id, title, funder, description, amount_min, amount_max, status, deadline, requirements, division_slugs, program_areas, eligibility FROM grant_opportunities"),
+    db.all(`SELECT id, title, funder, description, amount_min, amount_max,
+      award_floor, award_ceiling, estimated_funding, max_individual_award, total_program_funding,
+      status, deadline, close_date, posted_date, updated_at, requirements, division_slugs, program_areas, eligibility
+      FROM grant_opportunities`),
     db.all("SELECT id, opportunity_id, status, founder_approval_status, ready_to_submit, updated_at FROM grant_applications"),
     db.all("SELECT application_id, total_requested, line_items FROM grant_proposal_budgets"),
-    db.all("SELECT id, opportunity_id, application_id, amount, status FROM grant_awards"),
+    db.all("SELECT id, opportunity_id, application_id, amount, status, renewal_of_award_id FROM grant_awards"),
     db.all("SELECT award_id, status FROM grant_compliance"),
     db.all("SELECT original_award_id, new_opportunity_id, status FROM grant_renewals"),
   ]);
@@ -340,8 +495,16 @@ export async function loadFounderFundingView(now = new Date()): Promise<FounderF
       eligibility: text(row.eligibility),
       status: text(row.status),
       deadline: text(row.deadline),
+      closeDate: text(row.close_date),
+      postedDate: text(row.posted_date),
+      updatedAt: text(row.updated_at),
       amountMin: finiteNumber(row.amount_min),
       amountMax: finiteNumber(row.amount_max),
+      awardFloor: finiteNumber(row.award_floor),
+      awardCeiling: finiteNumber(row.award_ceiling),
+      estimatedFunding: finiteNumber(row.estimated_funding),
+      maxIndividualAward: finiteNumber(row.max_individual_award),
+      totalProgramFunding: finiteNumber(row.total_program_funding),
       programAreas: jsonList(row.program_areas),
       divisionSlugs: jsonList(row.division_slugs),
       requirements: text(row.requirements),
@@ -368,6 +531,7 @@ export async function loadFounderFundingView(now = new Date()): Promise<FounderF
       applicationId: text(row.application_id),
       amount: finiteNumber(row.amount),
       status: text(row.status),
+      renewalOfAwardId: text(row.renewal_of_award_id),
     })),
     compliance: asRows(complianceRows).map((row) => ({
       awardId: text(row.award_id),

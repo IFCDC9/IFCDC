@@ -4,7 +4,13 @@
  * Official docs: https://grants.gov/api/api-guide
  * search2 and fetchOpportunity do NOT require authentication or an API key.
  */
-import { getGrantFeedIntegrationStatus, syncGrantFeeds, countExternalFeedOpportunities } from "./grantFeedConnectors";
+import {
+  countExternalFeedOpportunities,
+  getGrantFeedIntegrationStatus,
+  reliableExternalId,
+  stableOpportunityFingerprint,
+  syncGrantFeeds,
+} from "./grantFeedConnectors";
 
 const SEARCH2_URL = "https://api.grants.gov/v1/api/search2";
 const PROBE_TIMEOUT_MS = 8_000;
@@ -209,37 +215,58 @@ export async function testGrantsGovIntegrationLive() {
 
 /** Parse Search2 hits for grant feed sync (shared with grantFeedConnectors). */
 export function normalizeGrantsGovHits(hits: Record<string, unknown>[]) {
-  return hits.map((hit) => {
-    const id = String(hit.id ?? hit.opportunityId ?? hit.number ?? hit.oppId ?? "");
-    return {
-      external_id: id || `gg-${Date.now()}`,
+  const opportunities = [];
+  for (const hit of hits) {
+    const reference = reliableExternalId(String(
+      hit.id ?? hit.opportunityId ?? hit.number ?? hit.oppId ?? hit.opportunityNumber ?? "",
+    ));
+    const rawTitle = String(hit.title ?? hit.opportunityTitle ?? "").trim();
+    const rawFunder = String(hit.agencyName ?? hit.agency ?? hit.agencyCode ?? "").trim();
+    const rawUrl = String(hit.opportunityUrl ?? hit.url ?? "").trim();
+    const detailUrl = rawUrl || (reference ? `https://www.grants.gov/search-results-detail/${reference}` : "");
+    const fingerprint = stableOpportunityFingerprint({
+      source: "grants_gov",
+      opportunityNumber: reference,
+      title: rawTitle,
+      funder: rawFunder,
+      url: detailUrl,
+    });
+    if (!reference && !fingerprint) continue;
+    const awardFloor = parseGrantAmount(hit.awardFloor);
+    const awardCeiling = parseGrantAmount(hit.awardCeiling);
+    const estimatedFunding = parseGrantAmount(hit.estimatedFunding);
+    const deadline = parseGrantDeadline(hit.closeDate ?? hit.applicationDueDate ?? hit.closeDateFormatted);
+    opportunities.push({
+      external_id: reference ?? "",
+      fingerprint,
       source_type: "grants_gov",
       import_status: "imported",
-      title: String(hit.title ?? hit.opportunityTitle ?? "Federal Grant Opportunity"),
-      funder: String(hit.agencyName ?? hit.agency ?? hit.agencyCode ?? "U.S. Federal Agency"),
+      title: rawTitle || "Federal Grant Opportunity",
+      funder: rawFunder || "U.S. Federal Agency",
       description: String(hit.description ?? hit.synopsis ?? hit.oppDescription ?? "").slice(0, 4000),
-      amount_min: parseGrantAmount(hit.awardFloor ?? hit.estimatedFunding),
-      amount_max: parseGrantAmount(hit.awardCeiling ?? hit.estimatedFunding),
-      deadline: parseGrantDeadline(hit.closeDate ?? hit.applicationDueDate ?? hit.closeDateFormatted),
-      url: String(
-        hit.opportunityUrl ??
-          hit.url ??
-          (id ? `https://www.grants.gov/search-results-detail/${id}` : "https://www.grants.gov")
-      ),
+      amount_min: awardFloor,
+      amount_max: awardCeiling,
+      award_floor: awardFloor,
+      award_ceiling: awardCeiling,
+      estimated_funding: estimatedFunding,
+      deadline,
+      close_date: deadline,
+      url: detailUrl || "https://www.grants.gov",
       funder_type: "federal",
       geography: "US",
       eligibility: String(hit.eligibility ?? hit.eligibilityCategory ?? "See opportunity listing"),
       requirements: String(hit.requirements ?? "Federal grant application requirements apply"),
       is_live: 1,
       is_national: 1,
-    };
-  });
+    });
+  }
+  return opportunities;
 }
 
 function parseGrantAmount(raw: unknown): number | null {
   if (raw == null) return null;
   const n = Number(String(raw).replace(/[^0-9.]/g, ""));
-  return Number.isFinite(n) ? n : null;
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 function parseGrantDeadline(raw: unknown): string | null {

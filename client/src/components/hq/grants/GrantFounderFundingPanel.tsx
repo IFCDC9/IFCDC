@@ -14,7 +14,12 @@ interface FundingRow {
   programMatch: Field<{ slug: string; label: string; matchedTerms: string[] }>;
   barbersWorkforceRelevant: Field<boolean>;
   fundingAmount: Field<{ min: number | null; max: number | null }>;
+  awardRange: Field<{ label: "Award Range"; min: number | null; max: number | null }>;
+  maximumIndividualAward: Field<{ label: "Maximum Individual Award"; amount: number }>;
+  estimatedProgramFunding: Field<{ label: "Estimated/Total Program Funding"; estimated: number | null; totalProgram: number | null }>;
   deadline: Field<string>;
+  deadlineSource: "deadline" | "close_date" | null;
+  freshness: Field<string[]>;
   renewable: Field<true>;
   proposalStatus: Field<string>;
   budgetStatus: Field<{ state: "recorded"; totalRequested: number | null }>;
@@ -39,14 +44,36 @@ function fieldText<T>(field: Field<T> | undefined, format: (value: T) => string)
   return format(field.value);
 }
 
-function amountText(field: FundingRow["fundingAmount"]): string {
-  return fieldText(field, (value) => {
-    const max = value.max;
-    const min = value.min;
-    if (typeof max === "number") return formatCurrency(max);
-    if (typeof min === "number") return formatCurrency(min);
-    return "Unavailable";
-  });
+function money(value: number | null | undefined): string | null {
+  return typeof value === "number" ? formatCurrency(value) : null;
+}
+
+function rangeText(field: FundingRow["awardRange"] | undefined): string {
+  if (!field || field.status !== "available") return "Unavailable";
+  const min = money(field.value.min);
+  const max = money(field.value.max);
+  if (min && max) return `${min}–${max}`;
+  return max || min || "Unavailable";
+}
+
+function individualText(field: FundingRow["maximumIndividualAward"] | undefined): string {
+  if (!field || field.status !== "available") return "Unavailable";
+  return money(field.value.amount) || "Unavailable";
+}
+
+function programText(field: FundingRow["estimatedProgramFunding"] | undefined): string {
+  if (!field || field.status !== "available") return "Unavailable";
+  const estimated = money(field.value.estimated);
+  const total = money(field.value.totalProgram);
+  if (estimated && total) return `${estimated} estimated · ${total} total program`;
+  if (total) return `${total} total program`;
+  return estimated || "Unavailable";
+}
+
+function deadlineText(row: FundingRow): string {
+  if (row.deadline.status !== "available") return "Deadline unavailable";
+  const day = row.deadline.value.slice(0, 10);
+  return row.deadlineSource === "close_date" ? `${day} (source date)` : day;
 }
 
 export const GrantFounderFundingPanel: React.FC = () => {
@@ -77,6 +104,7 @@ export const GrantFounderFundingPanel: React.FC = () => {
                 <th>Barbers / workforce</th>
                 <th>Amount</th>
                 <th>Deadline</th>
+                <th>Freshness</th>
                 <th>Renewable</th>
                 <th>Proposal</th>
                 <th>Budget</th>
@@ -96,8 +124,13 @@ export const GrantFounderFundingPanel: React.FC = () => {
                   </td>
                   <td>{fieldText(row.programMatch, (value) => value.label)}</td>
                   <td>{fieldText(row.barbersWorkforceRelevant, (value) => (value ? "Relevant" : "No workforce match"))}</td>
-                  <td>{amountText(row.fundingAmount)}</td>
-                  <td>{fieldText(row.deadline, (value) => value.slice(0, 10))}</td>
+                  <td>
+                    <div>Award Range: {rangeText(row.awardRange)}</div>
+                    <div>Maximum Individual Award: {individualText(row.maximumIndividualAward)}</div>
+                    <div>Estimated/Total Program Funding: {programText(row.estimatedProgramFunding)}</div>
+                  </td>
+                  <td>{deadlineText(row)}</td>
+                  <td>{fieldText(row.freshness, (value) => value.join(", "))}</td>
                   <td>{fieldText(row.renewable, () => "Recurring record")}</td>
                   <td>{fieldText(row.proposalStatus, (value) => value)}</td>
                   <td>{fieldText(row.budgetStatus, (value) => (value.totalRequested != null ? formatCurrency(value.totalRequested) : "Recorded"))}</td>
@@ -108,7 +141,7 @@ export const GrantFounderFundingPanel: React.FC = () => {
                 </tr>
               ))}
               {rows.length === 0 && (
-                <tr><td colSpan={12} className="hq-muted-text">No opportunities are stored in the local library.</td></tr>
+                <tr><td colSpan={13} className="hq-muted-text">No opportunities are stored in the local library.</td></tr>
               )}
             </tbody>
           </table>

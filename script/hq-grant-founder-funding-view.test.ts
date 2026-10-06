@@ -192,3 +192,138 @@ test("missing stored fields stay unavailable instead of a decided zero or false"
   assert.equal(stored.includes("\"value\":0"), false);
   assert.equal(stored.includes("\"value\":false"), false);
 });
+
+test("amount labels stay separate and a missing deadline stays unavailable", () => {
+  const builder = readFileSync(fileURLToPath(new URL("../server/hq/grantFounderFundingView.ts", import.meta.url)), "utf8");
+  assert.equal(/\bINSERT INTO\b|\bUPDATE\s|\bDELETE FROM\b|setFounderApproval|confirmPortalSubmission|sam\.gov|grants\.gov/i.test(builder), false);
+
+  const view = buildFounderFundingView(source({
+    opportunities: [
+      {
+        id: "range-1",
+        title: "Floor and ceiling only",
+        awardFloor: 25000,
+        awardCeiling: 100000,
+        totalProgramFunding: 5000000,
+      },
+      {
+        id: "individual-1",
+        title: "Individual cap",
+        maxIndividualAward: 15000,
+        totalProgramFunding: 900000,
+      },
+      {
+        id: "program-1",
+        title: "Program estimate",
+        estimatedFunding: 750000,
+        totalProgramFunding: 750000,
+      },
+      {
+        id: "normalized-1",
+        title: "Normalized pair",
+        amountMin: 10000,
+        amountMax: 40000,
+        estimatedFunding: 400000,
+      },
+      { id: "none-1", title: "No amounts and no date" },
+      { id: "close-1", title: "Close date only", closeDate: "2026-12-01" },
+      { id: "stored-1", title: "Stored deadline", deadline: "2026-11-02", closeDate: "2026-12-31" },
+    ],
+  }));
+
+  const range = view.opportunities.find((row) => row.id === "range-1");
+  const individual = view.opportunities.find((row) => row.id === "individual-1");
+  const program = view.opportunities.find((row) => row.id === "program-1");
+  const normalized = view.opportunities.find((row) => row.id === "normalized-1");
+  const none = view.opportunities.find((row) => row.id === "none-1");
+  const closeOnly = view.opportunities.find((row) => row.id === "close-1");
+  const stored = view.opportunities.find((row) => row.id === "stored-1");
+  assert.ok(range && individual && program && normalized && none && closeOnly && stored);
+
+  assert.equal(range.awardRange.status, "available");
+  assert.deepEqual(range.awardRange.status === "available" && range.awardRange.value, {
+    label: "Award Range",
+    min: 25000,
+    max: 100000,
+  });
+  assert.equal(range.maximumIndividualAward.status, "unavailable");
+  assert.equal(range.estimatedProgramFunding.status, "available");
+  assert.equal(range.estimatedProgramFunding.status === "available" && range.estimatedProgramFunding.value.totalProgram, 5000000);
+  assert.equal(range.maximumIndividualAward.value, null);
+
+  assert.equal(individual.maximumIndividualAward.status, "available");
+  assert.equal(individual.maximumIndividualAward.status === "available" && individual.maximumIndividualAward.value.amount, 15000);
+  assert.equal(individual.maximumIndividualAward.status === "available" && individual.maximumIndividualAward.value.label, "Maximum Individual Award");
+  assert.equal(individual.awardRange.status, "unavailable");
+  assert.notEqual(individual.maximumIndividualAward.status === "available" && individual.maximumIndividualAward.value.amount, 900000);
+
+  assert.equal(program.awardRange.status, "unavailable");
+  assert.equal(program.maximumIndividualAward.status, "unavailable");
+  assert.deepEqual(program.estimatedProgramFunding.status === "available" && program.estimatedProgramFunding.value, {
+    label: "Estimated/Total Program Funding",
+    estimated: 750000,
+    totalProgram: 750000,
+  });
+
+  assert.deepEqual(normalized.awardRange.status === "available" && normalized.awardRange.value, {
+    label: "Award Range",
+    min: 10000,
+    max: 40000,
+  });
+  assert.equal(normalized.estimatedProgramFunding.status, "available");
+  assert.equal(normalized.maximumIndividualAward.status, "unavailable");
+
+  assert.equal(none.fundingAmount.status, "unavailable");
+  assert.equal(none.awardRange.status, "unavailable");
+  assert.equal(none.maximumIndividualAward.status, "unavailable");
+  assert.equal(none.estimatedProgramFunding.status, "unavailable");
+  assert.equal(none.deadline.status, "unavailable");
+  assert.equal(none.deadlineSource, null);
+
+  assert.equal(closeOnly.deadline.status, "available");
+  assert.equal(closeOnly.deadline.status === "available" && closeOnly.deadline.value, "2026-12-01");
+  assert.equal(closeOnly.deadlineSource, "close_date");
+  assert.equal(stored.deadline.status === "available" && stored.deadline.value, "2026-11-02");
+  assert.equal(stored.deadlineSource, "deadline");
+});
+
+test("freshness labels follow stored dates and renewable evidence", () => {
+  const view = buildFounderFundingView(source({
+    opportunities: [
+      { id: "new-1", title: "Posted this week", postedDate: "2026-09-25", deadline: "2026-12-20" },
+      { id: "updated-1", title: "Changed this week", postedDate: "2026-01-01", updatedAt: "2026-10-01", deadline: "2026-12-20" },
+      { id: "active-1", title: "Open later", status: "open", deadline: "2026-12-20" },
+      { id: "soon-1", title: "Due next week", deadline: "2026-10-15" },
+      { id: "expired-1", title: "Already closed", deadline: "2026-10-01" },
+      { id: "word-1", title: "Renew the community workforce grant", deadline: "2026-12-20" },
+      { id: "row-1", title: "Linked renewal record", deadline: "2026-12-20" },
+      { id: "flag-1", title: "Stored renewal flag", deadline: "2026-12-20", renewalFlag: true },
+      { id: "edge-new", title: "Posted on the window edge", postedDate: "2026-09-21", deadline: "2026-12-20" },
+      { id: "edge-old", title: "Posted outside the window", postedDate: "2026-09-20", deadline: "2026-12-20" },
+      { id: "edge-soon", title: "Closes on day 14", deadline: "2026-10-19" },
+      { id: "edge-active", title: "Closes on day 15", deadline: "2026-10-20" },
+    ],
+    renewals: [{ newOpportunityId: "row-1", status: "planned" }],
+  }));
+  const labels = (id: string) => {
+    const row = view.opportunities.find((item) => item.id === id);
+    assert.ok(row);
+    assert.equal(row.freshness.status, "available");
+    return row.freshness.status === "available" ? row.freshness.value : [];
+  };
+  assert.deepEqual(labels("new-1"), ["NEW"]);
+  assert.deepEqual(labels("updated-1"), ["UPDATED"]);
+  assert.deepEqual(labels("active-1"), ["ACTIVE"]);
+  assert.deepEqual(labels("soon-1"), ["CLOSING SOON"]);
+  assert.deepEqual(labels("expired-1"), ["EXPIRED"]);
+  assert.deepEqual(labels("word-1"), ["ACTIVE"]);
+  assert.equal(view.opportunities.find((row) => row.id === "word-1")?.renewable.status, "unavailable");
+  assert.ok(labels("row-1").includes("RENEWABLE"));
+  assert.equal(view.opportunities.find((row) => row.id === "row-1")?.renewable.status, "available");
+  assert.ok(labels("flag-1").includes("RENEWABLE"));
+  assert.equal(view.opportunities.find((row) => row.id === "flag-1")?.renewable.status, "available");
+  assert.ok(labels("edge-new").includes("NEW"));
+  assert.equal(labels("edge-old").includes("NEW"), false);
+  assert.deepEqual(labels("edge-soon"), ["CLOSING SOON"]);
+  assert.deepEqual(labels("edge-active"), ["ACTIVE"]);
+});

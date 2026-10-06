@@ -2,6 +2,7 @@
  * Grant Center — live external feed connectors.
  * Syncs federal, foundation, and corporate opportunities into grant_opportunities.
  */
+import { createHash } from "node:crypto";
 import { getDb } from "../db";
 import { grantId } from "./grantsSchema";
 import { allowStaticCsrFeedSync, allowGrantsGovRssFallback } from "./grantProductionPolicy";
@@ -10,6 +11,7 @@ export type GrantFeedProvider = "grants_gov" | "sam_gov" | "foundation_directory
 
 export interface NormalizedGrantOpportunity {
   external_id: string;
+  fingerprint?: string | null;
   source_type: string;
   import_status?: string;
   title: string;
@@ -17,7 +19,11 @@ export interface NormalizedGrantOpportunity {
   description: string;
   amount_min: number | null;
   amount_max: number | null;
+  award_floor?: number | null;
+  award_ceiling?: number | null;
+  estimated_funding?: number | null;
   deadline: string | null;
+  close_date?: string | null;
   url: string;
   funder_type: string;
   geography: string;
@@ -69,26 +75,197 @@ async function recordFeedSync(provider: GrantFeedProvider, result: Omit<FeedSync
   );
 }
 
+/** A Grants.gov id of gg-<digits> is a previous timestamp placeholder, not a source id. */
+export function reliableExternalId(raw: string | null | undefined): string | null {
+  const value = String(raw ?? "").trim();
+  if (!value || /^gg-\d+$/.test(value)) return null;
+  return value;
+}
+
+function identityText(raw: string | null | undefined): string {
+  return String(raw ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function canonicalOpportunityUrl(raw: string | null | undefined): string {
+  const value = String(raw ?? "").trim();
+  if (!value) return "";
+  try {
+    const url = new URL(value);
+    if (/^(www\.)?grants\.gov$/i.test(url.hostname) && (url.pathname === "/" || url.pathname === "")) return "";
+    url.hash = "";
+    for (const key of [...url.searchParams.keys()]) {
+      if (key.toLowerCase().startsWith("utm_")) url.searchParams.delete(key);
+    }
+    const path = url.pathname.replace(/\/+$/, "") || "/";
+    const search = url.searchParams.toString();
+    return `${url.protocol}//${url.host.toLowerCase()}${path}${search ? `?${search}` : ""}`;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Stable fingerprint from source, opportunity number, title, funder, and canonical URL.
+ * No timestamp. Title similarity alone is not an identity.
+ * Without an opportunity number, title, funder, and a specific URL are all required.
+ */
+export function stableOpportunityFingerprint(input: {
+  source: string;
+  opportunityNumber?: string | null;
+  title?: string | null;
+  funder?: string | null;
+  url?: string | null;
+}): string | null {
+  const source = identityText(input.source);
+  const number = identityText(reliableExternalId(input.opportunityNumber));
+  const title = identityText(input.title);
+  const funder = identityText(input.funder);
+  const url = canonicalOpportunityUrl(input.url);
+  if (!source) return null;
+  if (!number && !(title && funder && url)) return null;
+  const base = [source, number, title, funder, url].join("|");
+  return createHash("sha256").update(base).digest("hex").slice(0, 40);
+}
+
+export interface FeedIdentity {
+  externalId: string | null;
+  fingerprint: string | null;
+  action: "ready" | "skip";
+}
+
+export function identifyFeedOpportunity(opp: {
+  source_type: string;
+  external_id?: string | null;
+  title?: string | null;
+  funder?: string | null;
+  url?: string | null;
+  fingerprint?: string | null;
+}): FeedIdentity {
+  const externalId = reliableExternalId(opp.external_id);
+  const provided = String(opp.fingerprint ?? "").trim();
+  const fingerprint = provided || stableOpportunityFingerprint({
+    source: opp.source_type,
+    opportunityNumber: externalId,
+    title: opp.title,
+    funder: opp.funder,
+    url: opp.url,
+  });
+  if (!externalId && !fingerprint) return { externalId: null, fingerprint: null, action: "skip" };
+  return { externalId, fingerprint, action: "ready" };
+}
+
+export interface ExistingFeedIdentity {
+  source_type: string;
+  external_id?: string | null;
+  fingerprint?: string | null;
+}
+
+export interface FeedUpsertPlan {
+  insert: number;
+  update: number;
+  skipped: number;
+  duplicatesPrevented: number;
+}
+
+/** Dry-run of the existing upsert identity rules. Does not write a database. */
+export function planFeedUpserts(
+  existing: ExistingFeedIdentity[],
+  incoming: Array<{
+    source_type: string;
+    external_id?: string | null;
+    title?: string | null;
+    funder?: string | null;
+    url?: string | null;
+    fingerprint?: string | null;
+  }>,
+): FeedUpsertPlan {
+  const libraryExternalId = new Set<string>();
+  const libraryFingerprint = new Set<string>();
+  for (const row of existing) {
+    const externalId = reliableExternalId(row.external_id);
+    if (externalId) libraryExternalId.add(`${row.source_type}|${externalId}`);
+    const fingerprint = String(row.fingerprint ?? "").trim();
+    if (fingerprint) libraryFingerprint.add(`${row.source_type}|${fingerprint}`);
+  }
+  const seenExternalId = new Set<string>();
+  const seenFingerprint = new Set<string>();
+  const plan: FeedUpsertPlan = { insert: 0, update: 0, skipped: 0, duplicatesPrevented: 0 };
+  for (const opp of incoming) {
+    const identity = identifyFeedOpportunity(opp);
+    if (identity.action === "skip") {
+      plan.skipped++;
+      continue;
+    }
+    const externalKey = identity.externalId ? `${opp.source_type}|${identity.externalId}` : "";
+    const fingerprintKey = identity.fingerprint ? `${opp.source_type}|${identity.fingerprint}` : "";
+    const libraryMatch = Boolean(
+      (externalKey && libraryExternalId.has(externalKey))
+      || (!identity.externalId && fingerprintKey && libraryFingerprint.has(fingerprintKey)),
+    );
+    if (libraryMatch) {
+      plan.update++;
+      plan.duplicatesPrevented++;
+      continue;
+    }
+    const batchMatch = Boolean(
+      (externalKey && seenExternalId.has(externalKey)) || (fingerprintKey && seenFingerprint.has(fingerprintKey)),
+    );
+    if (batchMatch) {
+      plan.duplicatesPrevented++;
+      continue;
+    }
+    plan.insert++;
+    if (externalKey) seenExternalId.add(externalKey);
+    if (fingerprintKey) seenFingerprint.add(fingerprintKey);
+  }
+  return plan;
+}
+
 async function upsertFeedOpportunity(opp: NormalizedGrantOpportunity): Promise<"inserted" | "updated" | "skipped"> {
+  const identity = identifyFeedOpportunity(opp);
+  if (identity.action === "skip" || (!identity.fingerprint && !identity.externalId)) return "skipped";
   const db = await getDb();
-  const existing = await db.get<{ id: string }>(
-    "SELECT id FROM grant_opportunities WHERE source_type = ? AND external_id = ?",
-    opp.source_type,
-    opp.external_id
-  );
+  let existing: { id: string } | undefined;
+  if (identity.externalId) {
+    existing = await db.get<{ id: string }>(
+      "SELECT id FROM grant_opportunities WHERE source_type = ? AND external_id = ?",
+      opp.source_type,
+      identity.externalId,
+    );
+  } else if (identity.fingerprint) {
+    existing = await db.get<{ id: string }>(
+      "SELECT id FROM grant_opportunities WHERE source_type = ? AND fingerprint = ?",
+      opp.source_type,
+      identity.fingerprint,
+    );
+  }
   const now = new Date().toISOString();
+  const awardFloor = opp.award_floor ?? opp.amount_min;
+  const awardCeiling = opp.award_ceiling ?? opp.amount_max;
+  const closeDate = opp.close_date ?? opp.deadline;
   if (existing) {
     await db.run(
-      `UPDATE grant_opportunities SET title = ?, funder = ?, description = ?, amount_min = ?, amount_max = ?,
-       deadline = ?, url = ?, funder_type = ?, geography = ?, eligibility = ?, requirements = ?,
-       is_live = ?, is_national = ?, import_status = ?, last_verified_at = ?, updated_at = ?, status = 'open'
+      `UPDATE grant_opportunities SET title = ?, funder = ?, description = ?,
+       amount_min = COALESCE(?, amount_min), amount_max = COALESCE(?, amount_max),
+       award_floor = COALESCE(?, award_floor), award_ceiling = COALESCE(?, award_ceiling),
+       estimated_funding = COALESCE(?, estimated_funding),
+       deadline = COALESCE(?, deadline), close_date = COALESCE(?, close_date),
+       url = ?, funder_type = ?, geography = ?, eligibility = ?, requirements = ?,
+       is_live = ?, is_national = ?, import_status = ?,
+       fingerprint = COALESCE(?, fingerprint),
+       external_id = CASE WHEN ? IS NOT NULL THEN ? ELSE external_id END,
+       last_verified_at = ?, updated_at = ?, status = 'open'
        WHERE id = ?`,
       opp.title,
       opp.funder,
       opp.description,
       opp.amount_min,
       opp.amount_max,
+      awardFloor,
+      awardCeiling,
+      opp.estimated_funding ?? null,
       opp.deadline,
+      closeDate,
       opp.url,
       opp.funder_type,
       opp.geography,
@@ -97,29 +274,40 @@ async function upsertFeedOpportunity(opp: NormalizedGrantOpportunity): Promise<"
       opp.is_live,
       opp.is_national,
       opp.import_status ?? "imported",
+      identity.fingerprint,
+      identity.externalId,
+      identity.externalId,
       now,
       now,
-      existing.id
+      existing.id,
     );
     return "updated";
   }
+  const storedExternalId = identity.externalId ?? identity.fingerprint;
+  if (!storedExternalId) return "skipped";
   await db.run(
     `INSERT INTO grant_opportunities (
-       id, title, funder, description, amount_min, amount_max, status, deadline, url, requirements,
-       source_type, external_id, import_status, funder_type, geography, eligibility, is_live, is_national,
+       id, title, funder, description, amount_min, amount_max, award_floor, award_ceiling, estimated_funding,
+       status, deadline, close_date, url, requirements,
+       source_type, external_id, fingerprint, import_status, funder_type, geography, eligibility, is_live, is_national,
        posted_date, last_verified_at, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     grantId(),
     opp.title,
     opp.funder,
     opp.description,
     opp.amount_min,
     opp.amount_max,
+    awardFloor,
+    awardCeiling,
+    opp.estimated_funding ?? null,
     opp.deadline,
+    closeDate,
     opp.url,
     opp.requirements,
     opp.source_type,
-    opp.external_id,
+    storedExternalId,
+    identity.fingerprint,
     opp.import_status ?? "imported",
     opp.funder_type,
     opp.geography,
@@ -129,7 +317,7 @@ async function upsertFeedOpportunity(opp: NormalizedGrantOpportunity): Promise<"
     now,
     now,
     now,
-    now
+    now,
   );
   return "inserted";
 }
