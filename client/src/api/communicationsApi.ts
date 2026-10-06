@@ -7,8 +7,39 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+export interface EnterpriseNotificationCard {
+  readOnly: boolean;
+  responseTimeMs: number | null;
+  source: string;
+  emailClaimsAvailable: boolean;
+  smsLogsAvailable: boolean;
+  providers: {
+    postmark: { role: string; configured: boolean; recentStored: boolean; status: string };
+    twilio: { role: string; configured: boolean; messagingServiceConfigured: boolean; recentStored: boolean; status: string };
+    resend: { role: string; configured: boolean; recentStored: boolean; status: string };
+  };
+  summary: { delivered: number; pending: number; failed: number; bounced: number; retried: number; fallbackUsed: number; accepted: number };
+  groups: Record<string, number>;
+  filter: string | null;
+  records: Array<{
+    time: string | null;
+    type: string | null;
+    recipient: string | null;
+    originatingApp: string;
+    bookingId: string | null;
+    provider: string | null;
+    providerMessageId: string | null;
+    status: string | null;
+    fallbackUsed: boolean | null;
+    error: string | null;
+    group: string;
+  }>;
+}
+
 export const communicationsApi = {
   overview: () => api<{ announcements: number; messages: number }>("/overview"),
+  enterpriseNotifications: (group?: string) =>
+    api<EnterpriseNotificationCard>(`/enterprise-notifications${group ? `?group=${encodeURIComponent(group)}` : ""}`),
   announcements: () => api<{ announcements: Announcement[] }>("/announcements"),
   createAnnouncement: (data: { title: string; body: string; priority?: string; expires_at?: string }) =>
     api("/announcements", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),

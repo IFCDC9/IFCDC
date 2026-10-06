@@ -46,7 +46,7 @@ export const HQ_INHERITED_SERVICES: InheritedService[] = [
   { id: "grants", name: "Grant Center", description: "Grant lifecycle integrated with finance", endpoint: "/api/hq/grants", scopes: ["read", "write", "compliance"] },
   { id: "analytics", name: "Organization Analytics", description: "Cross-org KPIs, trends, forecasting, and executive reports", endpoint: "/api/hq/analytics", scopes: ["overview", "kpi", "reports", "export"] },
   { id: "operations", name: "Operations Modules", description: "Housing, scholarships, fleet, facilities, board, compliance, calendar", endpoint: "/api/hq/operations", scopes: ["read", "write"] },
-  { id: "notifications", name: "Enterprise Notifications", description: "Unified alerts, compliance reminders, and broadcasts", endpoint: "/api/hq/notifications/broadcast", scopes: ["read", "send"] },
+  { id: "notifications", name: "Enterprise Notifications", description: "Read-only delivery visibility for stored Barbers email claims and SMS logs", endpoint: "/api/hq/communications/enterprise-notifications", scopes: ["read"] },
   { id: "aura", name: "AURA AI", description: "Executive assistant, report summaries, and strategic recommendations", endpoint: "/api/hq/aura/chat", scopes: ["chat", "summarize", "recommend", "forecast"] },
   { id: "enterprise", name: "Enterprise Hub", description: "Global search, module registry, and activity feed", endpoint: "/api/hq/enterprise", scopes: ["search", "modules", "overview"] },
 ];

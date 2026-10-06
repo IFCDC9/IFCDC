@@ -16,6 +16,8 @@ import { buildClientCaseOverview } from "./clientCaseEngine";
 let contextCache: { text: string; expires: number } | null = null;
 const CONTEXT_CACHE_TTL_MS = 2 * 60 * 1000;
 
+// Notification questions are answered by answerEnterpriseNotificationQuestions.
+// Keep that call read-only. Do not register send, retry, or cancel tools here.
 export async function buildAuraExecutiveContext(extra?: string): Promise<string> {
   const now = Date.now();
   if (!extra && contextCache && contextCache.expires > now) {

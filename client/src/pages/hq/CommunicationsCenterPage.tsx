@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Megaphone, Mail, Send, Plus, Inbox, Bell, Users, PhoneCall } from "lucide-react";
 import HQLayout from "../../layouts/HQLayout";
@@ -21,6 +21,7 @@ function formatDuration(sec: number): string {
 const CommunicationsCenterPage: React.FC = () => {
   const { user } = useAuth();
   const [tab, setTab] = useState<Tab>("announcements");
+  const [noticeGroup, setNoticeGroup] = useState("");
   const [showAnnounce, setShowAnnounce] = useState(false);
   const [announceForm, setAnnounceForm] = useState({ title: "", body: "", priority: "normal" });
   const [msgForm, setMsgForm] = useState({ to_email: "", to_name: "", subject: "", body: "" });
@@ -29,7 +30,16 @@ const CommunicationsCenterPage: React.FC = () => {
   const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
   const qc = useQueryClient();
 
+  useEffect(() => {
+    if (window.location.hash === "#enterprise-notifications") setTab("notifications");
+  }, []);
+
   const overview = useQuery({ queryKey: ["comms-overview"], queryFn: communicationsApi.overview });
+  const enterpriseVisibility = useQuery({
+    queryKey: ["enterprise-notifications", noticeGroup],
+    queryFn: () => communicationsApi.enterpriseNotifications(noticeGroup || undefined),
+    enabled: tab === "notifications",
+  });
   const announcements = useQuery({ queryKey: ["comms-announcements"], queryFn: communicationsApi.announcements });
   const inbox = useQuery({ queryKey: ["comms-inbox"], queryFn: () => communicationsApi.messages("inbox"), enabled: tab === "inbox" });
   const sent = useQuery({ queryKey: ["comms-sent"], queryFn: () => communicationsApi.messages("sent"), enabled: tab === "sent" });
@@ -407,6 +417,63 @@ const CommunicationsCenterPage: React.FC = () => {
               </p>
             )}
           </HqPanel>
+        )}
+
+        {tab === "notifications" && (
+          <div id="enterprise-notifications">
+            {enterpriseVisibility.isLoading ? <HqLoading /> : (
+              <HqPanel title="Enterprise Notifications" subtitle={enterpriseVisibility.data?.responseTimeMs != null ? `Barbers read ${enterpriseVisibility.data.responseTimeMs} ms` : "Read-only delivery visibility"}>
+                <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
+                  <StatusBadge label={`Postmark ${enterpriseVisibility.data?.providers.postmark.status ?? "unknown"}`} variant={enterpriseVisibility.data?.providers.postmark.configured ? "success" : "muted"} />
+                  <StatusBadge label={`Twilio ${enterpriseVisibility.data?.providers.twilio.status ?? "unknown"}`} variant={enterpriseVisibility.data?.providers.twilio.configured ? "success" : "muted"} />
+                  <StatusBadge label={`Resend ${enterpriseVisibility.data?.providers.resend.status ?? "legacy"}`} variant="muted" />
+                </div>
+                <p style={{ fontSize: "0.82rem", color: "var(--hq-text-muted)" }}>
+                  Delivered {enterpriseVisibility.data?.summary.delivered ?? 0}
+                  {" · "}Pending {enterpriseVisibility.data?.summary.pending ?? 0}
+                  {" · "}Accepted {enterpriseVisibility.data?.summary.accepted ?? 0}
+                  {" · "}Failed {enterpriseVisibility.data?.summary.failed ?? 0}
+                  {" · "}Bounced {enterpriseVisibility.data?.summary.bounced ?? 0}
+                  {" · "}Retried {enterpriseVisibility.data?.summary.retried ?? 0}
+                  {" · "}Fallback {enterpriseVisibility.data?.summary.fallbackUsed ?? 0}
+                </p>
+                <label style={{ display: "block", margin: "0.75rem 0" }}>
+                  Activity
+                  <select className="hq-input" value={noticeGroup} onChange={(e) => setNoticeGroup(e.target.value)}>
+                    <option value="">All stored activity</option>
+                    {Object.entries(enterpriseVisibility.data?.groups ?? {}).map(([group, count]) => (
+                      <option key={group} value={group}>{group} ({count})</option>
+                    ))}
+                  </select>
+                </label>
+                <table className="hq-table hq-table-compact">
+                  <thead>
+                    <tr>
+                      <th>Time</th><th>Type</th><th>Recipient</th><th>App</th><th>Booking</th><th>Provider</th><th>Status</th><th>Fallback</th><th>Error</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(enterpriseVisibility.data?.records ?? []).map((record, index) => (
+                      <tr key={`${record.providerMessageId ?? record.bookingId ?? "row"}-${index}`}>
+                        <td>{record.time ? new Date(record.time).toLocaleString() : "—"}</td>
+                        <td>{record.type ?? "—"}</td>
+                        <td>{record.recipient ?? "—"}</td>
+                        <td>{record.originatingApp}</td>
+                        <td>{record.bookingId ?? "—"}</td>
+                        <td>{record.provider ?? "—"}</td>
+                        <td>{record.status ?? "—"}</td>
+                        <td>{record.fallbackUsed == null ? "—" : record.fallbackUsed ? "yes" : "no"}</td>
+                        <td>{record.error ?? "—"}</td>
+                      </tr>
+                    ))}
+                    {!enterpriseVisibility.data?.records?.length && (
+                      <tr><td colSpan={9}>No stored notification activity</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </HqPanel>
+            )}
+          </div>
         )}
 
         {tab === "notifications" && (

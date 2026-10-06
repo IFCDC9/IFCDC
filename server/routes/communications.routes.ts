@@ -5,10 +5,17 @@ import { hqAuthRequired, requireHQModule } from "../middleware/hqAuth";
 import { commId } from "../hq/communicationsSchema";
 import { sendHqNotification } from "../lib/notifications";
 import { enqueueNotification } from "../hq/notificationQueue";
+import { loadEnterpriseNotificationVisibility } from "../hq/enterpriseNotificationVisibility";
 
 const router = Router();
 
 router.use(hqAuthRequired, requireHQModule("notifications"));
+
+router.get("/enterprise-notifications", async (req, res) => {
+  const group = typeof req.query.group === "string" ? req.query.group : null;
+  const view = await loadEnterpriseNotificationVisibility({ group });
+  res.json(view);
+});
 
 router.get("/overview", async (_req, res) => {
   const db = await getDb();

@@ -345,6 +345,11 @@ const SoftwareDivisionPage: React.FC = () => {
                           Founder funding view
                         </Link>
                       )}
+                      {svc.id === "notifications" && (
+                        <Link to="/hq/communications#enterprise-notifications" className="hq-framework-endpoint">
+                          Delivery visibility
+                        </Link>
+                      )}
                     </div>
                   ))}
                 </div>
