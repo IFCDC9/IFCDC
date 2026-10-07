@@ -272,6 +272,7 @@ export async function runAutonomousOperationsCycle(opts?: {
   actorEmail?: string;
   notifyFounderChannels?: boolean;
   prepareCadences?: boolean;
+  includeFundingAlerts?: boolean;
 }): Promise<{
   id: string;
   aoVersion: typeof AO_VERSION;
@@ -306,7 +307,10 @@ export async function runAutonomousOperationsCycle(opts?: {
       "proactive",
       () =>
         import("./auraProactiveIntelligence").then((m) =>
-          m.evaluateAndEmitProactiveAlerts({ notifyFounderChannels: notify })
+          m.evaluateAndEmitProactiveAlerts({
+            notifyFounderChannels: notify,
+            includeFundingAlerts: opts?.includeFundingAlerts,
+          })
         ),
       { evaluated: 0, emitted: 0, skipped: 0, alerts: [] }
     ),

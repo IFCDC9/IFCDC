@@ -2,6 +2,11 @@ import { getDb } from "../db";
 import { ensureWorkflowTables, workflowId } from "./workflowEngineSchema";
 import { buildApprovalQueue, type ApprovalTask } from "./enterpriseApprovals";
 import { generateGrantNotifications } from "./grantReporting";
+import {
+  isFundingWarehouseJob,
+  noteFundingRestartDeferral,
+  shouldRunScheduledJobNow,
+} from "./fundingBootGate";
 import { captureFullWarehouseSnapshot } from "./analyticsWarehouse";
 import { logHqAudit } from "./hqAuditLog";
 import { syncGrantExpenditureFromFinance } from "./grantFinanceIntegration";
@@ -159,12 +164,13 @@ export async function createWorkflowInstance(opts: {
   return db.get("SELECT * FROM hq_workflow_instances WHERE id = ?", id);
 }
 
-export async function syncApprovalTasksToWorkflows() {
+export async function syncApprovalTasksToWorkflows(opts?: { skipGrantApprovals?: boolean }) {
   await ensureWorkflowTables();
   const { tasks } = await buildApprovalQueue(50);
   const db = await getDb();
   let synced = 0;
   for (const task of tasks) {
+    if (opts?.skipGrantApprovals && task.type === "grant_founder_approval") continue;
     const workflowKey = taskTypeToWorkflowKey(task.type);
     const existing = await db.get(
       `SELECT id FROM hq_workflow_instances WHERE entity_type = ? AND entity_id = ? AND status = 'pending'`,
@@ -424,7 +430,10 @@ function computeNextRunAt(jobKey: string): string {
   return new Date(Date.now() + scheduleIntervalMs(schedule)).toISOString();
 }
 
-export async function runDueScheduledJobs(actorEmail?: string): Promise<{ ran: string[]; skipped: string[]; errors: string[] }> {
+export async function runDueScheduledJobs(
+  actorEmail?: string,
+  opts?: { catchUp?: boolean },
+): Promise<{ ran: string[]; skipped: string[]; errors: string[] }> {
   await ensureWorkflowTables();
   const db = await getDb();
   const jobs = (await db.all(
@@ -436,18 +445,24 @@ export async function runDueScheduledJobs(actorEmail?: string): Promise<{ ran: s
   const errors: string[] = [];
   const now = Date.now();
 
+  const catchUp = opts?.catchUp === true;
+
   for (const job of jobs) {
     const interval = scheduleIntervalMs(job.schedule_expr ?? "daily");
     const lastRun = job.last_run_at ? new Date(job.last_run_at).getTime() : 0;
     const due = !job.last_run_at || now - lastRun >= interval;
+    const runNow = shouldRunScheduledJobNow({ jobKey: job.job_key, due, catchUp, now });
 
-    if (!due) {
+    if (!runNow) {
+      if (catchUp && due && isFundingWarehouseJob(job.job_key)) {
+        noteFundingRestartDeferral(job.job_key, now);
+      }
       skipped.push(job.job_key);
       continue;
     }
 
     try {
-      await executeScheduledJob(job.job_key, actorEmail);
+      await executeScheduledJob(job.job_key, actorEmail, { catchUp });
       const ts = new Date().toISOString();
       await db.run(
         "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'success', last_error = NULL WHERE job_key = ?",
@@ -476,7 +491,11 @@ export async function runDueScheduledJobs(actorEmail?: string): Promise<{ ran: s
   return { ran, skipped, errors };
 }
 
-async function executeScheduledJob(jobKey: string, actorEmail?: string): Promise<void> {
+async function executeScheduledJob(
+  jobKey: string,
+  actorEmail?: string,
+  opts?: { catchUp?: boolean },
+): Promise<void> {
   const now = new Date().toISOString();
   switch (jobKey) {
     case "grant_deadlines":
@@ -517,11 +536,12 @@ async function executeScheduledJob(jobKey: string, actorEmail?: string): Promise
         actorEmail: actorEmail ?? "system-scheduler",
         notifyFounderChannels: false,
         prepareCadences: true,
+        includeFundingAlerts: opts?.catchUp !== true,
       });
       break;
     }
     case "onboarding_check":
-      await syncApprovalTasksToWorkflows();
+      await syncApprovalTasksToWorkflows({ skipGrantApprovals: opts?.catchUp === true });
       break;
     default:
       break;

@@ -1,5 +1,6 @@
 import { runDueScheduledJobs } from "./workflowEngine";
 import { scanPipelineDeadlineAlerts } from "./pipelineAutomation";
+import { shouldRunFundingBootSync } from "./fundingBootGate";
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 const STARTUP_DELAY_MS = 30 * 1000;
@@ -21,12 +22,14 @@ export function startHqScheduler(): void {
   started = true;
 
   setTimeout(() => {
-    runDueScheduledJobs("system-scheduler").catch((err) => {
+    runDueScheduledJobs("system-scheduler", { catchUp: true }).catch((err) => {
       console.error("[HQ Scheduler] Initial run failed:", err);
     });
-    runPipelineDeadlineScan().catch((err) => {
-      console.error("[HQ Scheduler] Initial pipeline scan failed:", err);
-    });
+    if (shouldRunFundingBootSync()) {
+      runPipelineDeadlineScan().catch((err) => {
+        console.error("[HQ Scheduler] Initial pipeline scan failed:", err);
+      });
+    }
   }, STARTUP_DELAY_MS);
 
   timer = setInterval(() => {

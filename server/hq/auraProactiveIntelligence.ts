@@ -8,6 +8,7 @@ import { buildTechnicalCommandBriefing } from "./auraTechnicalCommandEngine";
 import { buildExecutiveHealthSummary } from "./auraExecutiveAssistant";
 import { trackComplianceDeadlines } from "./auraExecutiveOps";
 import { buildOrgWideGrantMatches } from "./grantIntelligenceEngine";
+import { selectStartupSafeProactiveAlerts } from "./fundingBootGate";
 import { logHqAudit } from "./hqAuditLog";
 import { sendFounderSecurityEmail, sendFounderSecuritySms } from "../lib/notifications";
 import { getFounderEmail } from "./auraFounderTrustEngine";
@@ -69,13 +70,20 @@ export type ProactiveAlertCandidate = {
   notifySms?: boolean;
 };
 
-export async function collectProactiveAlertCandidates(): Promise<ProactiveAlertCandidate[]> {
+export async function collectProactiveAlertCandidates(opts?: {
+  includeFundingAlerts?: boolean;
+}): Promise<ProactiveAlertCandidate[]> {
+  const includeFundingAlerts = opts?.includeFundingAlerts !== false;
   const out: ProactiveAlertCandidate[] = [];
   const [tech, executive, compliance, grants] = await Promise.all([
     buildTechnicalCommandBriefing().catch(() => null),
     buildExecutiveHealthSummary().catch(() => null),
-    trackComplianceDeadlines().catch(() => ({ overdue: 0, dueNext14Days: 0, deadlines: [] as unknown[] })),
-    buildOrgWideGrantMatches({ sort: "deadline", limit: 20, actorEmail: getFounderEmail() }).catch(() => ({ matches: [] })),
+    includeFundingAlerts
+      ? trackComplianceDeadlines().catch(() => ({ overdue: 0, dueNext14Days: 0, deadlines: [] as unknown[] }))
+      : Promise.resolve({ overdue: 0, dueNext14Days: 0, deadlines: [] as unknown[] }),
+    includeFundingAlerts
+      ? buildOrgWideGrantMatches({ sort: "deadline", limit: 20, actorEmail: getFounderEmail() }).catch(() => ({ matches: [] }))
+      : Promise.resolve({ matches: [] }),
   ]);
 
   if (tech) {
@@ -159,8 +167,13 @@ export async function collectProactiveAlertCandidates(): Promise<ProactiveAlertC
 
 export async function evaluateAndEmitProactiveAlerts(opts?: {
   notifyFounderChannels?: boolean;
+  includeFundingAlerts?: boolean;
 }): Promise<{ evaluated: number; emitted: number; skipped: number; alerts: ProactiveAlertCandidate[] }> {
-  const candidates = await collectProactiveAlertCandidates();
+  const includeFundingAlerts = opts?.includeFundingAlerts !== false;
+  const candidates = selectStartupSafeProactiveAlerts(
+    await collectProactiveAlertCandidates({ includeFundingAlerts }),
+    includeFundingAlerts,
+  );
   let emitted = 0;
   let skipped = 0;
   const emittedAlerts: ProactiveAlertCandidate[] = [];

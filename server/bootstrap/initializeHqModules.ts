@@ -17,7 +17,6 @@ import { ensureNotificationQueueTables } from "../hq/notificationQueue";
 import { ensureCommunicationsTables } from "../hq/communicationsSchema";
 import { ensureDocumentTables } from "../hq/documentsSchema";
 import { ensureHqFileRegistry } from "../hq/hqFileStorage";
-import { syncGrantFeeds } from "../hq/grantFeedConnectors";
 import { purgeGrantDevSeedData } from "../hq/grantProductionCleanup";
 import { purgeHqSampleData } from "../hq/hqProductionCleanup";
 import { purgeWorkflowDemoData } from "../hq/workflowProductionCleanup";
@@ -115,7 +114,7 @@ export async function initializeHqModules(founder: FounderSeedConfig): Promise<v
   setTimeout(() => {
     import("../hq/auraProactiveIntelligence")
       .then(({ evaluateAndEmitProactiveAlerts }) =>
-        evaluateAndEmitProactiveAlerts({ notifyFounderChannels: false })
+        evaluateAndEmitProactiveAlerts({ notifyFounderChannels: false, includeFundingAlerts: false })
       )
       .then((r) => {
         if (r) console.log(`AURA proactive scan: evaluated=${r.evaluated} emitted=${r.emitted}`);
@@ -125,32 +124,24 @@ export async function initializeHqModules(founder: FounderSeedConfig): Promise<v
   getOrGenerateDailyBriefing().catch((e) => console.warn("Morning briefing generation skipped:", e?.message));
   await initGoogleOAuth();
   import("../hq/warehouseScheduler").then(({ startHqScheduler }) => startHqScheduler()).catch(() => undefined);
-  syncGrantFeeds().then((results) => {
-    const connected = results.filter((r) => r.status === "connected").length;
-    console.log(`Grant feed sync complete: ${connected}/${results.length} feeds connected`);
-  }).catch((e) => console.warn("Grant feed sync skipped:", e?.message));
-  import("../hq/grantIntelligenceEngine")
-    .then(({ scheduleGrantIntelligenceSync, runGrantIntelligenceSync, enrichAllOpportunities }) => {
-      scheduleGrantIntelligenceSync();
-      return runGrantIntelligenceSync().then((r) => enrichAllOpportunities(100).then((enriched) => ({ ...r, enriched })));
+  // Timers stay. Immediate Grants.gov / pipeline / scoring work does not run on deploy restart.
+  Promise.all([
+    import("../hq/fundingBootGate"),
+    import("../hq/grantFeedConnectors"),
+    import("../hq/grantIntelligenceEngine"),
+    import("../hq/grantFundingPipelineEngine"),
+  ])
+    .then(([gate, feeds, intelligence, pipeline]) => {
+      gate.startScheduledFundingJobs({
+        syncGrantFeeds: () => feeds.syncGrantFeeds(),
+        scheduleGrantIntelligenceSync: intelligence.scheduleGrantIntelligenceSync,
+        runGrantIntelligenceSync: () => intelligence.runGrantIntelligenceSync(),
+        enrichAllOpportunities: intelligence.enrichAllOpportunities,
+        scheduleLivePipelineSync: pipeline.scheduleLivePipelineSync,
+        runLivePipelineSync: () => pipeline.runLivePipelineSync(),
+      });
     })
-    .then((r) => {
-      if (r) console.log(`Grant Intelligence Engine boot sync: enriched ${r.enriched} opportunities`);
-    })
-    .catch((e) => console.warn("Grant intelligence boot sync skipped:", e?.message));
-  import("../hq/grantFundingPipelineEngine")
-    .then(({ scheduleLivePipelineSync, runLivePipelineSync }) => {
-      scheduleLivePipelineSync();
-      // Defer heavy feed+stage sync so dashboard reads are not blocked at boot.
-      setTimeout(() => {
-        void runLivePipelineSync()
-          .then((r) => {
-            if (r) console.log(`Enterprise Funding Pipeline boot sync: ${r.stagesSynced} stages, ${r.notifications} notifications`);
-          })
-          .catch((e) => console.warn("Funding pipeline boot sync skipped:", e?.message));
-      }, 120_000);
-    })
-    .catch((e) => console.warn("Funding pipeline scheduler skipped:", e?.message));
+    .catch((e) => console.warn("Funding scheduler skipped:", e?.message));
   if (process.env.NODE_ENV === "production") {
     import("../hq/twilioIntegrationEngine")
       .then(({ syncTwilioWebhooksIfNeeded }) => syncTwilioWebhooksIfNeeded())
