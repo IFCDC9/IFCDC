@@ -45,6 +45,8 @@ export const communicationsApi = {
     api("/announcements", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
   messages: (folder?: "inbox" | "sent") =>
     api<{ messages: HQMessage[] }>(`/messages?folder=${folder ?? "inbox"}`),
+  inboundMail: (view?: string) =>
+    api<{ readOnly: boolean; messages: InboundBusinessMail[] }>(`/inbound-mail${view ? `?view=${encodeURIComponent(view)}` : ""}`),
   sendMessage: (data: { to_email: string; to_name?: string; subject: string; body: string }) =>
     api("/messages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
   markRead: (id: string) =>
@@ -119,6 +121,35 @@ export interface Announcement {
   priority: string;
   author_name: string;
   published_at: string;
+}
+
+export interface InboundBusinessMail {
+  id: string;
+  messageId: string;
+  threadId: string | null;
+  senderName: string | null;
+  senderAddress: string;
+  recipient: string;
+  subject: string;
+  textBody: string;
+  receivedAt: string;
+  category: string;
+  unmatched: boolean;
+  urgency: string;
+  founderAttention: boolean;
+  flags: {
+    deadline: boolean;
+    meeting: boolean;
+    fundingOpportunity: boolean;
+    payment: boolean;
+    approval: boolean;
+    partnershipRequest: boolean;
+  };
+  deadline: string | null;
+  linked: { kind: string; id: string } | null;
+  attachments: Array<{ filename: string; contentType: string; size: number }>;
+  draftSuggestion: string | null;
+  readAt: string | null;
 }
 
 export interface HQMessage {

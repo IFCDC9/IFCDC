@@ -10,7 +10,7 @@ import { HqPanel } from "../../components/hq/HqPanel";
 import { StatusBadge } from "../../components/hq/StatusBadge";
 import { HqLoading } from "../../components/hq/HqLoading";
 
-type Tab = "announcements" | "inbox" | "sent" | "compose" | "email" | "campaigns" | "notifications" | "voice";
+type Tab = "announcements" | "inbox" | "founder-inbox" | "sent" | "compose" | "email" | "campaigns" | "notifications" | "voice";
 
 function formatDuration(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -22,6 +22,7 @@ const CommunicationsCenterPage: React.FC = () => {
   const { user } = useAuth();
   const [tab, setTab] = useState<Tab>("announcements");
   const [noticeGroup, setNoticeGroup] = useState("");
+  const [inboundView, setInboundView] = useState("inbound");
   const [showAnnounce, setShowAnnounce] = useState(false);
   const [announceForm, setAnnounceForm] = useState({ title: "", body: "", priority: "normal" });
   const [msgForm, setMsgForm] = useState({ to_email: "", to_name: "", subject: "", body: "" });
@@ -32,6 +33,7 @@ const CommunicationsCenterPage: React.FC = () => {
 
   useEffect(() => {
     if (window.location.hash === "#enterprise-notifications") setTab("notifications");
+    if (window.location.hash === "#founder-inbox") setTab("founder-inbox");
   }, []);
 
   const overview = useQuery({ queryKey: ["comms-overview"], queryFn: communicationsApi.overview });
@@ -42,6 +44,11 @@ const CommunicationsCenterPage: React.FC = () => {
   });
   const announcements = useQuery({ queryKey: ["comms-announcements"], queryFn: communicationsApi.announcements });
   const inbox = useQuery({ queryKey: ["comms-inbox"], queryFn: () => communicationsApi.messages("inbox"), enabled: tab === "inbox" });
+  const founderInbox = useQuery({
+    queryKey: ["comms-founder-inbox", inboundView],
+    queryFn: () => communicationsApi.inboundMail(inboundView),
+    enabled: tab === "founder-inbox",
+  });
   const sent = useQuery({ queryKey: ["comms-sent"], queryFn: () => communicationsApi.messages("sent"), enabled: tab === "sent" });
   const enterpriseNotifs = useQuery({ queryKey: ["comms-notifications"], queryFn: enterpriseApi.notifications, enabled: tab === "notifications" });
   const audiences = useQuery({ queryKey: ["comms-audiences"], queryFn: communicationsApi.audiences, enabled: tab === "campaigns" || tab === "email" });
@@ -137,6 +144,9 @@ const CommunicationsCenterPage: React.FC = () => {
         </button>
         <button type="button" className={`hq-tab ${tab === "inbox" ? "active" : ""}`} onClick={() => setTab("inbox")}>
           <Inbox size={16} /> Inbox
+        </button>
+        <button type="button" className={`hq-tab ${tab === "founder-inbox" ? "active" : ""}`} onClick={() => setTab("founder-inbox")}>
+          <Mail size={16} /> Founder Inbox
         </button>
         <button type="button" className={`hq-tab ${tab === "sent" ? "active" : ""}`} onClick={() => setTab("sent")}>
           <Send size={16} /> Sent
@@ -320,6 +330,60 @@ const CommunicationsCenterPage: React.FC = () => {
                   </li>
                 ))}
                 {!inbox.data?.messages?.length && <li className="hq-empty">No messages in inbox</li>}
+              </ul>
+            </HqPanel>
+          )
+        )}
+
+        {tab === "founder-inbox" && (
+          founderInbox.isLoading ? <HqLoading /> : (
+            <HqPanel title="Founder Inbox" subtitle="Read-only inbound business mail. Nothing here is sent, replied, or deleted.">
+              <label style={{ display: "block", marginBottom: "0.75rem", fontSize: "0.8rem" }}>
+                View
+                <select value={inboundView} onChange={(event) => setInboundView(event.target.value)} style={{ marginLeft: "0.5rem" }}>
+                  <option value="inbound">Inbound</option>
+                  <option value="unread">Unread</option>
+                  <option value="urgent">Urgent</option>
+                  <option value="needs-founder">Needs founder</option>
+                  <option value="awaiting-reply">Awaiting reply</option>
+                  <option value="drafts">Drafts</option>
+                  <option value="follow-up">Follow-up</option>
+                  <option value="deadlines">Deadlines</option>
+                </select>
+              </label>
+              <ul className="hq-notif-list">
+                {(founderInbox.data?.messages ?? []).map((message) => (
+                  <li key={message.id} className={`hq-notif-item ${message.readAt ? "read" : "unread"}`}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", alignItems: "center" }}>
+                        <StatusBadge label={message.category} variant={message.unmatched ? "muted" : "gold"} />
+                        <StatusBadge label={message.urgency} variant={message.urgency === "high" ? "warning" : "muted"} />
+                        {message.founderAttention && <StatusBadge label="Needs founder" variant="warning" />}
+                        {message.unmatched && <StatusBadge label="Unmatched" variant="muted" />}
+                      </div>
+                      <div style={{ fontWeight: 600, fontSize: "0.9rem", marginTop: "0.35rem" }}>{message.subject}</div>
+                      <div style={{ fontSize: "0.78rem", color: "var(--hq-text-muted)" }}>
+                        {message.senderName || message.senderAddress} · {message.senderAddress}
+                      </div>
+                      <p style={{ fontSize: "0.82rem", marginTop: "0.35rem", color: "var(--hq-text-muted)" }}>
+                        {message.textBody.slice(0, 160)}{message.textBody.length > 160 ? "…" : ""}
+                      </p>
+                      {message.linked && (
+                        <div style={{ fontSize: "0.75rem", marginTop: "0.25rem" }}>
+                          Linked {message.linked.kind}: {message.linked.id}
+                        </div>
+                      )}
+                      {message.deadline && (
+                        <div style={{ fontSize: "0.75rem", marginTop: "0.25rem" }}>Deadline {message.deadline}</div>
+                      )}
+                      {message.draftSuggestion && (
+                        <p style={{ fontSize: "0.78rem", marginTop: "0.35rem" }}>Draft suggestion, not sent: {message.draftSuggestion}</p>
+                      )}
+                    </div>
+                    <div style={{ fontSize: "0.72rem", color: "var(--hq-text-dim)" }}>{new Date(message.receivedAt).toLocaleString()}</div>
+                  </li>
+                ))}
+                {!founderInbox.data?.messages?.length && <li className="hq-empty">No inbound business mail</li>}
               </ul>
             </HqPanel>
           )

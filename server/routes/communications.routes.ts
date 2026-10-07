@@ -6,6 +6,8 @@ import { commId } from "../hq/communicationsSchema";
 import { sendHqNotification } from "../lib/notifications";
 import { enqueueNotification } from "../hq/notificationQueue";
 import { loadEnterpriseNotificationVisibility } from "../hq/enterpriseNotificationVisibility";
+import { ingestInboundMailHttp, listInboundMailHttp, saveInboundDraftSuggestion } from "../hq/inboundBusinessMail";
+import { getDb as getInboundDb } from "../db";
 
 const router = Router();
 
@@ -15,6 +17,35 @@ router.get("/enterprise-notifications", async (req, res) => {
   const group = typeof req.query.group === "string" ? req.query.group : null;
   const view = await loadEnterpriseNotificationVisibility({ group });
   res.json(view);
+});
+
+router.get("/inbound-mail", async (req, res) => {
+  await listInboundMailHttp(req, res);
+});
+
+router.post("/inbound-mail", async (req, res) => {
+  await ingestInboundMailHttp(req, res);
+});
+
+router.post("/inbound-mail/:id/draft", async (req, res) => {
+  const { inboundMailSessionStatus } = await import("../hq/inboundBusinessMail");
+  const status = inboundMailSessionStatus(req.hqUser);
+  if (status) {
+    res.status(status).json({ error: status === 401 ? "Authentication required" : "Founder session required" });
+    return;
+  }
+  const suggestion = typeof req.body?.suggestion === "string" ? req.body.suggestion : "";
+  if (!suggestion.trim()) {
+    res.status(400).json({ error: "suggestion is required" });
+    return;
+  }
+  const row = await saveInboundDraftSuggestion(await getInboundDb(), req.params.id, suggestion);
+  if (!row) {
+    res.status(404).json({ error: "Inbound message not found" });
+    return;
+  }
+  const { toPublicInboundMail } = await import("../hq/inboundBusinessMail");
+  res.json({ sent: false, message: toPublicInboundMail(row) });
 });
 
 router.get("/overview", async (_req, res) => {

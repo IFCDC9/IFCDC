@@ -259,6 +259,20 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
     };
   }
 
+  {
+    const { isInboundMailQuestion, answerStoredInboundMailQuestion } = await import("./inboundBusinessMail");
+    if (isInboundMailQuestion(command)) {
+      const reply = await answerStoredInboundMailQuestion(command);
+      return {
+        reply,
+        actions: [],
+        approvalsCreated: [],
+        poweredBy: "AURA Inbound Mail",
+        identity: publicIdentitySummary(identity),
+      };
+    }
+  }
+
   // Founder Executive Operations — plan compound requests, then execute (email/SMS/…).
   {
     const { tryRunExecutiveCommand } = await import("./auraExecutiveOperations");
