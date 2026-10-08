@@ -36,6 +36,7 @@ function mockRes() {
       return res;
     },
     json(body: unknown) {
+      if (state.code == null) state.code = 200;
       state.body = body;
       return res;
     },
@@ -202,6 +203,35 @@ test("inbox handler returns 401 without a session and the payload has no secret"
   const publicRow = toPublicInboundMail(stored.row);
   assert.equal("secret" in publicRow, false);
   assert.equal("webhookSecret" in publicRow, false);
+});
+
+test("authenticated non-founder fixture receives 403 and founder or owner is allowed", async () => {
+  const db = await memoryDb();
+  const call = async (hqUser: { role?: string } | undefined) => {
+    const { state, res } = mockRes();
+    await listInboundMailHttp({ hqUser, query: {} } as Request, res, db);
+    return state;
+  };
+
+  const missing = await call(undefined);
+  assert.equal(missing.code, 401);
+  assert.match(JSON.stringify(missing.body), /Authentication required/);
+
+  for (const role of ["grant_manager", "user"]) {
+    const denied = await call({ role });
+    assert.equal(denied.code, 403);
+    const body = JSON.stringify(denied.body);
+    assert.match(body, /Founder session required/);
+    assert.doesNotMatch(body, /secret|password|token|webhook/i);
+  }
+
+  for (const role of ["founder", "owner"]) {
+    const allowed = await call({ role });
+    assert.equal(allowed.code, 200);
+    const body = allowed.body as { readOnly?: boolean; messages?: unknown[] };
+    assert.equal(body.readOnly, true);
+    assert.deepEqual(body.messages, []);
+  }
 });
 
 test("draft suggestion is stored locally and Aura answers do not invent a count", async () => {
