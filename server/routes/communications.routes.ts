@@ -8,6 +8,7 @@ import { enqueueNotification } from "../hq/notificationQueue";
 import { loadEnterpriseNotificationVisibility } from "../hq/enterpriseNotificationVisibility";
 import { ingestInboundMailHttp, listInboundMailHttp, saveInboundDraftSuggestion } from "../hq/inboundBusinessMail";
 import { generateInboundReplyDraftHttp, reviewInboundReplyDraftHttp } from "../hq/inboundReplyDraft";
+import { sendFounderApprovedDraftHttp } from "../hq/inboundOutboundMail";
 import { graphAuthReadinessHttp, graphMailboxHealthHttp, graphMailboxPollOnceHttp, graphMailboxSyncOnceHttp, startMicrosoftGraphMailboxSync } from "../hq/microsoftGraphMailbox";
 import { getDb as getInboundDb } from "../db";
 
@@ -72,6 +73,10 @@ router.post("/inbound-mail/:id/aura-draft", async (req, res) => {
 
 router.post("/inbound-mail/:id/aura-draft/review", async (req, res) => {
   await reviewInboundReplyDraftHttp(req, res);
+});
+
+router.post("/inbound-mail/:id/aura-draft/send", async (req, res) => {
+  await sendFounderApprovedDraftHttp(req, res);
 });
 
 router.get("/overview", async (_req, res) => {

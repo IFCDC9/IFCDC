@@ -55,6 +55,12 @@ export const communicationsApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, replyText }),
     }),
+  sendApprovedInboundReply: (id: string, confirmSend: true) =>
+    api<OutboundSendResult>(`/inbound-mail/${encodeURIComponent(id)}/aura-draft/send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmSend }),
+    }),
   sendMessage: (data: { to_email: string; to_name?: string; subject: string; body: string }) =>
     api("/messages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
   markRead: (id: string) =>
@@ -192,6 +198,24 @@ export interface InboundReplyDraftResult {
   status: string;
   activeApproval: boolean;
   draft: InboundReplyDraft;
+}
+
+export interface OutboundSendResult {
+  sent: boolean;
+  status: string;
+  errorCode: string | null;
+  changed: boolean;
+  record: {
+    id: string;
+    draftId: string;
+    actorRole: string;
+    timestamp: string;
+    status: string;
+    providerMessageId: string | null;
+    errorCode: string | null;
+    duplicateKey: string | null;
+    attachmentsNote: string;
+  } | null;
 }
 
 export interface HQMessage {

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Megaphone, Mail, Send, Plus, Inbox, Bell, Users, PhoneCall } from "lucide-react";
 import HQLayout from "../../layouts/HQLayout";
-import { communicationsApi, type InboundReplyDraft } from "../../api/communicationsApi";
+import { communicationsApi, type InboundReplyDraft, type OutboundSendResult } from "../../api/communicationsApi";
 import { enterpriseApi } from "../../api/enterpriseApi";
 import { useAuth } from "../../auth/AuthContext";
 import { KpiCard } from "../../components/hq/KpiCard";
@@ -25,6 +25,8 @@ const CommunicationsCenterPage: React.FC = () => {
   const [inboundView, setInboundView] = useState("inbound");
   const [replyDrafts, setReplyDrafts] = useState<Record<string, InboundReplyDraft>>({});
   const [replyEdits, setReplyEdits] = useState<Record<string, string>>({});
+  const [sendConfirmed, setSendConfirmed] = useState<Record<string, boolean>>({});
+  const [sendResults, setSendResults] = useState<Record<string, OutboundSendResult>>({});
   const [showAnnounce, setShowAnnounce] = useState(false);
   const [announceForm, setAnnounceForm] = useState({ title: "", body: "", priority: "normal" });
   const [msgForm, setMsgForm] = useState({ to_email: "", to_name: "", subject: "", body: "" });
@@ -106,6 +108,11 @@ const CommunicationsCenterPage: React.FC = () => {
     mutationFn: (input: { id: string; action: "approve" | "edit" | "reject" | "save-for-later"; replyText?: string }) =>
       communicationsApi.reviewInboundReplyDraft(input.id, input.action, input.replyText),
     onSuccess: (result) => rememberDraft(result.draft),
+  });
+  const sendApprovedReply = useMutation({
+    retry: false,
+    mutationFn: (id: string) => communicationsApi.sendApprovedInboundReply(id, true),
+    onSuccess: (result, id) => setSendResults((current) => ({ ...current, [id]: result })),
   });
 
   const markRead = useMutation({
@@ -430,6 +437,31 @@ const CommunicationsCenterPage: React.FC = () => {
                                   <button type="button" className="hq-btn hq-btn-secondary hq-btn-sm" onClick={() => reviewReplyDraft.mutate({ id: message.id, action: "approve" })}>Approve</button>
                                   <button type="button" className="hq-btn hq-btn-ghost hq-btn-sm" onClick={() => reviewReplyDraft.mutate({ id: message.id, action: "reject" })}>Reject</button>
                                   <button type="button" className="hq-btn hq-btn-ghost hq-btn-sm" onClick={() => reviewReplyDraft.mutate({ id: message.id, action: "save-for-later" })}>Save for later</button>
+                                </div>
+                              )}
+                              {replyDrafts[message.id].status === "FOUNDER APPROVED" && (
+                                <div style={{ marginTop: "0.5rem" }}>
+                                  <p>Approval does not send. Sending is a separate action.</p>
+                                  <label style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={sendConfirmed[message.id] === true}
+                                      onChange={(event) => setSendConfirmed((current) => ({ ...current, [message.id]: event.target.checked }))}
+                                    />
+                                    Confirm send
+                                  </label>
+                                  <button
+                                    type="button"
+                                    className="hq-btn hq-btn-secondary hq-btn-sm"
+                                    style={{ marginTop: "0.35rem" }}
+                                    disabled={sendConfirmed[message.id] !== true || sendApprovedReply.isPending}
+                                    onClick={() => sendApprovedReply.mutate(message.id)}
+                                  >
+                                    Send approved reply
+                                  </button>
+                                  {sendResults[message.id] && (
+                                    <p>Send status: {sendResults[message.id].status}. {sendResults[message.id].sent ? "Sent." : "Not sent."}</p>
+                                  )}
                                 </div>
                               )}
                             </div>
