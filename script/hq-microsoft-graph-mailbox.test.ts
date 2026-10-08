@@ -15,6 +15,8 @@ import {
 } from "../server/hq/inboundBusinessMail";
 import {
   GRAPH_SCOPE,
+  checkGraphAuthenticationReadiness,
+  graphAuthReadinessHttp,
   graphMailboxHealth,
   graphMailboxHealthHttp,
   pollMicrosoftGraphMailbox,
@@ -318,12 +320,92 @@ type GraphHealth = {
   graphReadReady: boolean;
 };
 
+function readinessToken(roles: string[]): string {
+  const payload = Buffer.from(JSON.stringify({ roles })).toString("base64url");
+  return `fixture-header.${payload}.fixture-sig`;
+}
+
+test("graph auth readiness stays local until a token request is allowed", async () => {
+  let called = false;
+  const fetchImpl: typeof fetch = async () => {
+    called = true;
+    throw new Error(FIXTURE_SECRET);
+  };
+  const missing = await checkGraphAuthenticationReadiness({
+    fetchImpl,
+    env: { MICROSOFT_GRAPH_CLIENT_SECRET: " " },
+  });
+  assert.equal(called, false);
+  assert.deepEqual(missing, {
+    graphAuthenticationReady: false,
+    mailReadAuthorityAvailable: false,
+    httpStatus: 0,
+    errorCode: "not_configured",
+    mailSendPresent: false,
+  });
+
+  const token = readinessToken(["Mail.Read"]);
+  const calls: string[] = [];
+  const okFetch: typeof fetch = async (input, init) => {
+    const url = String(input);
+    calls.push(url);
+    assert.equal(init?.method, "POST");
+    assert.equal(url.includes("/messages"), false);
+    return new Response(JSON.stringify({ access_token: token, token_type: "Bearer" }), { status: 200 });
+  };
+  const { state, res } = mockRes();
+  await graphAuthReadinessHttp({ hqUser: { role: "founder" } } as Request, res, {
+    env: configuredEnv,
+    fetchImpl: okFetch,
+  });
+  assert.equal(state.code, 200);
+  assert.deepEqual(state.body, {
+    graphAuthenticationReady: true,
+    mailReadAuthorityAvailable: true,
+    httpStatus: 200,
+    errorCode: null,
+    mailSendPresent: false,
+  });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /\/oauth2\/v2\.0\/token$/);
+  const encoded = JSON.stringify(state.body);
+  assert.equal(encoded.includes(FIXTURE_SECRET), false);
+  assert.equal(encoded.includes(token), false);
+  assert.equal(encoded.includes("fixture-header"), false);
+
+  const deniedFetch: typeof fetch = async () => new Response(JSON.stringify({
+    error: "invalid_client",
+    error_description: FIXTURE_SECRET,
+  }), { status: 401 });
+  const denied = await checkGraphAuthenticationReadiness({ fetchImpl: deniedFetch, env: configuredEnv });
+  assert.equal(denied.graphAuthenticationReady, false);
+  assert.equal(denied.errorCode, "invalid_client");
+  assert.equal(JSON.stringify(denied).includes(FIXTURE_SECRET), false);
+  assert.equal(JSON.stringify(denied).includes("error_description"), false);
+
+  const locked = async (hqUser: { role?: string } | undefined) => {
+    const mocked = mockRes();
+    await graphAuthReadinessHttp({ hqUser } as Request, mocked.res, {
+      env: configuredEnv,
+      fetchImpl: okFetch,
+    });
+    return mocked.state;
+  };
+  const anon = await locked(undefined);
+  assert.equal(anon.code, 401);
+  const other = await locked({ role: "grant_manager" });
+  assert.equal(other.code, 403);
+  assert.equal(calls.length, 1);
+});
+
 test("connector source does not send, poll on boot, or change Phase 4A", () => {
   const connector = source("server/hq/microsoftGraphMailbox.ts");
   const routes = source("server/routes/communications.routes.ts");
   const boot = source("server/bootstrap/initializeHqModules.ts");
   assert.equal(GRAPH_SCOPE, "https://graph.microsoft.com/.default");
-  assert.doesNotMatch(connector, /sendMail|Mail\.Send|createReply|\/\$value|setInterval|setTimeout/);
+  assert.doesNotMatch(connector, /sendMail|createReply|\/\$value|setInterval|setTimeout/);
+  assert.equal(connector.includes("roles.includes(\"Mail.Send\")"), true);
+  assert.doesNotMatch(connector, /\/sendMail|method:\s*"PATCH"|method:\s*"DELETE"/);
   assert.match(routes, /router\.get\("\/inbound-mail\/mailbox-health"/);
   assert.match(routes, /sent: false/);
   assert.doesNotMatch(boot, /microsoftGraphMailbox|pollMicrosoftGraphMailbox/);

@@ -7,7 +7,7 @@ import { sendHqNotification } from "../lib/notifications";
 import { enqueueNotification } from "../hq/notificationQueue";
 import { loadEnterpriseNotificationVisibility } from "../hq/enterpriseNotificationVisibility";
 import { ingestInboundMailHttp, listInboundMailHttp, saveInboundDraftSuggestion } from "../hq/inboundBusinessMail";
-import { graphMailboxHealthHttp } from "../hq/microsoftGraphMailbox";
+import { graphAuthReadinessHttp, graphMailboxHealthHttp } from "../hq/microsoftGraphMailbox";
 import { getDb as getInboundDb } from "../db";
 
 const router = Router();
@@ -26,6 +26,10 @@ router.get("/inbound-mail", async (req, res) => {
 
 router.get("/inbound-mail/mailbox-health", async (req, res) => {
   await graphMailboxHealthHttp(req, res);
+});
+
+router.get("/graph-auth-readiness", async (req, res) => {
+  await graphAuthReadinessHttp(req, res);
 });
 
 router.post("/inbound-mail", async (req, res) => {

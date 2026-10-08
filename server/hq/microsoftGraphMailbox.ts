@@ -99,6 +99,117 @@ export async function graphMailboxHealthHttp(req: Request, res: Response, env: G
   res.json(graphMailboxHealth(env));
 }
 
+export type GraphAuthReadiness = {
+  graphAuthenticationReady: boolean;
+  mailReadAuthorityAvailable: boolean;
+  httpStatus: number;
+  errorCode: string | null;
+  mailSendPresent: boolean;
+};
+
+function notConfiguredReadiness(): GraphAuthReadiness {
+  return {
+    graphAuthenticationReady: false,
+    mailReadAuthorityAvailable: false,
+    httpStatus: 0,
+    errorCode: "not_configured",
+    mailSendPresent: false,
+  };
+}
+
+function failedReadiness(httpStatus: number, errorCode: string | null): GraphAuthReadiness {
+  return {
+    graphAuthenticationReady: false,
+    mailReadAuthorityAvailable: false,
+    httpStatus,
+    errorCode,
+    mailSendPresent: false,
+  };
+}
+
+function safeOAuthErrorCode(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  if (!/^[A-Za-z0-9_]{1,64}$/.test(value)) return null;
+  return value;
+}
+
+function rolesFromAccessToken(token: string): string[] {
+  const payload = token.split(".")[1];
+  if (!payload) return [];
+  try {
+    const padded = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const json = JSON.parse(Buffer.from(padded, "base64").toString("utf8")) as { roles?: unknown };
+    if (!Array.isArray(json.roles)) return [];
+    return json.roles.filter((role): role is string => typeof role === "string");
+  } catch {
+    return [];
+  }
+}
+
+export async function checkGraphAuthenticationReadiness(options: {
+  fetchImpl?: typeof fetch;
+  env?: GraphEnv;
+} = {}): Promise<GraphAuthReadiness> {
+  const config = readGraphMailboxConfig(options.env ?? process.env);
+  if (!config.microsoftGraphConfigured) return notConfiguredReadiness();
+
+  const fetchImpl = options.fetchImpl ?? fetch;
+  try {
+    const tokenBody = new URLSearchParams({
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      scope: GRAPH_SCOPE,
+      grant_type: "client_credentials",
+    });
+    const tokenResponse = await fetchImpl(
+      `https://login.microsoftonline.com/${encodeURIComponent(config.tenantId)}/oauth2/v2.0/token`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: tokenBody.toString(),
+      },
+    );
+    if (!tokenResponse.ok) {
+      let errorCode = "token_request_failed";
+      try {
+        const failure = await tokenResponse.json() as { error?: unknown };
+        errorCode = safeOAuthErrorCode(failure.error) ?? "token_request_failed";
+      } catch {
+        errorCode = "token_request_failed";
+      }
+      return failedReadiness(tokenResponse.status, errorCode);
+    }
+    const tokenPayload = await tokenResponse.json() as { access_token?: unknown };
+    const accessToken = typeof tokenPayload.access_token === "string" ? tokenPayload.access_token : "";
+    if (!accessToken) return failedReadiness(tokenResponse.status, "token_request_failed");
+    const roles = rolesFromAccessToken(accessToken);
+    const mailReadAuthorityAvailable = roles.includes("Mail.Read");
+    const mailSendPresent = roles.includes("Mail.Send");
+    return {
+      graphAuthenticationReady: true,
+      mailReadAuthorityAvailable,
+      httpStatus: tokenResponse.status,
+      errorCode: null,
+      mailSendPresent,
+    };
+  } catch {
+    return failedReadiness(0, "token_request_failed");
+  }
+}
+
+export async function graphAuthReadinessHttp(
+  req: Request,
+  res: Response,
+  options: { env?: GraphEnv; fetchImpl?: typeof fetch } = {},
+): Promise<void> {
+  const status = inboundMailSessionStatus(req.hqUser);
+  if (status) {
+    res.status(status).json({ error: status === 401 ? "Authentication required" : "Founder session required" });
+    return;
+  }
+  res.json(await checkGraphAuthenticationReadiness(options));
+}
+
 function inboxMessagesUrl(mailbox: string): string {
   const select = "id,conversationId,subject,from,toRecipients,receivedDateTime,body,hasAttachments";
   const expand = "attachments($select=name,contentType,size)";
