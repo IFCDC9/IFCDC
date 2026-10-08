@@ -47,6 +47,14 @@ export const communicationsApi = {
     api<{ messages: HQMessage[] }>(`/messages?folder=${folder ?? "inbox"}`),
   inboundMail: (view?: string) =>
     api<{ readOnly: boolean; messages: InboundBusinessMail[] }>(`/inbound-mail${view ? `?view=${encodeURIComponent(view)}` : ""}`),
+  createInboundReplyDraft: (id: string) =>
+    api<InboundReplyDraftResult>(`/inbound-mail/${encodeURIComponent(id)}/aura-draft`, { method: "POST" }),
+  reviewInboundReplyDraft: (id: string, action: "approve" | "edit" | "reject" | "save-for-later", replyText?: string) =>
+    api<InboundReplyDraftResult>(`/inbound-mail/${encodeURIComponent(id)}/aura-draft/review`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, replyText }),
+    }),
   sendMessage: (data: { to_email: string; to_name?: string; subject: string; body: string }) =>
     api("/messages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
   markRead: (id: string) =>
@@ -150,6 +158,40 @@ export interface InboundBusinessMail {
   attachments: Array<{ filename: string; contentType: string; size: number }>;
   draftSuggestion: string | null;
   readAt: string | null;
+}
+
+export interface InboundReplyDraftSummary {
+  whoSent: string;
+  organization: string;
+  whatTheyWant: string;
+  priority: string;
+  deadline: string;
+  recommendedResponse: string;
+  risk: string;
+}
+
+export interface InboundReplyDraft {
+  inboundId: string;
+  status: string;
+  sent: false;
+  activeApproval: boolean;
+  providerMessageId: string;
+  threadId: string | null;
+  senderName: string | null;
+  senderAddress: string;
+  subject: string;
+  contextSummary: string;
+  linked: { kind: string; id: string } | null;
+  replyText: string;
+  summary: InboundReplyDraftSummary;
+  hqContext: string;
+}
+
+export interface InboundReplyDraftResult {
+  sent: false;
+  status: string;
+  activeApproval: boolean;
+  draft: InboundReplyDraft;
 }
 
 export interface HQMessage {

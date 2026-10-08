@@ -385,6 +385,12 @@ export async function listInboundBusinessMail(db: MailDb, view: InboundView = "i
   return filterInboundMail(rows.map(rowToStored), view);
 }
 
+export async function getInboundBusinessMail(db: MailDb, id: string): Promise<StoredInboundMail | null> {
+  await ensureInboundBusinessMailTables(db);
+  const row = await db.get<Row>("SELECT * FROM hq_inbound_business_mail WHERE id = ?", id);
+  return row ? rowToStored(row) : null;
+}
+
 export async function saveInboundDraftSuggestion(db: MailDb, id: string, suggestion: string): Promise<StoredInboundMail | null> {
   await ensureInboundBusinessMailTables(db);
   const existing = await db.get<Row>("SELECT id FROM hq_inbound_business_mail WHERE id = ?", id);

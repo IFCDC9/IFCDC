@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Megaphone, Mail, Send, Plus, Inbox, Bell, Users, PhoneCall } from "lucide-react";
 import HQLayout from "../../layouts/HQLayout";
-import { communicationsApi } from "../../api/communicationsApi";
+import { communicationsApi, type InboundReplyDraft } from "../../api/communicationsApi";
 import { enterpriseApi } from "../../api/enterpriseApi";
 import { useAuth } from "../../auth/AuthContext";
 import { KpiCard } from "../../components/hq/KpiCard";
@@ -23,6 +23,8 @@ const CommunicationsCenterPage: React.FC = () => {
   const [tab, setTab] = useState<Tab>("announcements");
   const [noticeGroup, setNoticeGroup] = useState("");
   const [inboundView, setInboundView] = useState("inbound");
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, InboundReplyDraft>>({});
+  const [replyEdits, setReplyEdits] = useState<Record<string, string>>({});
   const [showAnnounce, setShowAnnounce] = useState(false);
   const [announceForm, setAnnounceForm] = useState({ title: "", body: "", priority: "normal" });
   const [msgForm, setMsgForm] = useState({ to_email: "", to_name: "", subject: "", body: "" });
@@ -89,6 +91,21 @@ const CommunicationsCenterPage: React.FC = () => {
   const broadcastSegment = useMutation({
     mutationFn: communicationsApi.broadcastSegment,
     onSuccess: () => setCampaignForm({ segment: "employees", subject: "", body: "", channel: "email" }),
+  });
+
+  const canReviewDrafts = user?.role === "founder" || user?.role === "owner";
+  const rememberDraft = (draft: InboundReplyDraft) => {
+    setReplyDrafts((current) => ({ ...current, [draft.inboundId]: draft }));
+    setReplyEdits((current) => ({ ...current, [draft.inboundId]: draft.replyText }));
+  };
+  const generateReplyDraft = useMutation({
+    mutationFn: (id: string) => communicationsApi.createInboundReplyDraft(id),
+    onSuccess: (result) => rememberDraft(result.draft),
+  });
+  const reviewReplyDraft = useMutation({
+    mutationFn: (input: { id: string; action: "approve" | "edit" | "reject" | "save-for-later"; replyText?: string }) =>
+      communicationsApi.reviewInboundReplyDraft(input.id, input.action, input.replyText),
+    onSuccess: (result) => rememberDraft(result.draft),
   });
 
   const markRead = useMutation({
@@ -337,7 +354,7 @@ const CommunicationsCenterPage: React.FC = () => {
 
         {tab === "founder-inbox" && (
           founderInbox.isLoading ? <HqLoading /> : (
-            <HqPanel title="Founder Inbox" subtitle="Read-only inbound business mail. Nothing here is sent, replied, or deleted.">
+            <HqPanel title="Founder Inbox" subtitle="Inbound business mail. A draft stays here until the Founder approves it. Approval does not send.">
               <label style={{ display: "block", marginBottom: "0.75rem", fontSize: "0.8rem" }}>
                 View
                 <select value={inboundView} onChange={(event) => setInboundView(event.target.value)} style={{ marginLeft: "0.5rem" }}>
@@ -378,6 +395,46 @@ const CommunicationsCenterPage: React.FC = () => {
                       )}
                       {message.draftSuggestion && (
                         <p style={{ fontSize: "0.78rem", marginTop: "0.35rem" }}>Draft suggestion, not sent: {message.draftSuggestion}</p>
+                      )}
+                      {canReviewDrafts && (
+                        <div style={{ marginTop: "0.5rem" }}>
+                          <button
+                            type="button"
+                            className="hq-btn hq-btn-secondary hq-btn-sm"
+                            disabled={generateReplyDraft.isPending}
+                            onClick={() => generateReplyDraft.mutate(message.id)}
+                          >
+                            Draft reply
+                          </button>
+                          {replyDrafts[message.id] && (
+                            <div style={{ marginTop: "0.5rem", fontSize: "0.78rem" }}>
+                              <StatusBadge label={replyDrafts[message.id].status} variant={replyDrafts[message.id].activeApproval ? "warning" : "muted"} />
+                              <p style={{ marginTop: "0.35rem" }}>Not sent.</p>
+                              <p>Who sent it: {replyDrafts[message.id].summary.whoSent}</p>
+                              <p>Organization: {replyDrafts[message.id].summary.organization}</p>
+                              <p>What they want: {replyDrafts[message.id].summary.whatTheyWant}</p>
+                              <p>Priority: {replyDrafts[message.id].summary.priority}</p>
+                              <p>Deadline: {replyDrafts[message.id].summary.deadline}</p>
+                              <p>Recommended response: {replyDrafts[message.id].summary.recommendedResponse}</p>
+                              <p>Risk: {replyDrafts[message.id].summary.risk}</p>
+                              <textarea
+                                className="hq-input"
+                                rows={5}
+                                value={replyEdits[message.id] ?? replyDrafts[message.id].replyText}
+                                onChange={(event) => setReplyEdits((current) => ({ ...current, [message.id]: event.target.value }))}
+                                disabled={!replyDrafts[message.id].activeApproval}
+                              />
+                              {replyDrafts[message.id].activeApproval && (
+                                <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", marginTop: "0.4rem" }}>
+                                  <button type="button" className="hq-btn hq-btn-secondary hq-btn-sm" onClick={() => reviewReplyDraft.mutate({ id: message.id, action: "edit", replyText: replyEdits[message.id] })}>Edit</button>
+                                  <button type="button" className="hq-btn hq-btn-secondary hq-btn-sm" onClick={() => reviewReplyDraft.mutate({ id: message.id, action: "approve" })}>Approve</button>
+                                  <button type="button" className="hq-btn hq-btn-ghost hq-btn-sm" onClick={() => reviewReplyDraft.mutate({ id: message.id, action: "reject" })}>Reject</button>
+                                  <button type="button" className="hq-btn hq-btn-ghost hq-btn-sm" onClick={() => reviewReplyDraft.mutate({ id: message.id, action: "save-for-later" })}>Save for later</button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                     <div style={{ fontSize: "0.72rem", color: "var(--hq-text-dim)" }}>{new Date(message.receivedAt).toLocaleString()}</div>
