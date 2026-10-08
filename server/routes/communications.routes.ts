@@ -7,7 +7,7 @@ import { sendHqNotification } from "../lib/notifications";
 import { enqueueNotification } from "../hq/notificationQueue";
 import { loadEnterpriseNotificationVisibility } from "../hq/enterpriseNotificationVisibility";
 import { ingestInboundMailHttp, listInboundMailHttp, saveInboundDraftSuggestion } from "../hq/inboundBusinessMail";
-import { graphAuthReadinessHttp, graphMailboxHealthHttp, graphMailboxPollOnceHttp } from "../hq/microsoftGraphMailbox";
+import { graphAuthReadinessHttp, graphMailboxHealthHttp, graphMailboxPollOnceHttp, graphMailboxSyncOnceHttp, startMicrosoftGraphMailboxSync } from "../hq/microsoftGraphMailbox";
 import { getDb as getInboundDb } from "../db";
 
 const router = Router();
@@ -34,6 +34,10 @@ router.get("/graph-auth-readiness", async (req, res) => {
 
 router.post("/graph-mailbox-poll-once", async (req, res) => {
   await graphMailboxPollOnceHttp(req, res);
+});
+
+router.post("/graph-mailbox-sync-once", async (req, res) => {
+  await graphMailboxSyncOnceHttp(req, res);
 });
 
 router.post("/inbound-mail", async (req, res) => {
@@ -264,5 +268,9 @@ router.get("/voice/live", async (_req, res) => {
     generatedAt: new Date().toISOString(),
   });
 });
+
+if (process.env.NODE_ENV === "production") {
+  startMicrosoftGraphMailboxSync();
+}
 
 export default router;

@@ -19,8 +19,11 @@ import {
   graphAuthReadinessHttp,
   graphMailboxHealth,
   graphMailboxHealthHttp,
+  MAILBOX_SYNC_INTERVAL_MS,
+  mailboxSyncScheduled,
   pollMicrosoftGraphMailbox,
   resetGraphMailboxPollStateForTests,
+  startMicrosoftGraphMailboxSync,
 } from "../server/hq/microsoftGraphMailbox";
 
 const root = new URL("../", import.meta.url);
@@ -271,6 +274,8 @@ test("Graph calls are Mail.Read GETs and do not request attachment bytes", async
   assert.equal(calls[0].body.includes("Mail.Send"), false);
   assert.equal(calls[1].method, "GET");
   assert.match(calls[1].url, /\/mailFolders\/inbox\/messages/);
+  assert.match(calls[1].url, /\$top=5/);
+  assert.match(calls[1].url, /\$orderby=receivedDateTime desc/);
   assert.match(calls[1].url, /\$select=id,conversationId,subject,from,toRecipients,receivedDateTime,body,hasAttachments/);
   assert.match(calls[1].url, /attachments\(\$select=name,contentType,size\)/);
   for (const call of calls) {
@@ -398,17 +403,138 @@ test("graph auth readiness stays local until a token request is allowed", async 
   assert.equal(calls.length, 1);
 });
 
-test("connector source does not send, poll on boot, or change Phase 4A", () => {
+test("incremental sync stores a newer message once and does not duplicate stored ids", async () => {
+  resetGraphMailboxPollStateForTests();
+  const db = await memoryDb();
+  const initial = [graphMessage(), unmatchedMessage()];
+  const newer = {
+    id: "graph-msg-school",
+    conversationId: "thread-school",
+    subject: "School visit",
+    from: { emailAddress: { name: "Principal Ames", address: "ames@lincoln.example" } },
+    toRecipients: [{ emailAddress: { address: FIXTURE_MAILBOX } }],
+    receivedDateTime: "2026-10-08T12:00:00.000Z",
+    body: { contentType: "text", content: "The school principal can visit on October 20, 2026." },
+    hasAttachments: false,
+  };
+  const updatedGrant = {
+    ...graphMessage(),
+    body: {
+      contentType: "text",
+      content: "This grant NOFO needs founder attention. The deadline is 2026-11-01. This is urgent.",
+    },
+  };
+  const deltaLink = "https://graph.microsoft.com/v1.0/users/service@ifcdc.org/mailFolders/inbox/messages/delta?$deltatoken=fixture-delta";
+  const calls: Array<{ url: string; method: string; body: string }> = [];
+  let phase: "initial" | "newer" | "repeat" = "initial";
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = String(input);
+    const method = init?.method || "GET";
+    const body = typeof init?.body === "string" ? init.body : "";
+    calls.push({ url, method, body });
+    if (url.includes("/oauth2/v2.0/token")) {
+      return new Response(JSON.stringify({ access_token: "fixture-access-token" }), { status: 200 });
+    }
+    if (url.includes("$deltatoken=latest")) {
+      return new Response(JSON.stringify({ value: [], "@odata.deltaLink": deltaLink }), { status: 200 });
+    }
+    if (url.includes("$deltatoken=fixture-delta")) {
+      const value = phase === "newer" ? [updatedGrant] : [];
+      return new Response(JSON.stringify({ value, "@odata.deltaLink": deltaLink }), { status: 200 });
+    }
+    if (url.includes("/mailFolders/inbox/messages")) {
+      const filter = decodeURIComponent(url).match(/receivedDateTime gt ([0-9T:.-]+Z)/);
+      const after = filter?.[1] ?? "";
+      const pool = phase === "initial" ? initial : [newer];
+      const value = pool.filter((message) => !after || message.receivedDateTime > after);
+      return new Response(JSON.stringify({ value }), { status: 200 });
+    }
+    return new Response("unexpected", { status: 500 });
+  };
+
+  const first = await pollMicrosoftGraphMailbox({
+    db,
+    fetchImpl,
+    env: configuredEnv,
+    incremental: true,
+    top: 25,
+  });
+  assert.equal(first.status, "ok");
+  assert.equal(first.created, 2);
+  assert.equal(first.updated, 0);
+  assert.equal((await listInboundBusinessMail(db)).length, 2);
+
+  phase = "newer";
+  const second = await pollMicrosoftGraphMailbox({
+    db,
+    fetchImpl,
+    env: configuredEnv,
+    incremental: true,
+    top: 25,
+  });
+  assert.equal(second.created, 1);
+  assert.equal(second.updated, 1);
+  assert.equal(second.alreadyStored, 0);
+  const afterNewer = await listInboundBusinessMail(db);
+  assert.equal(afterNewer.length, 3);
+  const school = afterNewer.find((row) => row.providerMessageId === "graph-msg-school");
+  assert.equal(school?.category, "Schools");
+  assert.equal(school?.urgency, "normal");
+  assert.equal(school?.founderAttention, false);
+  const grant = afterNewer.find((row) => row.providerMessageId === "graph-msg-1");
+  assert.equal(grant?.category, "Grants");
+  assert.equal(grant?.urgency, "high");
+  assert.equal(grant?.founderAttention, true);
+
+  phase = "repeat";
+  const third = await pollMicrosoftGraphMailbox({
+    db,
+    fetchImpl,
+    env: configuredEnv,
+    incremental: true,
+    top: 25,
+  });
+  assert.equal(third.created, 0);
+  assert.equal(third.updated, 0);
+  assert.equal((await listInboundBusinessMail(db)).length, 3);
+
+  const mailboxCalls = calls.filter((call) => !call.url.includes("/oauth2/v2.0/token"));
+  assert.ok(mailboxCalls.length > 0);
+  for (const call of mailboxCalls) {
+    assert.equal(call.method, "GET");
+    assert.match(call.url, /\/mailFolders\/inbox\/messages/);
+    assert.doesNotMatch(call.url, /sendMail|createReply|\/\$value|Mail\.Send|isRead/i);
+  }
+  assert.ok(calls.some((call) => call.url.includes("$top=25") && call.url.includes("$filter=")));
+  assert.equal(calls.some((call) => call.body.includes("Mail.Send")), false);
+  assert.equal(mailboxSyncScheduled(), false);
+});
+
+test("mailbox timer does not start under test", () => {
+  resetGraphMailboxPollStateForTests();
+  assert.equal(process.env.NODE_ENV, "test");
+  assert.equal(mailboxSyncScheduled(), false);
+  startMicrosoftGraphMailboxSync();
+  assert.equal(mailboxSyncScheduled(), false);
+  assert.equal(MAILBOX_SYNC_INTERVAL_MS, 300_000);
+});
+
+test("connector source does not send, poll on import, or change Phase 4A", () => {
   const connector = source("server/hq/microsoftGraphMailbox.ts");
   const routes = source("server/routes/communications.routes.ts");
   const boot = source("server/bootstrap/initializeHqModules.ts");
   assert.equal(GRAPH_SCOPE, "https://graph.microsoft.com/.default");
-  assert.doesNotMatch(connector, /sendMail|createReply|\/\$value|setInterval|setTimeout/);
+  assert.doesNotMatch(connector, /sendMail|createReply|\/\$value|setTimeout/);
+  assert.match(connector, /if \(process\.env\.NODE_ENV !== "production"\) return;/);
+  assert.match(connector, /setInterval\(runScheduledMailboxSync, MAILBOX_SYNC_INTERVAL_MS\)/);
+  assert.equal(connector.includes("startMicrosoftGraphMailboxSync();"), false);
   assert.equal(connector.includes("roles.includes(\"Mail.Send\")"), true);
   assert.doesNotMatch(connector, /\/sendMail|method:\s*"PATCH"|method:\s*"DELETE"/);
   assert.match(routes, /router\.get\("\/inbound-mail\/mailbox-health"/);
+  assert.match(routes, /router\.post\("\/graph-mailbox-sync-once"/);
+  assert.match(routes, /if \(process\.env\.NODE_ENV === "production"\) \{\s*startMicrosoftGraphMailboxSync\(\);/);
   assert.match(routes, /sent: false/);
-  assert.doesNotMatch(boot, /microsoftGraphMailbox|pollMicrosoftGraphMailbox/);
+  assert.doesNotMatch(boot, /microsoftGraphMailbox|pollMicrosoftGraphMailbox|startMicrosoftGraphMailboxSync/);
   const diff = execSync(
     "git diff --name-only -- server/hq/fundingBootGate.ts server/bootstrap/initializeHqModules.ts server/hq/warehouseScheduler.ts server/hq/workflowEngine.ts server/hq/auraProactiveIntelligence.ts server/hq/auraAutonomousOperations.ts script/hq-funding-boot-isolation.test.ts",
     { cwd: fileURLToPath(root) },
