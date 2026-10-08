@@ -25,6 +25,7 @@ export type GraphMailboxHealth = {
 
 export type MailboxPollResult = {
   status: Exclude<MailboxPollStatus, "never">;
+  retrieved: number;
   created: number;
   alreadyStored: number;
 };
@@ -210,10 +211,10 @@ export async function graphAuthReadinessHttp(
   res.json(await checkGraphAuthenticationReadiness(options));
 }
 
-function inboxMessagesUrl(mailbox: string): string {
+function inboxMessagesUrl(mailbox: string, top: number): string {
   const select = "id,conversationId,subject,from,toRecipients,receivedDateTime,body,hasAttachments";
   const expand = "attachments($select=name,contentType,size)";
-  return `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/mailFolders/inbox/messages?$select=${select}&$expand=${expand}&$top=25`;
+  return `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/mailFolders/inbox/messages?$select=${select}&$orderby=receivedDateTime desc&$expand=${expand}&$top=${top}`;
 }
 
 function messageText(body: GraphMessage["body"]): string {
@@ -239,18 +240,24 @@ function recipientList(message: GraphMessage, mailbox: string): string {
 
 function notConfigured(): MailboxPollResult {
   lastMailboxPollStatus = "not_configured";
-  return { status: "not_configured", created: 0, alreadyStored: 0 };
+  return { status: "not_configured", retrieved: 0, created: 0, alreadyStored: 0 };
 }
 
 function failed(): MailboxPollResult {
   lastMailboxPollStatus = "failed";
-  return { status: "failed", created: 0, alreadyStored: 0 };
+  return { status: "failed", retrieved: 0, created: 0, alreadyStored: 0 };
+}
+
+function boundedPollTop(value: number | undefined): number {
+  const requested = Number.isFinite(value) ? Math.floor(value as number) : 5;
+  return Math.min(5, Math.max(1, requested));
 }
 
 export async function pollMicrosoftGraphMailbox(options: {
   db: MailDb;
   fetchImpl?: typeof fetch;
   env?: GraphEnv;
+  top?: number;
 } ): Promise<MailboxPollResult> {
   const env = options.env ?? process.env;
   const config = readGraphMailboxConfig(env);
@@ -258,6 +265,7 @@ export async function pollMicrosoftGraphMailbox(options: {
     return notConfigured();
   }
 
+  const top = boundedPollTop(options.top);
   const fetchImpl = options.fetchImpl ?? fetch;
   try {
     const tokenBody = new URLSearchParams({
@@ -279,7 +287,7 @@ export async function pollMicrosoftGraphMailbox(options: {
     const accessToken = tokenPayload.access_token;
     if (!accessToken) return failed();
 
-    const messagesResponse = await fetchImpl(inboxMessagesUrl(config.mailbox), {
+    const messagesResponse = await fetchImpl(inboxMessagesUrl(config.mailbox, top), {
       method: "GET",
       headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
     });
@@ -289,9 +297,11 @@ export async function pollMicrosoftGraphMailbox(options: {
 
     let created = 0;
     let alreadyStored = 0;
-    for (const message of payload.value) {
+    let retrieved = 0;
+    for (const message of payload.value.slice(0, top)) {
       const providerMessageId = (message.id || "").trim();
       if (!providerMessageId) continue;
+      retrieved += 1;
       const stored = await ingestInboundBusinessMail(options.db, {
         providerMessageId,
         threadId: message.conversationId ?? null,
@@ -309,8 +319,34 @@ export async function pollMicrosoftGraphMailbox(options: {
 
     lastSuccessfulMailboxPoll = new Date().toISOString();
     lastMailboxPollStatus = "ok";
-    return { status: "ok", created, alreadyStored };
+    return { status: "ok", retrieved, created, alreadyStored };
   } catch {
     return failed();
   }
+}
+
+export async function graphMailboxPollOnceHttp(
+  req: Request,
+  res: Response,
+  options: { db?: MailDb; fetchImpl?: typeof fetch; env?: GraphEnv } = {},
+): Promise<void> {
+  const status = inboundMailSessionStatus(req.hqUser);
+  if (status) {
+    res.status(status).json({ error: status === 401 ? "Authentication required" : "Founder session required" });
+    return;
+  }
+  const db = options.db ?? await (await import("../db")).getDb();
+  const result = await pollMicrosoftGraphMailbox({
+    db,
+    fetchImpl: options.fetchImpl,
+    env: options.env,
+    top: 5,
+  });
+  res.json({
+    status: result.status,
+    retrieved: result.retrieved,
+    stored: result.created,
+    alreadyStored: result.alreadyStored,
+    duplicatesCreated: 0,
+  });
 }
