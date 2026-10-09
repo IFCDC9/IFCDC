@@ -12,6 +12,7 @@ import { registerMonolithRoutes, registerMonolithCronRoutes } from "../routes/mo
 import { registerTwilioAuraRoutes } from "../routes/twilioAura.routes";
 import { createTwilioSenders } from "../monolith/twilioHelpers";
 import { resolveTwilioPhoneNumber } from "../hq/twilioIntegrationEngine";
+import { registerExecCredentialReplacement } from "../hq/execCredentialReplacement";
 
 export interface MountApplicationOptions {
   isDev: boolean;
@@ -71,6 +72,7 @@ export async function mountApplication(app: Express, opts: MountApplicationOptio
   };
   registerMonolithRoutes(app, monolithDeps);
   registerMonolithCronRoutes(app, monolithDeps);
+  registerExecCredentialReplacement(app);
 
   const publicDir = getPublicDir();
   app.use(express.static(publicDir, { index: false }));
