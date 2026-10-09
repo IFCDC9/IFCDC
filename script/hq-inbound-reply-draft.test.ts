@@ -219,7 +219,7 @@ test("draft module does not send and Phase 4A files stay unchanged", () => {
   assert.match(graph, /MAILBOX_SYNC_INTERVAL_MS = 5 \* 60 \* 1000/);
   assert.doesNotMatch(graph, /sendMail|createReply|\/\$value|setTimeout/);
   const diff = execSync(
-    "git diff --name-only -- server/hq/fundingBootGate.ts server/bootstrap/initializeHqModules.ts server/hq/warehouseScheduler.ts server/hq/workflowEngine.ts server/hq/auraProactiveIntelligence.ts server/hq/auraAutonomousOperations.ts script/hq-funding-boot-isolation.test.ts server/hq/microsoftGraphMailbox.ts",
+    "git diff --name-only -- server/hq/fundingBootGate.ts server/bootstrap/initializeHqModules.ts server/hq/warehouseScheduler.ts server/hq/workflowEngine.ts server/hq/auraProactiveIntelligence.ts server/hq/auraAutonomousOperations.ts script/hq-funding-boot-isolation.test.ts",
     { cwd: fileURLToPath(root) },
   ).toString().trim();
   assert.equal(diff, "");

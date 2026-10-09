@@ -84,18 +84,56 @@ async function approvedDraft(db: MailDb, providerMessageId: string, subject = "H
   return stored.row.id;
 }
 
+const FIXTURE_GRAPH_TOKEN = "fixture-graph-token";
+const GRAPH_FIXTURE_ENV = {
+  MICROSOFT_GRAPH_TENANT_ID: "fixture-tenant",
+  MICROSOFT_GRAPH_CLIENT_ID: "fixture-client",
+  MICROSOFT_GRAPH_CLIENT_SECRET: "fixture-secret",
+  INBOUND_MAILBOX_ADDRESS: "service@ifcdc.org",
+} as const;
+
+function installGraphFixture() {
+  const previous: Partial<Record<keyof typeof GRAPH_FIXTURE_ENV, string | undefined>> = {};
+  for (const key of Object.keys(GRAPH_FIXTURE_ENV) as Array<keyof typeof GRAPH_FIXTURE_ENV>) {
+    previous[key] = process.env[key];
+    process.env[key] = GRAPH_FIXTURE_ENV[key];
+  }
+  return () => {
+    for (const key of Object.keys(GRAPH_FIXTURE_ENV) as Array<keyof typeof GRAPH_FIXTURE_ENV>) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+  };
+}
+
 async function withGate(value: string | undefined, run: () => Promise<void>) {
   const previousEnv = process.env.IFCDC_OUTBOUND_MAIL_SEND_ENABLED;
   const previousFetch = globalThis.fetch;
+  const restoreGraph = installGraphFixture();
   if (value === undefined) delete process.env.IFCDC_OUTBOUND_MAIL_SEND_ENABLED;
   else process.env.IFCDC_OUTBOUND_MAIL_SEND_ENABLED = value;
   try {
     await run();
   } finally {
     globalThis.fetch = previousFetch;
+    restoreGraph();
     if (previousEnv === undefined) delete process.env.IFCDC_OUTBOUND_MAIL_SEND_ENABLED;
     else process.env.IFCDC_OUTBOUND_MAIL_SEND_ENABLED = previousEnv;
   }
+}
+
+function mockGraphSend(onSend: (url: string, init?: RequestInit) => Response | Promise<Response>) {
+  return (async (url: RequestInfo | URL, init?: RequestInit) => {
+    const href = String(url);
+    if (href.includes("/oauth2/v2.0/token")) {
+      const params = new URLSearchParams(typeof init?.body === "string" ? init.body : "");
+      assert.equal(params.get("scope"), "https://graph.microsoft.com/.default");
+      assert.equal(params.get("grant_type"), "client_credentials");
+      assert.equal((params.get("scope") || "").includes("Mail.Send"), false);
+      return { ok: true, status: 200, json: async () => ({ access_token: FIXTURE_GRAPH_TOKEN }) };
+    }
+    return onSend(href, init);
+  }) as typeof fetch;
 }
 
 test("send gate defaults off and does not call fetch", async () => {
@@ -159,15 +197,21 @@ test("unapproved draft cannot send and approve does not send", async () => {
 test("approved confirmSend uses the service mailbox send URL once", async () => {
   const db = await memoryDb();
   const id = await approvedDraft(db, "msg-send-once", "Hello from Alex", "Thanks. Please see the attachment list later.");
-  const calls: Array<{ url: string; method?: string; body?: string }> = [];
+  const calls: Array<{ url: string; method?: string; body?: string; authorization?: string }> = [];
   let pendingDuring = "";
   await withGate("true", async () => {
-    globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = mockGraphSend(async (url, init) => {
       const row = await db.get<{ status: string }>("SELECT status FROM hq_inbound_outbound_sends WHERE draft_id = ?", id);
       pendingDuring = row?.status || "";
-      calls.push({ url: String(url), method: init?.method, body: typeof init?.body === "string" ? init.body : "" });
+      const headers = new Headers(init?.headers);
+      calls.push({
+        url,
+        method: init?.method,
+        body: typeof init?.body === "string" ? init.body : "",
+        authorization: headers.get("authorization") || "",
+      });
       return { status: 202, json: async () => ({ id: "mock-graph-1" }) };
-    }) as typeof fetch;
+    });
     const result = await send(db, id, { confirmSend: true }, { role: "owner" });
     assert.equal(result.body?.sent, true);
     assert.equal(result.body?.status, "sent");
@@ -175,6 +219,8 @@ test("approved confirmSend uses the service mailbox send URL once", async () => 
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, GRAPH_SEND_MAIL_URL);
     assert.equal(calls[0].method, "POST");
+    assert.equal(calls[0].authorization, `Bearer ${FIXTURE_GRAPH_TOKEN}`);
+    assert.equal(calls[0].authorization.includes(GRAPH_FIXTURE_ENV.MICROSOFT_GRAPH_CLIENT_SECRET), false);
     assert.match(calls[0].url, /\/users\/service@ifcdc\.org\/sendMail$/);
     assert.doesNotMatch(calls[0].url, /mailFolders\/inbox/);
     const payload = JSON.parse(calls[0].body || "{}");
@@ -219,10 +265,10 @@ test("a second confirmSend does not call the provider again", async () => {
   const id = await approvedDraft(db, "msg-duplicate");
   let calls = 0;
   await withGate("true", async () => {
-    globalThis.fetch = (async () => {
+    globalThis.fetch = mockGraphSend(() => {
       calls += 1;
       return { status: 202, json: async () => ({ id: "mock-graph-once" }) };
-    }) as typeof fetch;
+    });
     const first = await send(db, id, { confirmSend: true });
     const second = await send(db, id, { confirmSend: true });
     assert.equal(first.body?.sent, true);
@@ -238,13 +284,14 @@ test("a mocked provider error is recorded once and does not retry", async () => 
   const id = await approvedDraft(db, "msg-failed");
   let calls = 0;
   await withGate("true", async () => {
-    globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = mockGraphSend((url, init) => {
       calls += 1;
-      assert.equal(String(url), GRAPH_SEND_MAIL_URL);
+      assert.equal(url, GRAPH_SEND_MAIL_URL);
       assert.equal(init?.method, "POST");
-      assert.doesNotMatch(String(url), /mailFolders\/inbox|isRead/);
+      assert.equal(new Headers(init?.headers).get("authorization"), `Bearer ${FIXTURE_GRAPH_TOKEN}`);
+      assert.doesNotMatch(url, /mailFolders\/inbox|isRead/);
       return { status: 503, json: async () => ({ error: { code: "ErrorSendAsDenied" } }) };
-    }) as typeof fetch;
+    });
     const failed = await send(db, id, { confirmSend: true });
     assert.equal(failed.body?.sent, false);
     assert.equal(failed.body?.status, "failed");
@@ -252,6 +299,27 @@ test("a mocked provider error is recorded once and does not retry", async () => 
     assert.equal(calls, 1);
     const draft = await db.get<{ status: string }>("SELECT status FROM hq_inbound_reply_drafts WHERE inbound_id = ?", id);
     assert.equal(draft?.status, "FOUNDER APPROVED");
+  });
+});
+
+test("an authentication failure is recorded once and does not send", async () => {
+  const db = await memoryDb();
+  const id = await approvedDraft(db, "msg-auth-failed");
+  const calls: string[] = [];
+  await withGate("true", async () => {
+    globalThis.fetch = (async (url: RequestInfo | URL) => {
+      calls.push(String(url));
+      return { status: 401, json: async () => ({ error: "invalid_client" }) };
+    }) as typeof fetch;
+    const failed = await send(db, id, { confirmSend: true });
+    assert.equal(failed.body?.sent, false);
+    assert.equal(failed.body?.status, "failed");
+    assert.equal((failed.body?.record as { errorCode?: string }).errorCode, "invalid_client");
+    assert.equal(JSON.stringify(failed.body).includes(FIXTURE_GRAPH_TOKEN), false);
+    assert.equal(JSON.stringify(failed.body).includes(GRAPH_FIXTURE_ENV.MICROSOFT_GRAPH_CLIENT_SECRET), false);
+    assert.equal(calls.length, 1);
+    assert.match(calls[0], /\/oauth2\/v2\.0\/token$/);
+    assert.doesNotMatch(calls[0], /sendMail/);
   });
 });
 
@@ -302,15 +370,15 @@ test("aura can read outbound draft counts and does not send", async () => {
   const failedId = await approvedDraft(db, "msg-aura-failed");
   let calls = 0;
   await withGate("true", async () => {
-    globalThis.fetch = (async () => {
+    globalThis.fetch = mockGraphSend(() => {
       calls += 1;
       return { status: 202, json: async () => ({ id: "mock-aura-sent" }) };
-    }) as typeof fetch;
+    });
     await send(db, sentId, { confirmSend: true });
-    globalThis.fetch = (async () => {
+    globalThis.fetch = mockGraphSend(() => {
       calls += 1;
       return { status: 500, json: async () => ({ error: { code: "ErrorTemporary" } }) };
-    }) as typeof fetch;
+    });
     await send(db, failedId, { confirmSend: true });
   });
   await db.run(
@@ -348,12 +416,15 @@ test("outbound module leaves the read sync and Phase 4A files unchanged", () => 
   assert.match(outbound, /SERVICE_MAILBOX = "service@ifcdc.org"/);
   assert.match(outbound, /\$\{SERVICE_MAILBOX\}\/sendMail/);
   assert.match(outbound, /application Mail\.Send only/);
+  assert.match(outbound, /Authorization: `Bearer \$\{token\.accessToken\}`/);
   assert.doesNotMatch(outbound, /mailFolders\/inbox|startMicrosoftGraphMailboxSync|setInterval/);
   assert.doesNotMatch(draft, /sendMail|graph\.microsoft\.com|Mail\.Send/);
   assert.match(graph, /MAILBOX_SYNC_INTERVAL_MS = 5 \* 60 \* 1000/);
+  assert.match(graph, /acquireGraphApplicationToken/);
+  assert.match(graph, /scope: GRAPH_SCOPE/);
   assert.doesNotMatch(graph, /sendMail|createReply|\/\$value|setTimeout/);
   const diff = execSync(
-    "git diff --name-only -- server/hq/fundingBootGate.ts server/bootstrap/initializeHqModules.ts server/hq/warehouseScheduler.ts server/hq/workflowEngine.ts server/hq/auraProactiveIntelligence.ts server/hq/auraAutonomousOperations.ts script/hq-funding-boot-isolation.test.ts server/hq/microsoftGraphMailbox.ts",
+    "git diff --name-only -- server/hq/fundingBootGate.ts server/bootstrap/initializeHqModules.ts server/hq/warehouseScheduler.ts server/hq/workflowEngine.ts server/hq/auraProactiveIntelligence.ts server/hq/auraAutonomousOperations.ts script/hq-funding-boot-isolation.test.ts",
     { cwd: fileURLToPath(root) },
   ).toString().trim();
   assert.equal(diff, "");

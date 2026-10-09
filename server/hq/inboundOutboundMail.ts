@@ -11,6 +11,7 @@
 import { randomUUID } from "node:crypto";
 import type { Request, Response } from "express";
 import { inboundMailSessionStatus, type MailDb } from "./inboundBusinessMail";
+import { acquireGraphApplicationToken } from "./microsoftGraphMailbox";
 
 export const SERVICE_MAILBOX = "service@ifcdc.org";
 export const GRAPH_SEND_MAIL_URL = `https://graph.microsoft.com/v1.0/users/${SERVICE_MAILBOX}/sendMail`;
@@ -309,6 +310,18 @@ export async function sendFounderApprovedDraft(db: MailDb, input: SendInput): Pr
     return { httpStatus: 200, ...resultFrom(record, false) };
   }
 
+  const token = await acquireGraphApplicationToken();
+  if (!("accessToken" in token)) {
+    const record = await insertRecord(db, {
+      draftId: draft.inboundId,
+      actorRole: input.actorRole,
+      status: "failed",
+      errorCode: token.errorCode,
+      attachmentsNote,
+    });
+    return { httpStatus: 200, ...resultFrom(record, true) };
+  }
+
   const pending = await insertRecord(db, {
     draftId: draft.inboundId,
     actorRole: input.actorRole,
@@ -322,7 +335,10 @@ export async function sendFounderApprovedDraft(db: MailDb, input: SendInput): Pr
   try {
     const response = await fetch(GRAPH_SEND_MAIL_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token.accessToken}`,
+      },
       body: JSON.stringify(payload),
     });
     ok = response.status === 202;

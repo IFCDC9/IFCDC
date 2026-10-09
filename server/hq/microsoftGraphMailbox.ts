@@ -163,26 +163,16 @@ function safeOAuthErrorCode(value: unknown): string | null {
   return value;
 }
 
-function rolesFromAccessToken(token: string): string[] {
-  const payload = token.split(".")[1];
-  if (!payload) return [];
-  try {
-    const padded = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const json = JSON.parse(Buffer.from(padded, "base64").toString("utf8")) as { roles?: unknown };
-    if (!Array.isArray(json.roles)) return [];
-    return json.roles.filter((role): role is string => typeof role === "string");
-  } catch {
-    return [];
-  }
-}
+export type GraphApplicationToken =
+  | { accessToken: string }
+  | { errorCode: string; httpStatus: number };
 
-export async function checkGraphAuthenticationReadiness(options: {
+export async function acquireGraphApplicationToken(options: {
   fetchImpl?: typeof fetch;
   env?: GraphEnv;
-} = {}): Promise<GraphAuthReadiness> {
+} = {}): Promise<GraphApplicationToken> {
   const config = readGraphMailboxConfig(options.env ?? process.env);
-  if (!config.microsoftGraphConfigured) return notConfiguredReadiness();
-
+  if (!config.microsoftGraphConfigured) return { errorCode: "not_configured", httpStatus: 0 };
   const fetchImpl = options.fetchImpl ?? fetch;
   try {
     const tokenBody = new URLSearchParams({
@@ -207,18 +197,47 @@ export async function checkGraphAuthenticationReadiness(options: {
       } catch {
         errorCode = "token_request_failed";
       }
-      return failedReadiness(tokenResponse.status, errorCode);
+      return { errorCode, httpStatus: tokenResponse.status };
     }
     const tokenPayload = await tokenResponse.json() as { access_token?: unknown };
     const accessToken = typeof tokenPayload.access_token === "string" ? tokenPayload.access_token : "";
-    if (!accessToken) return failedReadiness(tokenResponse.status, "token_request_failed");
-    const roles = rolesFromAccessToken(accessToken);
+    if (!accessToken) return { errorCode: "token_request_failed", httpStatus: tokenResponse.status };
+    return { accessToken };
+  } catch {
+    return { errorCode: "token_request_failed", httpStatus: 0 };
+  }
+}
+
+function rolesFromAccessToken(token: string): string[] {
+  const payload = token.split(".")[1];
+  if (!payload) return [];
+  try {
+    const padded = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const json = JSON.parse(Buffer.from(padded, "base64").toString("utf8")) as { roles?: unknown };
+    if (!Array.isArray(json.roles)) return [];
+    return json.roles.filter((role): role is string => typeof role === "string");
+  } catch {
+    return [];
+  }
+}
+
+export async function checkGraphAuthenticationReadiness(options: {
+  fetchImpl?: typeof fetch;
+  env?: GraphEnv;
+} = {}): Promise<GraphAuthReadiness> {
+  const config = readGraphMailboxConfig(options.env ?? process.env);
+  if (!config.microsoftGraphConfigured) return notConfiguredReadiness();
+
+  try {
+    const token = await acquireGraphApplicationToken(options);
+    if (!("accessToken" in token)) return failedReadiness(token.httpStatus, token.errorCode);
+    const roles = rolesFromAccessToken(token.accessToken);
     const mailReadAuthorityAvailable = roles.includes("Mail.Read");
     const mailSendPresent = roles.includes("Mail.Send");
     return {
       graphAuthenticationReady: true,
       mailReadAuthorityAvailable,
-      httpStatus: tokenResponse.status,
+      httpStatus: 200,
       errorCode: null,
       mailSendPresent,
     };
@@ -505,24 +524,9 @@ export async function pollMicrosoftGraphMailbox(options: {
   const fetchImpl = options.fetchImpl ?? fetch;
   try {
     const receivedAfter = incremental ? await newestStoredReceivedAt(options.db) : null;
-    const tokenBody = new URLSearchParams({
-      client_id: config.clientId,
-      client_secret: config.clientSecret,
-      scope: GRAPH_SCOPE,
-      grant_type: "client_credentials",
-    });
-    const tokenResponse = await fetchImpl(
-      `https://login.microsoftonline.com/${encodeURIComponent(config.tenantId)}/oauth2/v2.0/token`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: tokenBody.toString(),
-      },
-    );
-    if (!tokenResponse.ok) return failed();
-    const tokenPayload = await tokenResponse.json() as { access_token?: string };
-    const accessToken = tokenPayload.access_token;
-    if (!accessToken) return failed();
+    const token = await acquireGraphApplicationToken({ fetchImpl, env });
+    if (!("accessToken" in token)) return failed();
+    const accessToken = token.accessToken;
 
     const page = await graphGet(fetchImpl, inboxMessagesUrl(config.mailbox, top, receivedAfter), accessToken);
     if (!page) return failed();
