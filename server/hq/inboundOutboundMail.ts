@@ -92,6 +92,15 @@ export function outboundMailSendEnabled(): boolean {
   return process.env.IFCDC_OUTBOUND_MAIL_SEND_ENABLED === "true";
 }
 
+export function outboundSendGateHttp(req: Request, res: Response): void {
+  const status = inboundMailSessionStatus(req.hqUser);
+  if (status) {
+    res.status(status).json({ error: status === 401 ? "Authentication required" : "Founder session required" });
+    return;
+  }
+  res.json({ outboundMailSendEnabled: outboundMailSendEnabled() });
+}
+
 export function replySubject(subject: string): string {
   return /^re:\s/i.test(subject.trim()) ? subject.trim() : `Re: ${subject.trim()}`;
 }

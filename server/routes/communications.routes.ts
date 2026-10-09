@@ -8,7 +8,7 @@ import { enqueueNotification } from "../hq/notificationQueue";
 import { loadEnterpriseNotificationVisibility } from "../hq/enterpriseNotificationVisibility";
 import { ingestInboundMailHttp, listInboundMailHttp, saveInboundDraftSuggestion } from "../hq/inboundBusinessMail";
 import { generateInboundReplyDraftHttp, reviewInboundReplyDraftHttp } from "../hq/inboundReplyDraft";
-import { sendFounderApprovedDraftHttp } from "../hq/inboundOutboundMail";
+import { outboundSendGateHttp, sendFounderApprovedDraftHttp } from "../hq/inboundOutboundMail";
 import {
   createOutboundCompositionHttp,
   listOutboundCompositionsHttp,
@@ -38,6 +38,10 @@ router.get("/inbound-mail/mailbox-health", async (req, res) => {
 
 router.get("/graph-auth-readiness", async (req, res) => {
   await graphAuthReadinessHttp(req, res);
+});
+
+router.get("/outbound-send-enabled", (req, res) => {
+  outboundSendGateHttp(req, res);
 });
 
 router.post("/graph-mailbox-poll-once", async (req, res) => {
