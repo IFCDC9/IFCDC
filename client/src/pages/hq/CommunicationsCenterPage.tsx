@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Megaphone, Mail, Send, Plus, Inbox, Bell, Users, PhoneCall } from "lucide-react";
 import HQLayout from "../../layouts/HQLayout";
-import { communicationsApi, type InboundReplyDraft, type OutboundSendResult } from "../../api/communicationsApi";
+import { communicationsApi, type InboundReplyDraft, type OutboundComposition, type OutboundSendResult } from "../../api/communicationsApi";
 import { enterpriseApi } from "../../api/enterpriseApi";
 import { useAuth } from "../../auth/AuthContext";
 import { KpiCard } from "../../components/hq/KpiCard";
@@ -10,7 +10,7 @@ import { HqPanel } from "../../components/hq/HqPanel";
 import { StatusBadge } from "../../components/hq/StatusBadge";
 import { HqLoading } from "../../components/hq/HqLoading";
 
-type Tab = "announcements" | "inbox" | "founder-inbox" | "sent" | "compose" | "email" | "campaigns" | "notifications" | "voice";
+type Tab = "announcements" | "inbox" | "founder-inbox" | "original" | "sent" | "compose" | "email" | "campaigns" | "notifications" | "voice";
 
 function formatDuration(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -27,6 +27,10 @@ const CommunicationsCenterPage: React.FC = () => {
   const [replyEdits, setReplyEdits] = useState<Record<string, string>>({});
   const [sendConfirmed, setSendConfirmed] = useState<Record<string, boolean>>({});
   const [sendResults, setSendResults] = useState<Record<string, OutboundSendResult>>({});
+  const [originalForm, setOriginalForm] = useState({ recipient: "", subject: "", body: "" });
+  const [originalEdits, setOriginalEdits] = useState<Record<string, { recipient: string; subject: string; body: string }>>({});
+  const [originalConfirmed, setOriginalConfirmed] = useState<Record<string, boolean>>({});
+  const [originalResults, setOriginalResults] = useState<Record<string, OutboundSendResult>>({});
   const [showAnnounce, setShowAnnounce] = useState(false);
   const [announceForm, setAnnounceForm] = useState({ title: "", body: "", priority: "normal" });
   const [msgForm, setMsgForm] = useState({ to_email: "", to_name: "", subject: "", body: "" });
@@ -38,6 +42,7 @@ const CommunicationsCenterPage: React.FC = () => {
   useEffect(() => {
     if (window.location.hash === "#enterprise-notifications") setTab("notifications");
     if (window.location.hash === "#founder-inbox") setTab("founder-inbox");
+    if (window.location.hash === "#original-email") setTab("original");
   }, []);
 
   const overview = useQuery({ queryKey: ["comms-overview"], queryFn: communicationsApi.overview });
@@ -52,6 +57,11 @@ const CommunicationsCenterPage: React.FC = () => {
     queryKey: ["comms-founder-inbox", inboundView],
     queryFn: () => communicationsApi.inboundMail(inboundView),
     enabled: tab === "founder-inbox",
+  });
+  const originalEmails = useQuery({
+    queryKey: ["comms-original-email"],
+    queryFn: communicationsApi.listOutboundCompositions,
+    enabled: tab === "original" && (user?.role === "founder" || user?.role === "owner"),
   });
   const sent = useQuery({ queryKey: ["comms-sent"], queryFn: () => communicationsApi.messages("sent"), enabled: tab === "sent" });
   const enterpriseNotifs = useQuery({ queryKey: ["comms-notifications"], queryFn: enterpriseApi.notifications, enabled: tab === "notifications" });
@@ -114,6 +124,26 @@ const CommunicationsCenterPage: React.FC = () => {
     mutationFn: (id: string) => communicationsApi.sendApprovedInboundReply(id, true),
     onSuccess: (result, id) => setSendResults((current) => ({ ...current, [id]: result })),
   });
+  const saveOriginalEmail = useMutation({
+    mutationFn: communicationsApi.createOutboundComposition,
+    onSuccess: () => {
+      setOriginalForm({ recipient: "", subject: "", body: "" });
+      qc.invalidateQueries({ queryKey: ["comms-original-email"] });
+    },
+  });
+  const reviewOriginalEmail = useMutation({
+    mutationFn: (input: { id: string; action: "approve" | "edit" | "reject" | "save-for-later"; recipient?: string; subject?: string; body?: string }) =>
+      communicationsApi.reviewOutboundComposition(input.id, input.action, input.recipient && input.subject && input.body ? { recipient: input.recipient, subject: input.subject, body: input.body } : undefined),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["comms-original-email"] }),
+  });
+  const sendOriginalEmail = useMutation({
+    retry: false,
+    mutationFn: (id: string) => communicationsApi.sendOutboundComposition(id, true),
+    onSuccess: (result, id) => {
+      setOriginalResults((current) => ({ ...current, [id]: result }));
+      qc.invalidateQueries({ queryKey: ["comms-original-email"] });
+    },
+  });
 
   const markRead = useMutation({
     mutationFn: communicationsApi.markRead,
@@ -171,6 +201,9 @@ const CommunicationsCenterPage: React.FC = () => {
         </button>
         <button type="button" className={`hq-tab ${tab === "founder-inbox" ? "active" : ""}`} onClick={() => setTab("founder-inbox")}>
           <Mail size={16} /> Founder Inbox
+        </button>
+        <button type="button" className={`hq-tab ${tab === "original" ? "active" : ""}`} onClick={() => setTab("original")}>
+          <Mail size={16} /> Original Email
         </button>
         <button type="button" className={`hq-tab ${tab === "sent" ? "active" : ""}`} onClick={() => setTab("sent")}>
           <Send size={16} /> Sent
@@ -476,6 +509,78 @@ const CommunicationsCenterPage: React.FC = () => {
               </ul>
             </HqPanel>
           )
+        )}
+
+        {tab === "original" && (
+          <HqPanel title="Original Email">
+            <p style={{ fontSize: "0.82rem" }}>From service@ifcdc.org. Saving a draft does not send. Approval does not send.</p>
+            {canReviewDrafts ? (
+              <>
+                <div className="hq-form-grid" style={{ marginTop: "0.75rem" }}>
+                  <label>To<input className="hq-input" value={originalForm.recipient} onChange={(event) => setOriginalForm({ ...originalForm, recipient: event.target.value })} /></label>
+                  <label style={{ gridColumn: "1 / -1" }}>Subject<input className="hq-input" value={originalForm.subject} onChange={(event) => setOriginalForm({ ...originalForm, subject: event.target.value })} /></label>
+                  <label style={{ gridColumn: "1 / -1" }}>Message<textarea className="hq-input" rows={8} value={originalForm.body} onChange={(event) => setOriginalForm({ ...originalForm, body: event.target.value })} /></label>
+                </div>
+                <button
+                  type="button"
+                  className="hq-btn hq-btn-secondary hq-btn-sm"
+                  style={{ marginTop: "0.5rem" }}
+                  disabled={!originalForm.recipient || !originalForm.subject.trim() || !originalForm.body.trim() || saveOriginalEmail.isPending}
+                  onClick={() => saveOriginalEmail.mutate(originalForm)}
+                >
+                  Save draft for review
+                </button>
+                <ul className="hq-notif-list" style={{ marginTop: "1rem" }}>
+                  {(originalEmails.data?.compositions ?? []).map((draft: OutboundComposition) => {
+                    const edit = originalEdits[draft.id] ?? { recipient: draft.recipient, subject: draft.subject, body: draft.body };
+                    return (
+                      <li key={draft.id} className="hq-notif-item">
+                        <div style={{ flex: 1 }}>
+                          <StatusBadge label={draft.status} variant={draft.activeApproval ? "warning" : "muted"} />
+                          <p style={{ marginTop: "0.35rem" }}>Not sent. No conversation id.</p>
+                          <p>From {draft.from}</p>
+                          <label>To<input className="hq-input" value={edit.recipient} disabled={!draft.activeApproval} onChange={(event) => setOriginalEdits((current) => ({ ...current, [draft.id]: { ...edit, recipient: event.target.value } }))} /></label>
+                          <label>Subject<input className="hq-input" value={edit.subject} disabled={!draft.activeApproval} onChange={(event) => setOriginalEdits((current) => ({ ...current, [draft.id]: { ...edit, subject: event.target.value } }))} /></label>
+                          <label>Message<textarea className="hq-input" rows={8} value={edit.body} disabled={!draft.activeApproval} onChange={(event) => setOriginalEdits((current) => ({ ...current, [draft.id]: { ...edit, body: event.target.value } }))} /></label>
+                          {draft.activeApproval && (
+                            <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", marginTop: "0.4rem" }}>
+                              <button type="button" className="hq-btn hq-btn-secondary hq-btn-sm" onClick={() => reviewOriginalEmail.mutate({ id: draft.id, action: "edit", ...edit })}>Save edit</button>
+                              <button type="button" className="hq-btn hq-btn-secondary hq-btn-sm" onClick={() => reviewOriginalEmail.mutate({ id: draft.id, action: "approve" })}>Approve</button>
+                              <button type="button" className="hq-btn hq-btn-ghost hq-btn-sm" onClick={() => reviewOriginalEmail.mutate({ id: draft.id, action: "reject" })}>Reject</button>
+                              <button type="button" className="hq-btn hq-btn-ghost hq-btn-sm" onClick={() => reviewOriginalEmail.mutate({ id: draft.id, action: "save-for-later" })}>Save for later</button>
+                            </div>
+                          )}
+                          {draft.status === "FOUNDER APPROVED" && (
+                            <div style={{ marginTop: "0.5rem" }}>
+                              <p>Approval does not send. Sending is a separate action.</p>
+                              <label style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
+                                <input type="checkbox" checked={originalConfirmed[draft.id] === true} onChange={(event) => setOriginalConfirmed((current) => ({ ...current, [draft.id]: event.target.checked }))} />
+                                Confirm send
+                              </label>
+                              <button
+                                type="button"
+                                className="hq-btn hq-btn-secondary hq-btn-sm"
+                                style={{ marginTop: "0.35rem" }}
+                                disabled={originalConfirmed[draft.id] !== true || sendOriginalEmail.isPending}
+                                onClick={() => sendOriginalEmail.mutate(draft.id)}
+                              >
+                                Send approved email
+                              </button>
+                              {originalResults[draft.id] && (
+                                <p>Send status: {originalResults[draft.id].status}. {originalResults[draft.id].sent ? "Sent." : "Not sent."}</p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            ) : (
+              <p>Founder session required.</p>
+            )}
+          </HqPanel>
         )}
 
         {tab === "sent" && (

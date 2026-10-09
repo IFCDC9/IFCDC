@@ -9,6 +9,12 @@ import { loadEnterpriseNotificationVisibility } from "../hq/enterpriseNotificati
 import { ingestInboundMailHttp, listInboundMailHttp, saveInboundDraftSuggestion } from "../hq/inboundBusinessMail";
 import { generateInboundReplyDraftHttp, reviewInboundReplyDraftHttp } from "../hq/inboundReplyDraft";
 import { sendFounderApprovedDraftHttp } from "../hq/inboundOutboundMail";
+import {
+  createOutboundCompositionHttp,
+  listOutboundCompositionsHttp,
+  reviewOutboundCompositionHttp,
+  sendOutboundCompositionHttp,
+} from "../hq/outboundComposition";
 import { graphAuthReadinessHttp, graphMailboxHealthHttp, graphMailboxPollOnceHttp, graphMailboxSyncOnceHttp, startMicrosoftGraphMailboxSync } from "../hq/microsoftGraphMailbox";
 import { getDb as getInboundDb } from "../db";
 
@@ -77,6 +83,22 @@ router.post("/inbound-mail/:id/aura-draft/review", async (req, res) => {
 
 router.post("/inbound-mail/:id/aura-draft/send", async (req, res) => {
   await sendFounderApprovedDraftHttp(req, res);
+});
+
+router.get("/outbound-compositions", async (req, res) => {
+  await listOutboundCompositionsHttp(req, res);
+});
+
+router.post("/outbound-compositions", async (req, res) => {
+  await createOutboundCompositionHttp(req, res);
+});
+
+router.post("/outbound-compositions/:id/review", async (req, res) => {
+  await reviewOutboundCompositionHttp(req, res);
+});
+
+router.post("/outbound-compositions/:id/send", async (req, res) => {
+  await sendOutboundCompositionHttp(req, res);
 });
 
 router.get("/overview", async (_req, res) => {

@@ -61,6 +61,30 @@ export const communicationsApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ confirmSend }),
     }),
+  listOutboundCompositions: () =>
+    api<{ sent: false; compositions: OutboundComposition[] }>("/outbound-compositions"),
+  createOutboundComposition: (input: { recipient: string; subject: string; body: string }) =>
+    api<OutboundCompositionResult>("/outbound-compositions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  reviewOutboundComposition: (
+    id: string,
+    action: "approve" | "edit" | "reject" | "save-for-later",
+    content?: { recipient: string; subject: string; body: string },
+  ) =>
+    api<OutboundCompositionResult>(`/outbound-compositions/${encodeURIComponent(id)}/review`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, ...content }),
+    }),
+  sendOutboundComposition: (id: string, confirmSend: true) =>
+    api<OutboundSendResult>(`/outbound-compositions/${encodeURIComponent(id)}/send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmSend }),
+    }),
   sendMessage: (data: { to_email: string; to_name?: string; subject: string; body: string }) =>
     api("/messages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
   markRead: (id: string) =>
@@ -198,6 +222,35 @@ export interface InboundReplyDraftResult {
   status: string;
   activeApproval: boolean;
   draft: InboundReplyDraft;
+}
+
+export interface OutboundComposition {
+  id: string;
+  from: "service@ifcdc.org";
+  recipient: string;
+  subject: string;
+  body: string;
+  status: string;
+  sent: false;
+  activeApproval: boolean;
+  conversationId: null;
+  deliveryHistory: Array<{
+    id: string;
+    status: string;
+    errorCode: string | null;
+    providerMessageId: string | null;
+    duplicateKey: string | null;
+    timestamp: string;
+  }>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OutboundCompositionResult {
+  sent: false;
+  status: string;
+  activeApproval: boolean;
+  draft: OutboundComposition;
 }
 
 export interface OutboundSendResult {

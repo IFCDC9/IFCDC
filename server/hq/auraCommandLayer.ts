@@ -287,6 +287,20 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
     }
   }
 
+  {
+    const { isOriginalCompositionRequest, prepareStoredOriginalComposition } = await import("./outboundComposition");
+    if (isOriginalCompositionRequest(command)) {
+      const reply = await prepareStoredOriginalComposition(command);
+      return {
+        reply,
+        actions: [],
+        approvalsCreated: [],
+        poweredBy: "AURA Original Email",
+        identity: publicIdentitySummary(identity),
+      };
+    }
+  }
+
   // Founder Executive Operations — plan compound requests, then execute (email/SMS/…).
   {
     const { tryRunExecutiveCommand } = await import("./auraExecutiveOperations");
