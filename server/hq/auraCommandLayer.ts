@@ -31,6 +31,14 @@ import {
   resolveIdentityFromHqUser,
   type AuraTrustedIdentity,
 } from "./auraFounderTrustEngine";
+import {
+  auraStageOneRecommendationText,
+  founderApprovalAllowed,
+  isAuraConsequentialAction,
+  isAuraStageOneRecommendation,
+  recordAuraRecommendation,
+  recordFounderApproval,
+} from "./auraActorIdentity";
 
 export interface AuraCommandInput {
   command: string;
@@ -158,6 +166,32 @@ export async function runAuraAction(
     };
   }
 
+  if (
+    action.kind === "execute"
+    && isAuraConsequentialAction(action.id)
+    && !founderApprovalAllowed({
+      id: identity.userId,
+      email: identity.email,
+      role: identity.legacyRole,
+      isFounder: identity.isFounder,
+    })
+  ) {
+    const denied = `Aura cannot execute "${action.label}". Founder authorization is required.`;
+    await logAuraIdentityAction({
+      identity,
+      action: "aura_action_denied",
+      detail: denied,
+      metadata: { actionId, auraCannotExecute: true },
+    });
+    return {
+      reply: denied,
+      actions: [],
+      approvalsCreated: [],
+      poweredBy: "AURA Trust Layer",
+      identity: publicIdentitySummary(identity),
+    };
+  }
+
   if (action.kind === "execute" && !identity.founderMode && !identity.isFounder) {
     const denied = `Execute action "${action.label}" requires Founder Mode.`;
     void import("./auraUnifiedAudit").then(({ mirrorAuraUnifiedActionAsync }) =>
@@ -205,6 +239,27 @@ export async function runAuraAction(
     detail: executed.summary.slice(0, 400),
     metadata: { status: executed.status, kind: action.kind },
   });
+  if (action.kind === "read" || action.kind === "prepare") {
+    await recordAuraRecommendation({
+      sessionUserId: identity.userId,
+      sessionEmail: identity.email,
+      summary: executed.summary,
+      topic: action.id,
+    });
+  }
+  if (approvalsCreated.length && founderApprovalAllowed({
+    id: identity.userId,
+    email: identity.email,
+    role: identity.legacyRole,
+    isFounder: identity.isFounder,
+  }) && identity.userId && identity.email) {
+    await recordFounderApproval({
+      founderId: identity.userId,
+      founderEmail: identity.email,
+      founderRole: identity.legacyRole,
+      summary: approvalsCreated.map((item) => item.label).join("; "),
+    });
+  }
 
   if (action.kind === "execute" || action.kind === "prepare") {
     void import("./auraUnifiedAudit").then(({ mirrorAuraUnifiedActionAsync }) =>
@@ -255,6 +310,23 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
       actions: [],
       approvalsCreated: [],
       poweredBy: "AURA",
+      identity: publicIdentitySummary(identity),
+    };
+  }
+
+  if (isAuraStageOneRecommendation(command)) {
+    const reply = auraStageOneRecommendationText();
+    await recordAuraRecommendation({
+      sessionUserId: identity.userId,
+      sessionEmail: identity.email,
+      summary: reply,
+      topic: "stage_one_priorities",
+    });
+    return {
+      reply,
+      actions: [],
+      approvalsCreated: [],
+      poweredBy: "AURA Recommendations",
       identity: publicIdentitySummary(identity),
     };
   }
@@ -769,6 +841,15 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
   const tools = auraToolDefinitions().filter((t) => {
     const action = getAuraAction(t.function.name);
     if (!action) return false;
+    if (
+      isAuraConsequentialAction(action.id)
+      && !founderApprovalAllowed({
+        id: identity.userId,
+        email: identity.email,
+        role: identity.legacyRole,
+        isFounder: identity.isFounder,
+      })
+    ) return false;
     if (action.kind === "execute" && !identity.founderMode && !identity.isFounder) return false;
     return true;
   });
@@ -816,6 +897,24 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
           label: action.label,
           status: "error",
           summary: `Denied: ${identity.enterpriseRoleLabel} cannot run ${action.label}.`,
+        });
+        continue;
+      }
+      if (
+        action.kind === "execute"
+        && isAuraConsequentialAction(action.id)
+        && !founderApprovalAllowed({
+          id: identity.userId,
+          email: identity.email,
+          role: identity.legacyRole,
+          isFounder: identity.isFounder,
+        })
+      ) {
+        executed.push({
+          id: action.id,
+          label: action.label,
+          status: "error",
+          summary: `Denied: Aura cannot execute ${action.label}. Founder authorization is required.`,
         });
         continue;
       }

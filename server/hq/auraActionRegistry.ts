@@ -2001,3 +2001,14 @@ export function auraToolDefinitions(): Array<{
 export function auraActionCatalog(): Array<{ id: string; label: string; module: AuraModule; kind: AuraActionKind; description: string }> {
   return AURA_ACTIONS.map(({ id, label, module, kind, description }) => ({ id, label, module, kind, description }));
 }
+
+const STAGE_ONE_READ_IDS = ["find_grants", "finance_overview", "donation_summary", "list_ops_projects", "se_portfolio_status"] as const;
+
+/** Read-only tools Aura may cite. Send and other execute tools are excluded. */
+export function auraStageOneReadSurface(): Array<{ id: string; module: AuraModule; kind: AuraActionKind }> {
+  return STAGE_ONE_READ_IDS.flatMap((id) => {
+    const action = getAuraAction(id);
+    if (!action || action.kind !== "read") return [];
+    return [{ id: action.id, module: action.module, kind: action.kind }];
+  });
+}
