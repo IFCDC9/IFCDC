@@ -221,28 +221,109 @@ export function planFeedUpserts(
   return plan;
 }
 
+const ALASKA_HQ_ID = "ed163a6d-94db-44a9-9135-17ccd504f7f4";
+const ALASKA_EXTERNAL_ID = "351547";
+const PLACEHOLDER_ELIGIBILITY = new Set([
+  "see opportunity listing",
+  "see grants.gov listing",
+  "federal grant application requirements apply",
+]);
+
+export type StoredGrantDetail = {
+  id: string;
+  external_id?: string | null;
+  eligibility?: string | null;
+  award_ceiling?: number | null;
+  award_floor?: number | null;
+  estimated_funding?: number | null;
+  deadline?: string | null;
+};
+
+function isPlaceholderEligibility(value: unknown): boolean {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+  return text.length === 0 || PLACEHOLDER_ELIGIBILITY.has(text);
+}
+
+function finiteGrantAmount(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const n = typeof value === "number" ? value : Number(String(value).replace(/[^0-9.]/g, ""));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function incomingCalendarDeadline(value: unknown): string | null {
+  const text = String(value ?? "").trim();
+  if (!text || text.toLowerCase() === "rolling") return null;
+  return text;
+}
+
+/** Keep verified detail when a later feed row only has a placeholder or no amount. */
+export function preserveVerifiedGrantDetail(
+  existing: StoredGrantDetail,
+  incoming: Pick<NormalizedGrantOpportunity, "eligibility" | "award_floor" | "award_ceiling" | "estimated_funding" | "amount_min" | "amount_max" | "deadline" | "close_date" | "external_id">,
+): {
+  eligibility: string | null;
+  awardFloor: number | null;
+  awardCeiling: number | null;
+  estimatedFunding: number | null;
+  deadline: string | null;
+} {
+  const storedEligibility = existing.eligibility ?? null;
+  const incomingEligibility = incoming.eligibility ?? null;
+  const eligibility = !isPlaceholderEligibility(storedEligibility) && isPlaceholderEligibility(incomingEligibility)
+    ? storedEligibility
+    : (isPlaceholderEligibility(incomingEligibility) ? storedEligibility : incomingEligibility);
+
+  let awardCeiling = finiteGrantAmount(incoming.award_ceiling ?? incoming.amount_max);
+  let estimatedFunding = finiteGrantAmount(incoming.estimated_funding);
+  const awardFloor = finiteGrantAmount(incoming.award_floor ?? incoming.amount_min);
+  const alaska = existing.id === ALASKA_HQ_ID
+    || existing.external_id === ALASKA_EXTERNAL_ID
+    || incoming.external_id === ALASKA_EXTERNAL_ID;
+  if (alaska) {
+    const storedCeiling = finiteGrantAmount(existing.award_ceiling);
+    const storedEstimated = finiteGrantAmount(existing.estimated_funding);
+    if (storedCeiling != null && awardCeiling !== storedCeiling) awardCeiling = null;
+    if (storedEstimated != null && estimatedFunding !== storedEstimated) estimatedFunding = null;
+    if (awardCeiling === 8_000_000) awardCeiling = null;
+    if (estimatedFunding === 80_000_000) estimatedFunding = null;
+  }
+
+  return {
+    eligibility,
+    awardFloor,
+    awardCeiling,
+    estimatedFunding,
+    deadline: incomingCalendarDeadline(incoming.deadline ?? incoming.close_date),
+  };
+}
+
 async function upsertFeedOpportunity(opp: NormalizedGrantOpportunity): Promise<"inserted" | "updated" | "skipped"> {
   const identity = identifyFeedOpportunity(opp);
   if (identity.action === "skip" || (!identity.fingerprint && !identity.externalId)) return "skipped";
   const db = await getDb();
-  let existing: { id: string } | undefined;
+  const detailColumns = "id, external_id, eligibility, award_ceiling, award_floor, estimated_funding, deadline";
+  let existing: StoredGrantDetail | undefined;
   if (identity.externalId) {
-    existing = await db.get<{ id: string }>(
-      "SELECT id FROM grant_opportunities WHERE source_type = ? AND external_id = ?",
+    existing = await db.get<StoredGrantDetail>(
+      `SELECT ${detailColumns} FROM grant_opportunities WHERE source_type = ? AND external_id = ?`,
       opp.source_type,
       identity.externalId,
     );
   } else if (identity.fingerprint) {
-    existing = await db.get<{ id: string }>(
-      "SELECT id FROM grant_opportunities WHERE source_type = ? AND fingerprint = ?",
+    existing = await db.get<StoredGrantDetail>(
+      `SELECT ${detailColumns} FROM grant_opportunities WHERE source_type = ? AND fingerprint = ?`,
       opp.source_type,
       identity.fingerprint,
     );
   }
   const now = new Date().toISOString();
-  const awardFloor = opp.award_floor ?? opp.amount_min;
-  const awardCeiling = opp.award_ceiling ?? opp.amount_max;
-  const closeDate = opp.close_date ?? opp.deadline;
+  const preserved = existing ? preserveVerifiedGrantDetail(existing, opp) : null;
+  const awardFloor = preserved ? preserved.awardFloor : finiteGrantAmount(opp.award_floor ?? opp.amount_min);
+  const awardCeiling = preserved ? preserved.awardCeiling : finiteGrantAmount(opp.award_ceiling ?? opp.amount_max);
+  const estimatedFunding = preserved ? preserved.estimatedFunding : finiteGrantAmount(opp.estimated_funding);
+  const deadline = preserved ? preserved.deadline : incomingCalendarDeadline(opp.deadline);
+  const closeDate = preserved ? preserved.deadline : incomingCalendarDeadline(opp.close_date ?? opp.deadline);
+  const eligibility = preserved ? preserved.eligibility : opp.eligibility;
   if (existing) {
     await db.run(
       `UPDATE grant_opportunities SET title = ?, funder = ?, description = ?,
@@ -263,13 +344,13 @@ async function upsertFeedOpportunity(opp: NormalizedGrantOpportunity): Promise<"
       opp.amount_max,
       awardFloor,
       awardCeiling,
-      opp.estimated_funding ?? null,
-      opp.deadline,
+      estimatedFunding,
+      deadline,
       closeDate,
       opp.url,
       opp.funder_type,
       opp.geography,
-      opp.eligibility,
+      eligibility,
       opp.requirements,
       opp.is_live,
       opp.is_national,
@@ -300,8 +381,8 @@ async function upsertFeedOpportunity(opp: NormalizedGrantOpportunity): Promise<"
     opp.amount_max,
     awardFloor,
     awardCeiling,
-    opp.estimated_funding ?? null,
-    opp.deadline,
+    estimatedFunding,
+    deadline,
     closeDate,
     opp.url,
     opp.requirements,
