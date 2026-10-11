@@ -13,6 +13,7 @@ import {
 } from "../../config/credentials";
 import { openAiConfigStatus } from "../../lib/openaiConfig";
 import { getEmailDeliveryStatus, resolveResendFromEmail } from "../../lib/notifications";
+import { headquartersMailReadiness } from "../../lib/transactionalEmail";
 
 export function registerHealthRoutes(app: Express): void {
   app.get("/api/health", async (_req, res) => {
@@ -30,6 +31,7 @@ export function registerHealthRoutes(app: Express): void {
     const twilioWebhooks = getTwilioWebhookUrls();
     const openai = openAiConfigStatus();
     const email = getEmailDeliveryStatus();
+    const mailReadiness = headquartersMailReadiness();
     const twilioPhoneSources = getTwilioPhoneEnvSources();
     let founderReadiness: Awaited<ReturnType<typeof getFounderPhoneReadiness>> | null = null;
     try {
@@ -162,13 +164,15 @@ export function registerHealthRoutes(app: Express): void {
           },
         },
         email: {
-          configured: email.configured,
-          provider: email.provider,
+          configured: email.configured || mailReadiness.postmarkReady,
+          provider: mailReadiness.configuredProvider,
+          resendFallback: mailReadiness.fallbackProvider,
           apiKeySet: email.apiKeySet,
           from: email.apiKeySet ? resolveResendFromEmail() : null,
           founderOtpTo: process.env.MASTER_OWNER_EMAIL || process.env.FOUNDER_EMAIL || "service@ifcdc.org",
           inlineOnly: email.inlineOnly,
           notificationsUrlSet: Boolean(email.notificationsUrl),
+          readiness: mailReadiness,
         },
         founder: founderReadiness
           ? {

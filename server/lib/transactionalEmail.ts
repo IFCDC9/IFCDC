@@ -152,6 +152,87 @@ export function transactionalSenderEmail(): string {
   return extractEmail(resolveTransactionalFromAddress()) || APPROVED_SENDER;
 }
 
+export type HeadquartersMailReadiness = {
+  /** Provider named by the Resend-key health check. */
+  healthReportedProvider: "resend" | "none";
+  /** Provider Headquarters should treat as configured for ordinary mail. */
+  configuredProvider: "postmark" | "resend" | "none";
+  /** No message has been accepted. Stays UNVERIFIED until a real send. */
+  actualDeliveryProvider: "UNVERIFIED";
+  postmarkReady: boolean;
+  deliveryVerification: "UNVERIFIED";
+  fallbackProvider: "resend" | "none";
+  /** Aura grant mail never selects Resend. */
+  auraGrantProvider: "postmark" | "none";
+};
+
+function resendConfiguredIn(env: NodeJS.ProcessEnv): boolean {
+  return Boolean((
+    env.RESEND_API_KEY
+    || env.EMAIL_API_KEY
+    || env.SMTP_API_KEY
+    || env.AI_INTEGRATIONS_RESEND_API_KEY
+    || ""
+  ).trim());
+}
+
+/** Same names getEmailDeliveryStatus uses. A set key does not make Postmark absent. */
+function healthReportsResend(env: NodeJS.ProcessEnv): boolean {
+  return Boolean((env.RESEND_API_KEY || env.EMAIL_API_KEY || env.SMTP_API_KEY || "").trim());
+}
+
+export function headquartersMailReadiness(env: NodeJS.ProcessEnv = process.env): HeadquartersMailReadiness {
+  const postmarkReady = Boolean((env.POSTMARK_SERVER_TOKEN || "").trim());
+  const resendConfigured = resendConfiguredIn(env);
+  const healthReportedProvider = healthReportsResend(env) ? "resend" : "none";
+  return {
+    healthReportedProvider,
+    configuredProvider: postmarkReady ? "postmark" : healthReportedProvider,
+    actualDeliveryProvider: "UNVERIFIED",
+    postmarkReady,
+    deliveryVerification: "UNVERIFIED",
+    fallbackProvider: resendConfigured ? "resend" : "none",
+    auraGrantProvider: postmarkReady ? "postmark" : "none",
+  };
+}
+
+export type AuraGrantPostmarkResult = {
+  success: boolean;
+  provider: "postmark" | "none";
+  messageId: string | null;
+  errorCode: string | null;
+};
+
+/**
+ * Aura grant mail uses the existing Postmark outbound stream only.
+ * A Resend key does not select Resend, and a missing Postmark token does not fall through to it.
+ */
+export async function sendAuraGrantViaPostmark(input: {
+  to: string;
+  subject: string;
+  text: string;
+  fetchImpl?: typeof fetch;
+  env?: NodeJS.ProcessEnv;
+}): Promise<AuraGrantPostmarkResult> {
+  const env = input.env ?? process.env;
+  const selection = headquartersMailReadiness(env);
+  if (!selection.postmarkReady) {
+    return { success: false, provider: "none", messageId: null, errorCode: "postmark_not_configured" };
+  }
+  const sent = await sendViaPostmark({
+    token: (env.POSTMARK_SERVER_TOKEN || "").trim(),
+    from: resolveTransactionalFromAddress(),
+    to: [input.to],
+    subject: input.subject,
+    text: input.text,
+    fetchImpl: input.fetchImpl,
+  });
+  if (!sent.success) {
+    return { success: false, provider: "postmark", messageId: null, errorCode: "postmark_rejected" };
+  }
+  return { success: true, provider: "postmark", messageId: sent.messageId ?? null, errorCode: null };
+}
+
 /** Record which transport accepted the message. Does not choose the provider. */
 export function transportAcceptance(result: Pick<TransactionalSendResult, "provider" | "fallbackUsed" | "from">): {
   provider: "POSTMARK" | "RESEND" | "NONE";
@@ -436,9 +517,11 @@ async function sendViaPostmark(input: {
   text: string;
   html?: string;
   replyTo?: string;
+  fetchImpl?: typeof fetch;
 }): Promise<TransactionalSendResult> {
+  const fetchImpl = input.fetchImpl ?? fetch;
   try {
-    const res = await fetch("https://api.postmarkapp.com/email", {
+    const res = await fetchImpl("https://api.postmarkapp.com/email", {
       method: "POST",
       headers: {
         Accept: "application/json",

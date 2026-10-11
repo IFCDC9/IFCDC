@@ -15,6 +15,7 @@ import {
   reviewOutboundCompositionHttp,
   sendOutboundCompositionHttp,
 } from "../hq/outboundComposition";
+import { grantOutreachQueueHttp, grantOutreachSendHttp } from "../hq/grantOutreachCorrespondence";
 import { graphAuthReadinessHttp, graphMailboxHealthHttp, graphMailboxPollOnceHttp, graphMailboxSyncOnceHttp, startMicrosoftGraphMailboxSync } from "../hq/microsoftGraphMailbox";
 import { getDb as getInboundDb } from "../db";
 
@@ -103,6 +104,14 @@ router.post("/outbound-compositions/:id/review", async (req, res) => {
 
 router.post("/outbound-compositions/:id/send", async (req, res) => {
   await sendOutboundCompositionHttp(req, res);
+});
+
+router.get("/grant-outreach/queue", (req, res) => {
+  grantOutreachQueueHttp(req, res);
+});
+
+router.post("/grant-outreach/send", async (req, res) => {
+  await grantOutreachSendHttp(req, res);
 });
 
 router.get("/overview", async (_req, res) => {
