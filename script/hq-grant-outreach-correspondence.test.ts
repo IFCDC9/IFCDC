@@ -14,6 +14,7 @@ import {
   evaluateGrantOutreachSendGate,
   grantApprovedBodyHash,
   grantAttachmentSha256,
+  grantOutreachPreflightHttp,
   grantOutreachSendHttp,
   prepareApprovedGrantAttachments,
   prepareGraphDeliveryTestDraft,
@@ -971,5 +972,153 @@ test("a generic attachment checksum still blocks a second send without using Res
   assert.equal(first.sent, true);
   assert.equal(second.reason, "duplicate_already_sent");
   assert.equal(calls, 1);
+});
+
+function preflightRequest(files: Array<{ name: string; sha256: string; contentBase64: string }>) {
+  const draft = mlkDraft(files);
+  return {
+    hqUser: { role: "founder", email: "founder@ifcdc.org" },
+    body: {
+      confirmSend: false,
+      id: draft.id,
+      version: draft.version,
+      recipient: draft.recipient,
+      subject: draft.subject,
+      body: draft.body,
+      purpose: draft.purpose,
+      status: draft.status,
+      grantOutreachSendEnabled: false,
+      attachments: files.map((file) => ({ name: file.name, sha256: file.sha256, contentBase64: file.contentBase64 })),
+      founderApproval: draft.founderApproval,
+    },
+  };
+}
+
+test("the PDF preflight stores both approved files and does not call Postmark", async () => {
+  const files = realSubmissionPdfs();
+  const calls: string[] = [];
+  globalThis.fetch = (() => {
+    calls.push("fetch");
+    throw new Error("network disabled");
+  }) as typeof fetch;
+  const db = await open({ filename: ":memory:", driver: sqlite3.Database }) as MailDb;
+  const state: { code: number; body: { sent?: boolean; network?: boolean; stored?: boolean; attachments?: Array<{ Name: string; ContentType: string; sha256: string }> } | null } = { code: 200, body: null };
+  const res = {
+    status(code: number) { state.code = code; return this; },
+    json(body: typeof state.body) { state.body = body; return this; },
+  };
+  await grantOutreachPreflightHttp(
+    preflightRequest(files) as unknown as import("express").Request,
+    res as unknown as import("express").Response,
+    { db },
+  );
+  assert.equal(state.body?.sent, false);
+  assert.equal(state.body?.network, false);
+  assert.equal(state.body?.stored, true);
+  assert.equal(calls.length, 0);
+  assert.deepEqual(
+    (state.body?.attachments || []).map((item) => `${item.Name} ${item.ContentType} ${item.sha256}`).sort(),
+    files.map((file) => `${file.name} application/pdf ${file.sha256}`).sort(),
+  );
+  const rows = await db.all<{ name: string; sha256: string; content_type: string; pdf_bytes: Buffer }>(
+    "SELECT name, sha256, content_type, pdf_bytes FROM grant_pdf_preflight",
+  );
+  assert.equal(rows.length, 2);
+  for (const row of rows) {
+    const original = files.find((file) => file.name === row.name);
+    const held = Buffer.isBuffer(row.pdf_bytes) ? row.pdf_bytes : Buffer.from(row.pdf_bytes);
+    assert.equal(row.content_type, "application/pdf");
+    assert.equal(createHash("sha256").update(held).digest("hex"), original?.sha256);
+    assert.deepEqual(held, original?.bytes);
+  }
+  const reservations = await db.get<{ c: number }>("SELECT COUNT(*) as c FROM sqlite_master WHERE name = 'grant_send_reservations'");
+  assert.equal(reservations?.c ?? 0, 0);
+  const audit = await db.get<{ detail: string }>("SELECT detail FROM grant_audit_events ORDER BY created_at DESC LIMIT 1");
+  assert.equal((audit?.detail || "").includes("contentBase64"), false);
+  assert.equal((audit?.detail || "").includes(files[0].contentBase64.slice(0, 40)), false);
+  const blocked = await deliverApprovedGrantOutreach(
+    { draft: mlkDraft(files), today: "2026-10-12" },
+    { allowNetwork: true, env: { POSTMARK_SERVER_TOKEN: FIXTURE_POSTMARK } as NodeJS.ProcessEnv, fetchImpl: globalThis.fetch, db },
+  );
+  assert.equal(blocked.sent, false);
+  assert.equal(blocked.reason, "attachment_missing");
+  assert.equal(calls.length, 0);
+});
+
+test("a checksum mismatch is rejected by the preflight and nothing is stored", async () => {
+  const files = realSubmissionPdfs();
+  const calls: string[] = [];
+  globalThis.fetch = (() => {
+    calls.push("fetch");
+    throw new Error("network disabled");
+  }) as typeof fetch;
+  const db = await open({ filename: ":memory:", driver: sqlite3.Database }) as MailDb;
+  const tampered = files.map((file, index) => index === 0
+    ? { ...file, contentBase64: tinyPdf("Other text").toString("base64") }
+    : file);
+  const state: { body: { stored?: boolean; reason?: string; sent?: boolean } | null } = { body: null };
+  const res = {
+    status() { return this; },
+    json(body: { stored?: boolean; reason?: string; sent?: boolean }) { state.body = body; return this; },
+  };
+  await grantOutreachPreflightHttp(
+    preflightRequest(tampered) as unknown as import("express").Request,
+    res as unknown as import("express").Response,
+    { db },
+  );
+  assert.equal(state.body?.sent, false);
+  assert.equal(state.body?.stored, false);
+  assert.equal(state.body?.reason, "attachment_checksum_mismatch");
+  assert.equal(calls.length, 0);
+  const table = await db.get<{ name: string }>("SELECT name FROM sqlite_master WHERE name = 'grant_pdf_preflight'");
+  if (table) {
+    const count = await db.get<{ c: number }>("SELECT COUNT(*) as c FROM grant_pdf_preflight");
+    assert.equal(count?.c, 0);
+  }
+});
+
+test("an unsigned PDF preflight stays unauthorized", async () => {
+  const calls: string[] = [];
+  globalThis.fetch = (() => {
+    calls.push("fetch");
+    throw new Error("network disabled");
+  }) as typeof fetch;
+  const state: { code: number; body: { sent?: boolean } | null } = { code: 200, body: null };
+  const res = {
+    status(code: number) { state.code = code; return this; },
+    json(body: { sent?: boolean }) { state.body = body; return this; },
+  };
+  await grantOutreachPreflightHttp(
+    { body: { confirmSend: false } } as unknown as import("express").Request,
+    res as unknown as import("express").Response,
+  );
+  assert.equal(state.code, 401);
+  assert.equal(state.body?.sent, false);
+  assert.equal(calls.length, 0);
+});
+
+test("confirmSend on the preflight route does not transmit", async () => {
+  const calls: string[] = [];
+  globalThis.fetch = (() => {
+    calls.push("fetch");
+    throw new Error("network disabled");
+  }) as typeof fetch;
+  const files = realSubmissionPdfs();
+  const request = preflightRequest(files);
+  request.body.confirmSend = true;
+  const state: { body: { sent?: boolean; network?: boolean; stored?: boolean; reason?: string } | null } = { body: null };
+  const res = {
+    status() { return this; },
+    json(body: { sent?: boolean; network?: boolean; stored?: boolean; reason?: string }) { state.body = body; return this; },
+  };
+  await grantOutreachPreflightHttp(
+    request as unknown as import("express").Request,
+    res as unknown as import("express").Response,
+  );
+  assert.equal(state.body?.sent, false);
+  assert.equal(state.body?.network, false);
+  assert.equal(state.body?.stored, false);
+  assert.equal(state.body?.reason, "preflight_does_not_send");
+  assert.equal(calls.length, 0);
 });
 

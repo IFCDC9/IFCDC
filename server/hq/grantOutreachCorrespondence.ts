@@ -71,6 +71,31 @@ export const POSTMARK_DELIVERY_TEST_STATUS = "NOT SENT";
 export const POSTMARK_DELIVERY_TEST_BODY =
   "This is an internal delivery verification for IFCDC Headquarters and Aura. No grant application or funding request is being submitted.";
 
+export const MLK_2027_RECIPIENT = "MLKCommission@sos.nj.gov";
+export const MLK_2027_SUBJECT = "MLK27 Commemorative";
+export const MLK_2027_BODY = `Imperial Foundation Community Development Center (IFCDC) submits the attached narrative and one-page budget for a local commemorative program, The Chair Is a Classroom — From the Barber Chair to the Classroom, proposed for January 18, 2027, in Asbury Park.
+
+The request is $1,000, the published local maximum. The figures are estimates. They are not expenses already incurred and they are not quotations. No direct gifts or gift cards are included.
+
+IFCDC
+EIN 47-3125994
+1215 Springwood Ave, Suite 28
+Asbury Park, NJ 07712
+service@ifcdc.org
+(732) 743-5048
+
+Fahreal Allah`;
+export const MLK_2027_ATTACHMENT_SPECS: GrantAttachmentSpec[] = [
+  {
+    name: "MLK-2027-NARRATIVE-SUBMISSION.pdf",
+    sha256: "dd4bfdba8374ea9c37974edce690bf0f1f1b29c83d391002c380b7fe2500847f",
+  },
+  {
+    name: "MLK-2027-BUDGET-FORM-SUBMISSION.pdf",
+    sha256: "a471f8ca708661a48b688d42f16118c2e13e5c82b2c429a51b70ceb4732fb6ec",
+  },
+];
+
 export const STONE_FOLLOW_UP_BODY = `Dear Elizabeth Murphy,
 
 I wrote on Sunday, October 11, 2026, with introductory questions from Imperial Foundation Community Development Center (IFCDC) in Asbury Park. I have not yet seen a reply.
@@ -163,7 +188,8 @@ export type GrantOutreachGateReason =
   | "uncertain_awaiting_founder_decision"
   | "reservation_unavailable"
   | "send_switch_off"
-  | "not_yet_due";
+  | "not_yet_due"
+  | "preflight_does_not_send";
 
 export type GrantOutreachGateResult = {
   allowed: boolean;
@@ -969,6 +995,138 @@ export function grantOutreachQueueHttp(req: Request, res: Response): void {
     followUpGate: evaluateGrantOutreachSendGate({ draft: followUp }),
     deliveryTestGate: evaluateGrantOutreachSendGate({ draft: deliveryTest }),
   });
+}
+
+function approvedMlkPackageMismatch(draft: GrantOutreachDraft): GrantOutreachGateReason | null {
+  if (email(draft.recipient) !== email(MLK_2027_RECIPIENT)) return "recipient_mismatch";
+  if (draft.subject !== MLK_2027_SUBJECT) return "subject_mismatch";
+  if (draft.body !== MLK_2027_BODY) return "exact_text_mismatch";
+  const approval = draft.founderApproval;
+  if (!approval?.recorded || !approval.authorizedBy.trim() || !approval.authorizedAt.trim()) return "unapproved";
+  if (approval.exactBody !== draft.body) return "exact_text_mismatch";
+  if (email(approval.recipient) !== email(draft.recipient)) return "recipient_mismatch";
+  if (approval.subject !== draft.subject) return "subject_mismatch";
+  if (!draft.id.trim() || approval.draftId !== draft.id) return "identity_mismatch";
+  if (approval.draftVersion !== draft.version) return "version_mismatch";
+  if (!sameAttachmentSpecs(approval.attachments ?? [], MLK_2027_ATTACHMENT_SPECS)) return "attachment_checksum_mismatch";
+  if (!sameAttachmentSpecs(draft.attachments ?? [], MLK_2027_ATTACHMENT_SPECS)) return "attachment_checksum_mismatch";
+  return null;
+}
+
+async function ensureGrantPdfPreflight(db: MailDb): Promise<void> {
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS grant_pdf_preflight (
+      draft_id TEXT NOT NULL,
+      draft_version INTEGER NOT NULL,
+      recipient TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      body_hash TEXT NOT NULL,
+      name TEXT NOT NULL,
+      sha256 TEXT NOT NULL,
+      content_type TEXT NOT NULL,
+      pdf_bytes BLOB NOT NULL,
+      stored_at TEXT NOT NULL,
+      PRIMARY KEY (draft_id, draft_version, name)
+    );
+  `);
+}
+
+export async function storeGrantPdfPreflight(
+  input: { draft: GrantOutreachDraft; attachmentPayloads?: GrantAttachmentPayload[] },
+  options: { db?: MailDb; actorEmail?: string } = {},
+): Promise<{
+  sent: false;
+  network: false;
+  stored: boolean;
+  reason: GrantOutreachGateReason | "stored";
+  attachments: Array<{ Name: string; ContentType: "application/pdf"; sha256: string }>;
+}> {
+  const empty = {
+    sent: false as const,
+    network: false as const,
+    stored: false,
+    attachments: [] as Array<{ Name: string; ContentType: "application/pdf"; sha256: string }>,
+  };
+  const mismatch = approvedMlkPackageMismatch(input.draft);
+  if (mismatch) return { ...empty, reason: mismatch };
+  const prepared = prepareApprovedGrantAttachments(MLK_2027_ATTACHMENT_SPECS, input.attachmentPayloads ?? []);
+  if (!prepared.ok) return { ...empty, reason: prepared.reason };
+  if (!options.db) return { ...empty, reason: "reservation_unavailable" };
+  const storedAt = new Date().toISOString();
+  const bodyHash = grantApprovedBodyHash(input.draft.body);
+  await ensureGrantPdfPreflight(options.db);
+  const visible: Array<{ Name: string; ContentType: "application/pdf"; sha256: string }> = [];
+  for (const item of prepared.attachments) {
+    const bytes = Buffer.from(item.Content, "base64");
+    const sha256 = grantAttachmentSha256(bytes);
+    if (sha256 !== MLK_2027_ATTACHMENT_SPECS.find((spec) => spec.name === item.Name)?.sha256) {
+      return { ...empty, reason: "attachment_checksum_mismatch" };
+    }
+    await options.db.run(
+      `INSERT OR REPLACE INTO grant_pdf_preflight (
+        draft_id, draft_version, recipient, subject, body_hash, name, sha256, content_type, pdf_bytes, stored_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      input.draft.id,
+      input.draft.version,
+      email(input.draft.recipient),
+      input.draft.subject,
+      bodyHash,
+      item.Name,
+      sha256,
+      item.ContentType,
+      bytes,
+      storedAt,
+    );
+    visible.push({ Name: item.Name, ContentType: "application/pdf", sha256 });
+  }
+  await recordGrantOutreachAudit(options.db, {
+    id: `${input.draft.id}-preflight-${randomUUID()}`,
+    action: "GRANT_PDF_PREFLIGHT_STORED",
+    source: "grant-pdf-preflight",
+    eligibilityResult: "NOT_SUBMITTED",
+    detail: JSON.stringify({
+      founderIdentity: (options.actorEmail || input.draft.founderApproval?.authorizedBy || "").trim() || null,
+      authorizedAt: input.draft.founderApproval?.authorizedAt || null,
+      recipient: input.draft.recipient,
+      subject: input.draft.subject,
+      draftId: input.draft.id,
+      draftVersion: input.draft.version,
+      bodyHash,
+      attachmentChecksums: visible.map((item) => ({ name: item.Name, sha256: item.sha256 })),
+      sent: false,
+      network: false,
+      deliveryVerification: "UNVERIFIED",
+    }),
+    actorEmail: (options.actorEmail || input.draft.founderApproval?.authorizedBy || "unrecorded").trim(),
+    sourceVerifiedAt: input.draft.founderApproval?.authorizedAt || storedAt,
+    createdAt: storedAt,
+    entityType: "grant_outreach",
+    entityId: input.draft.id,
+  });
+  return { sent: false, network: false, stored: true, reason: "stored", attachments: visible };
+}
+
+export async function grantOutreachPreflightHttp(
+  req: Request,
+  res: Response,
+  options: { db?: MailDb } = {},
+): Promise<void> {
+  const denied = inboundMailSessionStatus(req.hqUser);
+  if (denied) {
+    res.status(denied).json({ error: denied === 401 ? "Authentication required" : "Founder session required", sent: false, network: false });
+    return;
+  }
+  if (req.body?.confirmSend === true) {
+    res.json({ sent: false, network: false, stored: false, reason: "preflight_does_not_send" });
+    return;
+  }
+  const draft = draftFromRequest(req.body);
+  const db = options.db ?? await loadGrantAuditDb();
+  const decision = await storeGrantPdfPreflight(
+    { draft, attachmentPayloads: attachmentPayloadsFrom(req.body) },
+    { db, actorEmail: req.hqUser?.email },
+  );
+  res.json(decision);
 }
 
 export async function grantOutreachSendHttp(
