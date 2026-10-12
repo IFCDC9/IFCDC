@@ -1064,6 +1064,11 @@ export async function grantOutreachQueueHttp(
   const deliveryTest = preparePostmarkDeliveryTestDraft();
   const db = options.db ?? await loadGrantAuditDb();
   const mlkApplication = await readMlkApplicationTransmission(db);
+  const { mlkHeadquartersNextAction, runMlkCommissionReplyCheck } = await import("./grantApplicationTracking");
+  const nextAction = mlkHeadquartersNextAction();
+  const commissionReplies = db
+    ? await runMlkCommissionReplyCheck(db)
+    : { found: false, sendsMail: false as const, live: false as const, intervalMs: 300000, replies: [] };
   res.json({
     sent: false,
     mailbox: GRANT_OUTREACH_MAILBOX,
@@ -1071,6 +1076,8 @@ export async function grantOutreachQueueHttp(
     mailReadiness: headquartersMailReadiness(),
     applicationStatus: mlkApplication.applicationStatus,
     mlkApplication,
+    nextAction,
+    commissionReplies,
     inquiry,
     followUp,
     deliveryTest,

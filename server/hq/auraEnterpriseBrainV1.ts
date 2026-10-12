@@ -805,9 +805,11 @@ export async function buildExecutivePriorityQueueV1(opts: {
   markBrainV1ModuleLive("priority-queue");
   const generatedAt = new Date().toISOString();
   const cc = await withTimeout(buildExecutiveCommandCenterV1(opts), null, "command-center-for-queue");
-  const items = [...(cc?.answers.needsAttention ?? [])].sort(
-    (a, b) => priorityRank(a.severity) - priorityRank(b.severity)
-  );
+  const items = [...(cc?.answers.needsAttention ?? [])];
+  const { mlkExecutiveWatchItem } = await import("./grantApplicationTracking");
+  const watch = mlkExecutiveWatchItem();
+  if (!items.some((item) => item.id === watch.id)) items.push(watch);
+  items.sort((a, b) => priorityRank(a.severity) - priorityRank(b.severity));
   return {
     module: "priority-queue",
     version: "v1",

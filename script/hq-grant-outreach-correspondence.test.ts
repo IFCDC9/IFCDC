@@ -1188,7 +1188,7 @@ test("the grant queue reads an accepted MLK message id and does not send", async
     "2026-10-12T12:26:19.727Z",
     "2026-10-12T12:26:19.727Z",
   );
-  const shown: { body: { applicationStatus?: string; sent?: boolean; mlkApplication?: { applicationStatus?: string; providerMessageId?: string | null; deliveryVerification?: string; commissionReview?: boolean; awarded?: boolean; fundsReceived?: boolean } } | null } = { body: null };
+  const shown: { body: { applicationStatus?: string; sent?: boolean; nextAction?: { text?: string; sendsMail?: boolean }; mlkApplication?: { applicationStatus?: string; providerMessageId?: string | null; deliveryVerification?: string; commissionReview?: boolean; awarded?: boolean; fundsReceived?: boolean; officiallyAcknowledged?: boolean } } | null } = { body: null };
   const shownRes = {
     status() { return this; },
     json(body: typeof shown.body) { shown.body = body; return this; },
@@ -1208,6 +1208,8 @@ test("the grant queue reads an accepted MLK message id and does not send", async
   assert.equal(shown.body?.mlkApplication?.officiallyAcknowledged, false);
   assert.equal(shown.body?.mlkApplication?.awarded, false);
   assert.equal(shown.body?.mlkApplication?.fundsReceived, false);
+  assert.equal(shown.body?.nextAction?.text, "Watch for a Commission reply. Do not send.");
+  assert.equal(shown.body?.nextAction?.sendsMail, false);
   assert.equal(calls.length, 0);
 
   const files = realSubmissionPdfs();

@@ -610,11 +610,18 @@ async function runScheduledMailboxSync(): Promise<void> {
   syncInFlight = true;
   try {
     const { getDb } = await import("../db");
+    const db = await getDb();
     await pollMicrosoftGraphMailbox({
-      db: await getDb(),
+      db,
       top: MAILBOX_SYNC_CYCLE_LIMIT,
       incremental: true,
     });
+    try {
+      const { runMlkCommissionReplyCheck } = await import("./grantApplicationTracking");
+      await runMlkCommissionReplyCheck(db);
+    } catch {
+      console.error("MLK reply check failed");
+    }
   } catch {
     lastMailboxPollStatus = "failed";
     console.error("Graph mailbox sync failed");

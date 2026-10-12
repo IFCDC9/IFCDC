@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildHeadquartersGrantTracking, mlkHeadquartersNextAction } from "../server/hq/grantApplicationTracking";
+import { buildHeadquartersGrantTracking, classifyCommissionReplyText, mlkExecutiveWatchItem, mlkHeadquartersNextAction, scanCommissionReplies } from "../server/hq/grantApplicationTracking";
 import { currentMlkExecutiveAction } from "../server/hq/executiveGrantWorkflowEngine";
 
 test("the headquarters grant tracker keeps MLK stages apart and does not send", () => {
@@ -22,4 +22,22 @@ test("the headquarters grant tracker keeps MLK stages apart and does not send", 
   assert.equal(action.sendsMail, false);
   assert.equal(action.text, "Watch for a Commission reply. Do not send.");
   assert.deepEqual(currentMlkExecutiveAction(), action);
+  const watch = mlkExecutiveWatchItem();
+  assert.equal(watch.severity, "watch");
+  assert.match(watch.detail, /Do not send/);
+  assert.match(watch.detail, /not under review/);
+  assert.match(watch.detail, /not awarded/);
+  assert.equal(watch.detail.includes("is under review"), false);
+  assert.equal(classifyCommissionReplyText("Please provide the additional document."), "requests_more_information");
+  assert.equal(classifyCommissionReplyText("Your application is under review."), "confirms_review");
+  assert.equal(classifyCommissionReplyText("The application was not selected."), "communicates_a_decision");
+  assert.equal(classifyCommissionReplyText("Action required: please respond."), "requires_founder_action");
+  assert.equal(classifyCommissionReplyText("Thank you."), "unclassified");
+  const fixture = scanCommissionReplies([
+    { senderAddress: "notifications@ifcdcbarbersapp.com", subject: "daily report", textBody: "Please provide a report." },
+    { senderAddress: "MLKCommission@sos.nj.gov", senderName: "NJ MLK Commission", subject: "Fixture only", textBody: "Please provide one more page." },
+  ]);
+  assert.equal(fixture.sendsMail, false);
+  assert.equal(fixture.replies.length, 1);
+  assert.equal(fixture.replies[0].classification, "requests_more_information");
 });
