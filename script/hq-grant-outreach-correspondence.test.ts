@@ -10,11 +10,13 @@ import {
   POSTMARK_DELIVERY_TEST_SUBJECT,
   STONE_INQUIRY_BODY,
   STONE_INQUIRY_STATUS,
+  classifyPostmarkDeliveryActivity,
   deliverApprovedGrantOutreach,
   evaluateGrantOutreachSendGate,
   grantApprovedBodyHash,
   grantAttachmentSha256,
   grantMessageKey,
+  grantOutreachDeliveryHttp,
   grantOutreachPreflightHttp,
   grantOutreachQueueHttp,
   grantOutreachSendHttp,
@@ -1197,10 +1199,13 @@ test("the grant queue reads an accepted MLK message id and does not send", async
     { db },
   );
   assert.equal(shown.body?.sent, false);
+  assert.equal(shown.body?.applicationStatus, "Postmark accepted — delivery unverified");
   assert.equal(shown.body?.applicationStatus, MLK_APPLICATION_SUBMITTED_STATUS);
+  assert.equal(/awaiting review/i.test(shown.body?.applicationStatus || ""), false);
   assert.equal(shown.body?.mlkApplication?.providerMessageId, "fixture-mlk-message");
   assert.equal(shown.body?.mlkApplication?.deliveryVerification, "UNVERIFIED");
   assert.equal(shown.body?.mlkApplication?.commissionReview, false);
+  assert.equal(shown.body?.mlkApplication?.officiallyAcknowledged, false);
   assert.equal(shown.body?.mlkApplication?.awarded, false);
   assert.equal(shown.body?.mlkApplication?.fundsReceived, false);
   assert.equal(calls.length, 0);
@@ -1220,5 +1225,109 @@ test("the grant queue reads an accepted MLK message id and does not send", async
   assert.equal(retry.network, false);
   assert.equal(retry.reason, "duplicate_already_sent");
   assert.equal(calls.length, 0);
+});
+
+test("Postmark activity is classified without treating acceptance as delivery", () => {
+  assert.deepEqual(classifyPostmarkDeliveryActivity({
+    Status: "Sent",
+    MessageEvents: [{ Type: "Delivered" }],
+    ApiTokens: [FIXTURE_POSTMARK],
+  }), { delivery: "delivered", recipientAccepted: true });
+  assert.deepEqual(classifyPostmarkDeliveryActivity({
+    MessageEvents: [{ Type: "Bounced" }],
+  }), { delivery: "bounced", recipientAccepted: false });
+  assert.deepEqual(classifyPostmarkDeliveryActivity({ Status: "Queued" }), { delivery: "queued", recipientAccepted: false });
+  assert.deepEqual(classifyPostmarkDeliveryActivity({ Status: "Sent" }), { delivery: "unverified", recipientAccepted: false });
+});
+
+test("the delivery lookup returns status only and does not send", async () => {
+  const db = await open({ filename: ":memory:", driver: sqlite3.Database }) as MailDb;
+  const request = { hqUser: { role: "founder", email: "founder@ifcdc.org" } };
+  let called = "";
+  const fetchImpl: typeof fetch = async (input) => {
+    called = String(input);
+    return new Response(JSON.stringify({
+      Status: "Sent",
+      Message: FIXTURE_POSTMARK,
+      ApiTokens: [FIXTURE_POSTMARK],
+      MessageEvents: [{ Type: "Delivered", Details: { DestinationServer: "example" } }],
+    }), { status: 200 });
+  };
+  await db.exec(`
+    CREATE TABLE grant_send_reservations (
+      message_key TEXT PRIMARY KEY,
+      draft_id TEXT NOT NULL,
+      draft_version INTEGER NOT NULL,
+      content_hash TEXT NOT NULL,
+      recipient TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      state TEXT NOT NULL,
+      provider_message_id TEXT,
+      provider_error TEXT,
+      founder_identity TEXT,
+      authorized_at TEXT,
+      delivery_status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  await db.run(
+    `INSERT INTO grant_send_reservations (
+      message_key, draft_id, draft_version, content_hash, recipient, subject,
+      state, provider_message_id, provider_error, founder_identity, authorized_at,
+      delivery_status, created_at, updated_at
+    ) VALUES ('fixture-key', 'mlk-2027-commemorative', 1, 'hash', 'MLKCommission@sos.nj.gov', 'MLK27 Commemorative', 'accepted', '8a057c7e-df5d-4393-b973-ea7b0500e87d', NULL, 'founder@ifcdc.org', '2026-10-12T12:18:00.000Z', 'accepted', '2026-10-12T12:26:19.727Z', '2026-10-12T12:26:19.727Z')`,
+  );
+  await recordGrantOutreachAudit(db, {
+    id: "mlk-audit-fixture",
+    action: "POSTMARK_GRANT_ACCEPTED",
+    source: "aura-grant-postmark",
+    eligibilityResult: "NOT_SUBMITTED",
+    detail: JSON.stringify({
+      draftId: "mlk-2027-commemorative",
+      sent: true,
+      providerMessageId: "8a057c7e-df5d-4393-b973-ea7b0500e87d",
+      deliveryVerification: "UNVERIFIED",
+      attachmentChecksums: [
+        { name: "MLK-2027-NARRATIVE-SUBMISSION.pdf", sha256: "dd4bfdba8374ea9c37974edce690bf0f1f1b29c83d391002c380b7fe2500847f" },
+        { name: "MLK-2027-BUDGET-FORM-SUBMISSION.pdf", sha256: "a471f8ca708661a48b688d42f16118c2e13e5c82b2c429a51b70ceb4732fb6ec" },
+      ],
+    }),
+    actorEmail: "founder@ifcdc.org",
+    sourceVerifiedAt: "2026-10-12T12:18:00.000Z",
+    createdAt: "2026-10-12T12:26:19.727Z",
+    entityType: "grant_outreach",
+    entityId: "mlk-2027-commemorative",
+  });
+  const state: { code: number; body: Record<string, unknown> | null } = { code: 200, body: null };
+  const res = {
+    status(code: number) { state.code = code; return this; },
+    json(body: Record<string, unknown>) { state.body = body; return this; },
+  };
+  await grantOutreachDeliveryHttp(
+    request as unknown as import("express").Request,
+    res as unknown as import("express").Response,
+    { db, allowNetwork: true, env: { POSTMARK_SERVER_TOKEN: FIXTURE_POSTMARK } as NodeJS.ProcessEnv, fetchImpl },
+  );
+  const encoded = JSON.stringify(state.body);
+  assert.equal(encoded.includes(FIXTURE_POSTMARK), false);
+  assert.equal(encoded.includes("DestinationServer"), false);
+  assert.equal(state.body?.sent, false);
+  assert.equal(state.body?.delivery, "delivered");
+  assert.equal(state.body?.recipientAccepted, true);
+  assert.equal(state.body?.officiallyAcknowledged, false);
+  assert.equal(state.body?.awarded, false);
+  assert.equal(state.body?.fundsReceived, false);
+  assert.equal(state.body?.bothApprovedPdfsRecorded, true);
+  assert.equal(called.includes("/messages/outbound/8a057c7e-df5d-4393-b973-ea7b0500e87d/details"), true);
+  assert.equal(called.includes("/email"), false);
+
+  const unsigned: { code: number } = { code: 200 };
+  await grantOutreachDeliveryHttp(
+    {} as unknown as import("express").Request,
+    { status(code: number) { unsigned.code = code; return this; }, json() { return this; } } as unknown as import("express").Response,
+    { db, allowNetwork: true, env: { POSTMARK_SERVER_TOKEN: FIXTURE_POSTMARK } as NodeJS.ProcessEnv, fetchImpl },
+  );
+  assert.equal(unsigned.code, 401);
 });
 

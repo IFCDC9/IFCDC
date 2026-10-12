@@ -974,7 +974,7 @@ export async function deliverApprovedGrantOutreach(
 }
 
 const MLK_APPLICATION_DRAFT_ID = "mlk-2027-commemorative";
-export const MLK_APPLICATION_SUBMITTED_STATUS = "Submitted — Awaiting Review";
+export const MLK_APPLICATION_SUBMITTED_STATUS = "Postmark accepted — delivery unverified";
 export const MLK_APPLICATION_NOT_SUBMITTED_STATUS = "NOT SUBMITTED";
 
 export async function readMlkApplicationTransmission(db?: MailDb): Promise<{
@@ -982,21 +982,34 @@ export async function readMlkApplicationTransmission(db?: MailDb): Promise<{
   providerMessageId: string | null;
   deliveryVerification: "UNVERIFIED";
   commissionReview: false;
+  officiallyAcknowledged: false;
   awarded: false;
   fundsReceived: false;
+  attachmentChecksums: GrantAttachmentSpec[];
+  bothApprovedPdfsRecorded: boolean;
 }> {
   const hidden = {
     applicationStatus: MLK_APPLICATION_NOT_SUBMITTED_STATUS,
     providerMessageId: null as string | null,
     deliveryVerification: "UNVERIFIED" as const,
     commissionReview: false as const,
+    officiallyAcknowledged: false as const,
     awarded: false as const,
     fundsReceived: false as const,
+    attachmentChecksums: [] as GrantAttachmentSpec[],
+    bothApprovedPdfsRecorded: false,
   };
   if (!db) return hidden;
   const fromReservation = await acceptedMlkMessageId(db);
+  const proof = await readMlkAttachmentRecord(db);
   if (fromReservation) {
-    return { ...hidden, applicationStatus: MLK_APPLICATION_SUBMITTED_STATUS, providerMessageId: fromReservation };
+    return {
+      ...hidden,
+      applicationStatus: MLK_APPLICATION_SUBMITTED_STATUS,
+      providerMessageId: fromReservation,
+      attachmentChecksums: proof.attachmentChecksums,
+      bothApprovedPdfsRecorded: proof.bothApprovedPdfsRecorded,
+    };
   }
   return hidden;
 }
@@ -1064,6 +1077,125 @@ export async function grantOutreachQueueHttp(
     followUpGate: evaluateGrantOutreachSendGate({ draft: followUp }),
     deliveryTestGate: evaluateGrantOutreachSendGate({ draft: deliveryTest }),
   });
+}
+
+export type PostmarkDeliveryActivity = "delivered" | "bounced" | "queued" | "unverified";
+
+export function classifyPostmarkDeliveryActivity(payload: unknown): {
+  delivery: PostmarkDeliveryActivity;
+  recipientAccepted: boolean;
+} {
+  const body = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+  const events = Array.isArray(body.MessageEvents) ? body.MessageEvents : [];
+  const types = events.map((event) => {
+    if (!event || typeof event !== "object") return "";
+    const type = (event as Record<string, unknown>).Type;
+    return typeof type === "string" ? type.toLowerCase() : "";
+  });
+  if (types.some((type) => type.includes("bounce"))) return { delivery: "bounced", recipientAccepted: false };
+  if (types.includes("delivered")) return { delivery: "delivered", recipientAccepted: true };
+  const status = typeof body.Status === "string" ? body.Status.toLowerCase() : "";
+  if (status === "queued") return { delivery: "queued", recipientAccepted: false };
+  return { delivery: "unverified", recipientAccepted: false };
+}
+
+async function readMlkAttachmentRecord(db?: MailDb): Promise<{
+  attachmentChecksums: GrantAttachmentSpec[];
+  bothApprovedPdfsRecorded: boolean;
+}> {
+  const empty = { attachmentChecksums: [] as GrantAttachmentSpec[], bothApprovedPdfsRecorded: false };
+  if (!db) return empty;
+  try {
+    const rows = await db.all<{ detail: string }>(
+      `SELECT detail FROM grant_audit_events
+       WHERE action = 'POSTMARK_GRANT_ACCEPTED'
+       ORDER BY created_at DESC
+       LIMIT 20`,
+    );
+    for (const row of rows) {
+      const detail = JSON.parse(row.detail) as { draftId?: unknown; sent?: unknown; providerMessageId?: unknown; attachmentChecksums?: unknown };
+      const messageId = typeof detail.providerMessageId === "string" ? detail.providerMessageId.trim() : "";
+      if (detail.draftId !== MLK_APPLICATION_DRAFT_ID || detail.sent !== true || !messageId) continue;
+      const checksums = Array.isArray(detail.attachmentChecksums)
+        ? detail.attachmentChecksums.flatMap((item) => {
+          if (!item || typeof item !== "object") return [];
+          const record = item as Record<string, unknown>;
+          if (typeof record.name !== "string" || typeof record.sha256 !== "string") return [];
+          return [{ name: record.name, sha256: record.sha256.trim().toLowerCase() }];
+        })
+        : [];
+      const bothApprovedPdfsRecorded = MLK_2027_ATTACHMENT_SPECS.every((spec) => checksums.some((item) => item.name === spec.name && item.sha256 === spec.sha256));
+      return { attachmentChecksums: checksums, bothApprovedPdfsRecorded };
+    }
+  } catch {
+    return empty;
+  }
+  return empty;
+}
+
+export async function grantOutreachDeliveryHttp(
+  req: Request,
+  res: Response,
+  options: { db?: MailDb; env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch; allowNetwork?: boolean } = {},
+): Promise<void> {
+  const denied = inboundMailSessionStatus(req.hqUser);
+  if (denied) {
+    res.status(denied).json({
+      error: denied === 401 ? "Authentication required" : "Founder session required",
+      sent: false,
+      network: false,
+      delivery: "unverified",
+      recipientAccepted: false,
+    });
+    return;
+  }
+  const db = options.db ?? await loadGrantAuditDb();
+  const messageId = db ? await acceptedMlkMessageId(db) : null;
+  const proof = await readMlkAttachmentRecord(db);
+  const base = {
+    sent: false as const,
+    providerMessageId: messageId,
+    officiallyAcknowledged: false as const,
+    commissionReview: false as const,
+    awarded: false as const,
+    fundsReceived: false as const,
+    attachmentChecksums: proof.attachmentChecksums,
+    bothApprovedPdfsRecorded: proof.bothApprovedPdfsRecorded,
+  };
+  if (!messageId) {
+    res.json({ ...base, network: false, delivery: "unverified", recipientAccepted: false });
+    return;
+  }
+  const env = options.env ?? process.env;
+  if (!headquartersMailReadiness(env).postmarkReady) {
+    res.json({ ...base, network: false, delivery: "unverified", recipientAccepted: false });
+    return;
+  }
+  if (process.env.NODE_ENV === "test" && options.allowNetwork !== true) {
+    res.json({ ...base, network: false, delivery: "unverified", recipientAccepted: false });
+    return;
+  }
+  const token = (env.POSTMARK_SERVER_TOKEN || "").trim();
+  const fetchImpl = options.fetchImpl ?? fetch;
+  try {
+    const response = await fetchImpl(`https://api.postmarkapp.com/messages/outbound/${encodeURIComponent(messageId)}/details`, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "X-Postmark-Server-Token": token,
+      },
+      signal: AbortSignal.timeout(12_000),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      res.json({ ...base, network: true, delivery: "unverified", recipientAccepted: false });
+      return;
+    }
+    const activity = classifyPostmarkDeliveryActivity(payload);
+    res.json({ ...base, network: true, delivery: activity.delivery, recipientAccepted: activity.recipientAccepted });
+  } catch {
+    res.json({ ...base, network: true, delivery: "unverified", recipientAccepted: false });
+  }
 }
 
 function approvedMlkPackageMismatch(draft: GrantOutreachDraft): GrantOutreachGateReason | null {
