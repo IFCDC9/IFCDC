@@ -164,6 +164,8 @@ export type HeadquartersMailReadiness = {
   fallbackProvider: "resend" | "none";
   /** Aura grant mail never selects Resend. */
   auraGrantProvider: "postmark" | "none";
+  /** This build can attach approved PDFs on the grant path. No secret is included. */
+  grantPdfAttachments: true;
 };
 
 function resendConfiguredIn(env: NodeJS.ProcessEnv): boolean {
@@ -193,8 +195,15 @@ export function headquartersMailReadiness(env: NodeJS.ProcessEnv = process.env):
     deliveryVerification: "UNVERIFIED",
     fallbackProvider: resendConfigured ? "resend" : "none",
     auraGrantProvider: postmarkReady ? "postmark" : "none",
+    grantPdfAttachments: true,
   };
 }
+
+export type PostmarkPdfAttachment = {
+  Name: string;
+  Content: string;
+  ContentType: "application/pdf";
+};
 
 export type AuraGrantPostmarkResult = {
   success: boolean;
@@ -212,6 +221,7 @@ export async function sendAuraGrantViaPostmark(input: {
   to: string;
   subject: string;
   text: string;
+  attachments?: PostmarkPdfAttachment[];
   fetchImpl?: typeof fetch;
   env?: NodeJS.ProcessEnv;
 }): Promise<AuraGrantPostmarkResult> {
@@ -226,6 +236,7 @@ export async function sendAuraGrantViaPostmark(input: {
     to: [input.to],
     subject: input.subject,
     text: input.text,
+    attachments: input.attachments,
     fetchImpl: input.fetchImpl,
   });
   if (sent.success) {
@@ -526,6 +537,7 @@ async function sendViaPostmark(input: {
   text: string;
   html?: string;
   replyTo?: string;
+  attachments?: PostmarkPdfAttachment[];
   fetchImpl?: typeof fetch;
 }): Promise<TransactionalSendResult> {
   const fetchImpl = input.fetchImpl ?? fetch;
@@ -545,6 +557,7 @@ async function sendViaPostmark(input: {
         HtmlBody: input.html || input.text,
         MessageStream: "outbound",
         ...(input.replyTo ? { ReplyTo: input.replyTo } : {}),
+        ...(input.attachments?.length ? { Attachments: input.attachments } : {}),
       }),
       signal: AbortSignal.timeout(12_000),
     });

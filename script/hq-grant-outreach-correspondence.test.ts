@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import sqlite3 from "sqlite3";
@@ -12,7 +13,9 @@ import {
   deliverApprovedGrantOutreach,
   evaluateGrantOutreachSendGate,
   grantApprovedBodyHash,
+  grantAttachmentSha256,
   grantOutreachSendHttp,
+  prepareApprovedGrantAttachments,
   prepareGraphDeliveryTestDraft,
   preparePostmarkDeliveryTestDraft,
   prepareStoneFollowUp,
@@ -701,3 +704,272 @@ test("the audit row records founder identity, hash, and provider result without 
   assert.equal(JSON.stringify(detail).includes("X-Postmark-Server-Token"), false);
   assert.equal(process.env.IFCDC_OUTBOUND_MAIL_SEND_ENABLED, undefined);
 });
+
+function tinyPdf(text: string): Buffer {
+  const stream = `BT\n(${text}) Tj\nET\n`;
+  return Buffer.from(
+    `%PDF-1.4\n1 0 obj\n<< /Length ${stream.length} >>\nstream\n${stream}endstream\nendobj\n`
+    + `2 0 obj\n<< /Type /Page /Parent 3 0 R /Contents 1 0 R >>\nendobj\n`
+    + `3 0 obj\n<< /Type /Pages /Count 1 /Kids [2 0 R] >>\nendobj\n`
+    + `4 0 obj\n<< /Type /Catalog /Pages 3 0 R >>\nendobj\n`
+    + `trailer << /Root 4 0 R >>\n%%EOF\n`,
+    "latin1",
+  );
+}
+
+const MLK_BODY = `Imperial Foundation Community Development Center (IFCDC) submits the attached narrative and one-page budget for a local commemorative program, The Chair Is a Classroom — From the Barber Chair to the Classroom, proposed for January 18, 2027, in Asbury Park.
+
+The request is $1,000, the published local maximum. The figures are estimates. They are not expenses already incurred and they are not quotations. No direct gifts or gift cards are included.
+
+IFCDC
+EIN 47-3125994
+1215 Springwood Ave, Suite 28
+Asbury Park, NJ 07712
+service@ifcdc.org
+(732) 743-5048
+
+Fahreal Allah`;
+
+function realSubmissionPdfs(): Array<{ name: string; bytes: Buffer; sha256: string; contentBase64: string }> {
+  const folder = new URL("../../IMPERIAL-FOUNDATION-CDC/Documents/products/governance-drafts/", import.meta.url);
+  return [
+    "MLK-2027-NARRATIVE-SUBMISSION.pdf",
+    "MLK-2027-BUDGET-FORM-SUBMISSION.pdf",
+  ].map((name) => {
+    const bytes = readFileSync(new URL(name, folder));
+    return { name, bytes, sha256: grantAttachmentSha256(bytes), contentBase64: bytes.toString("base64") };
+  });
+}
+
+function mlkDraft(files = realSubmissionPdfs()): GrantOutreachDraft {
+  const specs = files.map((file) => ({ name: file.name, sha256: file.sha256 }));
+  return {
+    id: "mlk-2027-commemorative",
+    version: 1,
+    mailbox: "service@ifcdc.org",
+    recipient: "MLKCommission@sos.nj.gov",
+    subject: "MLK27 Commemorative",
+    body: MLK_BODY,
+    purpose: "mlk-2027-commemorative-mini-grant",
+    status: "FOUNDER APPROVED",
+    banner: null,
+    attachments: specs,
+    founderApproval: {
+      recorded: true,
+      exactBody: MLK_BODY,
+      recipient: "MLKCommission@sos.nj.gov",
+      subject: "MLK27 Commemorative",
+      purpose: "mlk-2027-commemorative-mini-grant",
+      draftId: "mlk-2027-commemorative",
+      draftVersion: 1,
+      authorizedBy: "founder@ifcdc.org",
+      authorizedAt: "2026-10-12T11:48:00.000Z",
+      attachments: specs,
+    },
+    grantOutreachSendEnabled: true,
+    sentByAura: false,
+    applicationStatus: "NOT SUBMITTED",
+    notBefore: null,
+    deliveryResult: null,
+  };
+}
+
+test("approved PDFs become Postmark attachments and round-trip to the original bytes", async () => {
+  const files = realSubmissionPdfs();
+  const built = prepareApprovedGrantAttachments(
+    files.map((file) => ({ name: file.name, sha256: file.sha256 })),
+    files.map((file) => ({ name: file.name, contentBase64: file.contentBase64 })),
+  );
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+  assert.equal(built.attachments.length, 2);
+  for (const file of files) {
+    const attached = built.attachments.find((item) => item.Name === file.name);
+    assert.ok(attached);
+    assert.equal(attached?.ContentType, "application/pdf");
+    assert.deepEqual(Buffer.from(attached?.Content || "", "base64"), file.bytes);
+  }
+  const calls: string[] = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.includes("resend")) throw new Error("wrong provider");
+    const body = JSON.parse(String(init?.body)) as {
+      TextBody?: string;
+      Attachments?: Array<{ Name: string; Content: string; ContentType: string }>;
+    };
+    assert.equal(body.TextBody, MLK_BODY);
+    assert.equal(body.Attachments?.length, 2);
+    assert.deepEqual(
+      body.Attachments?.map((item) => item.Name).sort(),
+      files.map((file) => file.name).sort(),
+    );
+    for (const item of body.Attachments || []) {
+      assert.equal(item.ContentType, "application/pdf");
+      const original = files.find((file) => file.name === item.Name);
+      assert.deepEqual(Buffer.from(item.Content, "base64"), original?.bytes);
+    }
+    return new Response(JSON.stringify({ MessageID: "fixture-mlk-attached", ErrorCode: 0 }), { status: 200 });
+  };
+  const db = await open({ filename: ":memory:", driver: sqlite3.Database }) as MailDb;
+  const draft = mlkDraft(files);
+  const env = { POSTMARK_SERVER_TOKEN: FIXTURE_POSTMARK, RESEND_API_KEY: FIXTURE_RESEND } as NodeJS.ProcessEnv;
+  const first = await deliverApprovedGrantOutreach(
+    { draft, today: "2026-10-12" },
+    { allowNetwork: true, env, fetchImpl, db, actorEmail: "founder@ifcdc.org", attachmentPayloads: files },
+  );
+  const second = await deliverApprovedGrantOutreach(
+    { draft, today: "2026-10-12" },
+    { allowNetwork: true, env, fetchImpl, db, actorEmail: "founder@ifcdc.org", attachmentPayloads: files },
+  );
+  assert.equal(first.sent, true);
+  assert.equal(first.providerMessageId, "fixture-mlk-attached");
+  assert.equal(second.sent, false);
+  assert.equal(second.reason, "duplicate_already_sent");
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /api\.postmarkapp\.com\/email$/);
+  const stored = await db.get<{ detail: string }>("SELECT detail FROM grant_audit_events ORDER BY created_at DESC LIMIT 1");
+  const detail = JSON.parse(stored?.detail || "{}") as { attachmentChecksums?: Array<{ sha256: string }>; deliveryVerification: string };
+  assert.equal(detail.deliveryVerification, "UNVERIFIED");
+  assert.deepEqual(
+    (detail.attachmentChecksums || []).map((item) => item.sha256).sort(),
+    files.map((file) => file.sha256).sort(),
+  );
+  assert.equal(JSON.stringify(detail).includes(FIXTURE_POSTMARK), false);
+});
+
+test("a changed attachment checksum invalidates approval and bad bytes never reach Postmark", async () => {
+  const files = realSubmissionPdfs();
+  const draft = mlkDraft(files);
+  const changed = {
+    ...draft,
+    attachments: draft.attachments?.map((item, index) => index === 0 ? { ...item, sha256: "a".repeat(64) } : item),
+  };
+  assert.equal(evaluateGrantOutreachSendGate({ draft: changed, today: "2026-10-12" }).reason, "attachment_mismatch");
+  const calls: string[] = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    calls.push(String(input));
+    throw new Error("network disabled");
+  };
+  const env = { POSTMARK_SERVER_TOKEN: FIXTURE_POSTMARK, RESEND_API_KEY: FIXTURE_RESEND } as NodeJS.ProcessEnv;
+  const db = await open({ filename: ":memory:", driver: sqlite3.Database }) as MailDb;
+  const missing = await deliverApprovedGrantOutreach(
+    { draft, today: "2026-10-12" },
+    { allowNetwork: true, env, fetchImpl, db, attachmentPayloads: [files[0]] },
+  );
+  assert.equal(missing.sent, false);
+  assert.equal(missing.reason, "attachment_missing");
+  const mismatched = await deliverApprovedGrantOutreach(
+    { draft, today: "2026-10-12" },
+    {
+      allowNetwork: true,
+      env,
+      fetchImpl,
+      db,
+      attachmentPayloads: files.map((file, index) => ({
+        name: file.name,
+        contentBase64: index === 0 ? tinyPdf("Other text").toString("base64") : file.contentBase64,
+      })),
+    },
+  );
+  assert.equal(mismatched.reason, "attachment_checksum_mismatch");
+  const encoded = await deliverApprovedGrantOutreach(
+    { draft, today: "2026-10-12" },
+    {
+      allowNetwork: true,
+      env,
+      fetchImpl,
+      db,
+      attachmentPayloads: files.map((file, index) => ({
+        name: file.name,
+        contentBase64: index === 0 ? "not base64!!!" : file.contentBase64,
+      })),
+    },
+  );
+  assert.equal(encoded.reason, "attachment_encoding");
+  const corrupt = tinyPdf("DRAFT NOT SUBMITTED");
+  const corruptDraft = mlkDraft([{ ...files[0], bytes: corrupt, sha256: grantAttachmentSha256(corrupt), contentBase64: corrupt.toString("base64") }, files[1]]);
+  const corrupted = await deliverApprovedGrantOutreach(
+    { draft: corruptDraft, today: "2026-10-12" },
+    {
+      allowNetwork: true,
+      env,
+      fetchImpl,
+      db,
+      attachmentPayloads: [
+        { name: files[0].name, contentBase64: corrupt.toString("base64") },
+        files[1],
+      ],
+    },
+  );
+  assert.equal(corrupted.reason, "attachment_corrupt");
+  const edited = evaluateGrantOutreachSendGate({
+    draft: { ...draft, body: `${draft.body}\nEdited.` },
+    today: "2026-10-12",
+  });
+  assert.equal(edited.reason, "exact_text_mismatch");
+  assert.equal(calls.length, 0);
+});
+
+test("a text-only grant is still refused when the approval requires the two PDFs", async () => {
+  const calls: string[] = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    calls.push(String(input));
+    throw new Error("network disabled");
+  };
+  const db = await open({ filename: ":memory:", driver: sqlite3.Database }) as MailDb;
+  const result = await deliverApprovedGrantOutreach(
+    { draft: mlkDraft(), today: "2026-10-12" },
+    { allowNetwork: true, env: { POSTMARK_SERVER_TOKEN: FIXTURE_POSTMARK } as NodeJS.ProcessEnv, fetchImpl, db },
+  );
+  assert.equal(result.sent, false);
+  assert.equal(result.reason, "attachment_missing");
+  assert.equal(calls.length, 0);
+});
+
+test("an unsigned grant send stays unauthorized", async () => {
+  const calls: string[] = [];
+  globalThis.fetch = (() => {
+    calls.push("fetch");
+    throw new Error("network disabled");
+  }) as typeof fetch;
+  const state: { code: number; body: { sent?: boolean } | null } = { code: 200, body: null };
+  const res = {
+    status(code: number) { state.code = code; return this; },
+    json(body: { sent?: boolean }) { state.body = body; return this; },
+  };
+  await grantOutreachSendHttp(
+    { body: { confirmSend: true } } as unknown as import("express").Request,
+    res as unknown as import("express").Response,
+  );
+  assert.equal(state.code, 401);
+  assert.equal(state.body?.sent, false);
+  assert.equal(calls.length, 0);
+});
+
+test("a generic attachment checksum still blocks a second send without using Resend", async () => {
+  const bytes = tinyPdf("Hello grant packet");
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  assert.equal(sha256, grantAttachmentSha256(bytes));
+  const spec = [{ name: "packet.pdf", sha256 }];
+  const draft = approvedFutureDraft();
+  draft.attachments = spec;
+  draft.founderApproval = { ...draft.founderApproval!, attachments: spec };
+  const payload = [{ name: "packet.pdf", contentBase64: bytes.toString("base64") }];
+  let calls = 0;
+  const fetchImpl: typeof fetch = async (input, init) => {
+    calls += 1;
+    if (String(input).includes("resend")) throw new Error("wrong provider");
+    const body = JSON.parse(String(init?.body)) as { Attachments?: Array<{ Content: string }> };
+    assert.equal(Buffer.from(body.Attachments?.[0].Content || "", "base64").toString("latin1").includes("Hello grant packet"), true);
+    return new Response(JSON.stringify({ MessageID: "fixture-packet", ErrorCode: 0 }), { status: 200 });
+  };
+  const db = await open({ filename: ":memory:", driver: sqlite3.Database }) as MailDb;
+  const env = { POSTMARK_SERVER_TOKEN: FIXTURE_POSTMARK, RESEND_API_KEY: FIXTURE_RESEND } as NodeJS.ProcessEnv;
+  const first = await deliverApprovedGrantOutreach({ draft, today: "2026-10-11" }, { allowNetwork: true, env, fetchImpl, db, attachmentPayloads: payload });
+  const second = await deliverApprovedGrantOutreach({ draft, today: "2026-10-11" }, { allowNetwork: true, env, fetchImpl, db, attachmentPayloads: payload });
+  assert.equal(first.sent, true);
+  assert.equal(second.reason, "duplicate_already_sent");
+  assert.equal(calls, 1);
+});
+

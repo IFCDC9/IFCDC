@@ -5,7 +5,8 @@
  * Approved grant mail uses the existing Postmark outbound stream. A Resend key does not
  * select Resend for this path.
  * A send may proceed only when Founder approval matches the recipient, subject,
- * message body, draft version, and draft id, and that draft's own send switch is on.
+ * message body, draft version, draft id, and each attachment checksum.
+ * A draft that requires attachments is not sent as text alone.
  * The Stone inquiry already sent on 2026-10-11 is a permanent duplicate and cannot pass.
  * An accepted or uncertain Postmark attempt is reserved in the local grant store and is not retried.
  */
@@ -13,7 +14,7 @@ import type { Request, Response } from "express";
 import { createHash, randomUUID } from "node:crypto";
 import { inboundMailSessionStatus, type MailDb } from "./inboundBusinessMail";
 import { SERVICE_MAILBOX, outboundMailSendEnabled } from "./inboundOutboundMail";
-import { sendAuraGrantViaPostmark, headquartersMailReadiness } from "../lib/transactionalEmail";
+import { sendAuraGrantViaPostmark, headquartersMailReadiness, type PostmarkPdfAttachment } from "../lib/transactionalEmail";
 
 export const GRANT_OUTREACH_MAILBOX = SERVICE_MAILBOX;
 
@@ -102,6 +103,17 @@ export type FounderExactApproval = {
   draftVersion: number;
   authorizedBy: string;
   authorizedAt: string;
+  attachments?: GrantAttachmentSpec[];
+};
+
+export type GrantAttachmentSpec = {
+  name: string;
+  sha256: string;
+};
+
+export type GrantAttachmentPayload = {
+  name: string;
+  contentBase64: string;
 };
 
 export type PriorGrantTransmission = {
@@ -125,6 +137,7 @@ export type GrantOutreachDraft = {
   status: GrantOutreachStatus;
   banner: string | null;
   founderApproval: FounderExactApproval | null;
+  attachments?: GrantAttachmentSpec[];
   grantOutreachSendEnabled: boolean;
   sentByAura: false;
   applicationStatus: "NOT SUBMITTED";
@@ -140,6 +153,11 @@ export type GrantOutreachGateReason =
   | "subject_mismatch"
   | "version_mismatch"
   | "identity_mismatch"
+  | "attachment_mismatch"
+  | "attachment_missing"
+  | "attachment_checksum_mismatch"
+  | "attachment_encoding"
+  | "attachment_corrupt"
   | "duplicate_already_sent"
   | "duplicate_in_progress"
   | "uncertain_awaiting_founder_decision"
@@ -351,6 +369,7 @@ export function evaluateGrantOutreachSendGate(input: GateInput): GrantOutreachGa
   if (approval.subject !== draft.subject) return blocked("subject_mismatch");
   if (approval.draftVersion !== draft.version) return blocked("version_mismatch");
   if (approval.draftId !== draft.id) return blocked("identity_mismatch");
+  if (!sameAttachmentSpecs(approval.attachments ?? [], draft.attachments ?? [])) return blocked("attachment_mismatch");
   if (draft.grantOutreachSendEnabled !== true) return blocked("send_switch_off");
   if (draft.notBefore && (input.today ?? headquartersCalendarDate()) < draft.notBefore) return blocked("not_yet_due");
 
@@ -468,18 +487,124 @@ type ReservationHold =
   | { acquired: true; messageKey: string; contentHash: string }
   | { acquired: false; reason: GrantOutreachGateReason; messageKey: string; contentHash: string };
 
+const NARRATIVE_ATTACHMENT = "MLK-2027-NARRATIVE-SUBMISSION.pdf";
+const BUDGET_ATTACHMENT = "MLK-2027-BUDGET-FORM-SUBMISSION.pdf";
+
+function attachmentChecksums(draft: GrantOutreachDraft): GrantAttachmentSpec[] {
+  return [...(draft.attachments ?? [])]
+    .map((item) => ({ name: item.name, sha256: item.sha256.trim().toLowerCase() }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function sameAttachmentSpecs(left: GrantAttachmentSpec[], right: GrantAttachmentSpec[]): boolean {
+  const a = [...left].map((item) => ({ name: item.name, sha256: item.sha256.trim().toLowerCase() }))
+    .sort((one, two) => one.name.localeCompare(two.name));
+  const b = [...right].map((item) => ({ name: item.name, sha256: item.sha256.trim().toLowerCase() }))
+    .sort((one, two) => one.name.localeCompare(two.name));
+  if (a.length !== b.length) return false;
+  return a.every((item, index) => item.name === b[index].name && item.sha256 === b[index].sha256);
+}
+
+export function grantAttachmentSha256(bytes: Buffer): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function decodePdfBase64(value: string): Buffer | null {
+  const trimmed = value.trim();
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(trimmed) || trimmed.length % 4 !== 0) return null;
+  const bytes = Buffer.from(trimmed, "base64");
+  if (!bytes.length || bytes.toString("base64") !== trimmed) return null;
+  return bytes;
+}
+
+function extractPdfText(bytes: Buffer): string {
+  const raw = bytes.toString("latin1");
+  const parts: string[] = [];
+  for (const match of raw.matchAll(/\((?:\\.|[^\\)])*\)/g)) {
+    parts.push(match[0].slice(1, -1).replace(/\\([()\\])/g, "$1"));
+  }
+  return parts.join(" ").replace(/\s+/g, " ").trim();
+}
+
+function pdfPageCount(bytes: Buffer): number {
+  const raw = bytes.toString("latin1");
+  const declared = raw.match(/\/Count\s+(\d+)/);
+  if (declared) return Number(declared[1]);
+  return raw.match(/\/Type\s*\/Page(?!s)/g)?.length ?? 0;
+}
+
+export function inspectGrantPdf(name: string, bytes: Buffer): GrantOutreachGateReason | null {
+  if (!bytes.subarray(0, 5).toString("latin1").startsWith("%PDF")) return "attachment_corrupt";
+  const text = extractPdfText(bytes);
+  if (!text) return "attachment_corrupt";
+  if (text.includes("DRAFT NOT SUBMITTED") || text.includes("Not a filing")) return "attachment_corrupt";
+  const pages = pdfPageCount(bytes);
+  if (name === NARRATIVE_ATTACHMENT) {
+    if (pages !== 2) return "attachment_corrupt";
+    const venue = text.includes("Asbury Park Senior Center")
+      && text.includes("1201 Springwood Avenue")
+      && text.includes("Suite 102")
+      && text.includes("PROPOSED and NOT RESERVED");
+    if (!venue) return "attachment_corrupt";
+  }
+  if (name === BUDGET_ATTACHMENT) {
+    if (pages !== 1) return "attachment_corrupt";
+    const budget = text.includes("$1,000")
+      && text.includes("ESTIMATE")
+      && text.includes("NOT A QUOTATION")
+      && text.includes("NOT INCURRED");
+    if (!budget) return "attachment_corrupt";
+  }
+  return null;
+}
+
+export function prepareApprovedGrantAttachments(
+  specs: GrantAttachmentSpec[],
+  payloads: GrantAttachmentPayload[],
+): { ok: true; attachments: PostmarkPdfAttachment[] } | { ok: false; reason: GrantOutreachGateReason } {
+  if (!specs.length) return { ok: true, attachments: [] };
+  const prepared: PostmarkPdfAttachment[] = [];
+  for (const spec of attachmentChecksums({ attachments: specs } as GrantOutreachDraft)) {
+    const payload = payloads.find((item) => item.name === spec.name);
+    if (!payload?.contentBase64.trim()) return { ok: false, reason: "attachment_missing" };
+    const bytes = decodePdfBase64(payload.contentBase64);
+    if (!bytes) return { ok: false, reason: "attachment_encoding" };
+    if (grantAttachmentSha256(bytes) !== spec.sha256) return { ok: false, reason: "attachment_checksum_mismatch" };
+    const problem = inspectGrantPdf(spec.name, bytes);
+    if (problem) return { ok: false, reason: problem };
+    prepared.push({
+      Name: spec.name,
+      Content: bytes.toString("base64"),
+      ContentType: "application/pdf",
+    });
+  }
+  if (prepared.length !== specs.length) return { ok: false, reason: "attachment_missing" };
+  return { ok: true, attachments: prepared };
+}
+
 export function grantApprovedBodyHash(body: string): string {
   return createHash("sha256").update(body, "utf8").digest("hex");
 }
 
 export function grantMessageKey(draft: GrantOutreachDraft, contentHash = grantApprovedBodyHash(draft.body)): string {
-  return createHash("sha256").update(JSON.stringify({
-    draftId: draft.id,
-    draftVersion: draft.version,
-    recipient: email(draft.recipient),
-    subject: draft.subject,
-    contentHash,
-  }), "utf8").digest("hex");
+  const attachments = attachmentChecksums(draft);
+  const material = attachments.length
+    ? {
+      draftId: draft.id,
+      draftVersion: draft.version,
+      recipient: email(draft.recipient),
+      subject: draft.subject,
+      contentHash,
+      attachments,
+    }
+    : {
+      draftId: draft.id,
+      draftVersion: draft.version,
+      recipient: email(draft.recipient),
+      subject: draft.subject,
+      contentHash,
+    };
+  return createHash("sha256").update(JSON.stringify(material), "utf8").digest("hex");
 }
 
 const SECRET_ENV_NAMES = [
@@ -637,6 +762,7 @@ async function recordDeliveryAttempt(
       deliveryStatus,
       network: result.network,
       deliveryVerification: "UNVERIFIED",
+      attachmentChecksums: attachmentChecksums(draft),
     }),
     actorEmail: founderIdentity || "unrecorded",
     sourceVerifiedAt: approval?.authorizedAt || now,
@@ -648,7 +774,14 @@ async function recordDeliveryAttempt(
 
 export async function deliverApprovedGrantOutreach(
   input: GateInput,
-  options: { fetchImpl?: typeof fetch; allowNetwork?: boolean; env?: NodeJS.ProcessEnv; db?: MailDb; actorEmail?: string } = {},
+  options: {
+    fetchImpl?: typeof fetch;
+    allowNetwork?: boolean;
+    env?: NodeJS.ProcessEnv;
+    db?: MailDb;
+    actorEmail?: string;
+    attachmentPayloads?: GrantAttachmentPayload[];
+  } = {},
 ): Promise<GrantDeliveryRecord> {
   const env = options.env ?? process.env;
   const decision = evaluateGrantOutreachSendGate(input);
@@ -663,6 +796,38 @@ export async function deliverApprovedGrantOutreach(
     };
     await recordDeliveryAttempt(options.db, input.draft, blocked, options.actorEmail);
     return blocked;
+  }
+  const required = input.draft.attachments ?? [];
+  const prepared = prepareApprovedGrantAttachments(required, options.attachmentPayloads ?? []);
+  if (!prepared.ok) {
+    const refused: GrantDeliveryRecord = {
+      allowed: false,
+      sent: false,
+      reason: prepared.reason,
+      network: false,
+      errorCode: prepared.reason,
+      providerMessageId: null,
+      providerError: null,
+      provider: "none",
+      deliveryStatus: "not_sent",
+    };
+    await recordDeliveryAttempt(options.db, input.draft, refused, options.actorEmail);
+    return refused;
+  }
+  if (required.length > 0 && prepared.attachments.length !== required.length) {
+    const missing: GrantDeliveryRecord = {
+      allowed: false,
+      sent: false,
+      reason: "attachment_missing",
+      network: false,
+      errorCode: "attachment_missing",
+      providerMessageId: null,
+      providerError: null,
+      provider: "none",
+      deliveryStatus: "not_sent",
+    };
+    await recordDeliveryAttempt(options.db, input.draft, missing, options.actorEmail);
+    return missing;
   }
   const selection = headquartersMailReadiness(env);
   if (!selection.postmarkReady) {
@@ -732,6 +897,7 @@ export async function deliverApprovedGrantOutreach(
       to: input.draft.recipient,
       subject: input.draft.subject,
       text: input.draft.body,
+      attachments: prepared.attachments,
       fetchImpl: options.fetchImpl,
       env,
     });
@@ -821,7 +987,10 @@ export async function grantOutreachSendHttp(
   }
   const draft = draftFromRequest(req.body);
   const db = options.db ?? await loadGrantAuditDb();
-  const decision = await deliverApprovedGrantOutreach({ draft }, { db, actorEmail: req.hqUser?.email });
+  const decision = await deliverApprovedGrantOutreach(
+    { draft },
+    { db, actorEmail: req.hqUser?.email, attachmentPayloads: attachmentPayloadsFrom(req.body) },
+  );
   res.json(decision);
 }
 
@@ -832,6 +1001,34 @@ async function loadGrantAuditDb(): Promise<MailDb | undefined> {
   } catch {
     return undefined;
   }
+}
+
+function attachmentSpecsFrom(value: unknown): GrantAttachmentSpec[] {
+  if (!Array.isArray(value)) return [];
+  const specs: GrantAttachmentSpec[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    if (typeof row.name !== "string" || typeof row.sha256 !== "string") continue;
+    specs.push({ name: row.name, sha256: row.sha256.trim().toLowerCase() });
+  }
+  return specs;
+}
+
+function attachmentPayloadsFrom(body: unknown): GrantAttachmentPayload[] {
+  const input = body && typeof body === "object" ? body as Record<string, unknown> : {};
+  if (!Array.isArray(input.attachments)) return [];
+  const payloads: GrantAttachmentPayload[] = [];
+  for (const item of input.attachments) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    if (typeof row.name !== "string") continue;
+    payloads.push({
+      name: row.name,
+      contentBase64: typeof row.contentBase64 === "string" ? row.contentBase64 : "",
+    });
+  }
+  return payloads;
 }
 
 function draftFromRequest(body: unknown): GrantOutreachDraft {
@@ -862,8 +1059,10 @@ function draftFromRequest(body: unknown): GrantOutreachDraft {
         draftVersion: typeof approval.draftVersion === "number" ? approval.draftVersion : Number.NaN,
         authorizedBy: typeof approval.authorizedBy === "string" ? approval.authorizedBy : "",
         authorizedAt: typeof approval.authorizedAt === "string" ? approval.authorizedAt : "",
+        attachments: attachmentSpecsFrom(approval.attachments),
       }
       : null,
+    attachments: attachmentSpecsFrom(input.attachments),
     grantOutreachSendEnabled: input.grantOutreachSendEnabled === true,
     sentByAura: false,
     applicationStatus: "NOT SUBMITTED",
