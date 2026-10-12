@@ -4,12 +4,13 @@
  * The global outbound flag is not set here and is not the grant-outreach send switch.
  * Approved grant mail uses the existing Postmark outbound stream. A Resend key does not
  * select Resend for this path.
- * A send may proceed only when exact-text approval, the approved recipient, a clear
- * duplicate check, and that draft's own send switch are all true. The Stone inquiry
- * already sent on 2026-10-11 is a permanent duplicate and cannot pass.
+ * A send may proceed only when Founder approval matches the recipient, subject,
+ * message body, draft version, and draft id, and that draft's own send switch is on.
+ * The Stone inquiry already sent on 2026-10-11 is a permanent duplicate and cannot pass.
+ * An accepted or uncertain Postmark attempt is reserved in the local grant store and is not retried.
  */
 import type { Request, Response } from "express";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { inboundMailSessionStatus, type MailDb } from "./inboundBusinessMail";
 import { SERVICE_MAILBOX, outboundMailSendEnabled } from "./inboundOutboundMail";
 import { sendAuraGrantViaPostmark, headquartersMailReadiness } from "../lib/transactionalEmail";
@@ -63,22 +64,11 @@ IFCDC Headquarters
 Imperial Foundation Community Development Center`;
 
 export const POSTMARK_DELIVERY_TEST_RECIPIENT = "service@ifcdc.org";
-export const POSTMARK_DELIVERY_TEST_SUBJECT = "IFCDC HQ — internal Postmark delivery test — NOT A FUNDER EMAIL";
+export const POSTMARK_DELIVERY_TEST_SUBJECT = "IFCDC HQ — Internal Postmark Delivery Test — NOT A FUNDER EMAIL";
 export const POSTMARK_DELIVERY_TEST_PURPOSE = "postmark-delivery-test";
-export const POSTMARK_DELIVERY_TEST_STATUS =
-  "NOT SENT — AWAITING FOUNDER APPROVAL TO DEPLOY THE GUARDED PATH AND THEN TO SEND ONE TEST";
-export const POSTMARK_DELIVERY_TEST_BODY = `This is an internal IFCDC Headquarters Postmark delivery test.
-
-It is not a grant application.
-It is not a message to a funder.
-It asks for no money and makes no commitment.
-
-If this message arrives at service@ifcdc.org, Postmark accepted a send from IFCDC Headquarters to its own mailbox.
-
-No reply is required.
-
-IFCDC Headquarters
-Imperial Foundation Community Development Center`;
+export const POSTMARK_DELIVERY_TEST_STATUS = "NOT SENT";
+export const POSTMARK_DELIVERY_TEST_BODY =
+  "This is an internal delivery verification for IFCDC Headquarters and Aura. No grant application or funding request is being submitted.";
 
 export const STONE_FOLLOW_UP_BODY = `Dear Elizabeth Murphy,
 
@@ -106,7 +96,10 @@ export type FounderExactApproval = {
   recorded: boolean;
   exactBody: string;
   recipient: string;
+  subject: string;
   purpose: string;
+  draftId: string;
+  draftVersion: number;
   authorizedBy: string;
   authorizedAt: string;
 };
@@ -123,6 +116,7 @@ export type PriorGrantTransmission = {
 
 export type GrantOutreachDraft = {
   id: string;
+  version: number;
   mailbox: typeof GRANT_OUTREACH_MAILBOX;
   recipient: string;
   subject: string;
@@ -143,7 +137,13 @@ export type GrantOutreachGateReason =
   | "unapproved"
   | "exact_text_mismatch"
   | "recipient_mismatch"
+  | "subject_mismatch"
+  | "version_mismatch"
+  | "identity_mismatch"
   | "duplicate_already_sent"
+  | "duplicate_in_progress"
+  | "uncertain_awaiting_founder_decision"
+  | "reservation_unavailable"
   | "send_switch_off"
   | "not_yet_due";
 
@@ -194,6 +194,7 @@ export function stoneInquiryAlreadySent(): PriorGrantTransmission {
 export function prepareStoneInquiryHeadquartersDraft(): GrantOutreachDraft {
   return {
     id: "stone-eligibility-inquiry-2026-10-11",
+    version: 1,
     mailbox: GRANT_OUTREACH_MAILBOX,
     recipient: STONE_INQUIRY_RECIPIENT,
     subject: STONE_INQUIRY_SUBJECT,
@@ -213,6 +214,7 @@ export function prepareStoneInquiryHeadquartersDraft(): GrantOutreachDraft {
 export function prepareGraphDeliveryTestDraft(): GrantOutreachDraft {
   return {
     id: "graph-delivery-test-2026-10-11",
+    version: 1,
     mailbox: GRANT_OUTREACH_MAILBOX,
     recipient: GRAPH_DELIVERY_TEST_RECIPIENT,
     subject: GRAPH_DELIVERY_TEST_SUBJECT,
@@ -232,12 +234,13 @@ export function prepareGraphDeliveryTestDraft(): GrantOutreachDraft {
 export function preparePostmarkDeliveryTestDraft(): GrantOutreachDraft {
   return {
     id: "postmark-delivery-test-2026-10-11",
+    version: 1,
     mailbox: GRANT_OUTREACH_MAILBOX,
     recipient: POSTMARK_DELIVERY_TEST_RECIPIENT,
     subject: POSTMARK_DELIVERY_TEST_SUBJECT,
     body: POSTMARK_DELIVERY_TEST_BODY,
     purpose: POSTMARK_DELIVERY_TEST_PURPOSE,
-    status: "NEEDS FOUNDER APPROVAL",
+    status: "NOT SENT",
     banner: POSTMARK_DELIVERY_TEST_STATUS,
     founderApproval: null,
     grantOutreachSendEnabled: false,
@@ -251,6 +254,7 @@ export function preparePostmarkDeliveryTestDraft(): GrantOutreachDraft {
 export function prepareStoneFollowUp(): GrantOutreachDraft {
   return {
     id: "stone-eligibility-inquiry-follow-up-2026-10-23",
+    version: 1,
     mailbox: GRANT_OUTREACH_MAILBOX,
     recipient: STONE_INQUIRY_RECIPIENT,
     subject: "Following up on introductory questions from IFCDC",
@@ -339,11 +343,14 @@ export function evaluateGrantOutreachSendGate(input: GateInput): GrantOutreachGa
   }
 
   const approval = draft.founderApproval;
-  if (!approval?.recorded) return blocked("unapproved");
+  if (!approval?.recorded || !approval.authorizedBy.trim() || !approval.authorizedAt.trim()) return blocked("unapproved");
   if (approval.exactBody !== draft.body) return blocked("exact_text_mismatch");
   if (email(approval.recipient) !== email(draft.recipient) || approval.purpose !== draft.purpose) {
     return blocked("recipient_mismatch");
   }
+  if (approval.subject !== draft.subject) return blocked("subject_mismatch");
+  if (approval.draftVersion !== draft.version) return blocked("version_mismatch");
+  if (approval.draftId !== draft.id) return blocked("identity_mismatch");
   if (draft.grantOutreachSendEnabled !== true) return blocked("send_switch_off");
   if (draft.notBefore && (input.today ?? headquartersCalendarDate()) < draft.notBefore) return blocked("not_yet_due");
 
@@ -450,34 +457,189 @@ export async function recordGrantOutreachAudit(db: MailDb, row: GrantOutreachAud
 type GrantDeliveryRecord = GrantOutreachGateResult & {
   errorCode?: string | null;
   providerMessageId?: string | null;
+  providerError?: string | null;
   provider: "postmark" | "none";
+  contentHash?: string | null;
+  messageKey?: string | null;
+  deliveryStatus?: "not_sent" | "reserved" | "accepted" | "rejected" | "uncertain";
 };
+
+type ReservationHold =
+  | { acquired: true; messageKey: string; contentHash: string }
+  | { acquired: false; reason: GrantOutreachGateReason; messageKey: string; contentHash: string };
+
+export function grantApprovedBodyHash(body: string): string {
+  return createHash("sha256").update(body, "utf8").digest("hex");
+}
+
+export function grantMessageKey(draft: GrantOutreachDraft, contentHash = grantApprovedBodyHash(draft.body)): string {
+  return createHash("sha256").update(JSON.stringify({
+    draftId: draft.id,
+    draftVersion: draft.version,
+    recipient: email(draft.recipient),
+    subject: draft.subject,
+    contentHash,
+  }), "utf8").digest("hex");
+}
+
+const SECRET_ENV_NAMES = [
+  "POSTMARK_SERVER_TOKEN",
+  "RESEND_API_KEY",
+  "EMAIL_API_KEY",
+  "SMTP_API_KEY",
+  "AI_INTEGRATIONS_RESEND_API_KEY",
+] as const;
+
+function scrubProviderError(value: string | null | undefined, env: NodeJS.ProcessEnv): string | null {
+  if (!value) return null;
+  let out = value;
+  for (const name of SECRET_ENV_NAMES) {
+    const secret = (env[name] || "").trim();
+    if (secret) out = out.split(secret).join("[redacted]");
+  }
+  return out;
+}
+
+async function ensureGrantSendReservations(db: MailDb): Promise<void> {
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS grant_send_reservations (
+      message_key TEXT PRIMARY KEY,
+      draft_id TEXT NOT NULL,
+      draft_version INTEGER NOT NULL,
+      content_hash TEXT NOT NULL,
+      recipient TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      state TEXT NOT NULL,
+      provider_message_id TEXT,
+      provider_error TEXT,
+      founder_identity TEXT,
+      authorized_at TEXT,
+      delivery_status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+}
+
+function isUniqueConstraint(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /UNIQUE constraint failed/i.test(message) || /SQLITE_CONSTRAINT/.test(message);
+}
+
+async function reserveGrantSend(db: MailDb, draft: GrantOutreachDraft): Promise<ReservationHold> {
+  await ensureGrantSendReservations(db);
+  const now = new Date().toISOString();
+  const contentHash = grantApprovedBodyHash(draft.body);
+  const messageKey = grantMessageKey(draft, contentHash);
+  const approval = draft.founderApproval;
+  try {
+    await db.run(
+      `INSERT INTO grant_send_reservations (
+        message_key, draft_id, draft_version, content_hash, recipient, subject,
+        state, provider_message_id, provider_error, founder_identity, authorized_at,
+        delivery_status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 'reserved', NULL, NULL, ?, ?, 'reserved', ?, ?)`,
+      messageKey,
+      draft.id,
+      draft.version,
+      contentHash,
+      email(draft.recipient),
+      draft.subject,
+      approval?.authorizedBy ?? "",
+      approval?.authorizedAt ?? "",
+      now,
+      now,
+    );
+    return { acquired: true, messageKey, contentHash };
+  } catch (err) {
+    if (!isUniqueConstraint(err)) throw err;
+  }
+  const relock = await db.run(
+    `UPDATE grant_send_reservations
+     SET state = 'reserved', delivery_status = 'reserved', provider_error = NULL, updated_at = ?
+     WHERE message_key = ? AND state = 'rejected'`,
+    now,
+    messageKey,
+  ) as { changes?: number };
+  if ((relock?.changes ?? 0) === 1) return { acquired: true, messageKey, contentHash };
+  const row = await db.get<{ state: string }>(
+    "SELECT state FROM grant_send_reservations WHERE message_key = ?",
+    messageKey,
+  );
+  const reason: GrantOutreachGateReason = row?.state === "accepted"
+    ? "duplicate_already_sent"
+    : row?.state === "uncertain"
+      ? "uncertain_awaiting_founder_decision"
+      : "duplicate_in_progress";
+  return { acquired: false, reason, messageKey, contentHash };
+}
+
+async function finishReservation(
+  db: MailDb,
+  messageKey: string,
+  state: "accepted" | "rejected" | "uncertain",
+  providerMessageId: string | null,
+  providerError: string | null,
+): Promise<void> {
+  await db.run(
+    `UPDATE grant_send_reservations
+     SET state = ?, delivery_status = ?, provider_message_id = ?, provider_error = ?, updated_at = ?
+     WHERE message_key = ? AND state = 'reserved'`,
+    state,
+    state,
+    providerMessageId,
+    providerError,
+    new Date().toISOString(),
+    messageKey,
+  );
+}
 
 async function recordDeliveryAttempt(
   db: MailDb | undefined,
   draft: GrantOutreachDraft,
   result: GrantDeliveryRecord,
+  actorEmail?: string,
 ): Promise<void> {
   if (!db) return;
   const now = new Date().toISOString();
+  const approval = draft.founderApproval;
+  const founderIdentity = (actorEmail || approval?.authorizedBy || "").trim();
+  const contentHash = result.contentHash ?? grantApprovedBodyHash(draft.body);
+  const messageKey = result.messageKey ?? grantMessageKey(draft, contentHash);
+  const deliveryStatus = result.deliveryStatus
+    ?? (result.sent ? "accepted" : "not_sent");
+  const action = deliveryStatus === "accepted"
+    ? "POSTMARK_GRANT_ACCEPTED"
+    : deliveryStatus === "uncertain"
+      ? "POSTMARK_GRANT_UNCERTAIN"
+      : "POSTMARK_GRANT_NOT_SENT";
   await recordGrantOutreachAudit(db, {
     id: `${draft.id}-${randomUUID()}`,
-    action: result.sent ? "POSTMARK_GRANT_ACCEPTED" : "POSTMARK_GRANT_NOT_SENT",
+    action,
     source: "aura-grant-postmark",
     eligibilityResult: "NOT_SUBMITTED",
     detail: JSON.stringify({
+      founderIdentity: founderIdentity || null,
+      authorizedAt: approval?.authorizedAt || null,
       recipient: draft.recipient,
       subject: draft.subject,
+      draftVersion: draft.version,
+      draftId: draft.id,
+      contentHash,
+      messageKey,
       purpose: draft.purpose,
       provider: result.provider,
       sent: result.sent,
       reason: result.reason,
       errorCode: result.errorCode ?? null,
+      providerError: result.providerError ?? null,
+      providerMessageId: result.providerMessageId ?? null,
+      deliveryStatus,
       network: result.network,
       deliveryVerification: "UNVERIFIED",
     }),
-    actorEmail: "founder",
-    sourceVerifiedAt: now,
+    actorEmail: founderIdentity || "unrecorded",
+    sourceVerifiedAt: approval?.authorizedAt || now,
     createdAt: now,
     entityType: "grant_outreach",
     entityId: draft.id,
@@ -486,15 +648,23 @@ async function recordDeliveryAttempt(
 
 export async function deliverApprovedGrantOutreach(
   input: GateInput,
-  options: { fetchImpl?: typeof fetch; allowNetwork?: boolean; env?: NodeJS.ProcessEnv; db?: MailDb } = {},
+  options: { fetchImpl?: typeof fetch; allowNetwork?: boolean; env?: NodeJS.ProcessEnv; db?: MailDb; actorEmail?: string } = {},
 ): Promise<GrantDeliveryRecord> {
+  const env = options.env ?? process.env;
   const decision = evaluateGrantOutreachSendGate(input);
   if (!decision.allowed) {
-    const blocked: GrantDeliveryRecord = { ...decision, errorCode: decision.reason, providerMessageId: null, provider: "none" };
-    await recordDeliveryAttempt(options.db, input.draft, blocked);
+    const blocked: GrantDeliveryRecord = {
+      ...decision,
+      errorCode: decision.reason,
+      providerMessageId: null,
+      providerError: null,
+      provider: "none",
+      deliveryStatus: "not_sent",
+    };
+    await recordDeliveryAttempt(options.db, input.draft, blocked, options.actorEmail);
     return blocked;
   }
-  const selection = headquartersMailReadiness(options.env ?? process.env);
+  const selection = headquartersMailReadiness(env);
   if (!selection.postmarkReady) {
     const missing: GrantDeliveryRecord = {
       allowed: true,
@@ -503,9 +673,11 @@ export async function deliverApprovedGrantOutreach(
       network: false,
       errorCode: "postmark_not_configured",
       providerMessageId: null,
+      providerError: null,
       provider: "none",
+      deliveryStatus: "not_sent",
     };
-    await recordDeliveryAttempt(options.db, input.draft, missing);
+    await recordDeliveryAttempt(options.db, input.draft, missing, options.actorEmail);
     return missing;
   }
   if (process.env.NODE_ENV === "test" && options.allowNetwork !== true) {
@@ -515,28 +687,97 @@ export async function deliverApprovedGrantOutreach(
       network: false,
       errorCode: "network_disabled_in_test",
       providerMessageId: null,
+      providerError: null,
       provider: "postmark",
+      deliveryStatus: "not_sent",
     };
-    await recordDeliveryAttempt(options.db, input.draft, held);
+    await recordDeliveryAttempt(options.db, input.draft, held, options.actorEmail);
     return held;
   }
-  const transport = await sendAuraGrantViaPostmark({
-    to: input.draft.recipient,
-    subject: input.draft.subject,
-    text: input.draft.body,
-    fetchImpl: options.fetchImpl,
-    env: options.env,
-  });
+  if (!options.db) {
+    const unavailable: GrantDeliveryRecord = {
+      allowed: false,
+      sent: false,
+      reason: "reservation_unavailable",
+      network: false,
+      errorCode: "reservation_unavailable",
+      providerMessageId: null,
+      providerError: null,
+      provider: "none",
+      deliveryStatus: "not_sent",
+    };
+    return unavailable;
+  }
+  const hold = await reserveGrantSend(options.db, input.draft);
+  if (!hold.acquired) {
+    const refused: GrantDeliveryRecord = {
+      allowed: false,
+      sent: false,
+      reason: hold.reason,
+      network: false,
+      errorCode: hold.reason,
+      providerMessageId: null,
+      providerError: null,
+      provider: "none",
+      contentHash: hold.contentHash,
+      messageKey: hold.messageKey,
+      deliveryStatus: hold.reason === "uncertain_awaiting_founder_decision" ? "uncertain" : "not_sent",
+    };
+    await recordDeliveryAttempt(options.db, input.draft, refused, options.actorEmail);
+    return refused;
+  }
+  let transport;
+  try {
+    transport = await sendAuraGrantViaPostmark({
+      to: input.draft.recipient,
+      subject: input.draft.subject,
+      text: input.draft.body,
+      fetchImpl: options.fetchImpl,
+      env,
+    });
+  } catch {
+    await finishReservation(options.db, hold.messageKey, "uncertain", null, "provider response uncertain");
+    const uncertain: GrantDeliveryRecord = {
+      allowed: true,
+      sent: false,
+      reason: "allowed",
+      network: true,
+      errorCode: "postmark_uncertain",
+      providerMessageId: null,
+      providerError: "provider response uncertain",
+      provider: "postmark",
+      contentHash: hold.contentHash,
+      messageKey: hold.messageKey,
+      deliveryStatus: "uncertain",
+    };
+    await recordDeliveryAttempt(options.db, input.draft, uncertain, options.actorEmail);
+    return uncertain;
+  }
+  const providerError = scrubProviderError(transport.providerError, env);
+  const accepted = transport.success === true;
+  const uncertain = !accepted && transport.errorCode === "postmark_uncertain";
+  const state = accepted ? "accepted" : uncertain ? "uncertain" : "rejected";
+  await finishReservation(
+    options.db,
+    hold.messageKey,
+    state,
+    accepted ? transport.messageId : null,
+    providerError,
+  );
   const result: GrantDeliveryRecord = {
     allowed: true,
-    sent: transport.success,
+    sent: accepted,
     reason: "allowed",
     network: true,
     errorCode: transport.errorCode,
-    providerMessageId: transport.messageId,
+    providerMessageId: accepted ? transport.messageId : null,
+    providerError,
     provider: transport.provider,
+    contentHash: hold.contentHash,
+    messageKey: hold.messageKey,
+    deliveryStatus: state,
   };
-  await recordDeliveryAttempt(options.db, input.draft, result);
+  await recordDeliveryAttempt(options.db, input.draft, result, options.actorEmail);
   return result;
 }
 
@@ -580,7 +821,7 @@ export async function grantOutreachSendHttp(
   }
   const draft = draftFromRequest(req.body);
   const db = options.db ?? await loadGrantAuditDb();
-  const decision = await deliverApprovedGrantOutreach({ draft }, { db });
+  const decision = await deliverApprovedGrantOutreach({ draft }, { db, actorEmail: req.hqUser?.email });
   res.json(decision);
 }
 
@@ -600,6 +841,7 @@ function draftFromRequest(body: unknown): GrantOutreachDraft {
     : null;
   return {
     id: typeof input.id === "string" ? input.id : "grant-outreach-draft",
+    version: typeof input.version === "number" ? input.version : 0,
     mailbox: GRANT_OUTREACH_MAILBOX,
     recipient: typeof input.recipient === "string" ? input.recipient : "",
     subject: typeof input.subject === "string" ? input.subject : "",
@@ -614,8 +856,11 @@ function draftFromRequest(body: unknown): GrantOutreachDraft {
         recorded: true,
         exactBody: approval.exactBody,
         recipient: typeof approval.recipient === "string" ? approval.recipient : "",
+        subject: typeof approval.subject === "string" ? approval.subject : "",
         purpose: typeof approval.purpose === "string" ? approval.purpose : "",
-        authorizedBy: typeof approval.authorizedBy === "string" ? approval.authorizedBy : "founder",
+        draftId: typeof approval.draftId === "string" ? approval.draftId : "",
+        draftVersion: typeof approval.draftVersion === "number" ? approval.draftVersion : Number.NaN,
+        authorizedBy: typeof approval.authorizedBy === "string" ? approval.authorizedBy : "",
         authorizedAt: typeof approval.authorizedAt === "string" ? approval.authorizedAt : "",
       }
       : null,

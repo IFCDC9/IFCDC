@@ -6,10 +6,12 @@ import { open } from "sqlite";
 import {
   POSTMARK_DELIVERY_TEST_BODY,
   POSTMARK_DELIVERY_TEST_STATUS,
+  POSTMARK_DELIVERY_TEST_SUBJECT,
   STONE_INQUIRY_BODY,
   STONE_INQUIRY_STATUS,
   deliverApprovedGrantOutreach,
   evaluateGrantOutreachSendGate,
+  grantApprovedBodyHash,
   grantOutreachSendHttp,
   prepareGraphDeliveryTestDraft,
   preparePostmarkDeliveryTestDraft,
@@ -39,6 +41,7 @@ function futureDraft(patch: Partial<GrantOutreachDraft> = {}): GrantOutreachDraf
   const body = "This is a different grant outreach draft for a later Founder decision.";
   return {
     id: "future-grant-outreach",
+    version: 1,
     mailbox: "service@ifcdc.org",
     recipient: "grants-review@example.com",
     subject: "A later question",
@@ -89,9 +92,12 @@ test("approved exact text passes the gate without a network send", () => {
         recorded: true,
         exactBody: body,
         recipient: "grants-review@example.com",
+        subject: "A later question",
         purpose: "future-grant-outreach",
-        authorizedBy: "founder",
-        authorizedAt: "2026-10-11",
+        draftId: "future-grant-outreach",
+        draftVersion: 1,
+        authorizedBy: "founder@ifcdc.org",
+        authorizedAt: "2026-10-11T20:15:00.000Z",
       },
     }),
     today: "2026-10-11",
@@ -115,9 +121,12 @@ test("a later edit of an approved body does not pass the gate", () => {
         recorded: true,
         exactBody: approved,
         recipient: "grants-review@example.com",
+        subject: "A later question",
         purpose: "future-grant-outreach",
-        authorizedBy: "founder",
-        authorizedAt: "2026-10-11",
+        draftId: "future-grant-outreach",
+        draftVersion: 1,
+        authorizedBy: "founder@ifcdc.org",
+        authorizedAt: "2026-10-11T20:15:00.000Z",
       },
     }),
     today: "2026-10-11",
@@ -288,9 +297,12 @@ function approvedFutureDraft(): GrantOutreachDraft {
       recorded: true,
       exactBody: body,
       recipient: "grants-review@example.com",
+      subject: "A later question",
       purpose: "future-grant-outreach",
-      authorizedBy: "founder",
-      authorizedAt: "2026-10-11",
+      draftId: "future-grant-outreach",
+      draftVersion: 1,
+      authorizedBy: "founder@ifcdc.org",
+      authorizedAt: "2026-10-11T20:15:00.000Z",
     },
   });
 }
@@ -436,14 +448,15 @@ test("the internal Postmark delivery test stays unsent", () => {
     throw new Error("network disabled");
   }) as typeof fetch;
   const draft = preparePostmarkDeliveryTestDraft();
+  assert.equal(draft.status, "NOT SENT");
   assert.equal(draft.banner, POSTMARK_DELIVERY_TEST_STATUS);
+  assert.equal(POSTMARK_DELIVERY_TEST_STATUS, "NOT SENT");
   assert.equal(draft.recipient, "service@ifcdc.org");
-  assert.match(draft.subject, /internal Postmark delivery test/);
-  assert.match(draft.subject, /NOT A FUNDER EMAIL/);
-  assert.match(draft.body, /not a grant application/);
-  assert.match(draft.body, /not a message to a funder/);
-  assert.match(draft.body, /asks for no money/);
+  assert.equal(draft.subject, "IFCDC HQ — Internal Postmark Delivery Test — NOT A FUNDER EMAIL");
+  assert.equal(draft.subject, POSTMARK_DELIVERY_TEST_SUBJECT);
+  assert.equal(draft.body, "This is an internal delivery verification for IFCDC Headquarters and Aura. No grant application or funding request is being submitted.");
   assert.equal(draft.body, POSTMARK_DELIVERY_TEST_BODY);
+  assert.equal(draft.body.includes("not a grant application"), false);
   assert.equal(draft.grantOutreachSendEnabled, false);
   assert.equal(draft.founderApproval, null);
   const decision = evaluateGrantOutreachSendGate({ draft, today: "2026-10-11" });
@@ -534,5 +547,157 @@ test("the send route writes an audit row and still refuses the Stone duplicate",
   assert.equal(row?.action, "POSTMARK_GRANT_NOT_SENT");
   assert.match(row?.detail || "", /duplicate_already_sent/);
   assert.equal((row?.detail || "").includes("POSTMARK_SERVER_TOKEN"), false);
+  assert.equal(process.env.IFCDC_OUTBOUND_MAIL_SEND_ENABLED, undefined);
+});
+
+test("a changed subject, recipient, version, or draft id invalidates approval", () => {
+  const approved = approvedFutureDraft();
+  assert.equal(evaluateGrantOutreachSendGate({ draft: approved, today: "2026-10-11" }).reason, "allowed");
+  assert.equal(evaluateGrantOutreachSendGate({
+    draft: { ...approved, subject: "A different subject line" },
+    today: "2026-10-11",
+  }).reason, "subject_mismatch");
+  assert.equal(evaluateGrantOutreachSendGate({
+    draft: { ...approved, recipient: "other@example.com" },
+    today: "2026-10-11",
+  }).reason, "recipient_mismatch");
+  assert.equal(evaluateGrantOutreachSendGate({
+    draft: { ...approved, body: `${approved.body}\nEdited.` },
+    today: "2026-10-11",
+  }).reason, "exact_text_mismatch");
+  assert.equal(evaluateGrantOutreachSendGate({
+    draft: { ...approved, version: 2 },
+    today: "2026-10-11",
+  }).reason, "version_mismatch");
+  assert.equal(evaluateGrantOutreachSendGate({
+    draft: { ...approved, id: "future-grant-outreach-edited" },
+    today: "2026-10-11",
+  }).reason, "identity_mismatch");
+  assert.equal(process.env.IFCDC_OUTBOUND_MAIL_SEND_ENABLED, undefined);
+});
+
+test("two concurrent reservations allow only one send", async () => {
+  const env = {
+    POSTMARK_SERVER_TOKEN: FIXTURE_POSTMARK,
+    RESEND_API_KEY: FIXTURE_RESEND,
+  } as NodeJS.ProcessEnv;
+  const calls: string[] = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    calls.push(String(input));
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    if (String(input).includes("resend")) throw new Error("wrong provider");
+    return new Response(JSON.stringify({ MessageID: "fixture-concurrent", ErrorCode: 0 }), { status: 200 });
+  };
+  const db = await open({ filename: ":memory:", driver: sqlite3.Database }) as MailDb;
+  const draft = approvedFutureDraft();
+  const [first, second] = await Promise.all([
+    deliverApprovedGrantOutreach({ draft, today: "2026-10-11" }, { allowNetwork: true, env, fetchImpl, db }),
+    deliverApprovedGrantOutreach({ draft, today: "2026-10-11" }, { allowNetwork: true, env, fetchImpl, db }),
+  ]);
+  const sent = [first, second].filter((result) => result.sent);
+  const refused = [first, second].filter((result) => !result.sent);
+  assert.equal(sent.length, 1);
+  assert.equal(refused.length, 1);
+  assert.equal(calls.length, 1);
+  assert.ok(refused[0].reason === "duplicate_in_progress" || refused[0].reason === "duplicate_already_sent");
+  assert.equal(process.env.IFCDC_OUTBOUND_MAIL_SEND_ENABLED, undefined);
+});
+
+test("an accepted Postmark message id blocks a retry of the same approval", async () => {
+  const env = { POSTMARK_SERVER_TOKEN: FIXTURE_POSTMARK } as NodeJS.ProcessEnv;
+  let calls = 0;
+  const fetchImpl: typeof fetch = async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ MessageID: "fixture-accepted-id", ErrorCode: 0 }), { status: 200 });
+  };
+  const db = await open({ filename: ":memory:", driver: sqlite3.Database }) as MailDb;
+  const draft = approvedFutureDraft();
+  const first = await deliverApprovedGrantOutreach({ draft, today: "2026-10-11" }, { allowNetwork: true, env, fetchImpl, db, actorEmail: "founder@ifcdc.org" });
+  const second = await deliverApprovedGrantOutreach({ draft, today: "2026-10-11" }, { allowNetwork: true, env, fetchImpl, db, actorEmail: "founder@ifcdc.org" });
+  assert.equal(first.sent, true);
+  assert.equal(first.providerMessageId, "fixture-accepted-id");
+  assert.equal(second.sent, false);
+  assert.equal(second.reason, "duplicate_already_sent");
+  assert.equal(second.network, false);
+  assert.equal(calls, 1);
+  const reserved = await db.get<{ state: string; provider_message_id: string }>(
+    "SELECT state, provider_message_id FROM grant_send_reservations",
+  );
+  assert.equal(reserved?.state, "accepted");
+  assert.equal(reserved?.provider_message_id, "fixture-accepted-id");
+});
+
+test("an uncertain provider response does not send again", async () => {
+  const env = { POSTMARK_SERVER_TOKEN: FIXTURE_POSTMARK } as NodeJS.ProcessEnv;
+  let calls = 0;
+  const fetchImpl: typeof fetch = async () => {
+    calls += 1;
+    throw new Error("timeout before a provider message id");
+  };
+  const db = await open({ filename: ":memory:", driver: sqlite3.Database }) as MailDb;
+  const draft = approvedFutureDraft();
+  const first = await deliverApprovedGrantOutreach({ draft, today: "2026-10-11" }, { allowNetwork: true, env, fetchImpl, db });
+  const second = await deliverApprovedGrantOutreach({ draft, today: "2026-10-11" }, { allowNetwork: true, env, fetchImpl, db });
+  assert.equal(first.sent, false);
+  assert.equal(first.errorCode, "postmark_uncertain");
+  assert.equal(first.deliveryStatus, "uncertain");
+  assert.equal(second.sent, false);
+  assert.equal(second.reason, "uncertain_awaiting_founder_decision");
+  assert.equal(second.network, false);
+  assert.equal(calls, 1);
+  const reserved = await db.get<{ state: string }>("SELECT state FROM grant_send_reservations");
+  assert.equal(reserved?.state, "uncertain");
+});
+
+test("the audit row records founder identity, hash, and provider result without a credential", async () => {
+  const fakeKey = "fixture-postmark-token-not-real";
+  const env = { POSTMARK_SERVER_TOKEN: fakeKey, RESEND_API_KEY: FIXTURE_RESEND } as NodeJS.ProcessEnv;
+  const fetchImpl: typeof fetch = async () => new Response(JSON.stringify({
+    MessageID: "fixture-audit-id",
+    ErrorCode: 0,
+    Message: `accepted near ${fakeKey}`,
+  }), { status: 200 });
+  const db = await open({ filename: ":memory:", driver: sqlite3.Database }) as MailDb;
+  const draft = approvedFutureDraft();
+  const result = await deliverApprovedGrantOutreach(
+    { draft, today: "2026-10-11" },
+    { allowNetwork: true, env, fetchImpl, db, actorEmail: "founder@ifcdc.org" },
+  );
+  assert.equal(result.sent, true);
+  const stored = await db.get<{ action: string; actor_email: string; detail: string; source_verified_at: string }>(
+    "SELECT action, actor_email, detail, source_verified_at FROM grant_audit_events ORDER BY created_at DESC LIMIT 1",
+  );
+  assert.equal(stored?.action, "POSTMARK_GRANT_ACCEPTED");
+  assert.equal(stored?.actor_email, "founder@ifcdc.org");
+  assert.equal(stored?.source_verified_at, "2026-10-11T20:15:00.000Z");
+  const detail = JSON.parse(stored?.detail || "{}") as {
+    founderIdentity: string;
+    authorizedAt: string;
+    recipient: string;
+    subject: string;
+    draftVersion: number;
+    draftId: string;
+    contentHash: string;
+    messageKey: string;
+    providerMessageId: string;
+    deliveryStatus: string;
+    deliveryVerification: string;
+    providerError: string | null;
+  };
+  assert.equal(detail.founderIdentity, "founder@ifcdc.org");
+  assert.equal(detail.authorizedAt, "2026-10-11T20:15:00.000Z");
+  assert.equal(detail.recipient, draft.recipient);
+  assert.equal(detail.subject, draft.subject);
+  assert.equal(detail.draftVersion, 1);
+  assert.equal(detail.draftId, draft.id);
+  assert.equal(detail.contentHash, grantApprovedBodyHash(draft.body));
+  assert.equal(detail.contentHash.length, 64);
+  assert.equal(typeof detail.messageKey, "string");
+  assert.equal(detail.providerMessageId, "fixture-audit-id");
+  assert.equal(detail.deliveryStatus, "accepted");
+  assert.equal(detail.deliveryVerification, "UNVERIFIED");
+  assert.equal(JSON.stringify(detail).includes(fakeKey), false);
+  assert.equal(JSON.stringify(detail).includes(FIXTURE_RESEND), false);
+  assert.equal(JSON.stringify(detail).includes("X-Postmark-Server-Token"), false);
   assert.equal(process.env.IFCDC_OUTBOUND_MAIL_SEND_ENABLED, undefined);
 });

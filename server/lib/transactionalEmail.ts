@@ -200,7 +200,8 @@ export type AuraGrantPostmarkResult = {
   success: boolean;
   provider: "postmark" | "none";
   messageId: string | null;
-  errorCode: string | null;
+  errorCode: "postmark_not_configured" | "postmark_rejected" | "postmark_uncertain" | null;
+  providerError: string | null;
 };
 
 /**
@@ -217,7 +218,7 @@ export async function sendAuraGrantViaPostmark(input: {
   const env = input.env ?? process.env;
   const selection = headquartersMailReadiness(env);
   if (!selection.postmarkReady) {
-    return { success: false, provider: "none", messageId: null, errorCode: "postmark_not_configured" };
+    return { success: false, provider: "none", messageId: null, errorCode: "postmark_not_configured", providerError: null };
   }
   const sent = await sendViaPostmark({
     token: (env.POSTMARK_SERVER_TOKEN || "").trim(),
@@ -227,10 +228,18 @@ export async function sendAuraGrantViaPostmark(input: {
     text: input.text,
     fetchImpl: input.fetchImpl,
   });
-  if (!sent.success) {
-    return { success: false, provider: "postmark", messageId: null, errorCode: "postmark_rejected" };
+  if (sent.success) {
+    return { success: true, provider: "postmark", messageId: sent.messageId ?? null, errorCode: null, providerError: null };
   }
-  return { success: true, provider: "postmark", messageId: sent.messageId ?? null, errorCode: null };
+  const exception = sent.providerResponse != null && Object.prototype.hasOwnProperty.call(sent.providerResponse, "exception");
+  const uncertain = sent.providerStatus == null || exception;
+  return {
+    success: false,
+    provider: "postmark",
+    messageId: null,
+    errorCode: uncertain ? "postmark_uncertain" : "postmark_rejected",
+    providerError: sent.error ?? (uncertain ? "provider response uncertain" : null),
+  };
 }
 
 /** Record which transport accepted the message. Does not choose the provider. */
