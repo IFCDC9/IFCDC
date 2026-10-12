@@ -14,8 +14,12 @@ import {
   evaluateGrantOutreachSendGate,
   grantApprovedBodyHash,
   grantAttachmentSha256,
+  grantMessageKey,
   grantOutreachPreflightHttp,
+  grantOutreachQueueHttp,
   grantOutreachSendHttp,
+  MLK_APPLICATION_NOT_SUBMITTED_STATUS,
+  MLK_APPLICATION_SUBMITTED_STATUS,
   prepareApprovedGrantAttachments,
   prepareGraphDeliveryTestDraft,
   preparePostmarkDeliveryTestDraft,
@@ -1119,6 +1123,102 @@ test("confirmSend on the preflight route does not transmit", async () => {
   assert.equal(state.body?.network, false);
   assert.equal(state.body?.stored, false);
   assert.equal(state.body?.reason, "preflight_does_not_send");
+  assert.equal(calls.length, 0);
+});
+
+test("the grant queue reads an accepted MLK message id and does not send", async () => {
+  const calls: string[] = [];
+  globalThis.fetch = (() => {
+    calls.push("fetch");
+    throw new Error("network disabled");
+  }) as typeof fetch;
+  const db = await open({ filename: ":memory:", driver: sqlite3.Database }) as MailDb;
+  const emptyState: { body: { applicationStatus?: string; mlkApplication?: { providerMessageId?: string | null; commissionReview?: boolean; awarded?: boolean; fundsReceived?: boolean } } | null } = { body: null };
+  const emptyRes = {
+    status() { return this; },
+    json(body: typeof emptyState.body) { emptyState.body = body; return this; },
+  };
+  const request = { hqUser: { role: "founder", email: "founder@ifcdc.org" } };
+  await grantOutreachQueueHttp(
+    request as unknown as import("express").Request,
+    emptyRes as unknown as import("express").Response,
+    { db },
+  );
+  assert.equal(emptyState.body?.applicationStatus, MLK_APPLICATION_NOT_SUBMITTED_STATUS);
+  assert.equal(emptyState.body?.mlkApplication?.providerMessageId ?? null, null);
+  assert.equal(calls.length, 0);
+
+  const draft = mlkDraft();
+  const contentHash = grantApprovedBodyHash(draft.body);
+  const messageKey = grantMessageKey(draft, contentHash);
+  await db.exec(`
+    CREATE TABLE grant_send_reservations (
+      message_key TEXT PRIMARY KEY,
+      draft_id TEXT NOT NULL,
+      draft_version INTEGER NOT NULL,
+      content_hash TEXT NOT NULL,
+      recipient TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      state TEXT NOT NULL,
+      provider_message_id TEXT,
+      provider_error TEXT,
+      founder_identity TEXT,
+      authorized_at TEXT,
+      delivery_status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  await db.run(
+    `INSERT INTO grant_send_reservations (
+      message_key, draft_id, draft_version, content_hash, recipient, subject,
+      state, provider_message_id, provider_error, founder_identity, authorized_at,
+      delivery_status, created_at, updated_at
+    ) VALUES (?, ?, 1, ?, ?, ?, 'accepted', ?, NULL, ?, ?, 'accepted', ?, ?)`,
+    messageKey,
+    "mlk-2027-commemorative",
+    contentHash,
+    "MLKCommission@sos.nj.gov",
+    "MLK27 Commemorative",
+    "fixture-mlk-message",
+    "founder@ifcdc.org",
+    "2026-10-12T12:18:00.000Z",
+    "2026-10-12T12:26:19.727Z",
+    "2026-10-12T12:26:19.727Z",
+  );
+  const shown: { body: { applicationStatus?: string; sent?: boolean; mlkApplication?: { applicationStatus?: string; providerMessageId?: string | null; deliveryVerification?: string; commissionReview?: boolean; awarded?: boolean; fundsReceived?: boolean } } | null } = { body: null };
+  const shownRes = {
+    status() { return this; },
+    json(body: typeof shown.body) { shown.body = body; return this; },
+  };
+  await grantOutreachQueueHttp(
+    request as unknown as import("express").Request,
+    shownRes as unknown as import("express").Response,
+    { db },
+  );
+  assert.equal(shown.body?.sent, false);
+  assert.equal(shown.body?.applicationStatus, MLK_APPLICATION_SUBMITTED_STATUS);
+  assert.equal(shown.body?.mlkApplication?.providerMessageId, "fixture-mlk-message");
+  assert.equal(shown.body?.mlkApplication?.deliveryVerification, "UNVERIFIED");
+  assert.equal(shown.body?.mlkApplication?.commissionReview, false);
+  assert.equal(shown.body?.mlkApplication?.awarded, false);
+  assert.equal(shown.body?.mlkApplication?.fundsReceived, false);
+  assert.equal(calls.length, 0);
+
+  const files = realSubmissionPdfs();
+  const retry = await deliverApprovedGrantOutreach(
+    { draft, today: "2026-10-12" },
+    {
+      allowNetwork: true,
+      env: { POSTMARK_SERVER_TOKEN: FIXTURE_POSTMARK } as NodeJS.ProcessEnv,
+      fetchImpl: globalThis.fetch,
+      db,
+      attachmentPayloads: files.map((file) => ({ name: file.name, contentBase64: file.contentBase64 })),
+    },
+  );
+  assert.equal(retry.sent, false);
+  assert.equal(retry.network, false);
+  assert.equal(retry.reason, "duplicate_already_sent");
   assert.equal(calls.length, 0);
 });
 

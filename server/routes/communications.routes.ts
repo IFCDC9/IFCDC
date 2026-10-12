@@ -106,8 +106,8 @@ router.post("/outbound-compositions/:id/send", async (req, res) => {
   await sendOutboundCompositionHttp(req, res);
 });
 
-router.get("/grant-outreach/queue", (req, res) => {
-  grantOutreachQueueHttp(req, res);
+router.get("/grant-outreach/queue", async (req, res) => {
+  await grantOutreachQueueHttp(req, res);
 });
 
 router.post("/grant-outreach/preflight", async (req, res) => {

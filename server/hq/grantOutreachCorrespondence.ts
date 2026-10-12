@@ -973,7 +973,73 @@ export async function deliverApprovedGrantOutreach(
   return result;
 }
 
-export function grantOutreachQueueHttp(req: Request, res: Response): void {
+const MLK_APPLICATION_DRAFT_ID = "mlk-2027-commemorative";
+export const MLK_APPLICATION_SUBMITTED_STATUS = "Submitted — Awaiting Review";
+export const MLK_APPLICATION_NOT_SUBMITTED_STATUS = "NOT SUBMITTED";
+
+export async function readMlkApplicationTransmission(db?: MailDb): Promise<{
+  applicationStatus: typeof MLK_APPLICATION_SUBMITTED_STATUS | typeof MLK_APPLICATION_NOT_SUBMITTED_STATUS;
+  providerMessageId: string | null;
+  deliveryVerification: "UNVERIFIED";
+  commissionReview: false;
+  awarded: false;
+  fundsReceived: false;
+}> {
+  const hidden = {
+    applicationStatus: MLK_APPLICATION_NOT_SUBMITTED_STATUS,
+    providerMessageId: null as string | null,
+    deliveryVerification: "UNVERIFIED" as const,
+    commissionReview: false as const,
+    awarded: false as const,
+    fundsReceived: false as const,
+  };
+  if (!db) return hidden;
+  const fromReservation = await acceptedMlkMessageId(db);
+  if (fromReservation) {
+    return { ...hidden, applicationStatus: MLK_APPLICATION_SUBMITTED_STATUS, providerMessageId: fromReservation };
+  }
+  return hidden;
+}
+
+async function acceptedMlkMessageId(db: MailDb): Promise<string | null> {
+  try {
+    const row = await db.get<{ provider_message_id: string | null }>(
+      `SELECT provider_message_id FROM grant_send_reservations
+       WHERE draft_id = ? AND state = 'accepted'
+         AND provider_message_id IS NOT NULL
+         AND length(trim(provider_message_id)) > 0
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      MLK_APPLICATION_DRAFT_ID,
+    );
+    const reserved = row?.provider_message_id?.trim() || "";
+    if (reserved) return reserved;
+  } catch {
+    return null;
+  }
+  try {
+    const rows = await db.all<{ detail: string }>(
+      `SELECT detail FROM grant_audit_events
+       WHERE action = 'POSTMARK_GRANT_ACCEPTED'
+       ORDER BY created_at DESC
+       LIMIT 20`,
+    );
+    for (const row of rows) {
+      const detail = JSON.parse(row.detail) as { draftId?: unknown; providerMessageId?: unknown; sent?: unknown };
+      const messageId = typeof detail.providerMessageId === "string" ? detail.providerMessageId.trim() : "";
+      if (detail.draftId === MLK_APPLICATION_DRAFT_ID && detail.sent === true && messageId) return messageId;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export async function grantOutreachQueueHttp(
+  req: Request,
+  res: Response,
+  options: { db?: MailDb } = {},
+): Promise<void> {
   const denied = inboundMailSessionStatus(req.hqUser);
   if (denied) {
     res.status(denied).json({ error: denied === 401 ? "Authentication required" : "Founder session required", sent: false });
@@ -982,12 +1048,15 @@ export function grantOutreachQueueHttp(req: Request, res: Response): void {
   const inquiry = prepareStoneInquiryHeadquartersDraft();
   const followUp = prepareStoneFollowUp();
   const deliveryTest = preparePostmarkDeliveryTestDraft();
+  const db = options.db ?? await loadGrantAuditDb();
+  const mlkApplication = await readMlkApplicationTransmission(db);
   res.json({
     sent: false,
     mailbox: GRANT_OUTREACH_MAILBOX,
     globalOutboundMailSendEnabled: outboundMailSendEnabled(),
     mailReadiness: headquartersMailReadiness(),
-    applicationStatus: "NOT SUBMITTED",
+    applicationStatus: mlkApplication.applicationStatus,
+    mlkApplication,
     inquiry,
     followUp,
     deliveryTest,
