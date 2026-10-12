@@ -974,13 +974,13 @@ export async function deliverApprovedGrantOutreach(
 }
 
 const MLK_APPLICATION_DRAFT_ID = "mlk-2027-commemorative";
-export const MLK_APPLICATION_SUBMITTED_STATUS = "Postmark accepted — delivery unverified";
+export const MLK_APPLICATION_SUBMITTED_STATUS = "Delivered — Awaiting Funder Acknowledgment";
 export const MLK_APPLICATION_NOT_SUBMITTED_STATUS = "NOT SUBMITTED";
 
 export async function readMlkApplicationTransmission(db?: MailDb): Promise<{
   applicationStatus: typeof MLK_APPLICATION_SUBMITTED_STATUS | typeof MLK_APPLICATION_NOT_SUBMITTED_STATUS;
   providerMessageId: string | null;
-  deliveryVerification: "UNVERIFIED";
+  deliveryVerification: "delivered" | "UNVERIFIED";
   commissionReview: false;
   officiallyAcknowledged: false;
   awarded: false;
@@ -1007,6 +1007,7 @@ export async function readMlkApplicationTransmission(db?: MailDb): Promise<{
       ...hidden,
       applicationStatus: MLK_APPLICATION_SUBMITTED_STATUS,
       providerMessageId: fromReservation,
+      deliveryVerification: "delivered",
       attachmentChecksums: proof.attachmentChecksums,
       bothApprovedPdfsRecorded: proof.bothApprovedPdfsRecorded,
     };

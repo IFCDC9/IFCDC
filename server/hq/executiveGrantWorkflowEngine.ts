@@ -16,6 +16,7 @@ import {
 import { runGrantIntelligenceSync } from "./grantIntelligenceEngine";
 import { retrieveKnowledge } from "./knowledgeBaseEngine";
 import { createLeadershipAlert } from "./criticalAlerts";
+import { mlkHeadquartersNextAction } from "./grantApplicationTracking";
 
 export type GrantWorkflowPhase =
   | "search"
@@ -304,3 +305,8 @@ export async function monitorGrantApplication(applicationId: string) {
 }
 
 export { setFounderApproval, confirmPortalSubmission };
+
+/** Read-only MLK next step for the executive grant view. It does not submit or send. */
+export function currentMlkExecutiveAction() {
+  return mlkHeadquartersNextAction();
+}

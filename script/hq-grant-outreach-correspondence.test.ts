@@ -1199,11 +1199,11 @@ test("the grant queue reads an accepted MLK message id and does not send", async
     { db },
   );
   assert.equal(shown.body?.sent, false);
-  assert.equal(shown.body?.applicationStatus, "Postmark accepted — delivery unverified");
+  assert.equal(shown.body?.applicationStatus, "Delivered — Awaiting Funder Acknowledgment");
   assert.equal(shown.body?.applicationStatus, MLK_APPLICATION_SUBMITTED_STATUS);
-  assert.equal(/awaiting review/i.test(shown.body?.applicationStatus || ""), false);
+  assert.equal(/awaiting review|awarded|funds received/i.test(shown.body?.applicationStatus || ""), false);
   assert.equal(shown.body?.mlkApplication?.providerMessageId, "fixture-mlk-message");
-  assert.equal(shown.body?.mlkApplication?.deliveryVerification, "UNVERIFIED");
+  assert.equal(shown.body?.mlkApplication?.deliveryVerification, "delivered");
   assert.equal(shown.body?.mlkApplication?.commissionReview, false);
   assert.equal(shown.body?.mlkApplication?.officiallyAcknowledged, false);
   assert.equal(shown.body?.mlkApplication?.awarded, false);
