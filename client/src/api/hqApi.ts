@@ -510,6 +510,31 @@ export const hqApi = {
       source: string;
       degraded: boolean;
       warning: string | null;
+      founderBriefing?: {
+        sendsMail: false;
+        generatedAt: string;
+        grantApplications: Array<{ id: string; status: string; evidence: string; timestamp: string; nextAction: string }>;
+        fundingOpportunities: { actionableCount: number; items: Array<{ name: string; deadline: string; evidence: string }> };
+        deadlines: Array<{ label: string; timestamp: string; evidence: string }>;
+        importantEmails: Array<{ who: string; subject: string; timestamp: string; evidence: string; classification: string }>;
+        founderDecisions: Array<{ text: string; timestamp: string; evidence: string }>;
+        barbersActivity: Array<{ who: string; subject: string; timestamp: string; evidence: string }>;
+        systemHealth: {
+          intervalMs: number;
+          automaticPolling: boolean;
+          lastPollAt: string | null;
+          lastPollStatus: string | null;
+          recordedPolls: Array<{ at: string; result: string }>;
+          pollGap: string;
+        };
+        money: {
+          projected: { lane: string; label: string; amount: string; evidence: string };
+          submitted: { lane: string; label: string; amount: string; evidence: string };
+          awards: { lane: string; label: string; amount: string; evidence: string };
+          received: { lane: string; label: string; amount: string; evidence: string };
+        };
+        alerts: Array<{ id: string; severity: string; title: string; detail: string; evidence: string; timestamp: string }>;
+      };
       moduleRoadmap: Array<{ id: number; name: string; status: "live" | "planned" }>;
     }>("/aura/brain-v1/daily-briefing", { timeoutMs: 60_000 }),
   auraBrainV1Projects: () =>

@@ -530,7 +530,76 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
           {b?.warning && (
             <p style={{ color: "var(--hq-warning)", marginBottom: "0.75rem", fontSize: "0.85rem" }}>{b.warning}</p>
           )}
-          {b && (
+          {b && b.founderBriefing && (
+            <>
+              <div className="hq-kpi-grid" style={{ marginBottom: "1.25rem" }}>
+                <KpiCard label="Projected" value={b.founderBriefing.money.projected.label} meta={b.founderBriefing.money.projected.amount} icon={Target} variant="muted" />
+                <KpiCard label="Submitted" value={b.founderBriefing.money.submitted.amount} meta={b.founderBriefing.money.submitted.label} icon={FileText} variant="gold" />
+                <KpiCard label="Awards" value={b.founderBriefing.money.awards.amount} meta={b.founderBriefing.money.awards.label} icon={CheckCircle2} variant="muted" />
+                <KpiCard label="Money received" value={b.founderBriefing.money.received.amount} meta={b.founderBriefing.money.received.label} icon={Activity} variant="muted" />
+              </div>
+              <div className="hq-panel" style={{ marginBottom: "1rem" }}>
+                <div className="hq-panel-body">
+                  <h4 style={{ color: "var(--hq-gold)", marginBottom: "0.5rem" }}>Aura executive briefing</h4>
+                  <p className="hq-muted-text" style={{ fontSize: "0.78rem", marginBottom: "0.75rem" }}>
+                    Generated {new Date(b.founderBriefing.generatedAt).toLocaleString()} · read only · does not send
+                  </p>
+                  <h5 style={{ margin: "0 0 0.35rem", fontSize: "0.85rem" }}>Grant application</h5>
+                  {b.founderBriefing.grantApplications.map((row) => (
+                    <p key={row.id} style={{ fontSize: "0.85rem", margin: "0 0 0.75rem" }}>
+                      <strong>{row.status}</strong><br />
+                      {row.nextAction}<br />
+                      <span className="hq-muted-text">{row.timestamp} · {row.evidence}</span>
+                    </p>
+                  ))}
+                  <h5 style={{ margin: "0 0 0.35rem", fontSize: "0.85rem" }}>Deadlines</h5>
+                  <ul style={{ margin: "0 0 0.75rem", paddingLeft: "1.1rem", fontSize: "0.85rem" }}>
+                    {b.founderBriefing.deadlines.map((row) => (
+                      <li key={row.label}><strong>{row.label}</strong> · {row.timestamp}. {row.evidence}</li>
+                    ))}
+                  </ul>
+                  <h5 style={{ margin: "0 0 0.35rem", fontSize: "0.85rem" }}>Funding opportunities</h5>
+                  <p style={{ fontSize: "0.85rem", margin: "0 0 0.35rem" }}>New actionable count: {b.founderBriefing.fundingOpportunities.actionableCount}</p>
+                  <ul style={{ margin: "0 0 0.75rem", paddingLeft: "1.1rem", fontSize: "0.85rem" }}>
+                    {b.founderBriefing.fundingOpportunities.items.map((row) => (
+                      <li key={row.name}><strong>{row.name}</strong> · {row.deadline}. {row.evidence}</li>
+                    ))}
+                  </ul>
+                  <h5 style={{ margin: "0 0 0.35rem", fontSize: "0.85rem" }}>Important email</h5>
+                  <ul style={{ margin: "0 0 0.75rem", paddingLeft: "1.1rem", fontSize: "0.85rem" }}>
+                    {b.founderBriefing.importantEmails.map((row) => (
+                      <li key={`${row.who}-${row.timestamp}`}>{row.who} · {row.subject} · {row.classification} · {row.timestamp}. {row.evidence}</li>
+                    ))}
+                  </ul>
+                  <h5 style={{ margin: "0 0 0.35rem", fontSize: "0.85rem" }}>Founder decision</h5>
+                  <ul style={{ margin: "0 0 0.75rem", paddingLeft: "1.1rem", fontSize: "0.85rem" }}>
+                    {b.founderBriefing.founderDecisions.map((row) => (
+                      <li key={row.text}>{row.text} · {row.timestamp}. {row.evidence}</li>
+                    ))}
+                  </ul>
+                  <h5 style={{ margin: "0 0 0.35rem", fontSize: "0.85rem" }}>Barbers App activity</h5>
+                  <ul style={{ margin: "0 0 0.75rem", paddingLeft: "1.1rem", fontSize: "0.85rem" }}>
+                    {b.founderBriefing.barbersActivity.map((row) => (
+                      <li key={`${row.subject}-${row.timestamp}`}>{row.who} · {row.subject} · {row.timestamp}. {row.evidence}</li>
+                    ))}
+                  </ul>
+                  <h5 style={{ margin: "0 0 0.35rem", fontSize: "0.85rem" }}>System health</h5>
+                  <p style={{ fontSize: "0.85rem", margin: "0 0 0.75rem" }}>
+                    Mailbox interval {b.founderBriefing.systemHealth.intervalMs} ms.
+                    This process last poll {b.founderBriefing.systemHealth.lastPollAt || "not recorded"} · {b.founderBriefing.systemHealth.lastPollStatus || "not recorded"}.
+                    {" "}{b.founderBriefing.systemHealth.pollGap}
+                  </p>
+                  <h5 style={{ margin: "0 0 0.35rem", fontSize: "0.85rem" }}>Alerts</h5>
+                  <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.85rem" }}>
+                    {b.founderBriefing.alerts.map((row) => (
+                      <li key={row.id}><strong>{row.title}</strong> · {row.timestamp}. {row.detail} {row.evidence}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </>
+          )}
+          {b && !b.founderBriefing && (
             <>
               <div className="hq-kpi-grid" style={{ marginBottom: "1.25rem" }}>
                 <KpiCard label="Briefing" value={b.cached ? "Cached" : "Live"} meta={b.date || undefined} icon={FileText} variant="gold" />

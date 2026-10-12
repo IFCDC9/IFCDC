@@ -602,6 +602,7 @@ export type ExecutiveDailyBriefingV1 = {
   content: string;
   highlights: string[];
   brainHighlights: string[];
+  founderBriefing: import("./grantApplicationTracking").FounderExecutiveBriefing;
   cached: boolean;
   source: string;
   degraded: boolean;
@@ -637,6 +638,41 @@ export async function buildExecutiveDailyBriefingV1(): Promise<ExecutiveDailyBri
     ...(brain?.highlights ?? []).slice(0, 6),
   ].filter((h, i, arr) => arr.indexOf(h) === i).slice(0, 12);
 
+  const { buildFounderExecutiveBriefing } = await import("./grantApplicationTracking");
+  let lastPollAt: string | null = null;
+  let lastPollStatus: string | null = null;
+  let intervalMs = 300000;
+  let automaticPolling = false;
+  let messages: Array<{ senderAddress?: string | null; senderName?: string | null; subject?: string | null; textBody?: string | null; receivedAt?: string | null }> = [];
+  let mailRead: "stored" | "not_read" = "not_read";
+  try {
+    const mailbox = await import("./microsoftGraphMailbox");
+    const health = mailbox.graphMailboxHealth();
+    lastPollAt = health.lastSuccessfulMailboxPoll;
+    lastPollStatus = health.lastMailboxPollStatus;
+    intervalMs = health.mailboxSyncIntervalMs;
+    automaticPolling = health.automaticPolling;
+  } catch {
+    lastPollAt = null;
+  }
+  try {
+    const { getDb } = await import("../db");
+    const { listInboundBusinessMail } = await import("./inboundBusinessMail");
+    messages = await listInboundBusinessMail(await getDb());
+    mailRead = "stored";
+  } catch {
+    mailRead = "not_read";
+  }
+  const founderBriefing = buildFounderExecutiveBriefing({
+    generatedAt,
+    messages,
+    mailRead,
+    lastPollAt,
+    lastPollStatus,
+    intervalMs,
+    automaticPolling,
+  });
+
   const content =
     (legacy?.content && String(legacy.content).trim())
     || (brain?.content && String(brain.content).trim())
@@ -652,6 +688,7 @@ export async function buildExecutiveDailyBriefingV1(): Promise<ExecutiveDailyBri
     content: content.slice(0, 12_000),
     highlights,
     brainHighlights: (brain?.highlights ?? []).slice(0, 8),
+    founderBriefing,
     cached: Boolean(legacy?.cached),
     source: legacy ? (legacy.cached ? "executive-briefings-cache" : "executive-briefings-live") : brain ? "enterprise-brain-2" : "none",
     degraded,
@@ -806,9 +843,28 @@ export async function buildExecutivePriorityQueueV1(opts: {
   const generatedAt = new Date().toISOString();
   const cc = await withTimeout(buildExecutiveCommandCenterV1(opts), null, "command-center-for-queue");
   const items = [...(cc?.answers.needsAttention ?? [])];
-  const { mlkExecutiveWatchItem } = await import("./grantApplicationTracking");
-  const watch = mlkExecutiveWatchItem();
-  if (!items.some((item) => item.id === watch.id)) items.push(watch);
+  let grantItems: Array<{ id: string; severity: "critical" | "high" | "watch" | "info"; title: string; detail: string; path?: string; source: string }> = [];
+  try {
+    const { getDb } = await import("../db");
+    const { listInboundBusinessMail } = await import("./inboundBusinessMail");
+    const { priorityItemsForStoredMail } = await import("./grantApplicationTracking");
+    const messages = await listInboundBusinessMail(await getDb());
+    grantItems = priorityItemsForStoredMail(messages).map((item) => ({
+      id: item.id,
+      severity: item.severity,
+      title: item.title,
+      detail: `${item.detail}${ "evidence" in item ? ` ${item.evidence}` : ""}`,
+      path: item.path,
+      source: item.source,
+    }));
+  } catch {
+    const { mlkExecutiveWatchItem } = await import("./grantApplicationTracking");
+    const watch = mlkExecutiveWatchItem();
+    grantItems = [watch];
+  }
+  for (const grantItem of grantItems) {
+    if (!items.some((item) => item.id === grantItem.id)) items.push(grantItem);
+  }
   items.sort((a, b) => priorityRank(a.severity) - priorityRank(b.severity));
   return {
     module: "priority-queue",
