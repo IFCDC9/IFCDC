@@ -58,7 +58,7 @@ export type ErcCheck = {
   module: string;
   path?: string;
   status: ErcCheckStatus;
-  score: number;
+  score: number | null;
   detail: string;
   latencyMs: number;
   live: boolean;
@@ -145,9 +145,10 @@ function isRenderHost(): boolean {
   return process.env.RENDER === "true" || Boolean(process.env.RENDER_SERVICE_ID);
 }
 
-function avg(nums: number[]): number {
-  if (!nums.length) return 0;
-  return Math.round(nums.reduce((a, b) => a + b, 0) / nums.length);
+function avg(nums: Array<number | null | undefined>): number {
+  const scored = nums.filter((value): value is number => value != null);
+  if (!scored.length) return 0;
+  return Math.round(scored.reduce((a, b) => a + b, 0) / scored.length);
 }
 
 function scoreFromStatus(status: ErcCheckStatus): number {
@@ -198,7 +199,7 @@ type ModuleProbe = {
   module: string;
   path: string;
   category: ErcCategory;
-  probe: () => Promise<{ ok: boolean; detail: string; warn?: boolean }>;
+  probe: () => Promise<{ ok: boolean; detail: string; warn?: boolean; unscored?: boolean }>;
 };
 
 async function moduleProbes(): Promise<ModuleProbe[]> {
@@ -575,6 +576,13 @@ async function moduleProbes(): Promise<ModuleProbe[]> {
       category: "performance",
       probe: async () => {
         const mon = await buildEnterpriseMonitoringOverview({ bypassCache: true });
+        if (mon.overallScore == null) {
+          return {
+            ok: true,
+            unscored: true,
+            detail: `Monitoring score unavailable (${mon.overallStatus}). A missing score is not zero.`,
+          };
+        }
         return {
           ok: mon.overallScore >= 60,
           detail: `Monitoring score ${mon.overallScore} (${mon.overallStatus})`,
@@ -796,6 +804,21 @@ export async function runEnterpriseReadinessCertification(opts?: {
       continue;
     }
     const result = r.value!;
+    if (result.unscored) {
+      checks.push({
+        id: p.id,
+        category: p.category,
+        label: p.label,
+        module: p.module,
+        path: p.path,
+        status: "pending_manual",
+        score: null,
+        detail: result.detail,
+        latencyMs: r.latencyMs,
+        live: true,
+      });
+      continue;
+    }
     const status: ErcCheckStatus = !result.ok ? "fail" : result.warn ? "warn" : "pass";
     const check: ErcCheck = {
       id: p.id,
@@ -925,28 +948,51 @@ export async function runEnterpriseReadinessCertification(opts?: {
     const monTimed = await timed(() => buildEnterpriseMonitoringOverview({ bypassCache: true }));
     const mon = monTimed.value as EnterpriseMonitoringOverview | undefined;
     if (mon && !monTimed.error) {
+      const monitoringScore = mon.overallScore;
       checks.push({
         id: "perf-monitoring-overall",
         category: "performance",
         label: "Enterprise Monitoring overall",
         module: "Monitoring",
         path: "/hq/monitoring",
-        status: mon.overallScore >= 80 ? "pass" : mon.overallScore >= 60 ? "warn" : "fail",
-        score: mon.overallScore,
-        detail: `${mon.overallStatus} · ${mon.uptimeLabel} uptime · ${mon.alerts?.length || 0} alerts`,
+        status:
+          monitoringScore == null
+            ? "pending_manual"
+            : monitoringScore >= 80
+              ? "pass"
+              : monitoringScore >= 60
+                ? "warn"
+                : "fail",
+        score: monitoringScore,
+        detail:
+          monitoringScore == null
+            ? `${mon.overallStatus} · score unavailable · not treated as zero · ${mon.uptimeLabel} uptime · ${mon.alerts?.length || 0} alerts`
+            : `${mon.overallStatus} · ${mon.uptimeLabel} uptime · ${mon.alerts?.length || 0} alerts`,
         latencyMs: monTimed.latencyMs,
         live: true,
       });
       const deployAligned = mon.components?.find((c) => c.id.includes("deploy") || c.label.toLowerCase().includes("deploy"));
-      if (deployAligned) {
+      const deployScore = deployAligned?.score;
+      const deployFailure =
+        deployAligned?.status === "degraded" ||
+        deployAligned?.status === "unreachable" ||
+        deployAligned?.status === "critical";
+      if (deployAligned && (deployScore != null || deployFailure)) {
         checks.push({
           id: "deploy-monitoring-component",
           category: "deployment",
           label: deployAligned.label,
           module: "Deployment",
           path: "/hq/monitoring",
-          status: deployAligned.status === "healthy" ? "pass" : deployAligned.status === "degraded" ? "warn" : "fail",
-          score: deployAligned.score,
+          status:
+            deployAligned.status === "healthy"
+              ? "pass"
+              : deployAligned.status === "critical"
+                ? "fail"
+                : deployFailure
+                  ? "warn"
+                  : "pending_manual",
+          score: deployScore ?? null,
           detail: deployAligned.detail,
           latencyMs: 0,
           live: true,

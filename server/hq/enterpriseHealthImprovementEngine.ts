@@ -378,6 +378,18 @@ export async function buildEnterpriseHealthReport(opts?: {
   }));
 
   const monComp = (id: string) => monitoring?.components?.find((c) => c.id === id);
+  const scoredMonitorProbe = (id: string, label: string, okAt = 80): EhiProbe | null => {
+    const component = monComp(id);
+    if (!component || component.score == null) return null;
+    return {
+      id,
+      label,
+      ok: component.score >= okAt,
+      score: component.score,
+      detail: component.detail,
+      live: true,
+    };
+  };
 
   // —— Infrastructure ——
   const infraProbes: EhiProbe[] = [
@@ -395,14 +407,7 @@ export async function buildEnterpriseHealthReport(opts?: {
           : `${serviceEntries.filter((s) => s.healthy).length}/${serviceEntries.length} healthy`,
       live: true,
     },
-    {
-      id: "storage",
-      label: "HQ storage",
-      ok: (monComp("storage")?.score ?? 0) >= 80,
-      score: monComp("storage")?.score ?? 0,
-      detail: monComp("storage")?.detail || "Storage probe unavailable",
-      live: Boolean(monComp("storage")),
-    },
+    ...([scoredMonitorProbe("storage", "HQ storage")].filter((probe): probe is EhiProbe => probe != null)),
     {
       id: "uptime",
       label: "Process uptime",
@@ -448,7 +453,7 @@ export async function buildEnterpriseHealthReport(opts?: {
       latencyMs: Date.now() - tStart,
     },
   ];
-  if (apiMon) {
+  if (apiMon && apiMon.score != null) {
     apiProbes.unshift({
       id: "api-monitoring",
       label: "API health component",
@@ -457,7 +462,7 @@ export async function buildEnterpriseHealthReport(opts?: {
       detail: apiMon.detail,
       live: true,
     });
-  } else if (serviceEntries.length) {
+  } else if (!apiMon && serviceEntries.length) {
     const score = Math.round((serviceEntries.filter((s) => s.healthy).length / serviceEntries.length) * 100);
     apiProbes.unshift({
       id: "api-services",
@@ -470,17 +475,10 @@ export async function buildEnterpriseHealthReport(opts?: {
   }
 
   // —— Database ——
-  const dbMon = monComp("database");
-  const databaseProbes: EhiProbe[] = [
-    {
-      id: "db-ping",
-      label: "Database ping",
-      ok: (dbMon?.score ?? 0) >= 80,
-      score: dbMon?.score ?? 0,
-      detail: dbMon?.detail || "Database probe unavailable",
-      live: Boolean(dbMon),
-    },
-  ];
+  const databaseProbe = scoredMonitorProbe("database", "Database ping");
+  const databaseProbes: EhiProbe[] = databaseProbe
+    ? [{ ...databaseProbe, id: "db-ping" }]
+    : [];
 
   // —— Communications ——
   const twilioOk = Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN);
@@ -529,6 +527,27 @@ export async function buildEnterpriseHealthReport(opts?: {
   const jwtOk = Boolean((process.env.JWT_SECRET || process.env.SESSION_SECRET || "").trim());
   const founderEmail = Boolean(getSuperAdminEmail());
   const authMon = monComp("authentication");
+  const authScore = authMon?.score;
+  const authComponentProbe: EhiProbe | null =
+    authMon && authScore != null
+      ? {
+          id: "auth-component",
+          label: "Authentication component",
+          ok: authScore >= 80,
+          score: authScore,
+          detail: authMon.detail,
+          live: true,
+        }
+      : authMon
+        ? null
+        : {
+            id: "auth-component",
+            label: "Authentication component",
+            ok: jwtOk,
+            score: jwtOk ? 70 : 0,
+            detail: "Auth monitoring component unavailable",
+            live: jwtOk,
+          };
   const securityProbes: EhiProbe[] = [
     {
       id: "jwt",
@@ -546,14 +565,7 @@ export async function buildEnterpriseHealthReport(opts?: {
       detail: founderEmail ? `MASTER_OWNER_EMAIL=${getSuperAdminEmail()}` : "Founder email not configured",
       live: true,
     },
-    {
-      id: "auth-component",
-      label: "Authentication component",
-      ok: (authMon?.score ?? 0) >= 80,
-      score: authMon?.score ?? (jwtOk ? 70 : 0),
-      detail: authMon?.detail || "Auth monitoring component unavailable",
-      live: Boolean(authMon) || jwtOk,
-    },
+    ...(authComponentProbe ? [authComponentProbe] : []),
   ];
 
   // —— Workflow ——
@@ -580,13 +592,14 @@ export async function buildEnterpriseHealthReport(opts?: {
 
   // —— Performance ——
   const perfProbes: EhiProbe[] = [];
-  if (monitoring && Number.isFinite(monitoring.overallScore)) {
+  if (monitoring && monitoring.overallScore != null && Number.isFinite(monitoring.overallScore)) {
+    const monitoringScore = monitoring.overallScore;
     perfProbes.push({
       id: "monitoring-overall",
       label: "Enterprise monitoring score",
-      ok: monitoring.overallScore >= 80,
-      score: monitoring.overallScore,
-      detail: `Monitoring overall ${monitoring.overallScore}% · ${monitoring.overallStatus}`,
+      ok: monitoringScore >= 80,
+      score: monitoringScore,
+      detail: `Monitoring overall ${monitoringScore}% · ${monitoring.overallStatus}`,
       live: true,
     });
   }

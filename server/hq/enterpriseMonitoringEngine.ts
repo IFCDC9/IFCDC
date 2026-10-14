@@ -625,8 +625,11 @@ export async function buildEnterpriseMonitoringOverview(opts?: {
   const voiceActive = (liveCalls || []).length;
 
   const systemPillar = commandHealth?.pillars.find((p) => p.id === "system");
-  const apiFromPolls = appsView.counted || servicesView.counted
-    ? Math.round(((appsView.counted ? appsView.score : servicesView.score) + (servicesView.counted ? servicesView.score : appsView.score)) / 2)
+  const countedPollScores = [appsView, servicesView]
+    .map((view) => (view.counted ? view.score : null))
+    .filter((score): score is number => score != null);
+  const apiFromPolls = countedPollScores.length
+    ? Math.round(countedPollScores.reduce((sum, score) => sum + score, 0) / countedPollScores.length)
     : null;
   const apiScore = systemPillar?.score ?? apiFromPolls;
 

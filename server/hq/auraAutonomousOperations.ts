@@ -129,7 +129,7 @@ type WorkspaceMcLite = {
 
 function buildRecommendations(ctx: {
   mc: WorkspaceMcLite | null;
-  mon: { overallScore?: number; overallStatus?: string; alerts?: unknown[] } | null;
+  mon: { overallScore?: number | null; overallStatus?: string; alerts?: unknown[] } | null;
   proactive: { alerts: Array<{ title: string; message: string; path?: string; priority: string; sourceModule: string }> };
   goalsAtRisk: number;
   pendingApprovals: number;
