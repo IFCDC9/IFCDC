@@ -9,7 +9,71 @@ import { resolveOpenAiCredentials } from "../lib/openaiConfig";
 import { listAuraActions } from "./auraCommandLayer";
 import { getTwilioEnvStatus, getTwilioWebhookUrls, getPublicBaseUrl } from "./twilioIntegrationEngine";
 
-export type ConnectionStatus = "connected" | "partial" | "missing" | "unsafe";
+export type ConnectionStatus =
+  | "healthy"
+  | "degraded"
+  | "timed out"
+  | "unreachable"
+  | "not configured"
+  | "not deployed"
+  | "unknown"
+  | "configured"
+  | "connected"
+  | "partial"
+  | "missing"
+  | "unsafe";
+
+/** A credential or registry row is configured until a live call in this check succeeds. */
+export function credentialOrRegistryDisposition(
+  present: boolean,
+  liveSucceeded: boolean | null
+): "configured" | "healthy" | "degraded" | "not configured" {
+  if (!present) return "not configured";
+  if (liveSucceeded === true) return "healthy";
+  if (liveSucceeded === false) return "degraded";
+  return "configured";
+}
+
+/** Resend-style probe: a partial or failed live check stays degraded. A skipped probe does not. */
+export function resendProbeDisposition(input: {
+  configured: boolean;
+  probeRan: boolean;
+  probeOk: boolean | null;
+}): "not configured" | "configured" | "healthy" | "degraded" {
+  if (!input.configured) return "not configured";
+  if (!input.probeRan || input.probeOk == null) return "configured";
+  return input.probeOk ? "healthy" : "degraded";
+}
+
+export function isLocalSidecarUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * development, mvp, and planned are software-registry statuses.
+ * They are not a Render deploy queue.
+ */
+export function pendingRenderDeployCount(statuses: string[]): number {
+  return statuses.filter((status) => status === "pending-render").length;
+}
+
+export function commandCenterHealthyValue(input: {
+  healthyCount: number;
+  probesIncomplete: boolean;
+  realFailureCount?: number;
+  sidecarMiss?: boolean;
+}): number | "timed out" | "not deployed" {
+  if (input.probesIncomplete && input.healthyCount === 0) return "timed out";
+  if (input.healthyCount === 0 && (input.realFailureCount ?? 0) === 0 && input.sidecarMiss) {
+    return "not deployed";
+  }
+  return input.healthyCount;
+}
 
 export type AuraE2eProbe = {
   id: string;
@@ -34,6 +98,14 @@ export type AuraE2eDiagnosticsReport = {
     partial: number;
     missing: number;
     unsafe: number;
+    configured: number;
+    healthy: number;
+    degraded: number;
+    timedOut: number;
+    unreachable: number;
+    notConfigured: number;
+    notDeployed: number;
+    unknown: number;
     actionCatalog: { total: number; read: number; prepare: number; execute: number };
   };
   identity: {
@@ -117,29 +189,34 @@ export async function buildAuraE2eDiagnostics(opts: {
     id: "core-command-layer",
     area: "AURA Core",
     label: "HQ command dispatcher + action registry",
-    status: "connected",
-    detail: `${actions.length} registered actions (${byKind.read} read · ${byKind.prepare} prepare · ${byKind.execute} execute)`,
+    status: credentialOrRegistryDisposition(actions.length > 0, null),
+    detail: `${actions.length} registered actions (${byKind.read} read · ${byKind.prepare} prepare · ${byKind.execute} execute). Registry only — no live call in this check.`,
     route: "POST /api/hq/aura/command",
     files: ["server/hq/auraCommandLayer.ts", "server/hq/auraActionRegistry.ts"],
   });
 
   const auraSvc = services.aura === true;
+  const servicesTimedOut = Object.keys(services).length === 0;
   const { getLegacy4101Summary, shouldProbeLegacy4101 } = await import("./auraLegacy4101");
   const legacy = getLegacy4101Summary();
   probes.push({
     id: "core-port-4101",
     area: "AURA Core",
     label: "Legacy aura-ai microservice (:4101) — Phase 7 deprecated",
-    status: shouldProbeLegacy4101()
-      ? auraSvc
-        ? "partial"
-        : "missing"
-      : "connected",
-    detail: shouldProbeLegacy4101()
-      ? auraSvc
-        ? "Probe enabled — health OK; HQ executive path still uses in-process OpenAI (not this service)"
-        : "Probe enabled — not reachable (optional; not required for HQ production)"
-      : `Phase 7: probe skipped by default · production path=${legacy.productionPath} · rollback=${legacy.rollback}`,
+    status: servicesTimedOut
+      ? "timed out"
+      : shouldProbeLegacy4101()
+        ? auraSvc
+          ? "healthy"
+          : "unreachable"
+        : "not deployed",
+    detail: servicesTimedOut
+      ? `timed out at ${generatedAt}. Not scored as an outage. Not the Headquarters database, Founder session, or Postmark path.`
+      : shouldProbeLegacy4101()
+        ? auraSvc
+          ? `Probe enabled — health OK at ${generatedAt}; HQ executive path still uses in-process OpenAI (not this service)`
+          : `unreachable at ${generatedAt}. Probe enabled — not reachable (optional; not required for HQ production)`
+        : `not deployed. Phase 7: probe skipped by default · production path=${legacy.productionPath} · rollback=${legacy.rollback}. Not the Headquarters database, Founder session, or Postmark path.`,
     route: "GET /api/hq/aura/diagnostics/legacy-4101",
     files: [
       "server/hq/auraLegacy4101.ts",
@@ -154,9 +231,9 @@ export async function buildAuraE2eDiagnostics(opts: {
     id: "core-openai",
     area: "AURA Core",
     label: "In-process OpenAI credentials",
-    status: openai?.apiKey ? "connected" : "missing",
+    status: credentialOrRegistryDisposition(Boolean(openai?.apiKey), null),
     detail: openai?.apiKey
-      ? `Configured (${openai.source || "env"}) — model path live for HQ AURA`
+      ? `Configured (${openai.source || "env"}). Credential present. No live model call in this check.`
       : "No OpenAI / AURA API key detected",
     env: ["AURA_OPENAI_API_KEY", "OPENAI_API_KEY", "AI_INTEGRATIONS_OPENAI_API_KEY"],
     risk: openai?.apiKey ? "low" : "high",
@@ -166,7 +243,7 @@ export async function buildAuraE2eDiagnostics(opts: {
     id: "core-duplicate-brains",
     area: "AURA Core",
     label: "Single unified brain",
-    status: "partial",
+    status: "unknown",
     detail: "Brain v1, Brain 2.0, EDI, OS4/OS5, AO, and receptionist coexist — consolidate later",
     files: [
       "server/hq/auraEnterpriseBrainV1.ts",
@@ -180,7 +257,7 @@ export async function buildAuraE2eDiagnostics(opts: {
     id: "auth-founder",
     area: "Authorization",
     label: "Founder / Admin recognition (this session)",
-    status: opts.founderMode || opts.isFounder ? "connected" : "partial",
+    status: opts.founderMode || opts.isFounder ? "healthy" : "degraded",
     detail: opts.founderMode || opts.isFounder
       ? `Founder access active · assurance=${opts.assurance || "n/a"}`
       : "Session is not Founder Mode — execute tools will be blocked",
@@ -192,8 +269,8 @@ export async function buildAuraE2eDiagnostics(opts: {
     id: "auth-execute-gate",
     area: "Authorization",
     label: "Execute tools require Founder Mode",
-    status: "connected",
-    detail: "auraCommandLayer strips kind=execute unless founderMode/isFounder",
+    status: "configured",
+    detail: "auraCommandLayer strips kind=execute unless founderMode/isFounder. Code path only — no live call in this check.",
     files: ["server/hq/auraCommandLayer.ts"],
   });
 
@@ -201,57 +278,57 @@ export async function buildAuraE2eDiagnostics(opts: {
     {
       id: "db-grants",
       label: "Grants module tools",
-      status: "connected",
-      detail: "find/sync/draft/submit-queue tools via registry",
+      status: "configured",
+      detail: "find/sync/draft/submit-queue tools via registry. No live call in this check.",
       tables: ["grant_opportunities", "grant_applications"],
     },
     {
       id: "db-communications",
       label: "Communications tools",
-      status: "connected",
-      detail: "send_sms, send_email, notifications, broadcast tools",
+      status: "configured",
+      detail: "send_sms, send_email, notifications, broadcast tools. Registry only — no message sent.",
       tables: ["twilio_communication_events", "hq_notification_queue"],
     },
     {
       id: "db-hr",
       label: "HR / People",
-      status: "connected",
-      detail: "Phase 4: hr_workforce_summary, list_people, list_job_applicants, prepare_applicant_review + payroll prepare",
+      status: "configured",
+      detail: "Phase 4: hr_workforce_summary, list_people, list_job_applicants, prepare_applicant_review + payroll prepare. Registry only.",
       tables: ["people", "job_applicants"],
     },
     {
       id: "db-finance",
       label: "Finance",
-      status: "connected",
-      detail: "Phase 4: finance_overview, list_pending_expenses, prepare_finance_brief",
+      status: "configured",
+      detail: "Phase 4: finance_overview, list_pending_expenses, prepare_finance_brief. Registry only.",
       tables: ["finance_expenses", "finance_accounts"],
     },
     {
       id: "db-donations",
       label: "Donations",
-      status: "connected",
-      detail: "Phase 4: donation_summary, list_recent_donations (Stripe/PayPal mutate still outside AURA)",
+      status: "configured",
+      detail: "Phase 4: donation_summary, list_recent_donations (Stripe/PayPal mutate still outside AURA). Registry only.",
       tables: ["funding_events"],
     },
     {
       id: "db-compliance",
       label: "Compliance",
-      status: "partial",
-      detail: "generate_compliance_report + trackers",
+      status: "configured",
+      detail: "generate_compliance_report + trackers. Registry only — no live filing check.",
       tables: ["compliance_filings"],
     },
     {
       id: "db-projects",
       label: "Projects / ops",
-      status: "connected",
-      detail: "Phase 4: list_ops_projects, prepare_ops_project (planning drafts)",
+      status: "configured",
+      detail: "Phase 4: list_ops_projects, prepare_ops_project (planning drafts). Registry only.",
       tables: ["ops_projects"],
     },
     {
       id: "db-barbers",
       label: "Barbers / bookings",
-      status: "partial",
-      detail: "Receptionist booking path only — not action-registry tools",
+      status: "configured",
+      detail: "Receptionist booking path only — not action-registry tools. Registry only.",
       tables: ["clients", "appointments"],
     },
   ];
@@ -272,10 +349,10 @@ export async function buildAuraE2eDiagnostics(opts: {
     id: "sms-send",
     area: "SMS",
     label: "AURA → Twilio SMS send",
-    status: twilio.ready ? "connected" : "partial",
+    status: credentialOrRegistryDisposition(Boolean(twilio.ready), null),
     detail: twilio.ready
-      ? `Twilio ready · from=${twilio.phoneNumber || "messaging-service"} · config NOT modified by diagnostics`
-      : "Twilio SID/token/from incomplete — SMS send may fail",
+      ? `Twilio credentials present · from=${twilio.phoneNumber || "messaging-service"}. Configured only — no SMS sent and no live call in this check.`
+      : "Twilio SID/token/from incomplete — not configured",
     route: "POST /api/hq/aura/action/send_sms",
     files: ["server/hq/auraExecutiveOperations.ts", "server/lib/notifications.ts"],
     env: ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER", "TWILIO_MESSAGING_SERVICE_SID"],
@@ -287,9 +364,9 @@ export async function buildAuraE2eDiagnostics(opts: {
     id: "sms-inbound",
     area: "SMS",
     label: "Inbound SMS → AURA receptionist",
-    status: publicBase ? "connected" : "partial",
+    status: credentialOrRegistryDisposition(Boolean(publicBase), null),
     detail: publicBase
-      ? `Webhook mapped · ${webhooks.incomingSms}`
+      ? `Webhook URL mapped · ${webhooks.incomingSms}. Configured only — no inbound message was received in this check.`
       : "PUBLIC_BASE_URL / RENDER_EXTERNAL_URL missing — webhook URLs may be incomplete",
     route: "POST /api/twilio/aura/sms",
     files: ["server/routes/twilioAura.routes.ts"],
@@ -300,9 +377,7 @@ export async function buildAuraE2eDiagnostics(opts: {
     id: "sms-status",
     area: "SMS",
     label: "SMS delivery status capture",
-    status: publicBase && webhooks.smsStatus.startsWith("https://")
-      ? (hasTwilioEvents ? "connected" : "partial")
-      : "partial",
+    status: credentialOrRegistryDisposition(Boolean(publicBase && webhooks.smsStatus.startsWith("https://")), null),
     detail: publicBase && webhooks.smsStatus.startsWith("https://")
       ? `Phase 6: AURA outbound SMS attaches statusCallback=${webhooks.smsStatus} (per-message; Console untouched)${
           hasTwilioEvents ? ` · ${twilioEvents24h ?? 0} events/24h` : ""
@@ -319,8 +394,8 @@ export async function buildAuraE2eDiagnostics(opts: {
     id: "voice-core",
     area: "Voice",
     label: "Voice/SMS Founder path → command layer",
-    status: "connected",
-    detail: "Phase 3 adapter: Founder voice/SMS uses runAuraCommand (same tools/memory as HQ text). Booking path stays on receptionist. Twilio URLs untouched.",
+    status: "configured",
+    detail: "Phase 3 adapter: Founder voice/SMS uses runAuraCommand (same tools/memory as HQ text). Booking path stays on receptionist. Twilio URLs untouched. No live call in this check.",
     route: "POST /api/twilio/aura/voice · /sms",
     files: [
       "server/hq/auraReceptionistCommandAdapter.ts",
@@ -335,8 +410,8 @@ export async function buildAuraE2eDiagnostics(opts: {
     id: "events-realtime",
     area: "Events",
     label: "HQ realtime + AURA operational event bus",
-    status: "connected",
-    detail: "Phase 5: booking/payment/SMS-fail emit notifyHqDataChange + aura_operational_events (+ leadership alerts on fail)",
+    status: "configured",
+    detail: "Phase 5: booking/payment/SMS-fail emit notifyHqDataChange + aura_operational_events (+ leadership alerts on fail). Registry only — no live event in this check.",
     route: "WS /api/hq/ws · GET /api/hq/aura/diagnostics/operational-events",
     files: [
       "server/hq/hqRealtimeEvents.ts",
@@ -351,8 +426,10 @@ export async function buildAuraE2eDiagnostics(opts: {
     id: "memory-conversations",
     area: "Memory",
     label: "Per-user conversation memory",
-    status: hasConvos ? "connected" : "missing",
-    detail: hasConvos ? "hq_aura_conversations present" : "Conversation table missing",
+    status: hasConvos ? "healthy" : "unknown",
+    detail: hasConvos
+      ? `hq_aura_conversations present. Live table check succeeded at ${generatedAt}.`
+      : `Conversation table was not confirmed at ${generatedAt}. Not treated as an outage.`,
     tables: ["hq_aura_conversations"],
     route: "GET /api/hq/aura/memory",
   });
@@ -361,8 +438,8 @@ export async function buildAuraE2eDiagnostics(opts: {
     id: "audit-hq",
     area: "Audit",
     label: "HQ audit log",
-    status: "connected",
-    detail: "logHqAudit / identity actions available",
+    status: "configured",
+    detail: "logHqAudit / identity actions available. Code path only — no live audit write in this check.",
     tables: ["hq_audit_log"],
     files: ["server/hq/hqAuditLog.ts"],
   });
@@ -372,7 +449,7 @@ export async function buildAuraE2eDiagnostics(opts: {
     id: "audit-unified",
     area: "Audit",
     label: "Unified AURA action stream (Phase 2)",
-    status: hasUnified ? "connected" : "partial",
+    status: hasUnified ? "healthy" : "unknown",
     detail: hasUnified
       ? "aura_unified_action_log live — mirrors Brain v1, command prepare/execute, executive ops, receptionist"
       : "Table created on first mirror — stream ready after first prepare/execute",
@@ -386,7 +463,7 @@ export async function buildAuraE2eDiagnostics(opts: {
     id: "audit-brain-v1",
     area: "Audit",
     label: "Brain v1 action log",
-    status: hasBrainLog ? "connected" : "partial",
+    status: hasBrainLog ? "healthy" : "unknown",
     detail: hasBrainLog
       ? "Dedicated Brain v1 log live and mirrored into unified stream"
       : "Brain v1 action log table not created yet",
@@ -395,14 +472,24 @@ export async function buildAuraE2eDiagnostics(opts: {
     risk: "low",
   });
 
+  const resendResult = resendProbe as { ok?: boolean; error?: string } | null;
+  const resendStatus = resendProbeDisposition({
+    configured: Boolean(email.configured),
+    probeRan: Boolean(resendResult),
+    probeOk: resendResult ? resendResult.ok === true : null,
+  });
   probes.push({
     id: "email-resend",
     area: "Communications",
     label: "Resend email transport",
-    status: email.configured ? (resendProbe && (resendProbe as { ok?: boolean }).ok === false ? "partial" : "connected") : "missing",
-    detail: email.configured
-      ? `API key set · from=${email.from || "n/a"} · probe=${resendProbe ? "ran" : "skipped/unavailable"}`
-      : "Resend not configured",
+    status: resendStatus,
+    detail: !email.configured
+      ? "Resend not configured"
+      : resendStatus === "degraded"
+        ? `degraded at ${generatedAt}. ${resendResult?.error || "Live Resend check did not succeed."}`
+        : resendStatus === "healthy"
+          ? `Live Resend check succeeded at ${generatedAt}.`
+          : `API key set · from=${email.from || "n/a"}. Configured only — live probe did not run in this check.`,
     env: ["RESEND_API_KEY", "RESEND_FROM_EMAIL"],
   });
 
@@ -410,16 +497,24 @@ export async function buildAuraE2eDiagnostics(opts: {
     id: "health-surfaces",
     area: "Diagnostics",
     label: "Existing health / monitoring surfaces",
-    status: "connected",
-    detail: "GET /api/health, /api/hq/aura/status, monitoring, enterprise-health, integrations",
+    status: "configured",
+    detail: "GET /api/health, /api/hq/aura/status, monitoring, enterprise-health, integrations. Listed only — not called by this check.",
     route: "GET /api/hq/monitoring/overview",
   });
 
   const summary = {
     connected: probes.filter((p) => p.status === "connected").length,
-    partial: probes.filter((p) => p.status === "partial").length,
-    missing: probes.filter((p) => p.status === "missing").length,
+    partial: probes.filter((p) => p.status === "partial" || p.status === "degraded").length,
+    missing: probes.filter((p) => p.status === "missing" || p.status === "not configured").length,
     unsafe: probes.filter((p) => p.status === "unsafe").length,
+    configured: probes.filter((p) => p.status === "configured").length,
+    healthy: probes.filter((p) => p.status === "healthy").length,
+    degraded: probes.filter((p) => p.status === "degraded").length,
+    timedOut: probes.filter((p) => p.status === "timed out").length,
+    unreachable: probes.filter((p) => p.status === "unreachable").length,
+    notConfigured: probes.filter((p) => p.status === "not configured").length,
+    notDeployed: probes.filter((p) => p.status === "not deployed").length,
+    unknown: probes.filter((p) => p.status === "unknown").length,
     actionCatalog: { total: actions.length, ...byKind },
   };
 

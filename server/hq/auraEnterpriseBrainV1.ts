@@ -10,7 +10,13 @@ import { SOFTWARE_DIVISION_APPS, pollAllApps } from "./appRegistry";
 import { buildExecutiveCommandHealth } from "./executiveCommandHealth";
 import { listLeadershipAlerts } from "./criticalAlerts";
 import { buildHeadquartersActivityFeed, buildOrganizationHealthScore } from "./analyticsReporting";
-import { checkIfcdcServices } from "../lib/ifcdc";
+import { checkIfcdcServices, IFCDC_SERVICE_URLS } from "../lib/ifcdc";
+import { shouldProbeLegacy4101 } from "./auraLegacy4101";
+import {
+  commandCenterHealthyValue,
+  isLocalSidecarUrl,
+  pendingRenderDeployCount,
+} from "./auraE2eDiagnosticsEngine";
 
 const SECTION_TIMEOUT_MS = 10_000;
 
@@ -42,7 +48,17 @@ export type AuraBrainV1AttentionItem = {
 export type AuraBrainV1SystemRow = {
   id: string;
   label: string;
-  status: "healthy" | "action_required" | "watch" | "unknown";
+  status:
+    | "healthy"
+    | "action_required"
+    | "watch"
+    | "unknown"
+    | "configured"
+    | "degraded"
+    | "timed out"
+    | "unreachable"
+    | "not configured"
+    | "not deployed";
   detail: string;
 };
 
@@ -73,7 +89,7 @@ export type ExecutiveCommandCenterV1 = {
   summary: {
     attentionCount: number;
     changeCount: number;
-    healthySystemCount: number;
+    healthySystemCount: number | "timed out" | "not deployed";
     actionSystemCount: number;
     activeProjectCount: number;
     pendingDeployCount: number;
@@ -257,6 +273,81 @@ function severityFromPriority(priority: unknown): AuraBrainV1AttentionItem["seve
   return "info";
 }
 
+export function labelPlatformService(input: {
+  id: string;
+  ok: boolean;
+  url: string;
+  probeSkipped: boolean;
+  at: string;
+}): { status: AuraBrainV1SystemRow["status"]; detail: string } {
+  if (input.probeSkipped || (input.ok === false && isLocalSidecarUrl(input.url))) {
+    return {
+      status: "not deployed",
+      detail: `not deployed at ${input.at}. localhost sidecar ${input.id} is not the Headquarters database, Founder session, or Postmark path.`,
+    };
+  }
+  if (input.ok) {
+    return { status: "healthy", detail: `Live health check succeeded at ${input.at}.` };
+  }
+  return {
+    status: "unreachable",
+    detail: `unreachable at ${input.at}. Live health check did not succeed.`,
+  };
+}
+
+export function labelRegistryApp(input: {
+  registryStatus: string;
+  health: {
+    healthy: boolean;
+    latencyMs?: number;
+    deployment?: string;
+    error?: string;
+  } | null;
+  pollTimedOut: boolean;
+  at: string;
+}): { status: AuraBrainV1SystemRow["status"]; detail: string } {
+  const health = input.health;
+  if (
+    health &&
+    health.deployment === "production-locked" &&
+    (health.latencyMs ?? 0) === 0 &&
+    !health.error
+  ) {
+    return {
+      status: "configured",
+      detail: `Registry shortcut. Not a timed live probe. Registry status ${input.registryStatus}. ${input.at}`,
+    };
+  }
+  if (health?.error && /HEALTH_URL|not_configured|Set HQ_/i.test(health.error)) {
+    return {
+      status: "not configured",
+      detail: `not configured at ${input.at}. ${health.error}`,
+    };
+  }
+  if (health?.healthy === true && (health.latencyMs ?? 0) > 0) {
+    return {
+      status: "healthy",
+      detail: `Live poll succeeded · ${health.latencyMs}ms · ${input.at}`,
+    };
+  }
+  if (health?.healthy === false) {
+    return {
+      status: "unreachable",
+      detail: `unreachable at ${input.at}. ${health.error || "Live poll did not succeed."}`,
+    };
+  }
+  if (input.pollTimedOut) {
+    return {
+      status: "timed out",
+      detail: `timed out at ${input.at}. Registry status ${input.registryStatus}. Not a pending Render deployment.`,
+    };
+  }
+  return {
+    status: "configured",
+    detail: `Registry status ${input.registryStatus}. Not a pending Render deployment. ${input.at}`,
+  };
+}
+
 export async function buildExecutiveCommandCenterV1(opts: {
   userId?: string | null;
   userEmail?: string | null;
@@ -265,9 +356,9 @@ export async function buildExecutiveCommandCenterV1(opts: {
   let degraded = false;
   const warnings: string[] = [];
 
-  const [commandHealth, apps, services, alerts, activity, lastLoginAt, emailFails] = await Promise.all([
+  const [commandHealth, appPoll, services, alerts, activity, lastLoginAt, emailFails] = await Promise.all([
     withTimeout(buildExecutiveCommandHealth(), null, "command-health"),
-    withTimeout(pollAllApps(), [], "poll-apps"),
+    withTimeout(pollAllApps() as Promise<Awaited<ReturnType<typeof pollAllApps>> | null>, null, "poll-apps"),
     withTimeout(checkIfcdcServices(), {} as Record<string, boolean>, "services"),
     withTimeout(listLeadershipAlerts(40), [], "alerts"),
     withTimeout(buildHeadquartersActivityFeed(20), [], "activity"),
@@ -275,21 +366,54 @@ export async function buildExecutiveCommandCenterV1(opts: {
     withTimeout(collectFailedEmailSignals(), [], "email-fails"),
   ]);
 
+  const appPollTimedOut = appPoll == null;
+  const apps = appPoll ?? [];
+  const serviceMapTimedOut = Object.keys(services).length === 0;
+
   if (!commandHealth) {
-    degraded = true;
-    warnings.push("Command health timed out or unavailable.");
+    warnings.push(`Command health timed out at ${generatedAt}. This is not an outage.`);
+  }
+  if (serviceMapTimedOut) {
+    warnings.push(`Platform service map timed out at ${generatedAt}. A missing probe is not an outage.`);
+  }
+  if (appPollTimedOut) {
+    warnings.push(`App poll timed out at ${generatedAt}. Registry products stay listed. Not pending Render deployments.`);
   }
 
   const healthByApp = new Map(apps.map((a) => [a.id, a]));
   const systems: AuraBrainV1SystemRow[] = [];
 
+  if (serviceMapTimedOut) {
+    systems.push({
+      id: "svc-map",
+      label: "Platform services",
+      status: "timed out",
+      detail: `timed out at ${generatedAt}. A missing probe is not an outage. Not the Headquarters database, Founder session, or Postmark path.`,
+    });
+  }
+
+  let sidecarMiss = false;
   for (const [id, ok] of Object.entries(services)) {
+    const url = IFCDC_SERVICE_URLS[id as keyof typeof IFCDC_SERVICE_URLS] || "";
+    const labeled = labelPlatformService({
+      id,
+      ok: Boolean(ok),
+      url,
+      probeSkipped: id === "aura" && !shouldProbeLegacy4101(),
+      at: generatedAt,
+    });
+    if (labeled.status === "not deployed") sidecarMiss = true;
     systems.push({
       id: `svc-${id}`,
       label: `Platform · ${id}`,
-      status: ok ? "healthy" : "action_required",
-      detail: ok ? "Responding" : "Unhealthy or unreachable",
+      status: labeled.status,
+      detail: labeled.detail,
     });
+  }
+  if (sidecarMiss) {
+    warnings.push(
+      `localhost sidecars on ports 4100–4104 are not deployed. They are not the Headquarters database, Founder session, or Postmark path. ${generatedAt}`
+    );
   }
 
   if (commandHealth) {
@@ -313,51 +437,54 @@ export async function buildExecutiveCommandCenterV1(opts: {
 
   for (const app of SOFTWARE_DIVISION_APPS) {
     const health = healthByApp.get(app.id);
-    const healthy = health ? Boolean(health.healthy) : null;
+    const labeled = labelRegistryApp({
+      registryStatus: app.status,
+      health: health
+        ? {
+            healthy: Boolean(health.healthy),
+            latencyMs: health.latencyMs,
+            deployment: health.deployment,
+            error: health.error,
+          }
+        : null,
+      pollTimedOut: appPollTimedOut,
+      at: generatedAt,
+    });
     systems.push({
       id: `app-${app.id}`,
       label: app.name,
-      status:
-        healthy === true
-          ? "healthy"
-          : healthy === false
-            ? "action_required"
-            : app.status === "planned"
-              ? "watch"
-              : "unknown",
-      detail: health?.error
-        ? String(health.error).slice(0, 160)
-        : healthy === true
-          ? `Healthy · ${health?.latencyMs ?? "—"}ms`
-          : `Registry status: ${app.status}`,
+      status: labeled.status,
+      detail: labeled.detail.slice(0, 240),
     });
   }
 
   const systemsHealthy = systems.filter((s) => s.status === "healthy");
-  const systemsRequireAction = systems.filter((s) => s.status === "action_required");
+  const systemsRequireAction = systems.filter(
+    (s) =>
+      s.status === "action_required" ||
+      s.status === "degraded" ||
+      s.status === "unreachable" ||
+      s.status === "not configured"
+  );
 
   const activeProjects: AuraBrainV1ProjectRow[] = SOFTWARE_DIVISION_APPS.filter(
     (a) => a.status === "production" || a.status === "mvp" || a.status === "development" || a.status === "locked"
   ).map((a) => {
     const health = healthByApp.get(a.id);
+    const shortcut =
+      health?.deployment === "production-locked" && (health.latencyMs ?? 0) === 0 && !health.error;
+    const notConfigured = Boolean(health?.error && /HEALTH_URL|not_configured|Set HQ_/i.test(health.error));
     return {
       id: a.id,
       name: a.name,
       status: a.status,
-      healthy: health ? Boolean(health.healthy) : null,
+      healthy: shortcut || notConfigured || !health ? null : Boolean(health.healthy),
       detail: a.description,
     };
   });
 
-  const deploymentsPending: AuraBrainV1ProjectRow[] = SOFTWARE_DIVISION_APPS.filter(
-    (a) => a.status === "development" || a.status === "mvp" || a.status === "planned"
-  ).map((a) => ({
-    id: a.id,
-    name: a.name,
-    status: a.status,
-    healthy: healthByApp.has(a.id) ? Boolean(healthByApp.get(a.id)?.healthy) : null,
-    detail: `Pending production readiness · current status ${a.status}`,
-  }));
+  const deploymentsPending: AuraBrainV1ProjectRow[] = [];
+  const renderDeployCount = pendingRenderDeployCount(SOFTWARE_DIVISION_APPS.map((a) => a.status));
 
   const needsAttention: AuraBrainV1AttentionItem[] = [];
 
@@ -430,8 +557,8 @@ export async function buildExecutiveCommandCenterV1(opts: {
   if (unreadHigh) {
     doNext.push(`Clear ${unreadHigh} high-priority attention item(s) from the priority queue.`);
   }
-  if (deploymentsPending.length) {
-    doNext.push(`Track ${deploymentsPending.length} app(s) still below production status.`);
+  if (renderDeployCount > 0) {
+    doNext.push(`Track ${renderDeployCount} Render deploy(s).`);
   }
   if (!doNext.length) {
     doNext.push("No critical blockers detected — review daily briefing when Module 3 is live.");
@@ -458,10 +585,15 @@ export async function buildExecutiveCommandCenterV1(opts: {
     summary: {
       attentionCount: needsAttention.length,
       changeCount: changedSinceLastLogin.length,
-      healthySystemCount: systemsHealthy.length,
+      healthySystemCount: commandCenterHealthyValue({
+        healthyCount: systemsHealthy.length,
+        probesIncomplete: serviceMapTimedOut || !commandHealth,
+        realFailureCount: systemsRequireAction.length,
+        sidecarMiss,
+      }),
       actionSystemCount: systemsRequireAction.length,
       activeProjectCount: activeProjects.length,
-      pendingDeployCount: deploymentsPending.length,
+      pendingDeployCount: renderDeployCount,
       failedEmailCount: emailFails.length,
       commandHealthOverall: commandHealth?.overall ?? null,
       emailConfigured: email.configured,

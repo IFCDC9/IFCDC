@@ -4,7 +4,9 @@
  */
 import fs from "fs/promises";
 import { getDb } from "../db";
-import { checkIfcdcServices } from "../lib/ifcdc";
+import { checkIfcdcServices, IFCDC_SERVICE_URLS } from "../lib/ifcdc";
+import { shouldProbeLegacy4101 } from "./auraLegacy4101";
+import { isLocalSidecarUrl } from "./auraE2eDiagnosticsEngine";
 import { pollAllApps } from "./appRegistry";
 import { buildExecutiveCommandHealth, type ExecutiveCommandHealth } from "./executiveCommandHealth";
 import { buildIntegrationsHubSafe, invalidateIntegrationsHubCache, testIntegrationHubProvider } from "./integrationsHubEngine";
@@ -13,7 +15,16 @@ import { listLiveCallMonitors, listRecentVoiceJobs } from "./auraVoiceJobQueue";
 import { scanKpiAnomalies, type KpiAnomalyAlert } from "./anomalyMonitor";
 import { getHqUploadRoot } from "./hqFileStorage";
 
-export type MonitorComponentStatus = "healthy" | "degraded" | "critical" | "unknown";
+export type MonitorComponentStatus =
+  | "healthy"
+  | "degraded"
+  | "critical"
+  | "unknown"
+  | "timed out"
+  | "unreachable"
+  | "not configured"
+  | "not deployed"
+  | "configured";
 
 export type MonitorComponent = {
   id: string;
@@ -22,6 +33,8 @@ export type MonitorComponent = {
   score: number;
   detail: string;
   meta?: string;
+  /** False when this score must not be averaged into an outage. */
+  counted?: boolean;
 };
 
 export type EnterpriseMonitoringOverview = {
@@ -59,6 +72,128 @@ function statusFromScore(score: number): MonitorComponentStatus {
   if (score >= 80) return "healthy";
   if (score >= 60) return "degraded";
   return "critical";
+}
+
+export function presentCheckedRatio(input: {
+  timedOut: boolean;
+  healthy: number;
+  checked: number;
+  notDeployed: number;
+  at: string;
+  noun: string;
+}): { status: MonitorComponentStatus; score: number; counted: boolean; detail: string } {
+  if (input.timedOut) {
+    return {
+      status: "timed out",
+      score: 0,
+      counted: false,
+      detail: `timed out at ${input.at}. A missing probe is not an outage.`,
+    };
+  }
+  if (input.checked === 0 && input.notDeployed > 0) {
+    return {
+      status: "not deployed",
+      score: 0,
+      counted: false,
+      detail: `not deployed at ${input.at}. localhost sidecars are not the Headquarters database, Founder session, or Postmark path.`,
+    };
+  }
+  if (input.checked === 0) {
+    return {
+      status: "timed out",
+      score: 0,
+      counted: false,
+      detail: `timed out at ${input.at}. A missing probe is not an outage.`,
+    };
+  }
+  const score = Math.round((input.healthy / input.checked) * 100);
+  const status: MonitorComponentStatus =
+    input.healthy === 0 ? "unreachable" : score >= 80 ? "healthy" : "degraded";
+  return {
+    status,
+    score,
+    counted: true,
+    detail: `${input.healthy}/${input.checked} ${input.noun}`,
+  };
+}
+
+export function labelAuthProbe(input: {
+  jwtConfigured: boolean;
+  authService: boolean | null;
+  authUrl: string;
+  sidecarTimedOut: boolean;
+  sessionCount: number;
+  at: string;
+}): { status: MonitorComponentStatus; score: number; counted: boolean; detail: string; meta: string } {
+  if (!input.jwtConfigured) {
+    return {
+      status: "not configured",
+      score: 0,
+      counted: false,
+      detail: "JWT/SESSION secret missing",
+      meta: "not configured",
+    };
+  }
+  if (input.sidecarTimedOut) {
+    return {
+      status: "timed out",
+      score: 0,
+      counted: false,
+      detail: `timed out at ${input.at}. Not the Founder session.`,
+      meta: "timed out",
+    };
+  }
+  if (input.authService === false && isLocalSidecarUrl(input.authUrl)) {
+    return {
+      status: "not deployed",
+      score: 0,
+      counted: false,
+      detail: "Auth sidecar is not deployed. This is not the Founder session or the Headquarters database.",
+      meta: "not deployed",
+    };
+  }
+  if (input.authService === true) {
+    return {
+      status: "healthy",
+      score: 95,
+      counted: true,
+      detail: `Session secrets configured · ${input.sessionCount} tracked session(s)`,
+      meta: "auth service up",
+    };
+  }
+  if (input.authService === false) {
+    return {
+      status: "unreachable",
+      score: 55,
+      counted: true,
+      detail: `Auth service did not respond at ${input.at}.`,
+      meta: "unreachable",
+    };
+  }
+  return {
+    status: "unknown",
+    score: 0,
+    counted: false,
+    detail: `Auth sidecar was not in the service map at ${input.at}.`,
+    meta: "unknown",
+  };
+}
+
+export function integrationDisposition(input: {
+  status: string;
+  liveHealthy: boolean | null;
+}): "healthy" | "degraded" | "not configured" | "configured" | "unknown" {
+  if (input.liveHealthy === true) return "healthy";
+  const status = input.status.toLowerCase();
+  if (status === "degraded" || status === "partial" || status === "error" || status === "unreachable") {
+    return "degraded";
+  }
+  if (input.liveHealthy === false) return "degraded";
+  if (status === "not_configured" || status === "not configured" || status === "missing") {
+    return "not configured";
+  }
+  if (status === "connected" || status === "configured") return "configured";
+  return "unknown";
 }
 
 function formatUptime(seconds: number): string {
@@ -147,16 +282,23 @@ async function probeAuth(): Promise<MonitorComponent> {
     sessionCount = 0;
   }
 
-  const score = jwtOk ? (authService === false ? 55 : 95) : 20;
+  const sidecarTimedOut = Object.keys(services).length === 0;
+  const labeled = labelAuthProbe({
+    jwtConfigured: jwtOk,
+    authService: authService === true ? true : authService === false ? false : null,
+    authUrl: IFCDC_SERVICE_URLS.auth,
+    sidecarTimedOut,
+    sessionCount,
+    at: new Date().toISOString(),
+  });
   return {
     id: "authentication",
     label: "Authentication",
-    status: statusFromScore(score),
-    score,
-    detail: jwtOk
-      ? `Session secrets configured · ${sessionCount} tracked session(s)`
-      : "JWT/SESSION secret missing",
-    meta: authService == null ? "local auth" : authService ? "auth service up" : "auth service down",
+    status: labeled.status,
+    score: labeled.score,
+    counted: labeled.counted,
+    detail: labeled.detail,
+    meta: labeled.meta,
   };
 }
 
@@ -179,7 +321,7 @@ const CACHE_TTL_MS = 30_000;
 export function emptyEnterpriseMonitoring(): EnterpriseMonitoringOverview {
   return {
     overallScore: 0,
-    overallStatus: "unknown",
+    overallStatus: "timed out",
     uptimeSeconds: Math.floor(process.uptime()),
     uptimeLabel: formatUptime(process.uptime()),
     components: [],
@@ -191,8 +333,8 @@ export function emptyEnterpriseMonitoring(): EnterpriseMonitoringOverview {
     anomalies: [],
     alerts: [],
     monitoredAt: new Date().toISOString(),
-    degraded: true,
-    warning: "Enterprise monitoring unavailable — showing safe empty state.",
+    degraded: false,
+    warning: `Monitoring timed out at ${new Date().toISOString()}. This is not an outage.`,
     source: "live",
   };
 }
@@ -221,67 +363,156 @@ export async function buildEnterpriseMonitoringOverview(opts?: {
   ] = await Promise.all([
     withTimeout(buildExecutiveCommandHealth({ bypassCache: opts?.bypassCache }), 14_000, null, "command-health"),
     withTimeout(checkIfcdcServices(), 8_000, {} as Record<string, boolean>, "services"),
-    withTimeout(pollAllApps(), 10_000, [], "apps"),
+    withTimeout(pollAllApps() as Promise<Awaited<ReturnType<typeof pollAllApps>> | null>, 10_000, null, "apps"),
     withTimeout(buildIntegrationsHubSafe(), 14_000, null, "integrations"),
-    withTimeout(listScheduledJobs(), 8_000, [], "scheduled-jobs"),
+    withTimeout(listScheduledJobs() as Promise<Awaited<ReturnType<typeof listScheduledJobs>> | null>, 8_000, null, "scheduled-jobs"),
     withTimeout(listRecentVoiceJobs(20), 6_000, [], "voice-jobs"),
     withTimeout(Promise.resolve(listLiveCallMonitors()), 2_000, [], "live-calls"),
     withTimeout(scanKpiAnomalies(), 10_000, [], "anomalies"),
     withTimeout(probeDatabase(), 6_000, {
       id: "database",
       label: "Database",
-      status: "unknown" as const,
+      status: "timed out" as const,
       score: 0,
-      detail: "Probe timed out",
+      counted: false,
+      detail: "timed out. A missing probe is not an outage. SELECT 1 did not finish.",
     }, "database"),
     withTimeout(probeStorage(), 4_000, {
       id: "storage",
       label: "Storage",
-      status: "unknown" as const,
+      status: "timed out" as const,
       score: 0,
-      detail: "Probe timed out",
+      counted: false,
+      detail: "timed out. A missing probe is not an outage.",
     }, "storage"),
     withTimeout(probeAuth(), 8_000, {
       id: "authentication",
       label: "Authentication",
-      status: "unknown" as const,
+      status: "timed out" as const,
       score: 0,
-      detail: "Probe timed out",
+      counted: false,
+      detail: "timed out. Not the Founder session. A missing probe is not an outage.",
     }, "authentication"),
     withTimeout(notificationPendingCount(), 4_000, 0, "notifications"),
   ]);
 
-  const serviceEntries = Object.entries(services || {}).map(([id, healthy]) => ({ id, healthy: Boolean(healthy) }));
-  const servicesHealthy = serviceEntries.filter((s) => s.healthy).length;
-  const servicesTotal = serviceEntries.length || 1;
-  const servicesScore = Math.round((servicesHealthy / servicesTotal) * 100);
+  const monitoredAt = new Date().toISOString();
+  const servicesTimedOut = services == null || Object.keys(services).length === 0;
+  const serviceEntries: { id: string; healthy: boolean }[] = [];
+  let notDeployedServices = 0;
+  for (const [id, ok] of Object.entries(services || {})) {
+    const url = IFCDC_SERVICE_URLS[id as keyof typeof IFCDC_SERVICE_URLS] || "";
+    const skipped = id === "aura" && !shouldProbeLegacy4101();
+    if (!ok && (skipped || isLocalSidecarUrl(url))) {
+      notDeployedServices += 1;
+      continue;
+    }
+    serviceEntries.push({ id, healthy: Boolean(ok) });
+  }
+  const servicesView = presentCheckedRatio({
+    timedOut: servicesTimedOut,
+    healthy: serviceEntries.filter((s) => s.healthy).length,
+    checked: serviceEntries.length,
+    notDeployed: notDeployedServices,
+    at: monitoredAt,
+    noun: "platform services with a live check",
+  });
 
-  const appRows = (apps || []).map((a) => ({
-    id: a.id,
-    healthy: Boolean(a.healthy),
-    latencyMs: a.latencyMs,
-    error: a.error,
-  }));
-  const appsHealthy = appRows.filter((a) => a.healthy).length;
-  const appsTotal = appRows.length || 1;
-  const appsScore = Math.round((appsHealthy / appsTotal) * 100);
+  const appsTimedOut = apps == null;
+  const polls = apps ?? [];
+  const shortcutPolls = polls.filter(
+    (a) => a.deployment === "production-locked" && a.latencyMs === 0 && !a.error
+  );
+  const livePolls = polls.filter(
+    (a) => !(a.deployment === "production-locked" && a.latencyMs === 0 && !a.error)
+  );
+  const notConfiguredPolls = livePolls.filter((a) =>
+    Boolean(a.error && /HEALTH_URL|not_configured|Set HQ_/i.test(a.error))
+  );
+  const checkedPolls = livePolls.filter((a) => !notConfiguredPolls.includes(a));
+  const appsView = presentCheckedRatio({
+    timedOut: appsTimedOut,
+    healthy: checkedPolls.filter((a) => a.healthy).length,
+    checked: appsTimedOut ? 0 : checkedPolls.length,
+    notDeployed: 0,
+    at: monitoredAt,
+    noun: "apps with a live poll",
+  });
+  if (!appsTimedOut && shortcutPolls.length) {
+    appsView.detail += ` ${shortcutPolls.length} registry shortcut(s) are not timed live probes.`;
+  }
+  if (!appsTimedOut && notConfiguredPolls.length) {
+    appsView.detail += ` ${notConfiguredPolls.length} not configured.`;
+  }
+  const appRows = polls.map((a) => {
+    const shortcut = a.deployment === "production-locked" && a.latencyMs === 0 && !a.error;
+    if (shortcut) {
+      return {
+        id: a.id,
+        healthy: true,
+        error: "Registry shortcut. Not a timed live probe.",
+      };
+    }
+    return {
+      id: a.id,
+      healthy: Boolean(a.healthy),
+      latencyMs: a.latencyMs,
+      error: a.error,
+    };
+  });
 
+  const hubTimedOut = hub == null;
   const integrations = ((hub as { integrations?: Array<{
     id: string;
     name: string;
     status: string;
     health?: { healthy?: boolean; message?: string };
-  }> } | null)?.integrations ?? []).map((i) => ({
-    id: i.id,
-    name: i.name,
-    status: i.status,
-    healthy: Boolean(i.health?.healthy || i.status === "connected"),
-    message: i.health?.message || i.status,
-  }));
-  const integHealthy = integrations.filter((i) => i.healthy).length;
-  const integTotal = integrations.length || 1;
-  const integScore = Math.round((integHealthy / integTotal) * 100);
+  }> } | null)?.integrations ?? []).map((i) => {
+    const disposition = integrationDisposition({
+      status: i.status,
+      liveHealthy: i.health?.healthy === true ? true : i.health?.healthy === false ? false : null,
+    });
+    return {
+      id: i.id,
+      name: i.name,
+      status: disposition,
+      healthy: disposition === "healthy",
+      message: i.health?.message || i.status,
+    };
+  });
+  const liveIntegrations = integrations.filter((i) => i.status === "healthy" || i.status === "degraded");
+  const configuredOnly = integrations.filter((i) => i.status === "configured").length;
+  const notConfiguredIntegrations = integrations.filter((i) => i.status === "not configured").length;
+  const degradedIntegrations = integrations.filter((i) => i.status === "degraded").length;
+  const integView = hubTimedOut
+    ? presentCheckedRatio({
+        timedOut: true,
+        healthy: 0,
+        checked: 0,
+        notDeployed: 0,
+        at: monitoredAt,
+        noun: "connectors",
+      })
+    : liveIntegrations.length === 0
+      ? {
+          status: (notConfiguredIntegrations > 0 ? "not configured" : "configured") as MonitorComponentStatus,
+          score: 0,
+          counted: false,
+          detail: `${notConfiguredIntegrations} not configured. ${configuredOnly} configured. A missing probe is not an outage. ${monitoredAt}`,
+        }
+      : presentCheckedRatio({
+          timedOut: false,
+          healthy: integrations.filter((i) => i.status === "healthy").length,
+          checked: liveIntegrations.length,
+          notDeployed: 0,
+          at: monitoredAt,
+          noun: "connectors with a live check",
+        });
+  if (!hubTimedOut && liveIntegrations.length > 0) {
+    integView.detail += ` ${degradedIntegrations} degraded. ${notConfiguredIntegrations} not configured. ${monitoredAt}`;
+  }
 
+  const jobsTimedOut = scheduledJobs == null;
   const jobsMapped = (scheduledJobs || []).map((raw) => {
     const j = raw as Record<string, unknown>;
     return {
@@ -294,30 +525,39 @@ export async function buildEnterpriseMonitoringOverview(opts?: {
     };
   });
   const failedJobs = jobsMapped.filter((j) => j.enabled && j.runStatus === "failed").length;
-  const jobsScore = jobsMapped.length
-    ? Math.max(40, 100 - failedJobs * 15)
-    : 85;
+  const jobsScore = jobsTimedOut
+    ? 0
+    : jobsMapped.length
+      ? Math.max(40, 100 - failedJobs * 15)
+      : 85;
 
   const voiceFailed = (voiceJobs || []).filter((j) => j.status === "error").length;
   const voiceActive = (liveCalls || []).length;
 
   const systemPillar = commandHealth?.pillars.find((p) => p.id === "system");
-  const apiScore = systemPillar?.score ?? Math.round(appsScore * 0.5 + servicesScore * 0.5);
+  const apiFromPolls = appsView.counted || servicesView.counted
+    ? Math.round(((appsView.counted ? appsView.score : servicesView.score) + (servicesView.counted ? servicesView.score : appsView.score)) / 2)
+    : null;
+  const apiScore = systemPillar?.score ?? apiFromPolls;
 
   const components: MonitorComponent[] = [
     {
       id: "services",
       label: "Live Services",
-      status: statusFromScore(servicesScore),
-      score: servicesScore,
-      detail: `${servicesHealthy}/${servicesTotal} platform services healthy`,
+      status: servicesView.status,
+      score: servicesView.score,
+      counted: servicesView.counted,
+      detail: servicesView.detail,
     },
     {
       id: "api",
       label: "API Health",
-      status: statusFromScore(apiScore),
-      score: apiScore,
-      detail: systemPillar?.meta ?? `${appsHealthy}/${appsTotal} apps responding`,
+      status: apiScore == null ? appsView.status : systemPillar ? statusFromScore(apiScore) : appsView.status,
+      score: apiScore ?? 0,
+      counted: apiScore != null,
+      detail: systemPillar?.meta
+        ? `${systemPillar.meta} · ${monitoredAt}`
+        : appsView.detail,
     },
     database,
     storage,
@@ -325,16 +565,20 @@ export async function buildEnterpriseMonitoringOverview(opts?: {
     {
       id: "integrations",
       label: "Integrations",
-      status: statusFromScore(integScore),
-      score: integScore,
-      detail: `${integHealthy}/${integTotal} connectors healthy`,
+      status: integView.status,
+      score: integView.score,
+      counted: integView.counted,
+      detail: integView.detail,
     },
     {
       id: "jobs",
       label: "Background Jobs",
-      status: statusFromScore(jobsScore),
+      status: jobsTimedOut ? "timed out" : statusFromScore(jobsScore),
       score: jobsScore,
-      detail: `${jobsMapped.filter((j) => j.enabled).length} scheduled · ${failedJobs} failed · ${voiceActive} live voice`,
+      counted: !jobsTimedOut,
+      detail: jobsTimedOut
+        ? `timed out at ${monitoredAt}. A missing probe is not an outage.`
+        : `${jobsMapped.filter((j) => j.enabled).length} scheduled · ${failedJobs} failed · ${voiceActive} live voice`,
       meta: notifPending ? `${notifPending} pending notifications` : undefined,
     },
     {
@@ -347,9 +591,11 @@ export async function buildEnterpriseMonitoringOverview(opts?: {
     },
   ];
 
-  const overallScore = Math.round(
-    components.reduce((sum, c) => sum + c.score, 0) / Math.max(1, components.length)
-  );
+  const scored = components.filter((c) => c.counted !== false);
+  const overallScore = scored.length
+    ? Math.round(scored.reduce((sum, c) => sum + c.score, 0) / scored.length)
+    : 0;
+  const timedOutComponents = components.filter((c) => c.status === "timed out");
 
   const alerts: EnterpriseMonitoringOverview["alerts"] = [];
   for (const c of components) {
@@ -383,7 +629,7 @@ export async function buildEnterpriseMonitoringOverview(opts?: {
 
   const data: EnterpriseMonitoringOverview = {
     overallScore,
-    overallStatus: statusFromScore(overallScore),
+    overallStatus: scored.length ? statusFromScore(overallScore) : "timed out",
     uptimeSeconds: Math.floor(process.uptime()),
     uptimeLabel: formatUptime(process.uptime()),
     components,
@@ -399,13 +645,15 @@ export async function buildEnterpriseMonitoringOverview(opts?: {
     },
     anomalies: anomalies.slice(0, 20),
     alerts: alerts.slice(0, 25),
-    monitoredAt: new Date().toISOString(),
-    degraded: overallScore === 0 && components.every((c) => c.score === 0),
-    warning: null,
+    monitoredAt,
+    degraded: components.some((c) => c.status === "degraded" || c.status === "critical" || c.status === "unreachable"),
+    warning: timedOutComponents.length
+      ? `timed out at ${monitoredAt}. ${timedOutComponents.map((c) => c.label).join(", ")}. A missing probe is not an outage.`
+      : null,
     source: "live",
   };
 
-  if (!data.degraded) cache = { at: now, data };
+  if (timedOutComponents.length === 0) cache = { at: now, data };
   return data;
 }
 
