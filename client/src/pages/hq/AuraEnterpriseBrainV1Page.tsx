@@ -19,10 +19,25 @@ import { HqApiError } from "../../api/hqApiFetch";
 type BrainTab = "command" | "health" | "briefing" | "projects" | "systems" | "queue" | "actions" | "log" | "diagnostics";
 
 function probeVariant(status: string): "success" | "warning" | "danger" | "muted" {
-  if (status === "connected") return "success";
-  if (status === "partial") return "warning";
-  if (status === "missing" || status === "unsafe") return "danger";
+  if (status === "healthy" || status === "connected") return "success";
+  if (status === "degraded" || status === "partial" || status === "unreachable") return "warning";
+  if (status === "missing" || status === "unsafe" || status === "not configured") return "danger";
   return "muted";
+}
+
+function monitorCardText(status: string, score: number | null | undefined, counted?: boolean): string {
+  if (
+    counted === false ||
+    score == null ||
+    status === "timed out" ||
+    status === "unknown" ||
+    status === "not deployed" ||
+    status === "not configured" ||
+    status === "configured"
+  ) {
+    return status || "unknown";
+  }
+  return `${score}/100`;
 }
 
 function errorMessage(err: unknown): string {
@@ -694,7 +709,7 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
           {s && (
             <>
               <div className="hq-kpi-grid" style={{ marginBottom: "1.25rem" }}>
-                <KpiCard label="Overall Score" value={s.overallScore != null ? `${s.overallScore}` : "—"} meta={s.overallStatus} icon={Shield} variant="gold" />
+                <KpiCard label="Overall Score" value={monitorCardText(s.overallStatus, s.overallScore)} meta={s.overallStatus} icon={Shield} variant="gold" />
                 <KpiCard label="Components" value={s.components.length} icon={Monitor} />
                 <KpiCard label="Healthy" value={s.components.filter((c) => c.status === "healthy").length} icon={CheckCircle2} variant="success" />
                 <KpiCard label="Alerts" value={s.alerts.length} icon={AlertTriangle} variant={s.alerts.length ? "warning" : "success"} />
@@ -709,7 +724,7 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
                           <strong>{c.label}</strong>
                           <div style={{ opacity: 0.85 }}>{c.detail}</div>
                         </div>
-                        <StatusBadge label={`${c.score} · ${c.status}`} variant={severityVariant(c.status === "critical" ? "critical" : c.status === "degraded" ? "watch" : c.status)} />
+                        <StatusBadge label={monitorCardText(c.status, c.score)} variant={severityVariant(c.status === "critical" ? "critical" : c.status === "degraded" || c.status === "unreachable" ? "watch" : c.status)} />
                       </div>
                     ))}
                   </div>
@@ -955,9 +970,11 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
           {diag && (
             <>
               <div className="hq-kpi-grid" style={{ marginBottom: "1rem" }}>
-                <KpiCard label="Connected" value={diag.summary.connected} icon={CheckCircle2} variant="success" />
-                <KpiCard label="Partial" value={diag.summary.partial} icon={Activity} variant="warning" />
-                <KpiCard label="Missing" value={diag.summary.missing} icon={AlertTriangle} variant={diag.summary.missing ? "danger" : "success"} />
+                <KpiCard label="Healthy" value={diag.summary.healthy ?? 0} icon={CheckCircle2} variant="success" />
+                <KpiCard label="Configured" value={diag.summary.configured ?? 0} icon={Shield} variant="muted" />
+                <KpiCard label="Degraded" value={diag.summary.degraded ?? diag.summary.partial} icon={Activity} variant="warning" />
+                <KpiCard label="Unavailable" value={diag.summary.unavailable ?? diag.summary.missing} icon={AlertTriangle} variant={(diag.summary.unavailable ?? diag.summary.missing) ? "warning" : "muted"} />
+                <KpiCard label="Unknown" value={diag.summary.unknown ?? 0} icon={AlertTriangle} variant="muted" />
                 <KpiCard
                   label="Action catalog"
                   value={diag.summary.actionCatalog.total}

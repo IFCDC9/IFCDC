@@ -8,7 +8,6 @@ import HQLayout from "../../layouts/HQLayout";
 import {
   EMPTY_ENTERPRISE_MONITORING,
   monitoringApi,
-  type MonitorComponentStatus,
 } from "../../api/monitoringApi";
 import { KpiCard } from "../../components/hq/KpiCard";
 import { HqPanel } from "../../components/hq/HqPanel";
@@ -16,11 +15,26 @@ import { StatusBadge } from "../../components/hq/StatusBadge";
 import { HqLoading } from "../../components/hq/HqLoading";
 import { HqWidgetErrorBoundary } from "../../components/hq/HqErrorBoundary";
 
-function statusVariant(status: MonitorComponentStatus): "success" | "warning" | "danger" | "muted" {
+function statusVariant(status: string): "success" | "warning" | "danger" | "muted" {
   if (status === "healthy") return "success";
-  if (status === "degraded") return "warning";
+  if (status === "degraded" || status === "unreachable") return "warning";
   if (status === "critical") return "danger";
   return "muted";
+}
+
+function monitorCardText(status: string, score: number | null | undefined, counted?: boolean): string {
+  if (
+    counted === false ||
+    score == null ||
+    status === "timed out" ||
+    status === "unknown" ||
+    status === "not deployed" ||
+    status === "not configured" ||
+    status === "configured"
+  ) {
+    return status || "unknown";
+  }
+  return `${score}/100`;
 }
 
 const EnterpriseMonitoringPage: React.FC = () => {
@@ -62,7 +76,7 @@ const EnterpriseMonitoringPage: React.FC = () => {
     >
       <div className="hq-people-toolbar" style={{ marginBottom: "1rem", flexWrap: "wrap", gap: "0.5rem" }}>
         <StatusBadge
-          label={`Health ${data.overallScore}/100`}
+          label={`Health ${monitorCardText(data.overallStatus, data.overallScore)}`}
           variant={statusVariant(data.overallStatus)}
         />
         <StatusBadge label={`Uptime ${data.uptimeLabel}`} variant="gold" />
@@ -115,7 +129,7 @@ const EnterpriseMonitoringPage: React.FC = () => {
         <>
           <HqWidgetErrorBoundary label="Monitoring KPIs">
             <div className="hq-kpi-grid hq-fade-in" style={{ marginBottom: "1rem" }}>
-              <KpiCard label="System Health" value={`${data.overallScore}/100`} icon={Activity} variant={statusVariant(data.overallStatus)} meta={data.overallStatus} />
+              <KpiCard label="System Health" value={monitorCardText(data.overallStatus, data.overallScore)} icon={Activity} variant={statusVariant(data.overallStatus)} meta={data.overallStatus} />
               <KpiCard label="Uptime" value={data.uptimeLabel} icon={Timer} variant="success" meta={`${data.uptimeSeconds}s process`} />
               <KpiCard
                 label="Services"
@@ -138,7 +152,7 @@ const EnterpriseMonitoringPage: React.FC = () => {
             {components.map((c) => (
               <div key={c.id} className={`hq-executive-health-card hq-health-${c.status === "healthy" ? "good" : c.status === "degraded" ? "watch" : c.status === "critical" ? "critical" : "unknown"}`}>
                 <span className="hq-executive-health-label">{c.label}</span>
-                <span className="hq-executive-health-value">{c.score}/100</span>
+                <span className="hq-executive-health-value">{monitorCardText(c.status, c.score, c.counted)}</span>
                 <span className="hq-executive-health-meta">{c.detail}</span>
               </div>
             ))}

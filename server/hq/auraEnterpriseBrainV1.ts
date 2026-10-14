@@ -896,7 +896,7 @@ export type SystemHealthMonitorV1 = {
   mode: "read_only";
   overallScore: number | null;
   overallStatus: string;
-  components: Array<{ id: string; label: string; status: string; score: number; detail: string }>;
+  components: Array<{ id: string; label: string; status: string; score: number | null; detail: string }>;
   alerts: Array<{ id: string; severity: string; title: string; detail: string; path?: string }>;
   degraded: boolean;
   warning: string | null;

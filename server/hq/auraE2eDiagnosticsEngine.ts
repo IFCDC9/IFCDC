@@ -62,6 +62,53 @@ export function pendingRenderDeployCount(statuses: string[]): number {
   return statuses.filter((status) => status === "pending-render").length;
 }
 
+const UNAVAILABLE_PROBE_STATUSES = new Set([
+  "timed out",
+  "unreachable",
+  "not configured",
+  "not deployed",
+  "missing",
+  "unsafe",
+]);
+
+/** Separate counts so a renamed status does not collapse the Connected card to zero. */
+export function summarizeProbeStatuses(statuses: string[]): {
+  configured: number;
+  healthy: number;
+  degraded: number;
+  unavailable: number;
+  unknown: number;
+  connected: number;
+  partial: number;
+  missing: number;
+  unsafe: number;
+  timedOut: number;
+  unreachable: number;
+  notConfigured: number;
+  notDeployed: number;
+} {
+  const configured = statuses.filter((status) => status === "configured" || status === "connected").length;
+  const healthy = statuses.filter((status) => status === "healthy").length;
+  const degraded = statuses.filter((status) => status === "degraded" || status === "partial").length;
+  const unknown = statuses.filter((status) => status === "unknown").length;
+  const unavailable = statuses.filter((status) => UNAVAILABLE_PROBE_STATUSES.has(status)).length;
+  return {
+    configured,
+    healthy,
+    degraded,
+    unavailable,
+    unknown,
+    connected: configured + healthy,
+    partial: degraded,
+    missing: statuses.filter((status) => status === "missing" || status === "not configured").length,
+    unsafe: statuses.filter((status) => status === "unsafe").length,
+    timedOut: statuses.filter((status) => status === "timed out").length,
+    unreachable: statuses.filter((status) => status === "unreachable").length,
+    notConfigured: statuses.filter((status) => status === "not configured").length,
+    notDeployed: statuses.filter((status) => status === "not deployed").length,
+  };
+}
+
 export function commandCenterHealthyValue(input: {
   healthyCount: number;
   probesIncomplete: boolean;
@@ -101,6 +148,7 @@ export type AuraE2eDiagnosticsReport = {
     configured: number;
     healthy: number;
     degraded: number;
+    unavailable: number;
     timedOut: number;
     unreachable: number;
     notConfigured: number;
@@ -503,18 +551,7 @@ export async function buildAuraE2eDiagnostics(opts: {
   });
 
   const summary = {
-    connected: probes.filter((p) => p.status === "connected").length,
-    partial: probes.filter((p) => p.status === "partial" || p.status === "degraded").length,
-    missing: probes.filter((p) => p.status === "missing" || p.status === "not configured").length,
-    unsafe: probes.filter((p) => p.status === "unsafe").length,
-    configured: probes.filter((p) => p.status === "configured").length,
-    healthy: probes.filter((p) => p.status === "healthy").length,
-    degraded: probes.filter((p) => p.status === "degraded").length,
-    timedOut: probes.filter((p) => p.status === "timed out").length,
-    unreachable: probes.filter((p) => p.status === "unreachable").length,
-    notConfigured: probes.filter((p) => p.status === "not configured").length,
-    notDeployed: probes.filter((p) => p.status === "not deployed").length,
-    unknown: probes.filter((p) => p.status === "unknown").length,
+    ...summarizeProbeStatuses(probes.map((probe) => probe.status)),
     actionCatalog: { total: actions.length, ...byKind },
   };
 

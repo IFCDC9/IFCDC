@@ -1,18 +1,28 @@
 import { hqApiFetch } from "./hqApiFetch";
 
-export type MonitorComponentStatus = "healthy" | "degraded" | "critical" | "unknown";
+export type MonitorComponentStatus =
+  | "healthy"
+  | "degraded"
+  | "critical"
+  | "unknown"
+  | "timed out"
+  | "unreachable"
+  | "not configured"
+  | "not deployed"
+  | "configured";
 
 export type MonitorComponent = {
   id: string;
   label: string;
   status: MonitorComponentStatus;
-  score: number;
+  score: number | null;
   detail: string;
   meta?: string;
+  counted?: boolean;
 };
 
 export type EnterpriseMonitoringOverview = {
-  overallScore: number;
+  overallScore: number | null;
   overallStatus: MonitorComponentStatus;
   uptimeSeconds: number;
   uptimeLabel: string;
@@ -40,7 +50,7 @@ export type EnterpriseMonitoringOverview = {
 };
 
 export const EMPTY_ENTERPRISE_MONITORING: EnterpriseMonitoringOverview = {
-  overallScore: 0,
+  overallScore: null,
   overallStatus: "unknown",
   uptimeSeconds: 0,
   uptimeLabel: "—",

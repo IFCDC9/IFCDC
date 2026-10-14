@@ -566,7 +566,7 @@ export const hqApi = {
       mode: "read_only";
       overallScore: number | null;
       overallStatus: string;
-      components: Array<{ id: string; label: string; status: string; score: number; detail: string }>;
+      components: Array<{ id: string; label: string; status: string; score: number | null; detail: string }>;
       alerts: Array<{ id: string; severity: string; title: string; detail: string; path?: string }>;
       degraded: boolean;
       warning: string | null;
@@ -635,6 +635,11 @@ export const hqApi = {
         partial: number;
         missing: number;
         unsafe: number;
+        configured: number;
+        healthy: number;
+        degraded: number;
+        unavailable: number;
+        unknown: number;
         actionCatalog: { total: number; read: number; prepare: number; execute: number };
       };
       identity: {
@@ -647,7 +652,7 @@ export const hqApi = {
         id: string;
         area: string;
         label: string;
-        status: "connected" | "partial" | "missing" | "unsafe";
+        status: string;
         detail: string;
         route?: string;
         files?: string[];

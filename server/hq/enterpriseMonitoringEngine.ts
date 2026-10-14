@@ -30,7 +30,7 @@ export type MonitorComponent = {
   id: string;
   label: string;
   status: MonitorComponentStatus;
-  score: number;
+  score: number | null;
   detail: string;
   meta?: string;
   /** False when this score must not be averaged into an outage. */
@@ -38,7 +38,7 @@ export type MonitorComponent = {
 };
 
 export type EnterpriseMonitoringOverview = {
-  overallScore: number;
+  overallScore: number | null;
   overallStatus: MonitorComponentStatus;
   uptimeSeconds: number;
   uptimeLabel: string;
@@ -81,11 +81,11 @@ export function presentCheckedRatio(input: {
   notDeployed: number;
   at: string;
   noun: string;
-}): { status: MonitorComponentStatus; score: number; counted: boolean; detail: string } {
+}): { status: MonitorComponentStatus; score: number | null; counted: boolean; detail: string } {
   if (input.timedOut) {
     return {
       status: "timed out",
-      score: 0,
+      score: null,
       counted: false,
       detail: `timed out at ${input.at}. A missing probe is not an outage.`,
     };
@@ -93,7 +93,7 @@ export function presentCheckedRatio(input: {
   if (input.checked === 0 && input.notDeployed > 0) {
     return {
       status: "not deployed",
-      score: 0,
+      score: null,
       counted: false,
       detail: `not deployed at ${input.at}. localhost sidecars are not the Headquarters database, Founder session, or Postmark path.`,
     };
@@ -101,7 +101,7 @@ export function presentCheckedRatio(input: {
   if (input.checked === 0) {
     return {
       status: "timed out",
-      score: 0,
+      score: null,
       counted: false,
       detail: `timed out at ${input.at}. A missing probe is not an outage.`,
     };
@@ -124,11 +124,11 @@ export function labelAuthProbe(input: {
   sidecarTimedOut: boolean;
   sessionCount: number;
   at: string;
-}): { status: MonitorComponentStatus; score: number; counted: boolean; detail: string; meta: string } {
+}): { status: MonitorComponentStatus; score: number | null; counted: boolean; detail: string; meta: string } {
   if (!input.jwtConfigured) {
     return {
       status: "not configured",
-      score: 0,
+      score: null,
       counted: false,
       detail: "JWT/SESSION secret missing",
       meta: "not configured",
@@ -137,7 +137,7 @@ export function labelAuthProbe(input: {
   if (input.sidecarTimedOut) {
     return {
       status: "timed out",
-      score: 0,
+      score: null,
       counted: false,
       detail: `timed out at ${input.at}. Not the Founder session.`,
       meta: "timed out",
@@ -146,7 +146,7 @@ export function labelAuthProbe(input: {
   if (input.authService === false && isLocalSidecarUrl(input.authUrl)) {
     return {
       status: "not deployed",
-      score: 0,
+      score: null,
       counted: false,
       detail: "Auth sidecar is not deployed. This is not the Founder session or the Headquarters database.",
       meta: "not deployed",
@@ -172,10 +172,100 @@ export function labelAuthProbe(input: {
   }
   return {
     status: "unknown",
-    score: 0,
+    score: null,
     counted: false,
     detail: `Auth sidecar was not in the service map at ${input.at}.`,
     meta: "unknown",
+  };
+}
+
+const UNSCORED_STATUSES = new Set([
+  "timed out",
+  "unknown",
+  "not deployed",
+  "not configured",
+  "configured",
+]);
+
+/** A timed-out or unknown card shows its status, not a zero health score. */
+export function formatMonitorCardValue(input: {
+  status: string;
+  score: number | null;
+  counted?: boolean;
+}): string {
+  if (input.counted === false || input.score == null || UNSCORED_STATUSES.has(input.status)) {
+    return input.status || "unknown";
+  }
+  return `${input.score}/100`;
+}
+
+export function overallFromComponents(
+  components: Array<{ status: string; score: number | null; counted?: boolean }>
+): { overallScore: number | null; overallStatus: MonitorComponentStatus } {
+  const scored = components.filter(
+    (component) =>
+      component.counted !== false &&
+      component.score != null &&
+      !UNSCORED_STATUSES.has(component.status)
+  );
+  if (!scored.length) {
+    const status: MonitorComponentStatus = components.some((component) => component.status === "timed out")
+      ? "timed out"
+      : "unknown";
+    return { overallScore: null, overallStatus: status };
+  }
+  const overallScore = Math.round(
+    scored.reduce((sum, component) => sum + (component.score as number), 0) / scored.length
+  );
+  return { overallScore, overallStatus: statusFromScore(overallScore) };
+}
+
+async function readMailboxCard(): Promise<MonitorComponent> {
+  try {
+    const { graphMailboxHealth } = await import("./microsoftGraphMailbox");
+    const card = mailboxPollCard(graphMailboxHealth());
+    return { id: "mailbox", label: "Mailbox poll", ...card };
+  } catch {
+    const card = mailboxPollCard(null);
+    return { id: "mailbox", label: "Mailbox poll", ...card };
+  }
+}
+
+export function mailboxPollCard(input: {
+  lastSuccessfulMailboxPoll: string | null;
+  lastMailboxPollStatus: string | null;
+} | null): { status: MonitorComponentStatus; score: number | null; counted: boolean; detail: string } {
+  const pollAt = input?.lastSuccessfulMailboxPoll?.trim() || "";
+  if (!pollAt) {
+    return {
+      status: "unknown",
+      score: null,
+      counted: false,
+      detail: "Mailbox poll is unavailable.",
+    };
+  }
+  const pollStatus = input?.lastMailboxPollStatus || "unknown";
+  if (pollStatus === "ok") {
+    return {
+      status: "healthy",
+      score: 100,
+      counted: true,
+      detail: `Last verified mailbox poll ${pollAt} · ok. No mail sent.`,
+    };
+  }
+  if (pollStatus === "failed") {
+    return {
+      status: "degraded",
+      score: 40,
+      counted: true,
+      detail: `Last verified mailbox poll ${pollAt} · failed. No mail sent.`,
+    };
+  }
+  return {
+    status: "unknown",
+    score: null,
+    counted: false,
+    detail: `Last verified mailbox poll ${pollAt} · ${pollStatus}. No mail sent.`,
   };
 }
 
@@ -320,7 +410,7 @@ const CACHE_TTL_MS = 30_000;
 
 export function emptyEnterpriseMonitoring(): EnterpriseMonitoringOverview {
   return {
-    overallScore: 0,
+    overallScore: null,
     overallStatus: "timed out",
     uptimeSeconds: Math.floor(process.uptime()),
     uptimeLabel: formatUptime(process.uptime()),
@@ -373,7 +463,7 @@ export async function buildEnterpriseMonitoringOverview(opts?: {
       id: "database",
       label: "Database",
       status: "timed out" as const,
-      score: 0,
+      score: null,
       counted: false,
       detail: "timed out. A missing probe is not an outage. SELECT 1 did not finish.",
     }, "database"),
@@ -381,7 +471,7 @@ export async function buildEnterpriseMonitoringOverview(opts?: {
       id: "storage",
       label: "Storage",
       status: "timed out" as const,
-      score: 0,
+      score: null,
       counted: false,
       detail: "timed out. A missing probe is not an outage.",
     }, "storage"),
@@ -389,7 +479,7 @@ export async function buildEnterpriseMonitoringOverview(opts?: {
       id: "authentication",
       label: "Authentication",
       status: "timed out" as const,
-      score: 0,
+      score: null,
       counted: false,
       detail: "timed out. Not the Founder session. A missing probe is not an outage.",
     }, "authentication"),
@@ -496,7 +586,7 @@ export async function buildEnterpriseMonitoringOverview(opts?: {
     : liveIntegrations.length === 0
       ? {
           status: (notConfiguredIntegrations > 0 ? "not configured" : "configured") as MonitorComponentStatus,
-          score: 0,
+          score: null,
           counted: false,
           detail: `${notConfiguredIntegrations} not configured. ${configuredOnly} configured. A missing probe is not an outage. ${monitoredAt}`,
         }
@@ -526,7 +616,7 @@ export async function buildEnterpriseMonitoringOverview(opts?: {
   });
   const failedJobs = jobsMapped.filter((j) => j.enabled && j.runStatus === "failed").length;
   const jobsScore = jobsTimedOut
-    ? 0
+    ? null
     : jobsMapped.length
       ? Math.max(40, 100 - failedJobs * 15)
       : 85;
@@ -553,7 +643,7 @@ export async function buildEnterpriseMonitoringOverview(opts?: {
       id: "api",
       label: "API Health",
       status: apiScore == null ? appsView.status : systemPillar ? statusFromScore(apiScore) : appsView.status,
-      score: apiScore ?? 0,
+      score: apiScore,
       counted: apiScore != null,
       detail: systemPillar?.meta
         ? `${systemPillar.meta} · ${monitoredAt}`
@@ -573,7 +663,7 @@ export async function buildEnterpriseMonitoringOverview(opts?: {
     {
       id: "jobs",
       label: "Background Jobs",
-      status: jobsTimedOut ? "timed out" : statusFromScore(jobsScore),
+      status: jobsTimedOut ? "timed out" : statusFromScore(jobsScore ?? 0),
       score: jobsScore,
       counted: !jobsTimedOut,
       detail: jobsTimedOut
@@ -589,12 +679,11 @@ export async function buildEnterpriseMonitoringOverview(opts?: {
       detail: formatUptime(process.uptime()),
       meta: `Process uptime ${Math.floor(process.uptime())}s`,
     },
+    await readMailboxCard(),
   ];
 
-  const scored = components.filter((c) => c.counted !== false);
-  const overallScore = scored.length
-    ? Math.round(scored.reduce((sum, c) => sum + c.score, 0) / scored.length)
-    : 0;
+  const overall = overallFromComponents(components);
+  const overallScore = overall.overallScore;
   const timedOutComponents = components.filter((c) => c.status === "timed out");
 
   const alerts: EnterpriseMonitoringOverview["alerts"] = [];
@@ -629,7 +718,7 @@ export async function buildEnterpriseMonitoringOverview(opts?: {
 
   const data: EnterpriseMonitoringOverview = {
     overallScore,
-    overallStatus: scored.length ? statusFromScore(overallScore) : "timed out",
+    overallStatus: overall.overallStatus,
     uptimeSeconds: Math.floor(process.uptime()),
     uptimeLabel: formatUptime(process.uptime()),
     components,
