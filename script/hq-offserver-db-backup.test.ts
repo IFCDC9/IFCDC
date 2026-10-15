@@ -259,6 +259,25 @@ test("the scheduled backup function does not copy onto the persistent backup dir
   assert.match(scheduler, /last_run_status = 'failed'/);
 });
 
+test("Create Backup Now shows the snapshot result and does not mark the scheduled job success", () => {
+  const page = readFileSync(new URL("../client/src/pages/hq/SecurityCenterPage.tsx", import.meta.url), "utf8");
+  const api = readFileSync(new URL("../client/src/api/securityApi.ts", import.meta.url), "utf8");
+  const button = page.slice(page.indexOf("Create Backup Now") - 400, page.indexOf("Create Backup Now"));
+  assert.match(api, /method: "POST"/);
+  assert.match(api, /\/backup\/snapshot/);
+  assert.match(page, /function startOneBackup/);
+  assert.match(page, /backupClickLock\.current \|\| createBackup\.isPending/);
+  assert.match(button, /disabled=\{createBackup\.isPending\}/);
+  assert.match(button, /onClick=\{startOneBackup\}/);
+  assert.match(page, /role="alert"/);
+  assert.match(page, /Creating an encrypted off-server backup/);
+  assert.match(page, /Backup result: \{status\}/);
+  assert.match(page, /Off-server restore is not verified/);
+  assert.equal(page.includes("/jobs/"), false);
+  assert.equal(page.includes("run-scheduled"), false);
+  assert.equal(page.includes("last_run_status = 'success'"), false);
+});
+
 function resultSha(plain: Buffer): string {
   return createHash("sha256").update(plain).digest("hex");
 }
