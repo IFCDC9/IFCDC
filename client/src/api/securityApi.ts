@@ -58,7 +58,7 @@ export const securityApi = {
   restorePoints: (limit = 20) =>
     apiFetch<{ restorePoints: { id: string; filename: string; size_bytes: number; created_at: string }[] }>(`/backup/restore-points?limit=${limit}`).catch(() => ({ restorePoints: [] })),
   createBackup: () =>
-    apiFetch<{ snapshot: { id: string; filename: string; createdAt: string } }>("/backup/snapshot", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }),
+    apiFetch<{ snapshot: { id: string; filename: string; createdAt: string }; status: string }>("/backup/snapshot", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }),
   sessionPolicy: () =>
     apiFetch<{
       maxAgeDays: number;

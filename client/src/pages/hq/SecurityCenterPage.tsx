@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Shield, Lock, Activity, Database, RefreshCw, Smartphone, Monitor, AlertTriangle } from "lucide-react";
 import HQLayout from "../../layouts/HQLayout";
@@ -11,6 +11,13 @@ import { StatusBadge } from "../../components/hq/StatusBadge";
 import { formatDateTime } from "../../utils/safeFormat";
 
 type Tab = "overview" | "mfa" | "sessions" | "logins" | "threats" | "backup";
+
+function BackupRequestNotice({ pending, error, status }: { pending: boolean; error: Error | null; status?: string }) {
+  if (pending) return <p role="status">Creating an encrypted off-server backup…</p>;
+  if (error) return <p role="alert">{error.message}</p>;
+  if (status) return <p role="status">Backup result: {status}. Off-server restore is not verified.</p>;
+  return null;
+}
 
 const SecurityCenterPage: React.FC = () => {
   const [tab, setTab] = useState<Tab>("overview");
@@ -40,9 +47,11 @@ const SecurityCenterPage: React.FC = () => {
     mutationFn: () => authApi.mfaVerify(mfaCode),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["mfa-status"] }); qc.invalidateQueries({ queryKey: ["security-dashboard"] }); setQrCode(null); setMfaCode(""); },
   });
+  const backupClickLock = useRef(false);
   const createBackup = useMutation({
     mutationFn: securityApi.createBackup,
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["security-restore-points"] }); qc.invalidateQueries({ queryKey: ["security-dashboard"] }); },
+    onSettled: () => { backupClickLock.current = false; },
   });
   const revokeSession = useMutation({
     mutationFn: securityApi.revokeSession,
@@ -51,6 +60,12 @@ const SecurityCenterPage: React.FC = () => {
 
   const data = dashboard.data;
   const backup = data?.backup as { status?: string; message?: string; lastBackup?: { createdAt?: string; filename?: string } } | undefined;
+
+  function startOneBackup() {
+    if (backupClickLock.current || createBackup.isPending) return;
+    backupClickLock.current = true;
+    createBackup.mutate();
+  }
 
   return (
     <HQLayout title="Enterprise Security Center" subtitle="MFA, sessions, audit logs, threat monitoring, and database backups">
@@ -115,9 +130,10 @@ const SecurityCenterPage: React.FC = () => {
                   Last: {backup.lastBackup.filename} · {formatDateTime(backup.lastBackup.createdAt)}
                 </p>
               )}
-              <button type="button" className="hq-btn hq-btn-sm hq-btn-primary" style={{ marginTop: "0.5rem" }} disabled={createBackup.isPending} onClick={() => createBackup.mutate()}>
+              <button type="button" className="hq-btn hq-btn-sm hq-btn-primary" style={{ marginTop: "0.5rem" }} disabled={createBackup.isPending} onClick={startOneBackup}>
                 {createBackup.isPending ? "Creating…" : "Create Backup Now"}
               </button>
+              <BackupRequestNotice pending={createBackup.isPending} error={createBackup.error} status={createBackup.data?.status} />
             </HqPanel>
           </div>
         </>
@@ -234,9 +250,10 @@ const SecurityCenterPage: React.FC = () => {
 
       {tab === "backup" && (
         <HqPanel title="Restore Points" subtitle="Automated and manual database snapshots">
-          <button type="button" className="hq-btn hq-btn-primary hq-btn-sm" style={{ marginBottom: "1rem" }} disabled={createBackup.isPending} onClick={() => createBackup.mutate()}>
+          <button type="button" className="hq-btn hq-btn-primary hq-btn-sm" style={{ marginBottom: "1rem" }} disabled={createBackup.isPending} onClick={startOneBackup}>
             <Database size={14} /> {createBackup.isPending ? "Creating…" : "Create Snapshot"}
           </button>
+          <BackupRequestNotice pending={createBackup.isPending} error={createBackup.error} status={createBackup.data?.status} />
           {restorePoints.isLoading ? <HqLoading /> : (
             <table className="hq-table">
               <thead><tr><th>Filename</th><th>Size</th><th>Created</th></tr></thead>
