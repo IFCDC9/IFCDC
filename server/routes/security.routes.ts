@@ -91,7 +91,7 @@ router.get("/backup/restore-points", async (req, res) => {
 router.post("/backup/snapshot", async (req: Request, res: Response) => {
   try {
     const snapshot = await createDatabaseBackup(req.hqUser?.email ?? "manual");
-    res.status(201).json({ snapshot, status: "created" });
+    res.status(201).json({ snapshot, status: snapshot.restoreVerified ? "verified" : "uploaded_unverified" });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message, status: "failed" });
   }

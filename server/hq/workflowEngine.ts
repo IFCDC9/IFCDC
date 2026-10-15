@@ -462,8 +462,18 @@ export async function runDueScheduledJobs(
     }
 
     try {
-      await executeScheduledJob(job.job_key, actorEmail, { catchUp });
+      const outcome = await executeScheduledJob(job.job_key, actorEmail, { catchUp });
       const ts = new Date().toISOString();
+      if (outcome.status === "uploaded_unverified") {
+        await db.run(
+          "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'uploaded_unverified', last_error = ? WHERE job_key = ?",
+          ts,
+          computeNextRunAt(job.job_key),
+          "Off-server backup uploaded. Isolated restore has not been approved.",
+          job.job_key,
+        );
+        continue;
+      }
       await db.run(
         "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'success', last_error = NULL WHERE job_key = ?",
         ts, computeNextRunAt(job.job_key), job.job_key
@@ -495,7 +505,7 @@ async function executeScheduledJob(
   jobKey: string,
   actorEmail?: string,
   opts?: { catchUp?: boolean },
-): Promise<void> {
+): Promise<{ status: "ok" | "uploaded_unverified" }> {
   const now = new Date().toISOString();
   switch (jobKey) {
     case "grant_deadlines":
@@ -509,8 +519,10 @@ async function executeScheduledJob(
       await captureFullWarehouseSnapshot();
       break;
     case "db_backup": {
-      const { createDatabaseBackup } = await import("./hqBackupService");
-      await createDatabaseBackup(actorEmail ?? "scheduled");
+      const { assertOffServerUploadAuthorized, createDatabaseBackup } = await import("./hqBackupService");
+      assertOffServerUploadAuthorized();
+      const snapshot = await createDatabaseBackup(actorEmail ?? "scheduled");
+      if (!snapshot.restoreVerified) return { status: "uploaded_unverified" };
       break;
     }
     case "executive_report_daily": {
@@ -546,6 +558,7 @@ async function executeScheduledJob(
     default:
       break;
   }
+  return { status: "ok" };
 }
 
 export async function repairPendingWorkflowSteps(): Promise<number> {
