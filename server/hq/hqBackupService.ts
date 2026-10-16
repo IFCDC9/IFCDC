@@ -256,13 +256,15 @@ export async function createOffServerDatabaseBackup(opts: {
     if (free < sourceBytes * 2 + TEMP_MARGIN_BYTES) {
       throw new Error("Database backup stopped: temporary storage cannot hold a snapshot without using the persistent data disk");
     }
-    const source = new Database(opts.sourcePath, { readonly: true, fileMustExist: true });
+    // SQLite checkpoints a WAL database through this connection. A readonly
+    // handle throws "attempt to write a readonly database" before upload.
+    const source = new Database(opts.sourcePath, { fileMustExist: true });
     try {
       await source.backup(plaintextPath);
     } finally {
       source.close();
     }
-    const check = new Database(plaintextPath, { readonly: true, fileMustExist: true });
+    const check = new Database(plaintextPath, { fileMustExist: true });
     let integrity = "";
     try {
       integrity = String(check.pragma("integrity_check", { simple: true }));

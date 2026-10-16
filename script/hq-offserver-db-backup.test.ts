@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -276,6 +276,91 @@ test("Create Backup Now shows the snapshot result and does not mark the schedule
   assert.equal(page.includes("/jobs/"), false);
   assert.equal(page.includes("run-scheduled"), false);
   assert.equal(page.includes("last_run_status = 'success'"), false);
+});
+
+test("a readonly WAL connection throws before upload and a live WAL database uploads once", async () => {
+  const dir = mkdtempSync(join(root, "wal-readonly-"));
+  const frozen = join(dir, "frozen");
+  const writable = join(dir, "writable");
+  const disk = join(dir, "disk");
+  const temp = join(dir, "temp");
+  for (const path of [frozen, writable, disk, temp]) mkdirSync(path);
+  let writer: Database.Database | null = null;
+  try {
+  const walPath = join(writable, "live.db");
+  writer = new Database(walPath);
+  writer.pragma("journal_mode = WAL");
+  writer.exec("CREATE TABLE fixture_records (id INTEGER PRIMARY KEY, label TEXT NOT NULL)");
+  writer.prepare("INSERT INTO fixture_records (label) VALUES (?)").run("wal-live");
+  copyFileSync(walPath, join(frozen, "live.db"));
+  chmodSync(frozen, 0o555);
+  chmodSync(join(frozen, "live.db"), 0o444);
+  const readonlySource = new Database(join(frozen, "live.db"), { readonly: true, fileMustExist: true });
+  await assert.rejects(
+    () => readonlySource.backup(join(dir, "blocked.db")),
+    /attempt to write a readonly database/,
+  );
+  readonlySource.close();
+
+  let blockedPuts = 0;
+  await assert.rejects(
+    () => createOffServerDatabaseBackup({
+      sourcePath: join(frozen, "live.db"),
+      dataDiskRoot: disk,
+      tempDir: temp,
+      encryptionKey: key,
+      freeBytes: 1024 * 1024 * 1024,
+      lock: { held: false },
+      uploader: { async put() { blockedPuts += 1; } },
+    }),
+    (err: unknown) => {
+      const message = err instanceof Error ? err.message : "";
+      return message.includes("attempt to write a readonly database") && !message.includes("uploaded_unverified");
+    },
+  );
+  assert.equal(blockedPuts, 0);
+
+  const service = readFileSync(new URL("../server/hq/hqBackupService.ts", import.meta.url), "utf8");
+  const backupFn = service.slice(
+    service.indexOf("export async function createOffServerDatabaseBackup"),
+    service.indexOf("export function getDbPathForBackup"),
+  );
+  assert.equal(backupFn.includes("readonly: true"), false);
+  assert.match(backupFn, /new Database\(opts\.sourcePath, \{ fileMustExist: true \}\)/);
+  assert.ok(backupFn.indexOf("source.backup") < backupFn.indexOf("uploader.put"));
+  assert.equal(backupFn.includes("copyFileSync"), false);
+  assert.equal(backupFn.includes("pruneOldBackups"), false);
+
+  let saved: Buffer | null = null;
+  const result = await createOffServerDatabaseBackup({
+    sourcePath: walPath,
+    dataDiskRoot: disk,
+    tempDir: temp,
+    encryptionKey: key,
+    freeBytes: 1024 * 1024 * 1024,
+    now: new Date("2026-10-15T22:30:00.000Z"),
+    lock: { held: false },
+    uploader: {
+      async put(input) {
+        saved = readFileSync(input.filePath);
+      },
+    },
+  });
+  assert.equal(result.wrotePersistentDiskCopy, false);
+  assert.equal(saved !== null, true);
+  const plain = decryptBackupBytes(saved!, key);
+  const restoredPath = join(dir, "restored.db");
+  writeFileSync(restoredPath, plain);
+  const restored = new Database(restoredPath, { readonly: true, fileMustExist: true });
+  const row = restored.prepare("SELECT label FROM fixture_records WHERE id = 1").get() as { label: string };
+  restored.close();
+  assert.equal(row.label, "wal-live");
+  assert.equal(readdirSync(disk).length, 0);
+  assert.equal(readdirSync(temp).some((name) => name.endsWith(".db") || name.endsWith(".enc")), false);
+  } finally {
+    writer?.close();
+    chmodSync(frozen, 0o755);
+  }
 });
 
 function resultSha(plain: Buffer): string {
