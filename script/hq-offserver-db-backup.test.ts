@@ -345,10 +345,11 @@ test("a readonly WAL connection throws before upload and a live WAL database upl
       const message = err instanceof Error ? err.message : "";
       return message.includes("hq-backup")
         && message.includes("stage=backup")
-        && message.includes("operation=source.backup")
+        && message.includes("operation=vacuum-into")
         && message.includes("pathClass=data-disk-and-temp")
         && message.includes("attempt to write a readonly database")
-        && message.includes("code=SQLITE_")
+        && message.includes("code=SQLITE_READONLY")
+        && message.includes("extended=SQLITE_READONLY_DIRECTORY")
         && !message.includes(frozen)
         && !message.includes("uploaded_unverified");
     },
@@ -362,10 +363,17 @@ test("a readonly WAL connection throws before upload and a live WAL database upl
   );
   assert.equal(backupFn.includes("readonly: true"), false);
   assert.match(backupFn, /new Database\(opts\.sourcePath, \{ fileMustExist: true \}\)/);
-  assert.ok(backupFn.indexOf("source.backup") < backupFn.indexOf("uploader.put"));
+  assert.match(backupFn, /VACUUM INTO \?/);
+  assert.equal(backupFn.includes(".backup("), false);
+  assert.equal(backupFn.includes("journal_mode"), false);
+  assert.equal(backupFn.includes("wal_checkpoint"), false);
+  assert.equal(backupFn.includes("immutable"), false);
+  assert.ok(backupFn.indexOf("VACUUM INTO") < backupFn.indexOf("uploader.put"));
   assert.equal(backupFn.includes("copyFileSync"), false);
   assert.equal(backupFn.includes("pruneOldBackups"), false);
 
+  const dbBefore = statSync(walPath).size;
+  const walBefore = statSync(walPath + "-wal").size;
   let saved: Buffer | null = null;
   const result = await createOffServerDatabaseBackup({
     sourcePath: walPath,
@@ -383,12 +391,16 @@ test("a readonly WAL connection throws before upload and a live WAL database upl
   });
   assert.equal(result.wrotePersistentDiskCopy, false);
   assert.equal(saved !== null, true);
+  assert.equal(statSync(walPath).size, dbBefore);
+  assert.equal(statSync(walPath + "-wal").size, walBefore);
   const plain = decryptBackupBytes(saved!, key);
   const restoredPath = join(dir, "restored.db");
   writeFileSync(restoredPath, plain);
   const restored = new Database(restoredPath, { readonly: true, fileMustExist: true });
+  const integrity = String(restored.pragma("integrity_check", { simple: true }));
   const row = restored.prepare("SELECT label FROM fixture_records WHERE id = 1").get() as { label: string };
   restored.close();
+  assert.equal(integrity, "ok");
   assert.equal(row.label, "wal-live");
   assert.equal(readdirSync(disk).length, 0);
   assert.equal(readdirSync(temp).some((name) => name.endsWith(".db") || name.endsWith(".enc")), false);

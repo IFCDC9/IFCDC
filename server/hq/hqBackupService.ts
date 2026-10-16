@@ -253,7 +253,7 @@ export function backupStepFailure(
 ): Error {
   const operation = {
     open: "open-source",
-    backup: "source.backup",
+    backup: "vacuum-into",
     integrity: "integrity_check",
     encrypt: "encrypt",
     upload: "put",
@@ -305,8 +305,10 @@ export async function createOffServerDatabaseBackup(opts: {
     if (free < sourceBytes * 2 + TEMP_MARGIN_BYTES) {
       throw new Error("Database backup stopped: temporary storage cannot hold a snapshot without using the persistent data disk");
     }
-    // SQLite checkpoints a WAL database through this connection. A readonly
-    // handle throws "attempt to write a readonly database" before upload.
+    // VACUUM INTO writes a new file and takes a read lock on the source.
+    // Plain VACUUM is not used: that path copies the result back over the
+    // live database. The online backup step masks its status with 0xff, so
+    // that call can only report primary SQLITE_IOERR.
     let source: Database.Database | undefined;
     try {
       try {
@@ -315,7 +317,7 @@ export async function createOffServerDatabaseBackup(opts: {
         throw backupStepFailure("open", err, "data-disk");
       }
       try {
-        await source.backup(plaintextPath);
+        source.prepare("VACUUM INTO ?").run(plaintextPath);
       } catch (err) {
         throw backupStepFailure("backup", err, "data-disk-and-temp");
       }
