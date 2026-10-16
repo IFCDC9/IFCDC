@@ -215,11 +215,53 @@ export function r2BackupUploader(config: OffServerBackupConfig): EncryptedBackup
   };
 }
 
-export function backupStepFailure(step: "open" | "backup" | "integrity", err: unknown): Error {
-  const message = err instanceof Error ? err.message : "Database backup stopped";
-  const code = typeof err === "object" && err !== null && "code" in err && typeof err.code === "string" ? err.code : "";
-  const detail = code ? `${message} (${code})` : message;
-  return new Error(`Database backup stopped: ${step} failed: ${detail}`);
+const SQLITE_PRIMARY = [
+  "SQLITE_IOERR",
+  "SQLITE_READONLY",
+  "SQLITE_BUSY",
+  "SQLITE_FULL",
+  "SQLITE_CANTOPEN",
+  "SQLITE_CORRUPT",
+  "SQLITE_PERM",
+  "SQLITE_LOCKED",
+  "SQLITE_NOMEM",
+  "SQLITE_CONSTRAINT",
+  "SQLITE_ABORT",
+] as const;
+
+function sqliteCodes(err: unknown): { code: string; extended: string } {
+  const raw = typeof err === "object" && err !== null && "code" in err && typeof err.code === "string" ? err.code : "";
+  if (!/^SQLITE_[A-Z0-9_]+$/.test(raw)) return { code: "none", extended: "none" };
+  const primary = SQLITE_PRIMARY.find((name) => raw === name || raw.startsWith(`${name}_`));
+  if (!primary) return { code: raw, extended: "none" };
+  return { code: primary, extended: raw === primary ? "none" : raw };
+}
+
+function safeBackupMessage(err: unknown): string {
+  const message = err instanceof Error ? err.message : "";
+  const withoutIo = message.replaceAll("I/O", "IO");
+  if (!message || message.length > 80 || /[\r\n@\\]/.test(withoutIo) || withoutIo.includes("/") || /\b(SELECT|INSERT|UPDATE|DELETE|FROM|WHERE)\b/i.test(message)) {
+    return "unavailable";
+  }
+  return message;
+}
+
+export function backupStepFailure(
+  step: "open" | "backup" | "integrity" | "encrypt" | "upload",
+  err: unknown,
+  pathClass: "data-disk" | "temp" | "data-disk-and-temp" | "off-server",
+): Error {
+  const operation = {
+    open: "open-source",
+    backup: "source.backup",
+    integrity: "integrity_check",
+    encrypt: "encrypt",
+    upload: "put",
+  }[step];
+  const { code, extended } = sqliteCodes(err);
+  const line = `hq-backup stage=${step} operation=${operation} pathClass=${pathClass} code=${code} extended=${extended} message=${safeBackupMessage(err)}`;
+  console.error(line);
+  return new Error(line);
 }
 
 export async function createOffServerDatabaseBackup(opts: {
@@ -270,12 +312,12 @@ export async function createOffServerDatabaseBackup(opts: {
       try {
         source = new Database(opts.sourcePath, { fileMustExist: true });
       } catch (err) {
-        throw backupStepFailure("open", err);
+        throw backupStepFailure("open", err, "data-disk");
       }
       try {
         await source.backup(plaintextPath);
       } catch (err) {
-        throw backupStepFailure("backup", err);
+        throw backupStepFailure("backup", err, "data-disk-and-temp");
       }
     } finally {
       source?.close();
@@ -286,23 +328,34 @@ export async function createOffServerDatabaseBackup(opts: {
       try {
         check = new Database(plaintextPath, { fileMustExist: true });
       } catch (err) {
-        throw backupStepFailure("integrity", err);
+        throw backupStepFailure("integrity", err, "temp");
       }
       try {
         integrity = String(check.pragma("integrity_check", { simple: true }));
       } catch (err) {
-        throw backupStepFailure("integrity", err);
+        throw backupStepFailure("integrity", err, "temp");
       }
     } finally {
       check?.close();
     }
-    if (integrity !== "ok") throw new Error("Database backup stopped: snapshot integrity check failed");
-    const plaintextSha256 = await sha256File(plaintextPath);
-    await encryptBackupFile(plaintextPath, ciphertextPath, opts.encryptionKey);
-    const ciphertextSha256 = await sha256File(ciphertextPath);
-    const ciphertextBytes = fs.statSync(ciphertextPath).size;
+    if (integrity !== "ok") throw backupStepFailure("integrity", new Error("integrity check failed"), "temp");
+    let plaintextSha256 = "";
+    try {
+      plaintextSha256 = await sha256File(plaintextPath);
+      await encryptBackupFile(plaintextPath, ciphertextPath, opts.encryptionKey);
+    } catch (err) {
+      throw backupStepFailure("encrypt", err, "temp");
+    }
+    let ciphertextSha256 = "";
+    let ciphertextBytes = 0;
     const objectKey = `daily/${day}/ifcdc-${stamp}.db.enc`;
-    await opts.uploader.put({ objectKey, filePath: ciphertextPath, sha256Ciphertext: ciphertextSha256, bytes: ciphertextBytes });
+    try {
+      ciphertextSha256 = await sha256File(ciphertextPath);
+      ciphertextBytes = fs.statSync(ciphertextPath).size;
+      await opts.uploader.put({ objectKey, filePath: ciphertextPath, sha256Ciphertext: ciphertextSha256, bytes: ciphertextBytes });
+    } catch (err) {
+      throw backupStepFailure("upload", err, "off-server");
+    }
     const restoreVerified = opts.verifyRestored
       ? await opts.verifyRestored({ ciphertextPath, plaintextSha256 })
       : false;
