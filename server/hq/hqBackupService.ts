@@ -215,6 +215,13 @@ export function r2BackupUploader(config: OffServerBackupConfig): EncryptedBackup
   };
 }
 
+export function backupStepFailure(step: "open" | "backup" | "integrity", err: unknown): Error {
+  const message = err instanceof Error ? err.message : "Database backup stopped";
+  const code = typeof err === "object" && err !== null && "code" in err && typeof err.code === "string" ? err.code : "";
+  const detail = code ? `${message} (${code})` : message;
+  return new Error(`Database backup stopped: ${step} failed: ${detail}`);
+}
+
 export async function createOffServerDatabaseBackup(opts: {
   sourcePath: string;
   dataDiskRoot: string;
@@ -258,18 +265,36 @@ export async function createOffServerDatabaseBackup(opts: {
     }
     // SQLite checkpoints a WAL database through this connection. A readonly
     // handle throws "attempt to write a readonly database" before upload.
-    const source = new Database(opts.sourcePath, { fileMustExist: true });
+    let source: Database.Database | undefined;
     try {
-      await source.backup(plaintextPath);
+      try {
+        source = new Database(opts.sourcePath, { fileMustExist: true });
+      } catch (err) {
+        throw backupStepFailure("open", err);
+      }
+      try {
+        await source.backup(plaintextPath);
+      } catch (err) {
+        throw backupStepFailure("backup", err);
+      }
     } finally {
-      source.close();
+      source?.close();
     }
-    const check = new Database(plaintextPath, { fileMustExist: true });
+    let check: Database.Database | undefined;
     let integrity = "";
     try {
-      integrity = String(check.pragma("integrity_check", { simple: true }));
+      try {
+        check = new Database(plaintextPath, { fileMustExist: true });
+      } catch (err) {
+        throw backupStepFailure("integrity", err);
+      }
+      try {
+        integrity = String(check.pragma("integrity_check", { simple: true }));
+      } catch (err) {
+        throw backupStepFailure("integrity", err);
+      }
     } finally {
-      check.close();
+      check?.close();
     }
     if (integrity !== "ok") throw new Error("Database backup stopped: snapshot integrity check failed");
     const plaintextSha256 = await sha256File(plaintextPath);

@@ -8,6 +8,7 @@ import Database from "better-sqlite3";
 import {
   OFF_SERVER_DAILY_RETENTION,
   assertOffServerUploadAuthorized,
+  backupStepFailure,
   createOffServerDatabaseBackup,
   dailyObjectKeysToExpire,
   decryptBackupBytes,
@@ -278,6 +279,28 @@ test("Create Backup Now shows the snapshot result and does not mark the schedule
   assert.equal(page.includes("last_run_status = 'success'"), false);
 });
 
+test("a supplied sqlite code is kept with its step and is not a reproduced disk I/O error", () => {
+  const wrapped = backupStepFailure("integrity", Object.assign(new Error("disk I/O error"), { code: "SQLITE_IOERR_READ" }));
+  assert.equal(wrapped.message, "Database backup stopped: integrity failed: disk I/O error (SQLITE_IOERR_READ)");
+  assert.equal(wrapped.message.includes("uploaded_unverified"), false);
+  const dbPath = join(root, "code-check.db");
+  const db = new Database(dbPath);
+  db.exec("CREATE TABLE fixture_records (id INTEGER PRIMARY KEY)");
+  db.close();
+  const readonly = new Database(dbPath, { readonly: true, fileMustExist: true });
+  let caught: unknown;
+  try {
+    readonly.exec("INSERT INTO fixture_records (id) VALUES (1)");
+  } catch (err) {
+    caught = err;
+  } finally {
+    readonly.close();
+  }
+  const reported = backupStepFailure("open", caught);
+  assert.match(reported.message, /^Database backup stopped: open failed: attempt to write a readonly database \(SQLITE_READONLY/);
+  assert.equal(reported.message.includes("SQLITE_IOERR"), false);
+});
+
 test("a readonly WAL connection throws before upload and a live WAL database uploads once", async () => {
   const dir = mkdtempSync(join(root, "wal-readonly-"));
   const frozen = join(dir, "frozen");
@@ -315,7 +338,10 @@ test("a readonly WAL connection throws before upload and a live WAL database upl
     }),
     (err: unknown) => {
       const message = err instanceof Error ? err.message : "";
-      return message.includes("attempt to write a readonly database") && !message.includes("uploaded_unverified");
+      return message.includes("backup failed")
+        && message.includes("attempt to write a readonly database")
+        && message.includes("(SQLITE_")
+        && !message.includes("uploaded_unverified");
     },
   );
   assert.equal(blockedPuts, 0);
