@@ -1,8 +1,8 @@
 import fs from "fs";
+import https from "https";
 import os from "os";
 import path from "path";
 import crypto from "crypto";
-import { Readable } from "stream";
 import { pipeline } from "stream/promises";
 import Database from "better-sqlite3";
 import { getDb } from "../db";
@@ -11,7 +11,28 @@ import { getBackupDir, getDbPath } from "../config/dataPaths";
 /** Daily objects kept off the production disk. Ten copies of ~780 MB stay under the 10 GB-month R2 free allowance. */
 export const OFF_SERVER_DAILY_RETENTION = 10;
 const BACKUP_MAGIC = Buffer.from("IFCDCDB1");
+const GCM_IV_BYTES = 12;
+const GCM_TAG_BYTES = 16;
+const HEADER_BYTES = BACKUP_MAGIC.length + GCM_IV_BYTES;
 const TEMP_MARGIN_BYTES = 32 * 1024 * 1024;
+
+/**
+ * Memory ceiling for the existing 2 GB Render instance.
+ * Encrypt, hash, and upload move 1 MiB chunks. The backup connection keeps an
+ * 8 MiB page cache and mmap off, so VACUUM INTO does not pin the database.
+ * Extra anonymous RAM for that work stays on the order of a few chunks plus
+ * the cache. Ciphertext is fsynced every 32 MiB so dirty pages stay under the
+ * 256 MiB backup budget while the plaintext snapshot is only clean cache.
+ * The plaintext file is removed before the upload read. The rest of the 2 GB
+ * RSS belongs to the live HQ process. Do not raise the 2.5s Aura busy timeout
+ * to hide the read lock.
+ */
+export const BACKUP_STREAM_CHUNK_BYTES = 1024 * 1024;
+export const BACKUP_SQLITE_CACHE_KIB = 8192;
+/** Dirty ciphertext is synced at this interval so both full files are not dirty together. */
+export const BACKUP_DIRTY_SYNC_BYTES = 32 * 1024 * 1024;
+/** SigV4 payload marker. The PUT body is not hashed into one buffer before upload. */
+export const R2_UNSIGNED_PAYLOAD = "UNSIGNED-PAYLOAD";
 const productionBackupLock = { held: false };
 
 /** Names already set on Render. Older IFCDC_DB_BACKUP_* names are fallbacks only. */
@@ -117,34 +138,124 @@ function availableBytes(dir: string): number {
   return Number(stat.bavail) * Number(stat.bsize);
 }
 
+function boundedReadStream(filePath: string, extra?: { start?: number; end?: number }): fs.ReadStream {
+  return fs.createReadStream(filePath, { highWaterMark: BACKUP_STREAM_CHUNK_BYTES, ...extra });
+}
+
 async function sha256File(filePath: string): Promise<string> {
   const hash = crypto.createHash("sha256");
-  await pipeline(fs.createReadStream(filePath), hash);
+  await pipeline(boundedReadStream(filePath), hash);
   return hash.digest("hex");
 }
 
-export function decryptBackupBytes(payload: Buffer, key: Buffer): Buffer {
-  if (payload.length < BACKUP_MAGIC.length + 12 + 16 || !payload.subarray(0, BACKUP_MAGIC.length).equals(BACKUP_MAGIC)) {
+export function configureBackupConnection(db: Database.Database): void {
+  db.pragma(`cache_size = -${BACKUP_SQLITE_CACHE_KIB}`);
+  db.pragma("mmap_size = 0");
+}
+
+function assertBackupHeader(header: Buffer): void {
+  if (header.length < HEADER_BYTES || !header.subarray(0, BACKUP_MAGIC.length).equals(BACKUP_MAGIC)) {
     throw new Error("Database backup stopped: encrypted payload is not readable");
   }
-  const iv = payload.subarray(8, 20);
-  const tag = payload.subarray(payload.length - 16);
-  const ciphertext = payload.subarray(20, payload.length - 16);
+}
+
+export function decryptBackupBytes(payload: Buffer, key: Buffer): Buffer {
+  if (payload.length < HEADER_BYTES + GCM_TAG_BYTES) {
+    throw new Error("Database backup stopped: encrypted payload is not readable");
+  }
+  assertBackupHeader(payload.subarray(0, HEADER_BYTES));
+  const iv = payload.subarray(BACKUP_MAGIC.length, HEADER_BYTES);
+  const tag = payload.subarray(payload.length - GCM_TAG_BYTES);
+  const ciphertext = payload.subarray(HEADER_BYTES, payload.length - GCM_TAG_BYTES);
   const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
 }
 
-async function encryptBackupFile(source: string, destination: string, key: Buffer): Promise<void> {
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-  const output = fs.createWriteStream(destination);
-  await new Promise<void>((resolve, reject) => {
-    output.once("error", reject);
-    output.write(Buffer.concat([BACKUP_MAGIC, iv]), (err) => err ? reject(err) : resolve());
+async function writeAll(fh: fs.promises.FileHandle, buf: Buffer): Promise<void> {
+  let offset = 0;
+  while (offset < buf.length) {
+    const { bytesWritten } = await fh.write(buf, offset, buf.length - offset);
+    if (bytesWritten <= 0) throw new Error("Database backup stopped: temporary storage is unavailable");
+    offset += bytesWritten;
+  }
+}
+
+/** Make VACUUM output clean cache before encryption so it is reclaimable under cgroup pressure. */
+export async function syncBackupFile(filePath: string): Promise<void> {
+  const fh = await fs.promises.open(filePath, "r+");
+  try {
+    await fh.sync();
+  } finally {
+    await fh.close();
+  }
+}
+
+/** On-disk format stays IFCDCDB1 + 12-byte IV + ciphertext + 16-byte tag. Reads and writes 1 MiB chunks. */
+export async function encryptBackupFile(source: string, destination: string, key: Buffer): Promise<void> {
+  const iv = crypto.randomBytes(GCM_IV_BYTES);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv, {
+    authTagLength: GCM_TAG_BYTES,
+    highWaterMark: BACKUP_STREAM_CHUNK_BYTES,
   });
-  await pipeline(fs.createReadStream(source), cipher, output);
-  fs.appendFileSync(destination, cipher.getAuthTag());
+  const input = boundedReadStream(source);
+  const fh = await fs.promises.open(destination, "w");
+  try {
+    await writeAll(fh, Buffer.concat([BACKUP_MAGIC, iv]));
+    let dirty = 0;
+    for await (const chunk of input) {
+      const out = cipher.update(chunk as Buffer);
+      if (out.length) {
+        await writeAll(fh, out);
+        dirty += out.length;
+        if (dirty >= BACKUP_DIRTY_SYNC_BYTES) {
+          await fh.sync();
+          dirty = 0;
+        }
+      }
+    }
+    const tail = cipher.final();
+    if (tail.length) await writeAll(fh, tail);
+    await writeAll(fh, cipher.getAuthTag());
+    await fh.sync();
+  } finally {
+    await fh.close();
+  }
+}
+
+/** Stream the same IFCDCDB1 layout back to a file. The tag is read from the end; the body is not one buffer. */
+export async function decryptBackupFile(source: string, destination: string, key: Buffer): Promise<void> {
+  const stat = await fs.promises.stat(source);
+  if (stat.size < HEADER_BYTES + GCM_TAG_BYTES) {
+    throw new Error("Database backup stopped: encrypted payload is not readable");
+  }
+  const header = Buffer.alloc(HEADER_BYTES);
+  const tag = Buffer.alloc(GCM_TAG_BYTES);
+  const fh = await fs.promises.open(source, "r");
+  try {
+    const headerRead = await fh.read(header, 0, HEADER_BYTES, 0);
+    const tagRead = await fh.read(tag, 0, GCM_TAG_BYTES, stat.size - GCM_TAG_BYTES);
+    if (headerRead.bytesRead !== HEADER_BYTES || tagRead.bytesRead !== GCM_TAG_BYTES) {
+      throw new Error("Database backup stopped: encrypted payload is not readable");
+    }
+    assertBackupHeader(header);
+  } finally {
+    await fh.close();
+  }
+  const iv = header.subarray(BACKUP_MAGIC.length);
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv, { authTagLength: GCM_TAG_BYTES });
+  decipher.setAuthTag(tag);
+  const ciphertextEnd = stat.size - GCM_TAG_BYTES - 1;
+  if (ciphertextEnd < HEADER_BYTES) {
+    const plain = Buffer.concat([decipher.update(Buffer.alloc(0)), decipher.final()]);
+    await fs.promises.writeFile(destination, plain);
+    return;
+  }
+  await pipeline(
+    boundedReadStream(source, { start: HEADER_BYTES, end: ciphertextEnd }),
+    decipher,
+    fs.createWriteStream(destination, { highWaterMark: BACKUP_STREAM_CHUNK_BYTES }),
+  );
 }
 
 function r2Authorization(opts: {
@@ -187,7 +298,7 @@ export function r2BackupUploader(config: OffServerBackupConfig): EncryptedBackup
         method: "PUT",
         host,
         canonicalUri,
-        payloadHash: input.sha256Ciphertext,
+        payloadHash: R2_UNSIGNED_PAYLOAD,
         amzDate,
         accessKeyId: config.accessKeyId,
         secretAccessKey: config.secretAccessKey,
@@ -196,23 +307,34 @@ export function r2BackupUploader(config: OffServerBackupConfig): EncryptedBackup
       if (authorization.includes(config.secretAccessKey)) {
         throw new Error("Database backup stopped: off-server upload could not be signed");
       }
-      const response = await fetch(`https://${host}${canonicalUri}`, {
-        method: "PUT",
-        headers: {
-          "content-length": String(input.bytes),
-          "content-type": "application/octet-stream",
-          "x-amz-content-sha256": input.sha256Ciphertext,
-          "x-amz-date": amzDate,
-          Authorization: authorization,
-        },
-        body: Readable.toWeb(fs.createReadStream(input.filePath)) as unknown as ReadableStream,
-        duplex: "half",
-      } as RequestInit);
-      if (!response.ok) {
-        throw new Error(`Database backup stopped: off-server upload failed (${response.status})`);
-      }
+      await streamHttpsPut(`https://${host}${canonicalUri}`, {
+        "content-length": String(input.bytes),
+        "content-type": "application/octet-stream",
+        "x-amz-content-sha256": R2_UNSIGNED_PAYLOAD,
+        "x-amz-date": amzDate,
+        Authorization: authorization,
+      }, input.filePath);
     },
   };
+}
+
+function streamHttpsPut(url: string, headers: Record<string, string>, filePath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const req = https.request(url, { method: "PUT", headers }, (res) => {
+      const status = res.statusCode ?? 0;
+      res.resume();
+      res.on("error", reject);
+      res.on("end", () => {
+        if (status >= 200 && status < 300) resolve();
+        else reject(new Error(`Database backup stopped: off-server upload failed (${status})`));
+      });
+    });
+    req.on("error", reject);
+    pipeline(boundedReadStream(filePath), req).catch((err) => {
+      req.destroy();
+      reject(err);
+    });
+  });
 }
 
 const SQLITE_PRIMARY = [
@@ -229,8 +351,12 @@ const SQLITE_PRIMARY = [
   "SQLITE_ABORT",
 ] as const;
 
+function sqliteErrorCode(err: unknown): string {
+  return typeof err === "object" && err !== null && "code" in err && typeof err.code === "string" ? err.code : "";
+}
+
 function sqliteCodes(err: unknown): { code: string; extended: string } {
-  const raw = typeof err === "object" && err !== null && "code" in err && typeof err.code === "string" ? err.code : "";
+  const raw = sqliteErrorCode(err);
   if (!/^SQLITE_[A-Z0-9_]+$/.test(raw)) return { code: "none", extended: "none" };
   const primary = SQLITE_PRIMARY.find((name) => raw === name || raw.startsWith(`${name}_`));
   if (!primary) return { code: raw, extended: "none" };
@@ -317,6 +443,14 @@ export async function createOffServerDatabaseBackup(opts: {
         throw backupStepFailure("open", err, "data-disk");
       }
       try {
+        configureBackupConnection(source);
+      } catch (err) {
+        const code = sqliteErrorCode(err);
+        if (code !== "SQLITE_READONLY" && !code.startsWith("SQLITE_READONLY_")) {
+          throw backupStepFailure("open", err, "data-disk");
+        }
+      }
+      try {
         source.prepare("VACUUM INTO ?").run(plaintextPath);
       } catch (err) {
         throw backupStepFailure("backup", err, "data-disk-and-temp");
@@ -324,11 +458,17 @@ export async function createOffServerDatabaseBackup(opts: {
     } finally {
       source?.close();
     }
+    try {
+      await syncBackupFile(plaintextPath);
+    } catch (err) {
+      throw backupStepFailure("backup", err, "temp");
+    }
     let check: Database.Database | undefined;
     let integrity = "";
     try {
       try {
         check = new Database(plaintextPath, { fileMustExist: true });
+        configureBackupConnection(check);
       } catch (err) {
         throw backupStepFailure("integrity", err, "temp");
       }
@@ -342,9 +482,12 @@ export async function createOffServerDatabaseBackup(opts: {
     }
     if (integrity !== "ok") throw backupStepFailure("integrity", new Error("integrity check failed"), "temp");
     let plaintextSha256 = "";
+    let plaintextBytes = 0;
     try {
       plaintextSha256 = await sha256File(plaintextPath);
       await encryptBackupFile(plaintextPath, ciphertextPath, opts.encryptionKey);
+      plaintextBytes = fs.statSync(plaintextPath).size;
+      fs.unlinkSync(plaintextPath);
     } catch (err) {
       throw backupStepFailure("encrypt", err, "temp");
     }
@@ -365,7 +508,7 @@ export async function createOffServerDatabaseBackup(opts: {
       objectKey,
       plaintextSha256,
       ciphertextSha256,
-      plaintextBytes: fs.statSync(plaintextPath).size,
+      plaintextBytes,
       ciphertextBytes,
       restoreVerified: Boolean(restoreVerified),
       wrotePersistentDiskCopy: false,
