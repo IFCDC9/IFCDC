@@ -1,17 +1,25 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { createHash, createHmac } from "node:crypto";
+import { chmodSync, copyFileSync, createReadStream, createWriteStream, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import https from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import test from "node:test";
 import Database from "better-sqlite3";
 import {
+  BACKUP_SQLITE_CACHE_KIB,
+  BACKUP_STREAM_CHUNK_BYTES,
   OFF_SERVER_DAILY_RETENTION,
+  R2_UNSIGNED_PAYLOAD,
   assertOffServerUploadAuthorized,
   backupStepFailure,
+  configureBackupConnection,
   createOffServerDatabaseBackup,
   dailyObjectKeysToExpire,
   decryptBackupBytes,
+  decryptBackupFile,
   offServerUploadEnabled,
   readOffServerBackupConfig,
   r2BackupUploader,
@@ -206,14 +214,33 @@ test("retention keeps ten daily keys and a signed upload does not reveal the sec
   assert.deepEqual(expired, keys.slice(0, 2));
   const secret = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
   const file = join(root, "cipher.bin");
-  writeFileSync(file, Buffer.from("ciphertext"));
-  const originalFetch = globalThis.fetch;
+  const payload = Buffer.alloc(BACKUP_STREAM_CHUNK_BYTES + 100, 4);
+  writeFileSync(file, payload);
+  const originalRequest = https.request;
   let authorization = "";
-  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
-    const headers = new Headers(init?.headers);
-    authorization = headers.get("authorization") || "";
-    return new Response(null, { status: 200 });
-  }) as typeof fetch;
+  let payloadHash = "";
+  let contentLength = "";
+  let received = 0;
+  let maxChunk = 0;
+  https.request = ((url: string, options: https.RequestOptions, cb: (res: PassThrough) => void) => {
+    assert.equal(String(url).includes(secret), false);
+    const headers = options.headers ?? {};
+    authorization = String(headers.Authorization || headers.authorization || "");
+    payloadHash = String(headers["x-amz-content-sha256"] || "");
+    contentLength = String(headers["content-length"] || "");
+    const req = new PassThrough();
+    req.on("data", (chunk: Buffer) => {
+      received += chunk.length;
+      if (chunk.length > maxChunk) maxChunk = chunk.length;
+    });
+    req.on("finish", () => {
+      const res = new PassThrough();
+      (res as PassThrough & { statusCode: number }).statusCode = 200;
+      cb(res);
+      res.end();
+    });
+    return req as unknown as ReturnType<typeof https.request>;
+  }) as typeof https.request;
   try {
     await r2BackupUploader({
       encryptionKey: key,
@@ -229,10 +256,15 @@ test("retention keeps ten daily keys and a signed upload does not reveal the sec
       bytes: statSync(file).size,
     });
   } finally {
-    globalThis.fetch = originalFetch;
+    https.request = originalRequest;
   }
   assert.equal(authorization.includes(secret), false);
   assert.match(authorization, /^AWS4-HMAC-SHA256 /);
+  assert.equal(payloadHash, R2_UNSIGNED_PAYLOAD);
+  assert.equal(contentLength, String(payload.length));
+  assert.equal(received, payload.length);
+  assert.ok(maxChunk > 0 && maxChunk <= BACKUP_STREAM_CHUNK_BYTES);
+  assert.ok(received > BACKUP_STREAM_CHUNK_BYTES);
 });
 
 test("the scheduled backup function does not copy onto the persistent backup directory", () => {
@@ -409,6 +441,233 @@ test("a readonly WAL connection throws before upload and a live WAL database upl
     chmodSync(frozen, 0o755);
   }
 });
+
+test("backup streams encryption and upload in fixed chunks and restores from the stream", async () => {
+  const service = readFileSync(new URL("../server/hq/hqBackupService.ts", import.meta.url), "utf8");
+  const encryptFn = service.slice(service.indexOf("export async function encryptBackupFile"), service.indexOf("export async function decryptBackupFile"));
+  const uploadFn = service.slice(service.indexOf("export function r2BackupUploader"), service.indexOf("const SQLITE_PRIMARY"));
+  assert.match(encryptFn, /highWaterMark: BACKUP_STREAM_CHUNK_BYTES/);
+  assert.match(uploadFn, /boundedReadStream\(filePath\)/);
+  assert.match(uploadFn, /R2_UNSIGNED_PAYLOAD/);
+  assert.equal(encryptFn.includes("readFileSync"), false);
+  assert.equal(encryptFn.includes("readFile("), false);
+  assert.equal(uploadFn.includes("readFileSync"), false);
+  assert.equal(uploadFn.includes("readFile("), false);
+  assert.equal(uploadFn.includes("Readable.toWeb"), false);
+  assert.equal(service.includes('payloadHash: input.sha256Ciphertext'), false);
+
+  const dir = mkdtempSync(join(root, "stream-"));
+  const live = join(dir, "live.db");
+  const disk = join(dir, "disk");
+  const temp = join(dir, "temp");
+  mkdirSync(disk);
+  mkdirSync(temp);
+  const src = new Database(live);
+  src.exec("CREATE TABLE fixture_records (id INTEGER PRIMARY KEY, label TEXT NOT NULL, payload BLOB)");
+  const blob = Buffer.alloc(256 * 1024, 9);
+  const insert = src.prepare("INSERT INTO fixture_records (label, payload) VALUES (?, ?)");
+  for (let i = 0; i < 6; i++) insert.run(i === 0 ? "stream-row" : "pad", blob);
+  src.close();
+  let maxChunk = 0;
+  let received = 0;
+  const result = await createOffServerDatabaseBackup({
+    sourcePath: live,
+    dataDiskRoot: disk,
+    tempDir: temp,
+    encryptionKey: key,
+    freeBytes: 1024 * 1024 * 1024,
+    now: new Date("2026-10-16T14:00:00.000Z"),
+    lock: { held: false },
+    uploader: {
+      async put(input) {
+        for await (const chunk of createReadStream(input.filePath, { highWaterMark: BACKUP_STREAM_CHUNK_BYTES })) {
+          const buf = chunk as Buffer;
+          received += buf.length;
+          if (buf.length > maxChunk) maxChunk = buf.length;
+        }
+        assert.equal(input.bytes, received);
+        assert.equal(input.sha256Ciphertext.length, 64);
+      },
+    },
+  });
+  assert.equal(result.restoreVerified, false);
+  assert.equal(result.wrotePersistentDiskCopy, false);
+  assert.ok(maxChunk > 0 && maxChunk <= BACKUP_STREAM_CHUNK_BYTES);
+  assert.equal(readdirSync(temp).length, 0);
+
+  const cachePath = join(dir, "cache.db");
+  const cacheDb = new Database(cachePath);
+  configureBackupConnection(cacheDb);
+  assert.equal(Number(cacheDb.pragma("cache_size", { simple: true })), -BACKUP_SQLITE_CACHE_KIB);
+  assert.equal(Number(cacheDb.pragma("mmap_size", { simple: true })), 0);
+  cacheDb.close();
+});
+
+test("a streamed decrypt opens an isolated database and reads the known row", async () => {
+  const dir = mkdtempSync(join(root, "restore-"));
+  const live = join(dir, "live.db");
+  const disk = join(dir, "disk");
+  const temp = join(dir, "temp");
+  const sink = join(dir, "object.db.enc");
+  mkdirSync(disk);
+  mkdirSync(temp);
+  const src = new Database(live);
+  src.exec("CREATE TABLE fixture_records (id INTEGER PRIMARY KEY, label TEXT NOT NULL)");
+  src.prepare("INSERT INTO fixture_records (label) VALUES (?)").run("isolated-row");
+  src.close();
+  await createOffServerDatabaseBackup({
+    sourcePath: live,
+    dataDiskRoot: disk,
+    tempDir: temp,
+    encryptionKey: key,
+    freeBytes: 1024 * 1024 * 1024,
+    lock: { held: false },
+      uploader: {
+      async put(input) {
+        await new Promise<void>((resolve, reject) => {
+          const out = createWriteStream(sink);
+          createReadStream(input.filePath, { highWaterMark: BACKUP_STREAM_CHUNK_BYTES }).pipe(out);
+          out.on("finish", () => resolve());
+          out.on("error", reject);
+        });
+      },
+    },
+  });
+  const restoredPath = join(dir, "restored.db");
+  await decryptBackupFile(sink, restoredPath, key);
+  const restored = new Database(restoredPath, { readonly: true, fileMustExist: true });
+  const integrity = String(restored.pragma("integrity_check", { simple: true }));
+  const row = restored.prepare("SELECT label FROM fixture_records WHERE id = 1").get() as { label: string };
+  restored.close();
+  assert.equal(integrity, "ok");
+  assert.equal(row.label, "isolated-row");
+  assert.equal(readdirSync(disk).length, 0);
+});
+
+test("a local https server receives a streamed UNSIGNED-PAYLOAD put", async () => {
+  const dir = mkdtempSync(join(root, "r2-mock-"));
+  const keyPath = join(dir, "key.pem");
+  const certPath = join(dir, "cert.pem");
+  execFileSync("openssl", [
+    "req", "-x509", "-newkey", "rsa:2048",
+    "-keyout", keyPath, "-out", certPath,
+    "-days", "1", "-nodes", "-subj", "/CN=localhost",
+  ], { stdio: "ignore" });
+  const payload = Buffer.alloc(BACKUP_STREAM_CHUNK_BYTES + 128 * 1024, 5);
+  const file = join(dir, "body.bin");
+  writeFileSync(file, payload);
+  const secret = "local-test-secret-not-a-credential";
+  const accessKeyId = "local-test-access";
+  const accountId = "exampleaccount";
+  const bucket = "ifcdc-hq-db-backups";
+  const objectKey = "daily/2026-10-16/file.db.enc";
+  let requestUrl = "";
+  let authorization = "";
+  let amzDate = "";
+  let signedLength = "";
+  let signedHash = "";
+  const received: number[] = [];
+  let total = 0;
+  const server = https.createServer({
+    key: readFileSync(keyPath),
+    cert: readFileSync(certPath),
+  }, (req, res) => {
+    req.on("data", (chunk: Buffer) => {
+      received.push(chunk.length);
+      total += chunk.length;
+    });
+    req.on("end", () => {
+      res.writeHead(200);
+      res.end();
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+  const original = https.request;
+  https.request = ((url: string, options: https.RequestOptions, cb: (res: PassThrough) => void) => {
+    requestUrl = String(url);
+    const headers = options.headers ?? {};
+    authorization = String(headers.Authorization || "");
+    amzDate = String(headers["x-amz-date"] || "");
+    signedLength = String(headers["content-length"] || "");
+    signedHash = String(headers["x-amz-content-sha256"] || "");
+    const parsed = new URL(requestUrl);
+    return original.call(https, {
+      method: "PUT",
+      headers,
+      hostname: "127.0.0.1",
+      port,
+      path: parsed.pathname,
+      servername: parsed.hostname,
+      rejectUnauthorized: false,
+    }, cb);
+  }) as typeof https.request;
+  try {
+    await r2BackupUploader({
+      encryptionKey: key,
+      accountId,
+      bucket,
+      accessKeyId,
+      secretAccessKey: secret,
+      tempDir: dir,
+    }).put({
+      objectKey,
+      filePath: file,
+      sha256Ciphertext: "unused-body-hash",
+      bytes: payload.length,
+    });
+  } finally {
+    https.request = original;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+  const host = `${accountId}.r2.cloudflarestorage.com`;
+  const canonicalUri = `/${bucket}/${objectKey}`;
+  assert.equal(requestUrl, `https://${host}${canonicalUri}`);
+  assert.equal(signedHash, R2_UNSIGNED_PAYLOAD);
+  assert.equal(signedLength, String(payload.length));
+  assert.equal(authorization.includes(secret), false);
+  assert.equal(authorization, expectedUnsignedPutAuthorization({
+    secret,
+    accessKeyId,
+    host,
+    canonicalUri,
+    amzDate,
+    contentLength: payload.length,
+  }));
+  assert.match(authorization, /\/auto\/s3\/aws4_request/);
+  assert.equal(total, payload.length);
+  assert.ok(received.length >= 2);
+  assert.ok(received[0] > 0 && received[0] <= BACKUP_STREAM_CHUNK_BYTES);
+});
+
+function expectedUnsignedPutAuthorization(opts: {
+  secret: string;
+  accessKeyId: string;
+  host: string;
+  canonicalUri: string;
+  amzDate: string;
+  contentLength: number;
+}): string {
+  const dateStamp = opts.amzDate.slice(0, 8);
+  const region = "auto";
+  const service = "s3";
+  const payloadHash = "UNSIGNED-PAYLOAD";
+  const canonicalHeaders =
+    `content-length:${opts.contentLength}\n` +
+    `content-type:application/octet-stream\n` +
+    `host:${opts.host}\n` +
+    `x-amz-content-sha256:${payloadHash}\n` +
+    `x-amz-date:${opts.amzDate}\n`;
+  const signedHeaders = "content-length;content-type;host;x-amz-content-sha256;x-amz-date";
+  const canonicalRequest = `PUT\n${opts.canonicalUri}\n\n${canonicalHeaders}\n${signedHeaders}\n${payloadHash}`;
+  const scope = `${dateStamp}/${region}/${service}/aws4_request`;
+  const stringToSign = `AWS4-HMAC-SHA256\n${opts.amzDate}\n${scope}\n${createHash("sha256").update(canonicalRequest).digest("hex")}`;
+  const hmac = (key: Buffer | string, value: string) => createHmac("sha256", key).update(value).digest();
+  const signingKey = hmac(hmac(hmac(hmac(`AWS4${opts.secret}`, dateStamp), region), service), "aws4_request");
+  const signature = createHmac("sha256", signingKey).update(stringToSign).digest("hex");
+  return `AWS4-HMAC-SHA256 Credential=${opts.accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+}
 
 function resultSha(plain: Buffer): string {
   return createHash("sha256").update(plain).digest("hex");
