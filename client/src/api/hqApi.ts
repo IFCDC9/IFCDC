@@ -535,6 +535,31 @@ export const hqApi = {
         };
         alerts: Array<{ id: string; severity: string; title: string; detail: string; evidence: string; timestamp: string }>;
       };
+      grantsIntelligence: {
+        mode: "read_only";
+        sendsMail: false;
+        submitsGrant: false;
+        spends: false;
+        liveConnected: boolean;
+        liveReadFailed: boolean;
+        liveReadError: string | null;
+        verifiedOpportunityCount: number;
+        rows: Array<{
+          id: string;
+          fundingSource: string;
+          fundingClassification: string;
+          estimatedAmount: string;
+          eligibilityEvidence: string;
+          deadline: string;
+          allowableExpenses: string;
+          fundingStatus: string;
+          recommendedNextAction: string;
+          source: "fixture" | "live" | "incomplete";
+          fixtureLabel: string | null;
+          eligible: boolean;
+          notGuaranteedMoney: true;
+        }>;
+      };
       moduleRoadmap: Array<{ id: number; name: string; status: "live" | "planned" }>;
     }>("/aura/brain-v1/daily-briefing", { timeoutMs: 60_000 }),
   auraBrainV1Projects: () =>

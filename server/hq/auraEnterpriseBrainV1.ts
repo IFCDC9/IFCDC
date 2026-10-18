@@ -735,6 +735,9 @@ export type ExecutiveDailyBriefingV1 = {
   highlights: string[];
   brainHighlights: string[];
   founderBriefing: import("./grantApplicationTracking").FounderExecutiveBriefing;
+  grantsIntelligence: import("./grantRecurringFundingEngine").GrantsIntelligenceBriefing & {
+    verifiedOpportunityCount: number;
+  };
   cached: boolean;
   source: string;
   degraded: boolean;
@@ -805,6 +808,15 @@ export async function buildExecutiveDailyBriefingV1(): Promise<ExecutiveDailyBri
     automaticPolling,
   });
 
+  const { presentDailyBriefingGrants, readFounderGrantsBriefing } = await import("./grantRecurringFundingEngine");
+  let grantsIntelligence;
+  try {
+    const { getDb } = await import("../db");
+    grantsIntelligence = presentDailyBriefingGrants(await readFounderGrantsBriefing(await getDb()));
+  } catch {
+    grantsIntelligence = presentDailyBriefingGrants(await readFounderGrantsBriefing(null));
+  }
+
   const content =
     (legacy?.content && String(legacy.content).trim())
     || (brain?.content && String(brain.content).trim())
@@ -821,6 +833,7 @@ export async function buildExecutiveDailyBriefingV1(): Promise<ExecutiveDailyBri
     highlights,
     brainHighlights: (brain?.highlights ?? []).slice(0, 8),
     founderBriefing,
+    grantsIntelligence,
     cached: Boolean(legacy?.cached),
     source: legacy ? (legacy.cached ? "executive-briefings-cache" : "executive-briefings-live") : brain ? "enterprise-brain-2" : "none",
     degraded,

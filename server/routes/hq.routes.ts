@@ -2269,8 +2269,8 @@ router.get("/aura/brain-v1/daily-briefing", hqAuthRequired, requireHQModule("aur
     userId: identity.userId || req.hqUser?.id,
     userEmail: identity.email || req.hqUser?.email,
     command: "brain_v1.daily_briefing.read",
-    result: `ok source=${payload.source} highlights=${payload.highlights.length} degraded=${payload.degraded}`,
-    metadata: { module: "daily-briefing", mode: "read_only", cached: payload.cached },
+    result: `ok source=${payload.source} highlights=${payload.highlights.length} degraded=${payload.degraded} grantsRows=${payload.grantsIntelligence.rows.length} verifiedOpportunities=${payload.grantsIntelligence.verifiedOpportunityCount} liveReadFailed=${payload.grantsIntelligence.liveReadFailed}`,
+    metadata: { module: "daily-briefing", mode: "read_only", cached: payload.cached, grantsRead: "grants_intelligence.briefing.read" },
   });
   res.json(payload);
 });
