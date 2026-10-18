@@ -203,6 +203,30 @@ router.get("/qa/report", (_req, res) => {
 
 router.use(hqAuthRequired, requireHQModule("grants"));
 
+router.get("/intelligence/founder-briefing", async (req, res) => {
+  const { founderMayReadGrantsBriefing, readFounderGrantsBriefing } = await import("../hq/grantRecurringFundingEngine");
+  if (!founderMayReadGrantsBriefing(req.hqUser, getSuperAdminEmail())) {
+    return res.status(403).json({ error: "Founder Mode required", code: "founder_mode_required" });
+  }
+  let briefing;
+  try {
+    const db = await getDb();
+    briefing = await readFounderGrantsBriefing(db);
+  } catch {
+    briefing = await readFounderGrantsBriefing(null);
+  }
+  const { logAuraBrainV1Action } = await import("../hq/auraEnterpriseBrainV1");
+  await logAuraBrainV1Action({
+    userId: req.hqUser?.id,
+    userEmail: req.hqUser?.email,
+    command: "grants_intelligence.briefing.read",
+    result: `ok read-only rows=${briefing.rows.length} liveReadFailed=${briefing.liveReadFailed}`,
+    metadata: { module: "grants-intelligence-briefing", mode: "read_only", sendsMail: false, submitsGrant: false, spends: false },
+  });
+  res.set("Cache-Control", "no-store");
+  res.json(briefing);
+});
+
 router.use(async (_req, _res, next) => {
   try {
     await ensureGrantModulesReady();

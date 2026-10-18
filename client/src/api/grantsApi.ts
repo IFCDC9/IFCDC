@@ -1302,6 +1302,30 @@ export const grantsApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ entityType, entityId, toStage }),
     }),
+  founderGrantsBriefing: () => apiFetch<{
+    mode: "read_only";
+    sendsMail: false;
+    liveConnected: boolean;
+    liveReadFailed: boolean;
+    liveReadError: string | null;
+    rows: Array<{
+      id: string;
+      fundingSource: string;
+      estimatedAmount: string;
+      eligibilityEvidence: string;
+      deadline: string;
+      restrictions: string;
+      allowableExpenses: string;
+      renewal: string;
+      fundingStatus: string;
+      score: string;
+      recommendedNextAction: string;
+      source: "fixture" | "live" | "incomplete";
+      fixtureLabel: string | null;
+      eligible: boolean;
+      notGuaranteedMoney: true;
+    }>;
+  }>("/intelligence/founder-briefing"),
 };
 
 export interface GrantFunder {

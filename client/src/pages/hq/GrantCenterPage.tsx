@@ -197,6 +197,12 @@ const GrantCenterPage: React.FC = () => {
     qc.invalidateQueries({ queryKey: ["grant-enriched-applications"] });
   };
 
+  const founderBriefing = useQuery({
+    queryKey: ["grants-intelligence-founder-briefing"],
+    queryFn: grantsApi.founderGrantsBriefing,
+    enabled: tab === "overview",
+    retry: false,
+  });
   const dashboard = useQuery({ queryKey: ["grants-dashboard"], queryFn: grantsApi.dashboard, enabled: tab === "overview" });
   const grantPlatform = useQuery({ queryKey: ["grant-center-platform"], queryFn: grantsApi.grantCenterPlatform, enabled: tab === "overview" });
   const syncFeeds = useMutation({
@@ -345,6 +351,33 @@ const GrantCenterPage: React.FC = () => {
       <div className="hq-tab-content hq-fade-in">
         {tab === "overview" && (
           <>
+            <HqPanel title="Founder grants briefing" subtitle="Read only. Fixture rows are not live awards.">
+              {founderBriefing.isLoading && <HqLoading />}
+              {founderBriefing.isError && (
+                <p className="hq-muted-text">Founder-only briefing. This session cannot read it.</p>
+              )}
+              {founderBriefing.data?.liveReadFailed && (
+                <p className="hq-muted-text">{founderBriefing.data.liveReadError}</p>
+              )}
+              {founderBriefing.data && (
+                <ul className="hq-list">
+                  {founderBriefing.data.rows.map((row) => (
+                    <li key={`${row.source}-${row.id}`}>
+                      {row.source === "fixture" && <StatusBadge label="FIXTURE" variant="warning" />}
+                      {row.source === "incomplete" && <StatusBadge label="INCOMPLETE" variant="warning" />}
+                      {row.source === "live" && <StatusBadge label="LIVE" variant="success" />}
+                      <strong>{row.fundingSource}</strong>
+                      <div className="hq-muted-text">Estimated amount: {row.estimatedAmount}. Score: {row.score}.</div>
+                      <div className="hq-muted-text">Status: {row.fundingStatus}. Deadline: {row.deadline}. Source: {row.source}.</div>
+                      <div className="hq-muted-text">Restrictions: {row.restrictions}</div>
+                      <div className="hq-muted-text">Renewal: {row.renewal}</div>
+                      <div className="hq-muted-text">{row.allowableExpenses}</div>
+                      <div className="hq-muted-text">{row.recommendedNextAction}</div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </HqPanel>
             <GrantFoundationDashboardPanel
               onOpenPipeline={() => selectTab("pipeline")}
               onOpenCalendar={() => { selectTab("calendar"); setCalendarSection("calendar"); }}
