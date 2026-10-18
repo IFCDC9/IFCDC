@@ -3,10 +3,7 @@
  * Extends Grant Center scoring. Does not submit applications.
  */
 import path from "path";
-import sqlite3 from "sqlite3";
-import { open } from "sqlite";
 import { getDb } from "../db";
-import { getDbPath } from "../config/dataPaths";
 import { ensureGrantTables, logGrantActivity } from "./grantsSchema";
 import { evaluateGrantAllowableCostRecovery } from "./grantAllowableCostRecovery";
 import { productionGrantOpportunitySqlFilter } from "./grantProductionPolicy";
@@ -285,51 +282,52 @@ export function analyzeRecurringFunding(
   } else if (cadence === "one_time") sustainabilityRisk = "high";
 
   const align = Math.max(0, Math.min(100, programAlignmentScore));
+  const categoryEarly = classifyFundingCategory(blob);
+  const isContract = categoryEarly.category === "government_contract";
+  const renewableGrantYes = !isContract && renewable === "yes";
+  const gosYes = !isContract && generalOperatingAllowed === "yes";
+  const multiYes = multiYearAvailable === "yes" || (awardTermMonths != null && awardTermMonths >= 24);
   const breakdown = {
-    recurringRevenue: {
-      max: 25,
-      points:
-        cadence === "recurring" || renewable === "yes"
-          ? 25
-          : cadence === "unknown"
-            ? 10
-            : 0,
-      note: `${cadence} · renewable ${renewable}`,
-    },
-    payrollPersonnel: {
-      max: 20,
-      points: personnelAllowed === "yes" ? 20 : personnelAllowed === "unknown" ? 8 : 0,
-      note: `personnel ${personnelAllowed}${fringeAllowed === "yes" ? " + fringe" : ""}`,
-    },
-    hrAdmin: {
+    renewableGrant: {
       max: 15,
-      points:
-        administrativeAllowed === "yes" || generalOperatingAllowed === "yes"
-          ? 15
-          : administrativeAllowed === "unknown" && generalOperatingAllowed === "unknown"
-            ? 5
-            : 0,
-      note: `admin ${administrativeAllowed} · GOS ${generalOperatingAllowed}`,
-    },
-    indirectRecovery: {
-      max: 15,
-      points: indirectAllowed === "yes" ? 15 : indirectAllowed === "unknown" ? 6 : 0,
-      note: parseIndirectCap(blob) || `indirect ${indirectAllowed}`,
+      points: renewableGrantYes ? 15 : 0,
+      note: `renewable grant ${renewableGrantYes ? "yes" : renewable}. Unknown is not yes.`,
     },
     multiYear: {
       max: 15,
-      points: multiYearAvailable === "yes" || (awardTermMonths != null && awardTermMonths >= 24) ? 15 : multiYearAvailable === "unknown" ? 5 : 0,
+      points: multiYes ? 15 : 0,
       note: awardTermMonths ? `${awardTermMonths} months` : `multi-year ${multiYearAvailable}`,
     },
-    programAlignment: {
+    generalOperatingSupport: {
+      max: 15,
+      points: gosYes ? 15 : 0,
+      note: `general operating support ${generalOperatingAllowed}`,
+    },
+    governmentContract: {
       max: 10,
-      points: Math.round((align / 100) * 10),
-      note: `program fit ${align}`,
+      points: isContract ? 10 : 0,
+      note: "Government contract. Not a grant award and not received revenue.",
+    },
+    hr: {
+      max: 10,
+      points: hrAllowed === "yes" ? 10 : 0,
+      note: `hr ${hrAllowed}`,
+    },
+    payroll: {
+      max: 20,
+      points: personnelAllowed === "yes" ? 20 : 0,
+      note: `payroll ${personnelAllowed}`,
+    },
+    administration: {
+      max: 15,
+      points: administrativeAllowed === "yes" ? 15 : 0,
+      note: `administration ${administrativeAllowed}`,
     },
   };
   if (restrictedProgramOnly) {
-    breakdown.payrollPersonnel.points = Math.min(breakdown.payrollPersonnel.points, 4);
-    breakdown.hrAdmin.points = Math.min(breakdown.hrAdmin.points, 3);
+    breakdown.payroll.points = Math.min(breakdown.payroll.points, 4);
+    breakdown.administration.points = Math.min(breakdown.administration.points, 3);
+    breakdown.generalOperatingSupport.points = 0;
   }
 
   const recurringFundingScore = Math.max(
@@ -342,7 +340,7 @@ export function analyzeRecurringFunding(
 
   const renewalMatch = blob.match(/renew(?:al)?[^\n]{0,40}(\d{4}-\d{2}-\d{2}|\w+\s+\d{1,2},\s*\d{4})/);
   const periodEnd = opp.period_end ? String(opp.period_end) : opp.deadline ? String(opp.deadline) : null;
-  const category = classifyFundingCategory(blob);
+  const category = categoryEarly;
   const money = classifyMoneyStatus(blob);
   const recurringOperatingSupport = category.category === "recurring_operating_support";
   const restrictedExpenses = category.category === "restricted_expenses";
@@ -914,6 +912,7 @@ export type GrantsIntelligenceBriefingRow = {
   deadline: string;
   restrictions: string;
   allowableExpenses: string;
+  renewal: string;
   fundingStatus: FundingMoneyStatus;
   score: string;
   recommendedNextAction: string;
@@ -922,6 +921,17 @@ export type GrantsIntelligenceBriefingRow = {
   eligible: boolean;
   notGuaranteedMoney: true;
 };
+
+export type GrantCenterReader = {
+  all: (sql: string, ...params: unknown[]) => Promise<unknown[]>;
+};
+
+export const GRANT_CENTER_OPPORTUNITY_SQL = `SELECT
+  id, title, funder, description, amount_min, amount_max, status, deadline,
+  requirements, source_type, funder_type, eligibility, funding_status,
+  close_date, eligibility_result, funding_instrument, funding_period,
+  applicant_restrictions, program_limitations, award_ceiling, estimated_funding
+FROM grant_opportunities`;
 
 export type GrantsIntelligenceBriefing = {
   audience: "founder";
@@ -948,18 +958,47 @@ export function founderMayReadGrantsBriefing(
   return Boolean(founderEmail && email === founderEmail.toLowerCase());
 }
 
-function recordHasEstablishedEvidence(profile: RecurringFundingProfile): boolean {
-  const watched = new Set([
-    "general_operating_grant",
-    "renewable_grant",
-    "government_contract",
-    "payroll",
-    "hr",
-    "administration",
-    "allowable_indirect",
-  ]);
-  const dimensionEvidence = profile.dimensions.some((item) => watched.has(item.id) && item.status !== "unknown");
-  return dimensionEvidence || profile.fringeAllowed !== "unknown";
+function fieldText(opp: Record<string, unknown>, key: string): string {
+  const value = opp[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function isOpenEndedRecord(opp: Record<string, unknown>): boolean {
+  const blob = [opp.deadline, opp.close_date, opp.funding_period, opp.status]
+    .filter((value) => typeof value === "string")
+    .join(" ")
+    .toLowerCase();
+  return /\bopen[- ]ended\b|\brolling\b|\bno deadline\b/.test(blob);
+}
+
+function recordHasDeadlineEvidence(opp: Record<string, unknown>): boolean {
+  if (isOpenEndedRecord(opp)) return true;
+  const deadline = fieldText(opp, "deadline") || fieldText(opp, "close_date");
+  if (!deadline || deadline.toUpperCase() === "UNKNOWN") return false;
+  return !Number.isNaN(Date.parse(deadline));
+}
+
+function recordHasEligibilityText(opp: Record<string, unknown>): boolean {
+  return [opp.eligibility, opp.eligibility_result, opp.description, opp.requirements]
+    .some((value) => typeof value === "string" && value.trim().length > 0);
+}
+
+function meetsLiveEvidenceMinimum(opp: Record<string, unknown>): boolean {
+  const source = fieldText(opp, "source_type") || fieldText(opp, "source");
+  return source.length > 0 && source.toLowerCase() !== "fixture" && recordHasDeadlineEvidence(opp) && recordHasEligibilityText(opp);
+}
+
+function deadlineHasPassed(opp: Record<string, unknown>): boolean {
+  if (isOpenEndedRecord(opp)) return false;
+  const deadline = fieldText(opp, "deadline") || fieldText(opp, "close_date");
+  const parsed = Date.parse(deadline);
+  if (!deadline || Number.isNaN(parsed)) return false;
+  return parsed < Date.now();
+}
+
+function isFixtureRecord(opp: Record<string, unknown>, requested: "fixture" | "live"): boolean {
+  const source = (fieldText(opp, "source_type") || fieldText(opp, "source")).toLowerCase();
+  return requested === "fixture" || String(opp.id ?? "").startsWith("fixture-") || source === "fixture";
 }
 
 function briefingRowFromOpportunity(
@@ -967,17 +1006,26 @@ function briefingRowFromOpportunity(
   requested: "fixture" | "live",
 ): GrantsIntelligenceBriefingRow {
   const profile = analyzeRecurringFunding(opp, requested === "fixture" ? 80 : 0);
-  const forcedFixture = requested === "fixture" || String(opp.id ?? "").startsWith("fixture-");
-  const established = recordHasEstablishedEvidence(profile);
-  const source: GrantsIntelligenceSource = forcedFixture ? "fixture" : established ? "live" : "incomplete";
-  const deadline = typeof opp.deadline === "string" && opp.deadline.trim() ? opp.deadline.trim() : "UNKNOWN";
+  const forcedFixture = isFixtureRecord(opp, requested);
+  const source: GrantsIntelligenceSource = forcedFixture
+    ? "fixture"
+    : meetsLiveEvidenceMinimum(opp)
+      ? "live"
+      : "incomplete";
+  const deadline = fieldText(opp, "deadline") || fieldText(opp, "close_date") || "UNKNOWN";
+  const expired = source !== "fixture" && deadlineHasPassed(opp);
   const amount = awardAmount(opp);
   const estimatedAmount = amount == null
     ? "UNKNOWN"
     : source === "fixture"
       ? `fixture amount ${amount} — not guaranteed money`
-      : `estimated amount ${amount} — not guaranteed money`;
+      : `estimated amount ${amount} — not guaranteed money and not received revenue`;
+  const renewalDimension = profile.dimensions.find((item) => item.id === "renewable_grant");
+  const renewal = `renewable ${renewalDimension?.status === "unknown" ? "UNKNOWN" : renewalDimension?.status ?? "UNKNOWN"}`;
   const restrictions = [
+    expired ? "deadline passed" : null,
+    fieldText(opp, "applicant_restrictions") || null,
+    fieldText(opp, "program_limitations") || null,
     profile.restrictedWarning,
     profile.fringeAllowed === "no" ? "fringe not allowed" : null,
     profile.personnelAllowed === "no" ? "payroll not allowed" : null,
@@ -999,7 +1047,14 @@ function briefingRowFromOpportunity(
   const title = String(opp.title ?? profile.opportunityId);
   const score = source === "fixture"
     ? `fixture score ${profile.recurringFundingScore} — not guaranteed money`
-    : `score ${profile.recurringFundingScore} — not guaranteed money`;
+    : `score ${profile.recurringFundingScore} — not guaranteed money and not received revenue`;
+  const recommendedNextAction = source === "fixture"
+    ? "Fixture only. Founder review. Do not submit, spend, or treat the fixture score as money."
+    : expired
+      ? "deadline passed. Not eligible to pursue. Do not submit, spend, or treat the estimate as received revenue."
+      : source === "incomplete"
+        ? "Incomplete. Missing evidence is not eligibility. Do not submit, spend, or treat this as a live award."
+        : "Estimate only. Not received revenue. Do not submit or spend.";
   return {
     id: profile.opportunityId,
     fundingSource: source === "fixture" ? `${FIXTURE_LABEL}: ${funder} — ${title}` : `${funder} — ${title}`,
@@ -1008,16 +1063,13 @@ function briefingRowFromOpportunity(
     deadline,
     restrictions,
     allowableExpenses: allowable,
+    renewal,
     fundingStatus: profile.moneyStatus,
     score,
-    recommendedNextAction: source === "incomplete"
-      ? "Incomplete. Missing evidence is not eligibility. Do not submit, spend, or treat this as a live award."
-      : source === "fixture"
-        ? "Fixture only. Founder review. Do not submit, spend, or treat the fixture score as money."
-        : "Verified in-memory record only. This briefing did not query production. Do not submit or spend.",
+    recommendedNextAction,
     source,
     fixtureLabel: source === "fixture" ? FIXTURE_LABEL : null,
-    eligible: source !== "incomplete",
+    eligible: source === "live" && !expired,
     notGuaranteedMoney: true,
   };
 }
@@ -1029,26 +1081,26 @@ export function loadLiveGrantsIntelligenceRows(
   return alreadyLoaded.map((row) => briefingRowFromOpportunity(row, "live"));
 }
 
-export async function readAuthorizedGrantOpportunities(options: {
-  alreadyLoaded?: readonly Record<string, unknown>[] | null;
-  sqlitePath?: string | null;
-}): Promise<Record<string, unknown>[]> {
-  if (options.sqlitePath) {
-    const resolved = path.resolve(options.sqlitePath);
-    if (resolved === path.resolve(getDbPath())) {
-      throw new Error("Refusing to open the production database");
-    }
-    const db = await open({ filename: resolved, driver: sqlite3.Database, mode: sqlite3.OPEN_READONLY });
-    try {
-      const rows = await db.all(
-        "SELECT id, title, funder, description, requirements, eligibility, deadline, amount_max, funding_period, funder_type FROM grant_opportunities",
-      );
-      return rows as Record<string, unknown>[];
-    } finally {
-      await db.close();
-    }
+export function refuseProductionGrantDatabase(databasePath: string): void {
+  const resolved = path.resolve(databasePath);
+  const productionDir = path.resolve(process.cwd(), "data");
+  const base = path.basename(resolved);
+  if (base === "ifcdc.db" || resolved === productionDir || resolved.startsWith(`${productionDir}${path.sep}`)) {
+    throw new Error("Refusing to open the production database");
   }
-  return [...(options.alreadyLoaded ?? [])];
+}
+
+export async function readGrantCenterOpportunities(
+  db: GrantCenterReader,
+  databasePath: string,
+): Promise<Record<string, unknown>[]> {
+  refuseProductionGrantDatabase(databasePath);
+  const statement = GRANT_CENTER_OPPORTUNITY_SQL.trim();
+  if (!/^SELECT\b/i.test(statement) || /\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER)\b/i.test(statement)) {
+    throw new Error("Grants intelligence briefing is SELECT only");
+  }
+  const rows = await db.all(statement);
+  return rows as Record<string, unknown>[];
 }
 
 export function buildGrantsIntelligenceBriefing(input?: {
@@ -1067,6 +1119,15 @@ export function buildGrantsIntelligenceBriefing(input?: {
     liveConnected: false,
     rows: [...fixtures, ...loaded],
   };
+}
+
+export async function buildFounderBriefingFromGrantCenter(
+  db: GrantCenterReader | null,
+  databasePath?: string | null,
+): Promise<GrantsIntelligenceBriefing> {
+  if (!db || !databasePath) return buildGrantsIntelligenceBriefing();
+  const rows = await readGrantCenterOpportunities(db, databasePath);
+  return buildGrantsIntelligenceBriefing({ liveRows: rows });
 }
 
 export function submitGrantsIntelligenceBriefing(): never {

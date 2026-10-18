@@ -367,6 +367,7 @@ const GrantCenterPage: React.FC = () => {
                       <div className="hq-muted-text">Estimated amount: {row.estimatedAmount}. Score: {row.score}.</div>
                       <div className="hq-muted-text">Status: {row.fundingStatus}. Deadline: {row.deadline}. Source: {row.source}.</div>
                       <div className="hq-muted-text">Restrictions: {row.restrictions}</div>
+                      <div className="hq-muted-text">Renewal: {row.renewal}</div>
                       <div className="hq-muted-text">{row.allowableExpenses}</div>
                       <div className="hq-muted-text">{row.recommendedNextAction}</div>
                     </li>

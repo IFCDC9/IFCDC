@@ -1314,6 +1314,7 @@ export const grantsApi = {
       deadline: string;
       restrictions: string;
       allowableExpenses: string;
+      renewal: string;
       fundingStatus: string;
       score: string;
       recommendedNextAction: string;

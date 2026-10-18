@@ -1,21 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import sqlite3 from "sqlite3";
 import { open } from "sqlite";
 import {
   analyzeRecurringFunding,
+  buildFounderBriefingFromGrantCenter,
   buildFounderFixtureBriefing,
   buildGrantsIntelligenceBriefing,
   founderMayReadGrantsBriefing,
+  GRANT_CENTER_OPPORTUNITY_SQL,
   loadLiveGrantsIntelligenceRows,
-  readAuthorizedGrantOpportunities,
+  readGrantCenterOpportunities,
+  refuseProductionGrantDatabase,
   submitGrantsIntelligenceBriefing,
   RECURRING_FUNDING_ACCEPTANCE_FIXTURES,
   type FundingDimensionId,
 } from "../server/hq/grantRecurringFundingEngine";
-import { getDbPath } from "../server/config/dataPaths";
 
 function dimension(id: FundingDimensionId, rowId: string) {
   const item = fixture(rowId).dimensions.find((entry) => entry.id === id);
@@ -190,6 +193,9 @@ test("founder briefing separates fixture rows from live rows and does not open a
       id: "memory-only",
       funder: "Caller memory",
       title: "Already loaded row",
+      source_type: "grants.gov",
+      deadline: "2027-06-01",
+      eligibility: "Eligible nonprofit in the service area.",
       description: "Potential funding. Personnel salaries allowed.",
     }],
   });
@@ -216,6 +222,9 @@ test("founder briefing separates fixture rows from live rows and does not open a
     id: "memory-evidenced",
     title: "Payroll support",
     funder: "Caller memory",
+    source_type: "manual",
+    deadline: "2027-06-01",
+    eligibility: "Eligible nonprofit.",
     description: "Potential funding. Personnel salaries allowed. No fringe.",
   }]);
   assert.equal(evidenced[0]?.source, "live");
@@ -237,41 +246,114 @@ test("founder briefing separates fixture rows from live rows and does not open a
   assert.equal(window.includes("scoreOpenOpportunitiesRecurring"), false);
   assert.equal(window.includes("buildRecurringFundingPayrollCoverage"), false);
   assert.equal(window.includes("persistRecurringFundingProfile"), false);
+  assert.equal(window.includes("getDb("), false);
+  assert.match(window, /buildFounderBriefingFromGrantCenter\(null, null\)/);
+  assert.match(window, /Founder Mode required/);
 });
 
-test("authorized read uses a temp database and refuses the production path", async () => {
+test("grant center adapter reads temp rows and refuses the production database", async () => {
+  const productionDb = path.join(process.cwd(), "data", "ifcdc.db");
+  let productionQueried = false;
+  const productionSpy = {
+    all: async () => {
+      productionQueried = true;
+      return [];
+    },
+  };
+  assert.throws(() => refuseProductionGrantDatabase(productionDb), /production database/);
+  assert.throws(() => refuseProductionGrantDatabase(path.join(process.cwd(), "data")), /production database/);
+  await assert.rejects(() => readGrantCenterOpportunities(productionSpy, productionDb), /production database/);
+  await assert.rejects(() => readGrantCenterOpportunities(productionSpy, "/var/data/ifcdc.db"), /production database/);
+  assert.equal(productionQueried, false);
+  assert.match(GRANT_CENTER_OPPORTUNITY_SQL, /^SELECT\b/);
+  assert.doesNotMatch(GRANT_CENTER_OPPORTUNITY_SQL, /\b(INSERT|UPDATE|DELETE)\b/i);
+
+  const empty = await buildFounderBriefingFromGrantCenter(null, null);
+  assert.equal(empty.rows.every((row) => row.source === "fixture"), true);
+  assert.equal(empty.liveConnected, false);
+  assert.equal(founderMayReadGrantsBriefing(null), false);
+  assert.equal(founderMayReadGrantsBriefing({ role: "grant_manager" }), false);
+  assert.equal(founderMayReadGrantsBriefing({ role: "founder" }), true);
+
   const dir = fileURLToPath(new URL("../.test-data-fixture/", import.meta.url));
-  process.env.IFCDC_DATA_DIR = dir;
   mkdirSync(dir, { recursive: true });
-  const sqlitePath = `${dir}briefing-read.sqlite`;
+  const sqlitePath = path.join(dir, "briefing-read.sqlite");
   rmSync(sqlitePath, { force: true });
   const db = await open({ filename: sqlitePath, driver: sqlite3.Database });
   await db.exec(`CREATE TABLE grant_opportunities (
-    id TEXT, title TEXT, funder TEXT, description TEXT, requirements TEXT, eligibility TEXT,
-    deadline TEXT, amount_max INTEGER, funding_period TEXT, funder_type TEXT
+    id TEXT, title TEXT, funder TEXT, description TEXT, amount_min REAL, amount_max REAL,
+    status TEXT, deadline TEXT, requirements TEXT, source_type TEXT, funder_type TEXT,
+    eligibility TEXT, funding_status TEXT, close_date TEXT, eligibility_result TEXT,
+    funding_instrument TEXT, funding_period TEXT, applicant_restrictions TEXT,
+    program_limitations TEXT, award_ceiling REAL, estimated_funding REAL
   )`);
-  await db.run(
-    "INSERT INTO grant_opportunities (id, title, funder, description, deadline, amount_max) VALUES (?, ?, ?, ?, ?, ?)",
-    "temp-live-1",
-    "Temp operating support",
-    "Temp funder",
-    "Potential funding. General operating support. Administrative costs allowed. No fringe.",
-    "UNKNOWN",
-    1000,
-  );
-  await db.close();
+  const insert = `INSERT INTO grant_opportunities
+    (id, title, funder, description, amount_max, status, deadline, requirements, source_type, eligibility, applicant_restrictions, program_limitations)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+  await db.run(insert, "live-payroll", "Payroll support", "County funder", "Potential funding. Personnel salaries allowed. No fringe.", 50000, "open", "2027-06-01", "", "grants.gov", "Eligible nonprofit in the service area.", "", "");
+  await db.run(insert, "thin-record", "Thin record", "Unknown funder", "", null, "", "", "", "", "", "");
+  await db.run(insert, "expired-gos", "Expired operating support", "State funder", "Potential funding. General operating support. Renewable.", 25000, "open", "2020-01-01", "", "grants.gov", "Eligible nonprofit.", "", "");
+  await db.run(insert, "restricted-supplies", "Supply purchase", "Private funder", "Potential funding. Supplies only. Administrative costs not allowed. No fringe.", 18000, "open", "2027-08-01", "", "manual", "Restricted program supplies.", "Supplies only", "");
+  await db.run(insert, "fixture-sneak", "Disguised fixture", "Fixture funder", "Potential funding. Personnel salaries allowed.", 999, "open", "2027-01-01", "", "grants.gov", "Eligible.", "", "");
+  await db.run(insert, "open-ended-live", "Rolling support", "City funder", "Potential funding. HR and administration allowed.", 12000, "open", "open-ended", "", "grants.gov", "Eligible nonprofit.", "", "");
   try {
-    await assert.rejects(() => readAuthorizedGrantOpportunities({ sqlitePath: getDbPath() }), /production database/);
-    const rows = await readAuthorizedGrantOpportunities({ sqlitePath });
-    assert.equal(rows.length, 1);
-    const briefing = buildGrantsIntelligenceBriefing({ liveRows: rows });
-    const live = briefing.rows.find((row) => row.id === "temp-live-1");
+    const briefing = await buildFounderBriefingFromGrantCenter(db, sqlitePath);
+    const row = (id: string) => briefing.rows.find((item) => item.id === id);
+    const live = row("live-payroll");
     assert.equal(live?.source, "live");
-    assert.match(live?.estimatedAmount ?? "", /not guaranteed money/);
+    assert.equal(live?.eligible, true);
+    assert.equal(live?.fundingStatus, "potential_funding");
+    assert.match(live?.estimatedAmount ?? "", /estimated amount 50000/);
+    assert.match(live?.estimatedAmount ?? "", /not received revenue/);
+    assert.match(live?.allowableExpenses ?? "", /payroll yes/);
     assert.match(live?.allowableExpenses ?? "", /fringe no/);
+    assert.match(live?.allowableExpenses ?? "", /indirect UNKNOWN|allowable_indirect UNKNOWN/);
+    assert.match(live?.allowableExpenses ?? "", /hr UNKNOWN/);
+    assert.match(live?.allowableExpenses ?? "", /administration UNKNOWN/);
+    assert.match(live?.restrictions ?? "", /fringe not allowed/);
+    assert.match(live?.renewal ?? "", /UNKNOWN/);
+    assert.match(live?.score ?? "", /not received revenue/);
+
+    const thin = row("thin-record");
+    assert.equal(thin?.source, "incomplete");
+    assert.equal(thin?.eligible, false);
+    assert.match(thin?.allowableExpenses ?? "", /UNKNOWN/);
+    assert.notEqual(thin?.source, "live");
+
+    const expired = row("expired-gos");
+    assert.equal(expired?.source, "live");
+    assert.equal(expired?.eligible, false);
+    assert.match(expired?.restrictions ?? "", /deadline passed/);
+    assert.match(expired?.recommendedNextAction ?? "", /deadline passed/);
+    assert.match(expired?.recommendedNextAction ?? "", /Not eligible to pursue/);
+
+    const restricted = row("restricted-supplies");
+    assert.equal(restricted?.source, "live");
+    assert.match(restricted?.restrictions ?? "", /Supplies only|fringe not allowed|administration not allowed/);
+    assert.match(restricted?.allowableExpenses ?? "", /fringe no/);
+    assert.match(restricted?.allowableExpenses ?? "", /administration no/);
+
+    const fixture = row("fixture-sneak");
+    assert.equal(fixture?.source, "fixture");
+    assert.equal(fixture?.fixtureLabel, "FIXTURE — not a live opportunity");
+    assert.notEqual(fixture?.source, "live");
+
+    const rolling = row("open-ended-live");
+    assert.equal(rolling?.source, "live");
+    assert.equal(rolling?.eligible, true);
+    assert.doesNotMatch(rolling?.restrictions ?? "", /deadline passed/);
+    assert.match(rolling?.allowableExpenses ?? "", /hr yes/);
+    assert.match(rolling?.allowableExpenses ?? "", /administration yes/);
+    assert.match(rolling?.allowableExpenses ?? "", /payroll UNKNOWN/);
+
     assert.equal(briefing.liveConnected, false);
+    assert.equal(briefing.sendsMail, false);
+    assert.equal(briefing.submitsGrant, false);
+    assert.equal(briefing.spends, false);
     assert.equal(briefing.writesFundingRecords, false);
+    assert.equal(briefing.rows.some((item) => item.id.startsWith("fixture-") && item.source === "live"), false);
   } finally {
+    await db.close();
     rmSync(sqlitePath, { force: true });
     rmSync(dir, { recursive: true, force: true });
   }
