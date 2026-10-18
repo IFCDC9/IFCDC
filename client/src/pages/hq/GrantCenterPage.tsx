@@ -356,6 +356,9 @@ const GrantCenterPage: React.FC = () => {
               {founderBriefing.isError && (
                 <p className="hq-muted-text">Founder-only briefing. This session cannot read it.</p>
               )}
+              {founderBriefing.data?.liveReadFailed && (
+                <p className="hq-muted-text">{founderBriefing.data.liveReadError}</p>
+              )}
               {founderBriefing.data && (
                 <ul className="hq-list">
                   {founderBriefing.data.rows.map((row) => (

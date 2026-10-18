@@ -1305,7 +1305,9 @@ export const grantsApi = {
   founderGrantsBriefing: () => apiFetch<{
     mode: "read_only";
     sendsMail: false;
-    liveConnected: false;
+    liveConnected: boolean;
+    liveReadFailed: boolean;
+    liveReadError: string | null;
     rows: Array<{
       id: string;
       fundingSource: string;

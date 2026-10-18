@@ -7,18 +7,30 @@ import sqlite3 from "sqlite3";
 import { open } from "sqlite";
 import {
   analyzeRecurringFunding,
-  buildFounderBriefingFromGrantCenter,
   buildFounderFixtureBriefing,
   buildGrantsIntelligenceBriefing,
   founderMayReadGrantsBriefing,
   GRANT_CENTER_OPPORTUNITY_SQL,
   loadLiveGrantsIntelligenceRows,
-  readGrantCenterOpportunities,
-  refuseProductionGrantDatabase,
+  readFounderGrantsBriefing,
   submitGrantsIntelligenceBriefing,
   RECURRING_FUNDING_ACCEPTANCE_FIXTURES,
   type FundingDimensionId,
 } from "../server/hq/grantRecurringFundingEngine";
+
+function refuseProductionGrantDatabase(databasePath: string): void {
+  const resolved = path.resolve(databasePath);
+  const productionDir = path.resolve(process.cwd(), "data");
+  const base = path.basename(resolved);
+  if (base === "ifcdc.db" || resolved === productionDir || resolved.startsWith(`${productionDir}${path.sep}`)) {
+    throw new Error("Refusing to open the production database");
+  }
+}
+
+async function openTempGrantDatabase(databasePath: string) {
+  refuseProductionGrantDatabase(databasePath);
+  return open({ filename: databasePath, driver: sqlite3.Database });
+}
 
 function dimension(id: FundingDimensionId, rowId: string) {
   const item = fixture(rowId).dimensions.find((entry) => entry.id === id);
@@ -237,49 +249,56 @@ test("founder briefing separates fixture rows from live rows and does not open a
   const route = readFileSync(fileURLToPath(new URL("../server/routes/grants.routes.ts", import.meta.url)), "utf8");
   const at = route.indexOf('router.get("/intelligence/founder-briefing"');
   assert.equal(at > 0, true);
+  assert.ok(route.lastIndexOf("hqAuthRequired", at) < at);
   const next = route.indexOf("router.", at + 20);
-  const window = route.slice(at, next > at ? next : at + 900);
+  const window = route.slice(at, next > at ? next : at + 1200);
   assert.match(window, /founderMayReadGrantsBriefing/);
   assert.match(window, /grants_intelligence\.briefing\.read/);
   assert.match(window, /mode: "read_only"/);
+  assert.match(window, /const db = await getDb\(\)/);
+  assert.match(window, /readFounderGrantsBriefing\(db\)/);
   assert.equal(window.includes("persistRecurringFundingProfile"), false);
   assert.equal(window.includes("scoreOpenOpportunitiesRecurring"), false);
   assert.equal(window.includes("buildRecurringFundingPayrollCoverage"), false);
-  assert.equal(window.includes("persistRecurringFundingProfile"), false);
-  assert.equal(window.includes("getDb("), false);
-  assert.match(window, /buildFounderBriefingFromGrantCenter\(null, null\)/);
+  assert.equal(window.includes("INSERT"), false);
+  assert.equal(window.includes("UPDATE"), false);
+  assert.equal(window.includes("DELETE"), false);
   assert.match(window, /Founder Mode required/);
+  assert.equal(founderMayReadGrantsBriefing(null), false);
+  assert.equal(founderMayReadGrantsBriefing({ role: "grant_manager", email: "operator@example.com" }), false);
 });
 
 test("grant center adapter reads temp rows and refuses the production database", async () => {
   const productionDb = path.join(process.cwd(), "data", "ifcdc.db");
-  let productionQueried = false;
-  const productionSpy = {
-    all: async () => {
-      productionQueried = true;
-      return [];
-    },
-  };
   assert.throws(() => refuseProductionGrantDatabase(productionDb), /production database/);
   assert.throws(() => refuseProductionGrantDatabase(path.join(process.cwd(), "data")), /production database/);
-  await assert.rejects(() => readGrantCenterOpportunities(productionSpy, productionDb), /production database/);
-  await assert.rejects(() => readGrantCenterOpportunities(productionSpy, "/var/data/ifcdc.db"), /production database/);
-  assert.equal(productionQueried, false);
+  await assert.rejects(() => openTempGrantDatabase(productionDb), /production database/);
   assert.match(GRANT_CENTER_OPPORTUNITY_SQL, /^SELECT\b/);
   assert.doesNotMatch(GRANT_CENTER_OPPORTUNITY_SQL, /\b(INSERT|UPDATE|DELETE)\b/i);
 
-  const empty = await buildFounderBriefingFromGrantCenter(null, null);
-  assert.equal(empty.rows.every((row) => row.source === "fixture"), true);
-  assert.equal(empty.liveConnected, false);
-  assert.equal(founderMayReadGrantsBriefing(null), false);
-  assert.equal(founderMayReadGrantsBriefing({ role: "grant_manager" }), false);
-  assert.equal(founderMayReadGrantsBriefing({ role: "founder" }), true);
+  const missing = await readFounderGrantsBriefing(null);
+  assert.equal(missing.liveReadFailed, true);
+  assert.equal(missing.liveConnected, false);
+  assert.equal(missing.rows.every((row) => row.source === "fixture"), true);
+  assert.equal(missing.liveReadError, "Grant Center records could not be read.");
+
+  const leakedPath = "/Users/secret/data/ifcdc.db";
+  const failed = await readFounderGrantsBriefing({
+    all: async () => {
+      throw new Error(`SQLITE_CANTOPEN ${leakedPath}`);
+    },
+  });
+  assert.equal(failed.liveReadFailed, true);
+  assert.equal(failed.liveConnected, false);
+  assert.equal(failed.rows.some((row) => row.source === "live"), false);
+  assert.equal(JSON.stringify(failed).includes(leakedPath), false);
+  assert.equal(JSON.stringify(failed).includes("ifcdc.db"), false);
 
   const dir = fileURLToPath(new URL("../.test-data-fixture/", import.meta.url));
   mkdirSync(dir, { recursive: true });
   const sqlitePath = path.join(dir, "briefing-read.sqlite");
   rmSync(sqlitePath, { force: true });
-  const db = await open({ filename: sqlitePath, driver: sqlite3.Database });
+  const db = await openTempGrantDatabase(sqlitePath);
   await db.exec(`CREATE TABLE grant_opportunities (
     id TEXT, title TEXT, funder TEXT, description TEXT, amount_min REAL, amount_max REAL,
     status TEXT, deadline TEXT, requirements TEXT, source_type TEXT, funder_type TEXT,
@@ -296,8 +315,10 @@ test("grant center adapter reads temp rows and refuses the production database",
   await db.run(insert, "restricted-supplies", "Supply purchase", "Private funder", "Potential funding. Supplies only. Administrative costs not allowed. No fringe.", 18000, "open", "2027-08-01", "", "manual", "Restricted program supplies.", "Supplies only", "");
   await db.run(insert, "fixture-sneak", "Disguised fixture", "Fixture funder", "Potential funding. Personnel salaries allowed.", 999, "open", "2027-01-01", "", "grants.gov", "Eligible.", "", "");
   await db.run(insert, "open-ended-live", "Rolling support", "City funder", "Potential funding. HR and administration allowed.", 12000, "open", "open-ended", "", "grants.gov", "Eligible nonprofit.", "", "");
+  await db.run(insert, "gov-contract", "County services", "County funder", "Government contract. Potential funding only. Not a grant award. Not received revenue. Personnel salaries allowed.", 120000, "open", "2027-09-01", "", "sam.gov", "Eligible for a government contract.", "", "");
+  await db.run(insert, "restricted-award", "Restricted award", "Foundation", "Restricted award. Supplies only. No fringe.", 8000, "open", "2027-10-01", "", "manual", "Restricted program supplies.", "Restricted award", "");
   try {
-    const briefing = await buildFounderBriefingFromGrantCenter(db, sqlitePath);
+    const briefing = await readFounderGrantsBriefing(db);
     const row = (id: string) => briefing.rows.find((item) => item.id === id);
     const live = row("live-payroll");
     assert.equal(live?.source, "live");
@@ -318,6 +339,7 @@ test("grant center adapter reads temp rows and refuses the production database",
     assert.equal(thin?.source, "incomplete");
     assert.equal(thin?.eligible, false);
     assert.match(thin?.allowableExpenses ?? "", /UNKNOWN/);
+    assert.match(thin?.recommendedNextAction ?? "", /Not recommended/);
     assert.notEqual(thin?.source, "live");
 
     const expired = row("expired-gos");
@@ -332,6 +354,31 @@ test("grant center adapter reads temp rows and refuses the production database",
     assert.match(restricted?.restrictions ?? "", /Supplies only|fringe not allowed|administration not allowed/);
     assert.match(restricted?.allowableExpenses ?? "", /fringe no/);
     assert.match(restricted?.allowableExpenses ?? "", /administration no/);
+    assert.doesNotMatch(restricted?.eligibilityEvidence ?? "", /general_operating_grant yes/);
+    const restrictedAward = analyzeRecurringFunding({
+      id: "restricted-award",
+      description: "Restricted award. Supplies only. No fringe.",
+      eligibility: "Restricted program supplies.",
+      applicant_restrictions: "Restricted award",
+    });
+    assert.equal(restrictedAward.fundingCategory, "restricted_expenses");
+    assert.notEqual(restrictedAward.fundingCategory, "recurring_operating_support");
+    assert.notEqual(restrictedAward.generalOperatingAllowed, "yes");
+
+    const contract = row("gov-contract");
+    assert.equal(contract?.source, "live");
+    assert.equal(contract?.fundingStatus, "potential_funding");
+    assert.match(contract?.eligibilityEvidence ?? "", /government_contract yes/);
+    assert.doesNotMatch(contract?.eligibilityEvidence ?? "", /general_operating_grant yes/);
+    const contractProfile = analyzeRecurringFunding({
+      id: "gov-contract",
+      description: "Government contract. Potential funding only. Not a grant award. Not received revenue. Personnel salaries allowed.",
+      eligibility: "Eligible for a government contract.",
+    });
+    assert.equal(contractProfile.fundingCategory, "government_contract");
+    assert.equal(contractProfile.moneyStatus, "potential_funding");
+    assert.notEqual(contractProfile.moneyStatus, "award");
+    assert.notEqual(contractProfile.moneyStatus, "received_revenue");
 
     const fixture = row("fixture-sneak");
     assert.equal(fixture?.source, "fixture");
@@ -346,7 +393,8 @@ test("grant center adapter reads temp rows and refuses the production database",
     assert.match(rolling?.allowableExpenses ?? "", /administration yes/);
     assert.match(rolling?.allowableExpenses ?? "", /payroll UNKNOWN/);
 
-    assert.equal(briefing.liveConnected, false);
+    assert.equal(briefing.liveConnected, true);
+    assert.equal(briefing.liveReadFailed, false);
     assert.equal(briefing.sendsMail, false);
     assert.equal(briefing.submitsGrant, false);
     assert.equal(briefing.spends, false);

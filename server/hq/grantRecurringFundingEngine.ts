@@ -2,7 +2,6 @@
  * Recurring / renewable funding intelligence — HR & payroll sustainability.
  * Extends Grant Center scoring. Does not submit applications.
  */
-import path from "path";
 import { getDb } from "../db";
 import { ensureGrantTables, logGrantActivity } from "./grantsSchema";
 import { evaluateGrantAllowableCostRecovery } from "./grantAllowableCostRecovery";
@@ -448,12 +447,12 @@ function classifyFundingCategory(blob: string): { category: FundingCategory; phr
     return { category: "restricted_capital", phrase: capital[0] };
   }
 
-  const supplies = blob.match(/\bsupplies\s+only\b|\brestricted program supplies\b/);
-  if (supplies) return { category: "restricted_expenses", phrase: supplies[0] };
-
   const operating = blob.match(/\bgeneral\s+operating(?:\s+support)?\b|\brecurring\s+operating\s+support\b/);
   const operatingExcluded = explicitExclusionPhrase(blob, ["general operating support", "general operating", "operating support"]);
   if (operating && !operatingExcluded) return { category: "recurring_operating_support", phrase: operating[0] };
+
+  const restrictedExpense = blob.match(/\brestricted\s+(?:award|expense|expenses)\b|\bsupplies\s+only\b|\brestricted program supplies\b/);
+  if (restrictedExpense) return { category: "restricted_expenses", phrase: restrictedExpense[0] };
 
   const grant = blob.match(/\b(?:formula\s+grant|block\s+grant|grant)\b/);
   if (grant) return { category: "grant_opportunity", phrase: grant[0] };
@@ -941,7 +940,9 @@ export type GrantsIntelligenceBriefing = {
   spends: false;
   writesFundingRecords: false;
   notGuaranteedMoney: true;
-  liveConnected: false;
+  liveConnected: boolean;
+  liveReadFailed: boolean;
+  liveReadError: string | null;
   rows: GrantsIntelligenceBriefingRow[];
 };
 
@@ -1053,7 +1054,7 @@ function briefingRowFromOpportunity(
     : expired
       ? "deadline passed. Not eligible to pursue. Do not submit, spend, or treat the estimate as received revenue."
       : source === "incomplete"
-        ? "Incomplete. Missing evidence is not eligibility. Do not submit, spend, or treat this as a live award."
+        ? "Incomplete. Not recommended. Missing evidence is not eligibility. Do not submit, spend, or treat this as a live award."
         : "Estimate only. Not received revenue. Do not submit or spend.";
   return {
     id: profile.opportunityId,
@@ -1081,21 +1082,21 @@ export function loadLiveGrantsIntelligenceRows(
   return alreadyLoaded.map((row) => briefingRowFromOpportunity(row, "live"));
 }
 
-export function refuseProductionGrantDatabase(databasePath: string): void {
-  const resolved = path.resolve(databasePath);
-  const productionDir = path.resolve(process.cwd(), "data");
-  const base = path.basename(resolved);
-  if (base === "ifcdc.db" || resolved === productionDir || resolved.startsWith(`${productionDir}${path.sep}`)) {
-    throw new Error("Refusing to open the production database");
-  }
-}
+const LIVE_READ_ERROR = "Grant Center records could not be read.";
 
-export async function readGrantCenterOpportunities(
-  db: GrantCenterReader,
-  databasePath: string,
-): Promise<Record<string, unknown>[]> {
-  refuseProductionGrantDatabase(databasePath);
-  const statement = GRANT_CENTER_OPPORTUNITY_SQL.trim();
+export async function readGrantCenterOpportunities(db: GrantCenterReader): Promise<Record<string, unknown>[]> {
+  const info = await db.all("SELECT name FROM pragma_table_info('grant_opportunities')");
+  const names = new Set(
+    (info as Array<{ name?: unknown }>).map((row) => String(row.name ?? "")).filter(Boolean),
+  );
+  if (!names.has("id")) throw new Error("grant_opportunities is not available");
+  const columns = GRANT_CENTER_OPPORTUNITY_SQL
+    .replace(/^SELECT\s+/i, "")
+    .replace(/\s+FROM\s+grant_opportunities\s*$/i, "")
+    .split(",")
+    .map((column) => column.trim())
+    .filter((column) => names.has(column));
+  const statement = `SELECT ${columns.join(", ")} FROM grant_opportunities`;
   if (!/^SELECT\b/i.test(statement) || /\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER)\b/i.test(statement)) {
     throw new Error("Grants intelligence briefing is SELECT only");
   }
@@ -1117,17 +1118,27 @@ export function buildGrantsIntelligenceBriefing(input?: {
     writesFundingRecords: false,
     notGuaranteedMoney: true,
     liveConnected: false,
+    liveReadFailed: false,
+    liveReadError: null,
     rows: [...fixtures, ...loaded],
   };
 }
 
-export async function buildFounderBriefingFromGrantCenter(
-  db: GrantCenterReader | null,
-  databasePath?: string | null,
-): Promise<GrantsIntelligenceBriefing> {
-  if (!db || !databasePath) return buildGrantsIntelligenceBriefing();
-  const rows = await readGrantCenterOpportunities(db, databasePath);
-  return buildGrantsIntelligenceBriefing({ liveRows: rows });
+export async function readFounderGrantsBriefing(db: GrantCenterReader | null): Promise<GrantsIntelligenceBriefing> {
+  if (!db) {
+    return { ...buildGrantsIntelligenceBriefing(), liveConnected: false, liveReadFailed: true, liveReadError: LIVE_READ_ERROR };
+  }
+  try {
+    const rows = await readGrantCenterOpportunities(db);
+    return {
+      ...buildGrantsIntelligenceBriefing({ liveRows: rows }),
+      liveConnected: true,
+      liveReadFailed: false,
+      liveReadError: null,
+    };
+  } catch {
+    return { ...buildGrantsIntelligenceBriefing(), liveConnected: false, liveReadFailed: true, liveReadError: LIVE_READ_ERROR };
+  }
 }
 
 export function submitGrantsIntelligenceBriefing(): never {
