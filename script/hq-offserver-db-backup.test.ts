@@ -286,10 +286,83 @@ test("the scheduled backup function does not copy onto the persistent backup dir
   const scheduler = readFileSync(new URL("../server/hq/workflowEngine.ts", import.meta.url), "utf8");
   const backupCase = scheduler.slice(scheduler.indexOf('case "db_backup"'), scheduler.indexOf('case "executive_report_daily"'));
   assert.match(backupCase, /uploaded_unverified/);
+  assert.match(backupCase, /uploaded: true/);
   assert.equal(backupCase.includes("last_run_status = 'success'"), false);
+  assert.equal(backupCase.includes("last_error = NULL"), false);
+  assert.equal(backupCase.includes("restoreVerified: true"), false);
   assert.ok(backupCase.indexOf("assertOffServerUploadAuthorized") < backupCase.indexOf("createDatabaseBackup("));
+  assert.ok(backupCase.indexOf("createDatabaseBackup(") < backupCase.indexOf("uploaded: true"));
   assert.match(scheduler, /last_run_status = 'uploaded_unverified'/);
   assert.match(scheduler, /last_run_status = 'failed'/);
+  const recordFn = scheduler.slice(scheduler.indexOf("export function dbBackupRunRecord"), scheduler.indexOf("async function persistDbBackupRun"));
+  assert.match(recordFn, /scheduleIntervalMs\("daily"\)/);
+  assert.match(recordFn, /new Date\(input\.ranAt\)/);
+  assert.equal(recordFn.includes("Date.now()"), false);
+  assert.equal(recordFn.includes("last_error = NULL"), false);
+  for (const name of ["runSingleScheduledJob", "runScheduledJobs", "runDueScheduledJobs"]) {
+    const start = scheduler.indexOf(`export async function ${name}`);
+    const nextExport = scheduler.indexOf("\nexport async function ", start + 1);
+    const fn = scheduler.slice(start, nextExport === -1 ? scheduler.length : nextExport);
+    const gate = fn.indexOf('=== "db_backup"');
+    const successSql = fn.indexOf("last_run_status = 'success'");
+    assert.ok(gate >= 0, name);
+    assert.ok(successSql === -1 || gate < successSql, name);
+    const backupArm = fn.slice(gate, successSql === -1 ? fn.length : successSql);
+    assert.match(backupArm, /dbBackupRunRecord/);
+    assert.match(backupArm, /persistDbBackupRun/);
+    assert.equal(backupArm.includes("last_error = NULL"), false, name);
+    assert.match(fn, /dbBackupRunRecord\(\{ ranAt: (?:now|ts), error: message \}\)/);
+  }
+});
+
+test("a scheduled backup stores uploaded_unverified or the gate failure and advances the next daily run", async () => {
+  const dataDir = join(root, "scheduler-unused");
+  mkdirSync(dataDir, { recursive: true });
+  const previousDataDir = process.env.IFCDC_DATA_DIR;
+  process.env.IFCDC_DATA_DIR = dataDir;
+  const ranAt = "2026-10-19T11:00:00.000Z";
+  const nextDay = "2026-10-20T11:00:00.000Z";
+  try {
+    const { DB_BACKUP_UNVERIFIED_ERROR, dbBackupRunRecord } = await import("../server/hq/workflowEngine.ts");
+    const uploaded = dbBackupRunRecord({
+      ranAt,
+      outcome: { status: "uploaded_unverified", uploaded: true },
+    });
+    assert.equal(uploaded.lastRunStatus, "uploaded_unverified");
+    assert.equal(uploaded.lastError, DB_BACKUP_UNVERIFIED_ERROR);
+    assert.equal(uploaded.lastError, "Off-server backup uploaded. Isolated restore has not been approved.");
+    assert.equal(uploaded.lastRunAt, ranAt);
+    assert.equal(uploaded.nextRunAt, nextDay);
+    assert.notEqual(uploaded.lastRunStatus, "success");
+
+    let gateMessage = "";
+    try {
+      assertOffServerUploadAuthorized({});
+    } catch (err) {
+      gateMessage = err instanceof Error ? err.message : String(err);
+    }
+    const failed = dbBackupRunRecord({ ranAt, error: gateMessage });
+    assert.match(gateMessage, /IFCDC_DB_BACKUP_UPLOAD_ENABLED/);
+    assert.match(gateMessage, /not authorized/);
+    assert.equal(failed.lastRunStatus, "failed");
+    assert.equal(failed.lastError, gateMessage);
+    assert.equal(failed.nextRunAt, nextDay);
+    assert.equal(failed.lastError?.includes("success"), false);
+
+    const missingUpload = dbBackupRunRecord({ ranAt, outcome: { status: "ok" } });
+    assert.equal(missingUpload.lastRunStatus, "failed");
+    assert.match(missingUpload.lastError ?? "", /off-server upload did not happen/);
+    assert.equal(missingUpload.nextRunAt, nextDay);
+
+    const restored = dbBackupRunRecord({ ranAt, outcome: { status: "ok", uploaded: true } });
+    assert.equal(restored.lastRunStatus, "success");
+    assert.equal(restored.lastError, null);
+    assert.equal(restored.nextRunAt, nextDay);
+    assert.equal(readdirSync(dataDir).some((name) => name.includes("ifcdc.db")), false);
+  } finally {
+    if (previousDataDir === undefined) delete process.env.IFCDC_DATA_DIR;
+    else process.env.IFCDC_DATA_DIR = previousDataDir;
+  }
 });
 
 test("Create Backup Now shows the snapshot result and does not mark the scheduled job success", () => {
