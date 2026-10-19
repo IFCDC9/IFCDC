@@ -93,6 +93,94 @@ export async function setScheduledJobEnabled(jobKey: string, enabled: boolean, a
   return db.get("SELECT * FROM hq_scheduled_jobs WHERE job_key = ?", jobKey);
 }
 
+export const DB_BACKUP_UNVERIFIED_ERROR =
+  "Off-server backup uploaded. Isolated restore has not been approved.";
+
+export type ScheduledJobOutcome = {
+  status: "ok" | "uploaded_unverified";
+  /** Set only after createDatabaseBackup returns, which is after the off-server upload. */
+  uploaded?: boolean;
+};
+
+export type DbBackupRunRecord = {
+  lastRunAt: string;
+  nextRunAt: string;
+  lastRunStatus: "success" | "uploaded_unverified" | "failed";
+  lastError: string | null;
+};
+
+/** Next screen time for db_backup: the stored last_run_at plus the daily interval. */
+export function dbBackupRunRecord(input: {
+  ranAt: string;
+  outcome?: ScheduledJobOutcome;
+  error?: string;
+}): DbBackupRunRecord {
+  const nextRunAt = new Date(new Date(input.ranAt).getTime() + scheduleIntervalMs("daily")).toISOString();
+  if (input.error != null) {
+    return {
+      lastRunAt: input.ranAt,
+      nextRunAt,
+      lastRunStatus: "failed",
+      lastError: input.error,
+    };
+  }
+  if (input.outcome?.status === "uploaded_unverified") {
+    return {
+      lastRunAt: input.ranAt,
+      nextRunAt,
+      lastRunStatus: "uploaded_unverified",
+      lastError: DB_BACKUP_UNVERIFIED_ERROR,
+    };
+  }
+  if (input.outcome?.status === "ok" && input.outcome.uploaded === true) {
+    return {
+      lastRunAt: input.ranAt,
+      nextRunAt,
+      lastRunStatus: "success",
+      lastError: null,
+    };
+  }
+  return {
+    lastRunAt: input.ranAt,
+    nextRunAt,
+    lastRunStatus: "failed",
+    lastError: "Database backup stopped: off-server upload did not happen",
+  };
+}
+
+type ScheduledJobWriter = {
+  run(sql: string, ...params: unknown[]): Promise<unknown>;
+};
+
+async function persistDbBackupRun(db: ScheduledJobWriter, jobKey: string, record: DbBackupRunRecord): Promise<void> {
+  if (record.lastRunStatus === "uploaded_unverified") {
+    await db.run(
+      "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'uploaded_unverified', last_error = ? WHERE job_key = ?",
+      record.lastRunAt,
+      record.nextRunAt,
+      record.lastError,
+      jobKey,
+    );
+    return;
+  }
+  if (record.lastRunStatus === "failed") {
+    await db.run(
+      "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'failed', last_error = ? WHERE job_key = ?",
+      record.lastRunAt,
+      record.nextRunAt,
+      record.lastError,
+      jobKey,
+    );
+    return;
+  }
+  await db.run(
+    "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'success', last_error = NULL WHERE job_key = ?",
+    record.lastRunAt,
+    record.nextRunAt,
+    jobKey,
+  );
+}
+
 export async function runSingleScheduledJob(jobKey: string, actorEmail?: string) {
   await ensureWorkflowTables();
   const db = await getDb();
@@ -104,7 +192,32 @@ export async function runSingleScheduledJob(jobKey: string, actorEmail?: string)
 
   const now = new Date().toISOString();
   try {
-    await executeScheduledJob(job.job_key, actorEmail);
+    const outcome = await executeScheduledJob(job.job_key, actorEmail);
+    if (job.job_key === "db_backup") {
+      const record = dbBackupRunRecord({ ranAt: now, outcome });
+      await persistDbBackupRun(db, jobKey, record);
+      if (record.lastRunStatus === "failed") {
+        await logHqAudit({
+          action: "scheduled_job_failed",
+          entityType: "scheduled_job",
+          entityId: jobKey,
+          detail: record.lastError ?? "Database backup stopped",
+          actorEmail: actorEmail ?? "system",
+        });
+        return { ok: false, jobKey, error: record.lastError ?? "Database backup stopped", status: "failed" as const };
+      }
+      if (record.lastRunStatus === "uploaded_unverified") {
+        return { ok: true, jobKey, ranAt: now, status: "uploaded_unverified" as const };
+      }
+      await logHqAudit({
+        action: "scheduled_job_run",
+        entityType: "scheduled_job",
+        entityId: jobKey,
+        detail: job.name,
+        actorEmail: actorEmail ?? "system",
+      });
+      return { ok: true, jobKey, ranAt: now, status: "success" as const };
+    }
     await db.run(
       "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'success', last_error = NULL WHERE job_key = ?",
       now,
@@ -121,12 +234,17 @@ export async function runSingleScheduledJob(jobKey: string, actorEmail?: string)
     return { ok: true, jobKey, ranAt: now };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await db.run(
-      "UPDATE hq_scheduled_jobs SET last_run_at = ?, last_run_status = 'failed', last_error = ? WHERE job_key = ?",
-      now,
-      message,
-      jobKey
-    );
+    if (job.job_key === "db_backup") {
+      const record = dbBackupRunRecord({ ranAt: now, error: message });
+      await persistDbBackupRun(db, jobKey, record);
+    } else {
+      await db.run(
+        "UPDATE hq_scheduled_jobs SET last_run_at = ?, last_run_status = 'failed', last_error = ? WHERE job_key = ?",
+        now,
+        message,
+        jobKey
+      );
+    }
     await logHqAudit({
       action: "scheduled_job_failed",
       entityType: "scheduled_job",
@@ -381,7 +499,24 @@ export async function runScheduledJobs(actorEmail?: string): Promise<{ ran: stri
 
   for (const job of jobs) {
     try {
-      await executeScheduledJob(job.job_key, actorEmail);
+      const outcome = await executeScheduledJob(job.job_key, actorEmail);
+      if (job.job_key === "db_backup") {
+        const record = dbBackupRunRecord({ ranAt: now, outcome });
+        await persistDbBackupRun(db, job.job_key, record);
+        if (record.lastRunStatus === "failed") {
+          errors.push(`${job.job_key}: ${record.lastError}`);
+        } else if (record.lastRunStatus === "success") {
+          ran.push(job.job_key);
+          await logHqAudit({
+            action: "scheduled_job_run",
+            entityType: "scheduled_job",
+            entityId: job.job_key,
+            detail: job.name,
+            actorEmail: actorEmail ?? "system",
+          });
+        }
+        continue;
+      }
       await db.run(
         "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'success', last_error = NULL WHERE job_key = ?",
         now, computeNextRunAt(job.job_key), job.job_key
@@ -397,12 +532,17 @@ export async function runScheduledJobs(actorEmail?: string): Promise<{ ran: stri
     } catch (err) {
       const message = (err as Error).message;
       errors.push(`${job.job_key}: ${message}`);
-      await db.run(
-        "UPDATE hq_scheduled_jobs SET last_run_at = ?, last_run_status = 'failed', last_error = ? WHERE job_key = ?",
-        now,
-        message,
-        job.job_key
-      );
+      if (job.job_key === "db_backup") {
+        const record = dbBackupRunRecord({ ranAt: now, error: message });
+        await persistDbBackupRun(db, job.job_key, record);
+      } else {
+        await db.run(
+          "UPDATE hq_scheduled_jobs SET last_run_at = ?, last_run_status = 'failed', last_error = ? WHERE job_key = ?",
+          now,
+          message,
+          job.job_key
+        );
+      }
     }
   }
   return { ran, errors };
@@ -464,14 +604,19 @@ export async function runDueScheduledJobs(
     try {
       const outcome = await executeScheduledJob(job.job_key, actorEmail, { catchUp });
       const ts = new Date().toISOString();
-      if (outcome.status === "uploaded_unverified") {
-        await db.run(
-          "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'uploaded_unverified', last_error = ? WHERE job_key = ?",
-          ts,
-          computeNextRunAt(job.job_key),
-          "Off-server backup uploaded. Isolated restore has not been approved.",
-          job.job_key,
-        );
+      if (job.job_key === "db_backup") {
+        const record = dbBackupRunRecord({ ranAt: ts, outcome });
+        await persistDbBackupRun(db, job.job_key, record);
+        if (record.lastRunStatus === "success") {
+          ran.push(job.job_key);
+          await logHqAudit({
+            action: "scheduled_job_run",
+            entityType: "scheduled_job",
+            entityId: job.job_key,
+            detail: job.name,
+            actorEmail: actorEmail ?? "system",
+          });
+        }
         continue;
       }
       await db.run(
@@ -489,12 +634,18 @@ export async function runDueScheduledJobs(
     } catch (err) {
       const message = (err as Error).message;
       errors.push(`${job.job_key}: ${message}`);
-      await db.run(
-        "UPDATE hq_scheduled_jobs SET last_run_at = ?, last_run_status = 'failed', last_error = ? WHERE job_key = ?",
-        new Date().toISOString(),
-        message,
-        job.job_key
-      );
+      const ts = new Date().toISOString();
+      if (job.job_key === "db_backup") {
+        const record = dbBackupRunRecord({ ranAt: ts, error: message });
+        await persistDbBackupRun(db, job.job_key, record);
+      } else {
+        await db.run(
+          "UPDATE hq_scheduled_jobs SET last_run_at = ?, last_run_status = 'failed', last_error = ? WHERE job_key = ?",
+          ts,
+          message,
+          job.job_key
+        );
+      }
     }
   }
 
@@ -505,7 +656,7 @@ async function executeScheduledJob(
   jobKey: string,
   actorEmail?: string,
   opts?: { catchUp?: boolean },
-): Promise<{ status: "ok" | "uploaded_unverified" }> {
+): Promise<ScheduledJobOutcome> {
   const now = new Date().toISOString();
   switch (jobKey) {
     case "grant_deadlines":
@@ -522,8 +673,8 @@ async function executeScheduledJob(
       const { assertOffServerUploadAuthorized, createDatabaseBackup } = await import("./hqBackupService");
       assertOffServerUploadAuthorized();
       const snapshot = await createDatabaseBackup(actorEmail ?? "scheduled");
-      if (!snapshot.restoreVerified) return { status: "uploaded_unverified" };
-      break;
+      if (!snapshot.restoreVerified) return { status: "uploaded_unverified", uploaded: true };
+      return { status: "ok", uploaded: true };
     }
     case "executive_report_daily": {
       const { buildExecutiveReport } = await import("./analyticsReporting");
