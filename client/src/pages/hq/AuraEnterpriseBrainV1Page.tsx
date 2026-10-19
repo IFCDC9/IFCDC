@@ -545,6 +545,40 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
           {b?.warning && (
             <p style={{ color: "var(--hq-warning)", marginBottom: "0.75rem", fontSize: "0.85rem" }}>{b.warning}</p>
           )}
+          {b?.grantsIntelligence && (
+            <div className="hq-panel" style={{ marginBottom: "1rem" }}>
+              <div className="hq-panel-body">
+                <h4 style={{ color: "var(--hq-gold)", marginBottom: "0.5rem" }}>Grants intelligence</h4>
+                <p className="hq-muted-text" style={{ fontSize: "0.78rem", marginBottom: "0.75rem" }}>
+                  Read only. Verified opportunities: {b.grantsIntelligence.verifiedOpportunityCount}. Fixture rows are not verified opportunities.
+                  Estimated amounts are not received income. Potential funding, submitted applications, awards, and received revenue stay separate.
+                </p>
+                {b.grantsIntelligence.liveReadFailed && (
+                  <p className="hq-muted-text">{b.grantsIntelligence.liveReadError}</p>
+                )}
+                <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.85rem" }}>
+                  {b.grantsIntelligence.rows.map((row) => (
+                    <li key={`${row.source}-${row.id}`} style={{ marginBottom: "0.85rem" }}>
+                      {row.source === "fixture" && <StatusBadge label="FIXTURE" variant="warning" />}
+                      {row.source === "incomplete" && <StatusBadge label="INCOMPLETE" variant="warning" />}
+                      {row.source === "live" && <StatusBadge label="LIVE" variant="success" />}
+                      <strong>{row.fundingSource}</strong>
+                      {row.source === "fixture" && (
+                        <div>{row.fixtureLabel || "FIXTURE — not a live opportunity"}</div>
+                      )}
+                      <div>Funding classification: {row.fundingClassification}</div>
+                      <div>Eligibility evidence: {row.eligibilityEvidence}</div>
+                      <div>Payroll / HR / administration: {row.allowableExpenses}</div>
+                      <div>Deadline: {row.deadline}</div>
+                      <div>Recommended Founder action: {row.recommendedNextAction}</div>
+                      <div>Funding status: {row.fundingStatus}</div>
+                      <div>Estimated amount, not received income: {row.estimatedAmount}</div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
           {b && b.founderBriefing && (
             <>
               <div className="hq-kpi-grid" style={{ marginBottom: "1.25rem" }}>

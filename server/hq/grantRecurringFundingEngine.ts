@@ -917,6 +917,7 @@ export type GrantsIntelligenceBriefingRow = {
   recommendedNextAction: string;
   source: GrantsIntelligenceSource;
   fixtureLabel: string | null;
+  fundingClassification: FundingCategory;
   eligible: boolean;
   notGuaranteedMoney: true;
 };
@@ -1070,8 +1071,28 @@ function briefingRowFromOpportunity(
     recommendedNextAction,
     source,
     fixtureLabel: source === "fixture" ? FIXTURE_LABEL : null,
+    fundingClassification: profile.fundingCategory,
     eligible: source === "live" && !expired,
     notGuaranteedMoney: true,
+  };
+}
+
+function existingBriefingPriority(row: GrantsIntelligenceBriefingRow): number {
+  const match = /score\s+(\d+)/.exec(row.score);
+  return match ? Number(match[1]) : 0;
+}
+
+export function presentDailyBriefingGrants(
+  briefing: GrantsIntelligenceBriefing,
+): GrantsIntelligenceBriefing & { verifiedOpportunityCount: number } {
+  const rows = briefing.rows
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => existingBriefingPriority(b.row) - existingBriefingPriority(a.row) || a.index - b.index)
+    .map((item) => item.row);
+  return {
+    ...briefing,
+    rows,
+    verifiedOpportunityCount: rows.filter((row) => row.source === "live" && row.eligible && row.fixtureLabel == null).length,
   };
 }
 
