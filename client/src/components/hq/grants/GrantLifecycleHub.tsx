@@ -8,6 +8,7 @@ import { HqLoading } from "../HqLoading";
 import { GrantSubNav } from "./GrantSubNav";
 import { fmtGrantDeadline, fmtGrantAmount, fmtGrantSyncDate } from "../../../utils/grantFormat";
 import { useGrantManage } from "../../../hooks/useGrantManage";
+import { grantCallFailureText } from "./grantCallFailure";
 
 export type EnrichedOpp = {
   id: string;
@@ -151,7 +152,9 @@ export const GrantDiscoverHub: React.FC<{ onStartApplication?: (id: string) => v
         )}
       </div>
       {opps.isLoading ? <HqLoading /> : opps.isError ? (
-        <p className="hq-muted-text">Could not load opportunities. Try syncing feeds from the dashboard above.</p>
+        <p className="hq-muted-text" role="alert">{grantCallFailureText(opps.error, "Could not load opportunities. Try syncing feeds from the dashboard above.")}</p>
+      ) : (opps.data?.opportunities ?? []).length === 0 ? (
+        <p className="hq-muted-text" role="status">No opportunities match this view. Sync Grants.gov to refresh live data.</p>
       ) : (
         <GrantOpportunityTable opportunities={(opps.data?.opportunities ?? []) as EnrichedOpp[]} onStartApplication={onStartApplication} />
       )}
@@ -191,7 +194,9 @@ export const GrantApplicationsHub: React.FC<{
         active={view}
         onChange={(id) => setView(id as typeof view)}
       />
-      {apps.isLoading ? <HqLoading /> : (
+      {apps.isLoading ? <HqLoading /> : apps.isError ? (
+        <p className="hq-muted-text" role="alert">{grantCallFailureText(apps.error, "Applications could not be loaded.")}</p>
+      ) : (
         <div className="hq-table-scroll" style={{ marginTop: "1rem" }}>
           <table className="hq-table">
             <thead>

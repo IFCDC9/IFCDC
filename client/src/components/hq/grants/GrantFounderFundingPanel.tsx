@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { grantsApi } from "../../../api/grantsApi";
 import { HqPanel } from "../HqPanel";
 import { formatCurrency } from "../../../utils/safeFormat";
+import { grantCallFailureText } from "./grantCallFailure";
 
 type Field<T> = { status: "available"; value: T } | { status: "unavailable"; value: null };
 
@@ -91,7 +92,7 @@ export const GrantFounderFundingPanel: React.FC = () => {
     >
       {view.isLoading && <p className="hq-muted-text">Reading the local grant library…</p>}
       {view.isError && (
-        <p className="hq-muted-text">{(view.error as Error).message || "Founder funding view unavailable"}</p>
+        <p className="hq-muted-text" role="alert">{grantCallFailureText(view.error, "Founder funding view unavailable")}</p>
       )}
       {data && (
         <>

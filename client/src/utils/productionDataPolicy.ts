@@ -1,5 +1,5 @@
 /** True in Vite production builds (Render deploy). */
-export const isProductionClient = import.meta.env.PROD;
+export const isProductionClient = import.meta.env?.PROD === true;
 
 /** Dev-only placeholder for React Query — never use in production. */
 export function devPlaceholder<T>(fallback: T): T | undefined {

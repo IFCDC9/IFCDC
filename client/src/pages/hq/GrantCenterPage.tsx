@@ -10,7 +10,7 @@ import { StatusBadge } from "../../components/hq/StatusBadge";
 import { HqLoading } from "../../components/hq/HqLoading";
 import { formatCurrency } from "../../utils/safeFormat";
 import { lazyWithRetry } from "../../utils/lazyWithRetry";
-import { GrantLibraryPanel, GrantWriterStudioPanel, GrantIntelligencePanel } from "../../components/hq/grants/GrantCenterEnterprisePanels";
+import { GrantLibraryPanel, GrantWriterStudioPanel, GrantIntelligencePanel, GrantOpportunityFinderPanel } from "../../components/hq/grants/GrantCenterEnterprisePanels";
 import { GrantDiscoverHub, GrantApplicationsHub } from "../../components/hq/grants/GrantLifecycleHub";
 import { GrantFullApplicationWorkspace } from "../../components/hq/grants/GrantFullApplicationWorkspace";
 import { GrantEnterprisePipelineHub } from "../../components/hq/grants/GrantEnterprisePipelineHub";
@@ -335,22 +335,20 @@ const GrantCenterPage: React.FC = () => {
 
       <GrantReadOnlyBanner />
 
-      <div id="founder-funding-view" style={{ marginBottom: "1.25rem" }}>
-        <GrantFounderFundingPanel />
-      </div>
-
-      {dashboard.isError && (
-        <HqDataUnavailable
-          title="Grant Center data unavailable"
-          message="The grants dashboard could not load live data from headquarters."
-          detail={(dashboard.error as Error)?.message}
-          onRetry={() => void qc.invalidateQueries({ queryKey: ["grants-dashboard"] })}
-        />
-      )}
-
-      <div className="hq-tab-content hq-fade-in">
+      <div className="hq-tab-content hq-fade-in" data-grant-tab={tab}>
         {tab === "overview" && (
           <>
+            <div id="founder-funding-view" style={{ marginBottom: "1.25rem" }}>
+              <GrantFounderFundingPanel />
+            </div>
+            {dashboard.isError && (
+              <HqDataUnavailable
+                title="Grant Center data unavailable"
+                message="The grants dashboard could not load live data from headquarters."
+                detail={(dashboard.error as Error)?.message}
+                onRetry={() => void qc.invalidateQueries({ queryKey: ["grants-dashboard"] })}
+              />
+            )}
             <HqPanel title="Founder grants briefing" subtitle="Read only. Fixture rows are not live awards.">
               {founderBriefing.isLoading && <HqLoading />}
               {founderBriefing.isError && (
@@ -628,6 +626,9 @@ const GrantCenterPage: React.FC = () => {
 
         {tab === "discover" && (
           <>
+            <div style={{ marginBottom: "1.25rem" }} data-grant-panel="opportunity-finder">
+              <GrantOpportunityFinderPanel onStartApplication={handleStartApplication} />
+            </div>
             <div style={{ marginBottom: "1.25rem" }}>
               <GrantIntelligencePanel onStartApplication={handleStartApplication} />
             </div>
