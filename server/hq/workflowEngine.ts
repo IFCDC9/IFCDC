@@ -557,6 +557,25 @@ function scheduleIntervalMs(schedule: string): number {
   }
 }
 
+/** A pre-fix failure left next_run_at earlier than last_run_at. That screen time is not a new run. */
+export function staleDbBackupNextRun(input: {
+  lastRunAt: string | null;
+  nextRunAt: string | null;
+  scheduleExpr?: string | null;
+}): string | null {
+  if (!input.lastRunAt || !input.nextRunAt) return null;
+  const last = new Date(input.lastRunAt).getTime();
+  const next = new Date(input.nextRunAt).getTime();
+  if (!Number.isFinite(last) || !Number.isFinite(next) || next >= last) return null;
+  return new Date(last + scheduleIntervalMs(input.scheduleExpr ?? "daily")).toISOString();
+}
+
+export function isDbBackupOverlapError(message: string): boolean {
+  return message.includes("a backup is already running");
+}
+
+let dueScheduledRun: Promise<void> | null = null;
+
 function computeNextRunAt(jobKey: string): string {
   const schedules: Record<string, string> = {
     warehouse_snapshot: "hourly",
@@ -572,22 +591,86 @@ function computeNextRunAt(jobKey: string): string {
 
 export async function runDueScheduledJobs(
   actorEmail?: string,
-  opts?: { catchUp?: boolean },
+  opts?: {
+    catchUp?: boolean;
+    now?: number;
+    executeJob?: (
+      jobKey: string,
+      actorEmail?: string,
+      jobOpts?: { catchUp?: boolean },
+    ) => Promise<ScheduledJobOutcome>;
+  },
+): Promise<{ ran: string[]; skipped: string[]; errors: string[] }> {
+  if (dueScheduledRun) {
+    return { ran: [], skipped: ["in_flight"], errors: [] };
+  }
+  let release: () => void = () => undefined;
+  dueScheduledRun = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  try {
+    return await runDueScheduledJobsOnce(actorEmail, opts);
+  } finally {
+    dueScheduledRun = null;
+    release();
+  }
+}
+
+async function runDueScheduledJobsOnce(
+  actorEmail?: string,
+  opts?: {
+    catchUp?: boolean;
+    now?: number;
+    executeJob?: (
+      jobKey: string,
+      actorEmail?: string,
+      jobOpts?: { catchUp?: boolean },
+    ) => Promise<ScheduledJobOutcome>;
+  },
 ): Promise<{ ran: string[]; skipped: string[]; errors: string[] }> {
   await ensureWorkflowTables();
   const db = await getDb();
   const jobs = (await db.all(
-    "SELECT job_key, name, schedule_expr, last_run_at, next_run_at FROM hq_scheduled_jobs WHERE enabled = 1"
-  )) as { job_key: string; name: string; schedule_expr: string; last_run_at: string | null; next_run_at: string | null }[];
+    "SELECT job_key, name, schedule_expr, last_run_at, next_run_at, last_run_status, last_error FROM hq_scheduled_jobs WHERE enabled = 1"
+  )) as {
+    job_key: string;
+    name: string;
+    schedule_expr: string;
+    last_run_at: string | null;
+    next_run_at: string | null;
+    last_run_status: string | null;
+    last_error: string | null;
+  }[];
 
   const ran: string[] = [];
   const skipped: string[] = [];
   const errors: string[] = [];
-  const now = Date.now();
-
+  const now = opts?.now ?? Date.now();
+  const ts = new Date(now).toISOString();
   const catchUp = opts?.catchUp === true;
+  const execute = opts?.executeJob ?? executeScheduledJob;
+  const ordered = [
+    ...jobs.filter((job) => job.job_key === "db_backup"),
+    ...jobs.filter((job) => job.job_key !== "db_backup"),
+  ];
 
-  for (const job of jobs) {
+  for (const job of ordered) {
+    if (job.job_key === "db_backup") {
+      const corrected = staleDbBackupNextRun({
+        lastRunAt: job.last_run_at,
+        nextRunAt: job.next_run_at,
+        scheduleExpr: job.schedule_expr,
+      });
+      if (corrected) {
+        await db.run(
+          "UPDATE hq_scheduled_jobs SET next_run_at = ? WHERE job_key = ?",
+          corrected,
+          job.job_key,
+        );
+        job.next_run_at = corrected;
+      }
+    }
+
     const interval = scheduleIntervalMs(job.schedule_expr ?? "daily");
     const lastRun = job.last_run_at ? new Date(job.last_run_at).getTime() : 0;
     const due = !job.last_run_at || now - lastRun >= interval;
@@ -602,12 +685,13 @@ export async function runDueScheduledJobs(
     }
 
     try {
-      const outcome = await executeScheduledJob(job.job_key, actorEmail, { catchUp });
-      const ts = new Date().toISOString();
+      const outcome = await execute(job.job_key, actorEmail, { catchUp });
       if (job.job_key === "db_backup") {
         const record = dbBackupRunRecord({ ranAt: ts, outcome });
         await persistDbBackupRun(db, job.job_key, record);
-        if (record.lastRunStatus === "success") {
+        if (record.lastRunStatus === "failed") {
+          errors.push(`${job.job_key}: ${record.lastError ?? "Database backup stopped"}`);
+        } else if (record.lastRunStatus === "success") {
           ran.push(job.job_key);
           await logHqAudit({
             action: "scheduled_job_run",
@@ -632,12 +716,19 @@ export async function runDueScheduledJobs(
         actorEmail: actorEmail ?? "system",
       });
     } catch (err) {
-      const message = (err as Error).message;
+      const message = err instanceof Error ? err.message : String(err);
+      if (job.job_key === "db_backup" && isDbBackupOverlapError(message)) {
+        skipped.push(job.job_key);
+        continue;
+      }
       errors.push(`${job.job_key}: ${message}`);
-      const ts = new Date().toISOString();
       if (job.job_key === "db_backup") {
         const record = dbBackupRunRecord({ ranAt: ts, error: message });
-        await persistDbBackupRun(db, job.job_key, record);
+        try {
+          await persistDbBackupRun(db, job.job_key, record);
+        } catch {
+          errors.push(`${job.job_key}: result was not stored`);
+        }
       } else {
         await db.run(
           "UPDATE hq_scheduled_jobs SET last_run_at = ?, last_run_status = 'failed', last_error = ? WHERE job_key = ?",

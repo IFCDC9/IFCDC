@@ -123,7 +123,6 @@ export async function initializeHqModules(founder: FounderSeedConfig): Promise<v
   }, 120_000);
   getOrGenerateDailyBriefing().catch((e) => console.warn("Morning briefing generation skipped:", e?.message));
   await initGoogleOAuth();
-  import("../hq/warehouseScheduler").then(({ startHqScheduler }) => startHqScheduler()).catch(() => undefined);
   // Timers stay. Immediate Grants.gov / pipeline / scoring work does not run on deploy restart.
   Promise.all([
     import("../hq/fundingBootGate"),

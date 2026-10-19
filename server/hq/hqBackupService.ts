@@ -527,6 +527,202 @@ export function getBackupDirPath(): string {
   return getBackupDir();
 }
 
+/**
+ * Accepted October 19 off-server object. Integrity was already checked.
+ * This record does not reopen that file and does not claim full recovery.
+ */
+export const ACCEPTED_OFFSERVER_BACKUP = {
+  objectKey: "daily/2026-10-19/ifcdc-2026-10-19T11-58-23-661Z.db.enc",
+  bucket: "ifcdc-hq-db-backups",
+  capturedAt: "2026-10-19T11:58:23.661Z",
+  sourceBytes: 794116132,
+  ciphertextBytes: 794116132,
+  ciphertextSha256: "82a36aa544d787592e92f29c32241809ac3e35f60c3c6d8b4c7a85eb23b76dd8",
+  plaintextBytes: 794116096,
+  envelopeOverheadBytes: 36,
+  integrityCheck: "ok",
+  userTableCount: 225,
+  scheduledJobRows: 14,
+  backupSnapshotRows: 3,
+  plaintextDeleted: true,
+  productionOverwritten: false,
+  productionDatabaseOpened: false,
+  databaseIntegrity: "passed",
+  applicationRecovery: "readable_scheduled_jobs_and_snapshots",
+  applicationRecoveryAutomatedCriteria: "tested_on_fixture",
+  applicationRecoveryDetail:
+    "Automated recovery criteria were tested on a fixture database. This production object was not opened again. Accepted evidence already showed integrity_check ok and readable hq_scheduled_jobs (14) and hq_backup_snapshots (3) rows. That is not full application recovery.",
+  externalCopy: "not_verified",
+  fullRecoveryVerified: false,
+  offServerRestoreVerified: false,
+} as const;
+
+export const OFFSERVER_BACKUP_EVIDENCE_ACTION = "offserver_backup_evidence";
+
+export type ApplicationRecoveryLevel =
+  | "not_run"
+  | "failed"
+  | "readable_scheduled_jobs_and_snapshots";
+
+export type ApplicationRecoveryAssessment = {
+  databaseIntegrity: "passed" | "failed" | "not_run";
+  applicationRecovery: ApplicationRecoveryLevel;
+  externalCopy: "not_verified";
+  fullRecoveryVerified: false;
+  productionPathOpened: false;
+  queriedTables: string[];
+  detail: string;
+};
+
+export function applicationRecoveryDecision(input: {
+  integrity: string;
+  tableNames: string[];
+  scheduledJobQueryOk: boolean;
+  snapshotQueryOk: boolean;
+}): { databaseIntegrity: "passed" | "failed"; applicationRecovery: ApplicationRecoveryLevel; readApplicationTables: boolean } {
+  if (input.integrity !== "ok") {
+    return { databaseIntegrity: "failed", applicationRecovery: "not_run", readApplicationTables: false };
+  }
+  if (!input.tableNames.includes("hq_scheduled_jobs") || !input.scheduledJobQueryOk) {
+    return { databaseIntegrity: "passed", applicationRecovery: "failed", readApplicationTables: true };
+  }
+  if (!input.tableNames.includes("hq_backup_snapshots") || !input.snapshotQueryOk) {
+    return { databaseIntegrity: "passed", applicationRecovery: "failed", readApplicationTables: true };
+  }
+  return {
+    databaseIntegrity: "passed",
+    applicationRecovery: "readable_scheduled_jobs_and_snapshots",
+    readApplicationTables: true,
+  };
+}
+
+export function assessRestoredApplicationDatabase(
+  filePath: string,
+  productionDbPath: string,
+  openDatabase: (filePath: string) => Database.Database = (target) => new Database(target, { readonly: true, fileMustExist: true }),
+): ApplicationRecoveryAssessment {
+  const resolved = path.resolve(filePath);
+  const production = path.resolve(productionDbPath);
+  if (resolved === production) {
+    return {
+      databaseIntegrity: "not_run",
+      applicationRecovery: "not_run",
+      externalCopy: "not_verified",
+      fullRecoveryVerified: false,
+      productionPathOpened: false,
+      queriedTables: [],
+      detail: "Refused to open the production database path",
+    };
+  }
+  let db: Database.Database | undefined;
+  try {
+    db = openDatabase(resolved);
+    const integrity = String(db.pragma("integrity_check", { simple: true }));
+    const decisionBeforeRead = applicationRecoveryDecision({
+      integrity,
+      tableNames: [],
+      scheduledJobQueryOk: false,
+      snapshotQueryOk: false,
+    });
+    if (!decisionBeforeRead.readApplicationTables) {
+      return {
+        databaseIntegrity: "failed",
+        applicationRecovery: "not_run",
+        externalCopy: "not_verified",
+        fullRecoveryVerified: false,
+        productionPathOpened: false,
+        queriedTables: [],
+        detail: "integrity_check did not pass; application tables were not read",
+      };
+    }
+    const tableRows = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[];
+    const tableNames = tableRows.map((row) => row.name);
+    let scheduledJobQueryOk = false;
+    let snapshotQueryOk = false;
+    const queriedTables: string[] = [];
+    if (tableNames.includes("hq_scheduled_jobs")) {
+      db.prepare("SELECT COUNT(*) AS c FROM hq_scheduled_jobs").get();
+      scheduledJobQueryOk = true;
+      queriedTables.push("hq_scheduled_jobs");
+    }
+    if (tableNames.includes("hq_backup_snapshots")) {
+      db.prepare("SELECT COUNT(*) AS c FROM hq_backup_snapshots").get();
+      snapshotQueryOk = true;
+      queriedTables.push("hq_backup_snapshots");
+    }
+    const decision = applicationRecoveryDecision({
+      integrity,
+      tableNames,
+      scheduledJobQueryOk,
+      snapshotQueryOk,
+    });
+    return {
+      databaseIntegrity: decision.databaseIntegrity,
+      applicationRecovery: decision.applicationRecovery,
+      externalCopy: "not_verified",
+      fullRecoveryVerified: false,
+      productionPathOpened: false,
+      queriedTables,
+      detail: decision.applicationRecovery === "readable_scheduled_jobs_and_snapshots"
+        ? "Opened readonly after integrity_check ok. Readable scheduled-job and snapshot rows are not full application recovery."
+        : "integrity_check passed and a critical application table could not be queried",
+    };
+  } catch {
+    return {
+      databaseIntegrity: "failed",
+      applicationRecovery: "not_run",
+      externalCopy: "not_verified",
+      fullRecoveryVerified: false,
+      productionPathOpened: false,
+      queriedTables: [],
+      detail: "Restored file could not be opened readonly; application tables were not read",
+    };
+  } finally {
+    db?.close();
+  }
+}
+
+function storedOffServerEvidence(metadata: string | null | undefined): typeof ACCEPTED_OFFSERVER_BACKUP | null {
+  if (!metadata) return null;
+  try {
+    const parsed = JSON.parse(metadata) as { objectKey?: string; ciphertextSha256?: string; capturedAt?: string };
+    if (parsed.objectKey !== ACCEPTED_OFFSERVER_BACKUP.objectKey) return null;
+    if (parsed.ciphertextSha256 !== ACCEPTED_OFFSERVER_BACKUP.ciphertextSha256) return null;
+    if (!parsed.capturedAt) return null;
+    return parsed as typeof ACCEPTED_OFFSERVER_BACKUP;
+  } catch {
+    return null;
+  }
+}
+
+export async function persistAcceptedOffServerBackupEvidence(): Promise<void> {
+  const { ensureHqAuditTables } = await import("./hqAuditLog");
+  await ensureHqAuditTables();
+  const db = await getDb();
+  const evidence = ACCEPTED_OFFSERVER_BACKUP;
+  const existing = await db.get<{ id: string }>(
+    "SELECT id FROM hq_audit_log WHERE action = ? AND entity_id = ? LIMIT 1",
+    OFFSERVER_BACKUP_EVIDENCE_ACTION,
+    evidence.objectKey,
+  );
+  if (existing) return;
+  const { auditId } = await import("./hqAuditLog");
+  await db.run(
+    `INSERT INTO hq_audit_log (id, action, entity_type, entity_id, detail, actor_id, actor_email, ip_address, metadata_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    auditId(),
+    OFFSERVER_BACKUP_EVIDENCE_ACTION,
+    "backup",
+    evidence.objectKey,
+    "Accepted off-server backup evidence. Database integrity passed. Application recovery is limited to readable scheduled-job and snapshot rows. External copy is not verified. Full recovery is not verified. Production was not overwritten.",
+    null,
+    "system",
+    null,
+    JSON.stringify(evidence),
+    new Date().toISOString(),
+  );
+}
+
 export async function ensureBackupTables(): Promise<void> {
   const db = await getDb();
   await db.exec(`
@@ -540,6 +736,11 @@ export async function ensureBackupTables(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_hq_backup_created ON hq_backup_snapshots(created_at DESC);
   `);
+  try {
+    await persistAcceptedOffServerBackupEvidence();
+  } catch {
+    console.error("Off-server backup evidence was not stored");
+  }
 }
 
 const MAX_BACKUPS = 3;
@@ -656,35 +857,52 @@ export async function getBackupHealth() {
   const dbSize = dbExists ? fs.statSync(dbPath).size : 0;
   const backupDir = getBackupDir();
   const dirExists = fs.existsSync(backupDir);
+  let stored: { metadata_json: string | null } | undefined;
+  try {
+    stored = await db.get<{ metadata_json: string | null }>(
+      "SELECT metadata_json FROM hq_audit_log WHERE action = ? AND entity_id = ? ORDER BY created_at DESC LIMIT 1",
+      OFFSERVER_BACKUP_EVIDENCE_ACTION,
+      ACCEPTED_OFFSERVER_BACKUP.objectKey,
+    );
+  } catch {
+    stored = undefined;
+  }
+  const evidence = storedOffServerEvidence(stored?.metadata_json) ?? ACCEPTED_OFFSERVER_BACKUP;
+  const offServerAgeHours = (Date.now() - new Date(evidence.capturedAt).getTime()) / 3600000;
 
-  let ageHours: number | null = null;
-  let status: "healthy" | "warning" | "critical" = "critical";
+  let onDiskAgeHours: number | null = null;
+  let onDiskStatus: "healthy" | "warning" | "critical" = "critical";
   if (latest?.created_at) {
-    ageHours = (Date.now() - new Date(latest.created_at).getTime()) / 3600000;
-    if (ageHours <= 24) status = "healthy";
-    else if (ageHours <= 72) status = "warning";
-    else status = "critical";
+    onDiskAgeHours = (Date.now() - new Date(latest.created_at).getTime()) / 3600000;
+    if (onDiskAgeHours <= 24) onDiskStatus = "healthy";
+    else if (onDiskAgeHours <= 72) onDiskStatus = "warning";
+    else onDiskStatus = "critical";
   } else if (dbExists) {
-    status = "warning";
+    onDiskStatus = "warning";
   }
 
+  const onDiskSnapshot = latest
+    ? { filename: latest.filename, createdAt: latest.created_at, sizeBytes: latest.size_bytes, ageHours: onDiskAgeHours ?? 0, status: onDiskStatus }
+    : null;
+
   return {
-    status,
+    status: "warning" as const,
     dbPath: "data/ifcdc.db",
     dbSizeBytes: dbSize,
     backupDir: "data/backups",
     backupDirExists: dirExists,
     restorePointCount: count,
-    lastBackup: latest
-      ? { filename: latest.filename, createdAt: latest.created_at, sizeBytes: latest.size_bytes, ageHours: ageHours ?? 0 }
-      : null,
-    offServerRestoreVerified: false,
+    lastBackup: {
+      filename: evidence.objectKey,
+      createdAt: evidence.capturedAt,
+      sizeBytes: evidence.ciphertextBytes,
+      ageHours: offServerAgeHours,
+    },
+    onDiskSnapshot,
+    offServerBackup: evidence,
+    offServerRestoreVerified: false as const,
     message:
-      status === "healthy"
-        ? "An on-disk snapshot is recent. The off-server backup is not restore-verified."
-        : status === "warning"
-          ? "Schedule or run a backup — last snapshot is aging. The off-server backup is not restore-verified."
-          : "No recent backup — the off-server backup is not restore-verified.",
+      `Latest off-server backup: ${evidence.objectKey}. Database integrity passed. Application recovery is limited to readable scheduled-job and snapshot rows. External copy is not verified. Full recovery is not verified.`,
     timestamp: new Date().toISOString(),
   };
 }
