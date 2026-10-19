@@ -12,7 +12,11 @@ async function apiFetch<T>(path: string, options?: RequestInit & { timeoutMs?: n
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(err.error || "Request failed");
+      const message = typeof err?.error === "string" && err.error.trim() ? err.error.trim() : "Request failed";
+      const error = new Error(message) as Error & { status: number };
+      error.name = "GrantsRequestError";
+      error.status = res.status;
+      throw error;
     }
     return res.json();
   } catch (e) {

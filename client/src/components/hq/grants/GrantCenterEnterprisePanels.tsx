@@ -10,6 +10,7 @@ import { formatCurrency } from "../../../utils/safeFormat";
 import { fmtGrantDeadline, fmtGrantSyncDate } from "../../../utils/grantFormat";
 import { useDebouncedValue } from "../../../hooks/useDebouncedValue";
 import { useGrantManage } from "../../../hooks/useGrantManage";
+import { grantCallFailureText } from "./grantCallFailure";
 
 function QueryError({ message }: { message: string }) {
   return (
@@ -646,6 +647,7 @@ export const GrantOpportunityFinderPanel: React.FC<{
   const [category, setCategory] = useState("");
   const [q, setQ] = useState("");
   const [scoringId, setScoringId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [scores, setScores] = useState<Record<string, Record<string, unknown>>>({});
   const debouncedQ = useDebouncedValue(q, 350);
   const finder = useQuery({
@@ -659,16 +661,24 @@ export const GrantOpportunityFinderPanel: React.FC<{
     onSuccess: (data, id) => {
       setScores((prev) => ({ ...prev, [id]: data.intelligence }));
       setScoringId(null);
+      setActionError(null);
     },
-    onError: () => setScoringId(null),
+    onError: (error) => {
+      setScoringId(null);
+      setActionError(grantCallFailureText(error, "Opportunity score could not be loaded."));
+    },
   });
 
   const startApp = useMutation({
     mutationFn: (opportunityId: string) => grantsApi.startGrantApplication(opportunityId, true),
     onSuccess: (data) => {
+      setActionError(null);
       if (data.applicationId) onStartApplication?.(data.applicationId);
       qc.invalidateQueries({ queryKey: ["grant-applications"] });
       qc.invalidateQueries({ queryKey: ["grant-intelligence-dashboard"] });
+    },
+    onError: (error) => {
+      setActionError(grantCallFailureText(error, "The application workspace could not be opened."));
     },
   });
 
@@ -693,8 +703,11 @@ export const GrantOpportunityFinderPanel: React.FC<{
         ))}
         <input className="hq-input" placeholder="Search opportunities…" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 200, flex: "1 1 160px" }} />
       </div>
+      {actionError && <p className="hq-muted-text" role="alert">{actionError}</p>}
       {finder.isLoading ? <HqLoading /> : finder.isError ? (
-        <QueryError message="Opportunity finder unavailable. Check your connection and retry." />
+        <QueryError message={grantCallFailureText(finder.error, "Opportunity finder unavailable. Check your connection and retry.")} />
+      ) : finder.data && list.length === 0 ? (
+        <p className="hq-muted-text" role="status">No opportunities match. Sync Grants.gov feeds or add opportunities manually.</p>
       ) : (
         <div className="hq-table-scroll">
           <table className="hq-table">
