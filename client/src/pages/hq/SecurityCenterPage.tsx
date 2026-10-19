@@ -59,7 +59,21 @@ const SecurityCenterPage: React.FC = () => {
   });
 
   const data = dashboard.data;
-  const backup = data?.backup as { status?: string; message?: string; lastBackup?: { createdAt?: string; filename?: string } } | undefined;
+  const backup = data?.backup as {
+    status?: string;
+    message?: string;
+    lastBackup?: { createdAt?: string; filename?: string };
+    onDiskSnapshot?: { createdAt?: string; filename?: string } | null;
+    offServerBackup?: {
+      databaseIntegrity?: string;
+      applicationRecovery?: string;
+      externalCopy?: string;
+      fullRecoveryVerified?: boolean;
+    };
+  } | undefined;
+  const recoveryLabel = backup?.offServerBackup?.applicationRecovery === "readable_scheduled_jobs_and_snapshots"
+    ? "readable scheduled-job and snapshot rows"
+    : (backup?.offServerBackup?.applicationRecovery ?? "not run");
 
   function startOneBackup() {
     if (backupClickLock.current || createBackup.isPending) return;
@@ -125,9 +139,22 @@ const SecurityCenterPage: React.FC = () => {
             </HqPanel>
             <HqPanel title="Backup Health" subtitle={backup?.status ?? "—"}>
               <p className="hq-muted-text">{backup?.message}</p>
+              {backup?.offServerBackup && (
+                <ul className="hq-muted-text" style={{ fontSize: "0.8rem", margin: "0.5rem 0", paddingLeft: "1.1rem" }}>
+                  <li>Database integrity: {backup.offServerBackup.databaseIntegrity === "passed" ? "passed" : backup.offServerBackup.databaseIntegrity}</li>
+                  <li>Application recovery: {recoveryLabel}</li>
+                  <li>External copy: {backup.offServerBackup.externalCopy === "not_verified" ? "not verified" : backup.offServerBackup.externalCopy}</li>
+                  <li>Full recovery: {backup.offServerBackup.fullRecoveryVerified ? "verified" : "not verified"}</li>
+                </ul>
+              )}
               {backup?.lastBackup?.createdAt && (
                 <p style={{ fontSize: "0.75rem", color: "var(--hq-text-dim)" }}>
-                  Last: {backup.lastBackup.filename} · {formatDateTime(backup.lastBackup.createdAt)}
+                  Latest off-server backup: {backup.lastBackup.filename} · {formatDateTime(backup.lastBackup.createdAt)}
+                </p>
+              )}
+              {backup?.onDiskSnapshot?.createdAt && (
+                <p style={{ fontSize: "0.75rem", color: "var(--hq-text-dim)" }}>
+                  On-disk snapshot: {backup.onDiskSnapshot.filename} · {formatDateTime(backup.onDiskSnapshot.createdAt)}. This is not the off-server backup.
                 </p>
               )}
               <button type="button" className="hq-btn hq-btn-sm hq-btn-primary" style={{ marginTop: "0.5rem" }} disabled={createBackup.isPending} onClick={startOneBackup}>

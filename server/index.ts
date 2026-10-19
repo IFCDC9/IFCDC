@@ -103,6 +103,12 @@ async function startServer() {
   const { attachHqRealtimeHub } = await import("./hq/hqRealtimeHub");
   attachHqRealtimeHub(server);
 
+  // Arm the due runner before module init. A hang or throw later in init must
+  // not leave the timer unstarted, and a failed import must not be discarded.
+  void import("./hq/warehouseScheduler")
+    .then(({ startHqScheduler }) => startHqScheduler())
+    .catch((err) => console.error("[HQ Scheduler] Failed to start:", err));
+
   const { initializeHqModules } = await import("./bootstrap/initializeHqModules");
   if (!FOUNDER_SEED_PASSWORD) {
     console.error(
