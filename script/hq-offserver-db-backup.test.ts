@@ -330,10 +330,27 @@ test("a scheduled backup stores uploaded_unverified or the gate failure and adva
     });
     assert.equal(uploaded.lastRunStatus, "uploaded_unverified");
     assert.equal(uploaded.lastError, DB_BACKUP_UNVERIFIED_ERROR);
-    assert.equal(uploaded.lastError, "Off-server backup uploaded. Isolated restore has not been approved.");
+    assert.equal(uploaded.lastError, "Off-server backup uploaded. Database integrity has not been checked. Application recovery is pending. External copy is pending. Full recovery is not complete.");
+    assert.equal(uploaded.lastError.includes("approved"), false);
+    assert.equal(uploaded.lastError.includes("Isolated restore"), false);
     assert.equal(uploaded.lastRunAt, ranAt);
     assert.equal(uploaded.nextRunAt, nextDay);
+    assert.equal(uploaded.objectKey, null);
+    assert.equal(uploaded.auditId, null);
     assert.notEqual(uploaded.lastRunStatus, "success");
+    const identified = dbBackupRunRecord({
+      ranAt,
+      outcome: {
+        status: "uploaded_unverified",
+        uploaded: true,
+        objectKey: "daily/2026-10-19/ifcdc-2026-10-19T15-58-58-133Z.db.enc",
+        auditId: "audit-afternoon",
+      },
+    });
+    assert.equal(identified.objectKey, "daily/2026-10-19/ifcdc-2026-10-19T15-58-58-133Z.db.enc");
+    assert.equal(identified.auditId, "audit-afternoon");
+    assert.equal(identified.lastRunStatus, "uploaded_unverified");
+    assert.equal(identified.lastError, DB_BACKUP_UNVERIFIED_ERROR);
 
     let gateMessage = "";
     try {

@@ -202,11 +202,25 @@ const WorkflowAutomationPage: React.FC = () => {
                         Next: {job.next_run_at ? new Date(job.next_run_at).toLocaleString() : "—"}
                         {" · "}Last: {job.last_run_at ? new Date(job.last_run_at).toLocaleString() : "Never"}
                       </div>
-                      {job.lastError && (
+                      {job.backupSnapshot?.lines?.length ? (
+                        <ul className="hq-muted-text" style={{ fontSize: "0.75rem", margin: "0.35rem 0 0", paddingLeft: "1.1rem" }}>
+                          {job.backupSnapshot.lines.map((line) => (
+                            <li key={line}>{line}</li>
+                          ))}
+                        </ul>
+                      ) : job.lastError && job.lastError !== "Off-server backup uploaded. Isolated restore has not been approved." ? (
                         <div style={{ color: "var(--hq-danger)", fontSize: "0.75rem", marginTop: "0.25rem" }}>
                           {job.lastError}
                         </div>
-                      )}
+                      ) : job.lastError ? (
+                        <ul className="hq-muted-text" style={{ fontSize: "0.75rem", margin: "0.35rem 0 0", paddingLeft: "1.1rem" }}>
+                          <li>Verification: unknown</li>
+                          <li>Database integrity: unknown</li>
+                          <li>Application recovery: pending</li>
+                          <li>External copy: pending</li>
+                          <li>Full recovery: false</li>
+                        </ul>
+                      ) : null}
                       <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.5rem", flexWrap: "wrap" }}>
                         <button
                           type="button"

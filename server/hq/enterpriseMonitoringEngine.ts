@@ -604,13 +604,20 @@ export async function buildEnterpriseMonitoringOverview(opts?: {
 
   const jobsTimedOut = scheduledJobs == null;
   const jobsMapped = (scheduledJobs || []).map((raw) => {
-    const j = raw as Record<string, unknown>;
+    const j = raw as Record<string, unknown> & { backupSnapshot?: { lines?: string[] } | null };
+    const storedError = j.lastError != null ? String(j.lastError) : j.last_error != null ? String(j.last_error) : null;
+    const snapshotLines = j.backupSnapshot?.lines?.filter((line) => line.trim());
+    const lastError = snapshotLines?.length
+      ? snapshotLines.join(" · ")
+      : storedError === "Off-server backup uploaded. Isolated restore has not been approved."
+        ? "Verification: unknown. Database integrity: unknown. Application recovery: pending. External copy: pending. Full recovery: false."
+        : storedError;
     return {
       key: String(j.job_key ?? j.key ?? ""),
       name: String(j.name ?? ""),
       enabled: Boolean(j.enabled),
       runStatus: String(j.runStatus ?? j.last_run_status ?? "unknown"),
-      lastError: j.lastError != null ? String(j.lastError) : j.last_error != null ? String(j.last_error) : null,
+      lastError,
       sourceModule: String(j.sourceModule ?? j.source_module ?? "hq"),
     };
   });

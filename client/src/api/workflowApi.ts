@@ -48,6 +48,14 @@ export interface ScheduledJob {
   runStatus?: string;
   lastError?: string | null;
   sourceModule?: string;
+  backupSnapshot?: {
+    objectKey: string | null;
+    databaseIntegrity: "passed" | "unknown";
+    applicationRecovery: "pending" | "failed" | "readable_scheduled_jobs_and_snapshots";
+    externalCopy: "pending";
+    fullRecoveryVerified: false;
+    lines: string[];
+  } | null;
 }
 
 export const workflowApi = {

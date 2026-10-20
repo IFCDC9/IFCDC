@@ -65,7 +65,7 @@ export async function ensureWorkflowTables(): Promise<void> {
     );
   `);
 
-  for (const col of ["last_run_status TEXT", "last_error TEXT", "source_module TEXT"]) {
+  for (const col of ["last_run_status TEXT", "last_error TEXT", "source_module TEXT", "backup_object_key TEXT", "backup_audit_id TEXT"]) {
     try {
       await db.exec(`ALTER TABLE hq_scheduled_jobs ADD COLUMN ${col}`);
     } catch {
