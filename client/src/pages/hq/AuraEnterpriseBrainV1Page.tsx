@@ -49,6 +49,12 @@ function errorMessage(err: unknown): string {
   return "Request failed.";
 }
 
+function operatingUseLabel(id: "payroll" | "hr" | "administration"): string {
+  if (id === "payroll") return "Payroll";
+  if (id === "hr") return "HR";
+  return "Administration";
+}
+
 function severityVariant(severity: string): "danger" | "warning" | "muted" | "success" {
   if (severity === "critical" || severity === "high") return "danger";
   if (severity === "watch" || severity === "action_required") return "warning";
@@ -544,6 +550,42 @@ const AuraEnterpriseBrainV1Page: React.FC = () => {
           )}
           {b?.warning && (
             <p style={{ color: "var(--hq-warning)", marginBottom: "0.75rem", fontSize: "0.85rem" }}>{b.warning}</p>
+          )}
+          {b?.grantsIntelligence && (
+            <div className="hq-panel" style={{ marginBottom: "1rem" }}>
+              <div className="hq-panel-body">
+                <h4 style={{ color: "var(--hq-gold)", marginBottom: "0.5rem" }}>Operating funding list</h4>
+                <p className="hq-muted-text" style={{ fontSize: "0.78rem", marginBottom: "0.75rem" }}>
+                  Read only. Live potential funding with an explicit payroll, HR, or administration yes.
+                  Unknown stays unknown. Fixture rows stay in Grants intelligence.
+                  Submitted applications, awards, and received revenue stay in their current lanes.
+                </p>
+                {b.grantsIntelligence.liveReadFailed && (
+                  <p className="hq-muted-text">{b.grantsIntelligence.liveReadError}</p>
+                )}
+                {(b.grantsIntelligence.operatingFundingList?.items.length ?? 0) === 0 ? (
+                  <p className="hq-muted-text">No live potential-funding row has an explicit payroll, HR, or administration yes.</p>
+                ) : (
+                  <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.85rem" }}>
+                    {(b.grantsIntelligence.operatingFundingList?.items ?? []).map((item) => (
+                      <li key={item.id} style={{ marginBottom: "0.85rem" }}>
+                        <StatusBadge label="LIVE" variant="success" />
+                        <strong>{item.fundingSource}</strong>
+                        <div>Source: {item.source}</div>
+                        <div>Supporting source: {item.supportingSource}</div>
+                        <div>Yes: {item.yesDimensions.map((id) => operatingUseLabel(id)).join(", ")}</div>
+                        <div>Payroll: {item.payroll}</div>
+                        <div>HR: {item.hr}</div>
+                        <div>Administration: {item.administration}</div>
+                        <div>Deadline: {item.deadline}</div>
+                        {item.openEnded && <div>Open-ended</div>}
+                        <div>Next action: {item.nextAction}</div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
           )}
           {b?.grantsIntelligence && (
             <div className="hq-panel" style={{ marginBottom: "1rem" }}>

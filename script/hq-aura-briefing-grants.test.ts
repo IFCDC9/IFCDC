@@ -55,6 +55,7 @@ test("executive daily briefing includes the grants section on the founder path o
   assert.match(daily, /readFounderGrantsBriefing\(null\)/);
   assert.match(daily, /presentDailyBriefingGrants/);
   assert.match(daily, /grantsIntelligence/);
+  assert.match(daily, /operatingFundingList/);
   assert.equal(daily.includes("logAuraBrainV1Action"), false);
   assert.doesNotMatch(daily, /\bfetch\(|https?:\/\//);
   assert.equal(brain.replace(daily, "").includes("readFounderGrantsBriefing"), false);
@@ -62,6 +63,11 @@ test("executive daily briefing includes the grants section on the founder path o
 
   const page = readSource("../client/src/pages/hq/AuraEnterpriseBrainV1Page.tsx");
   assert.match(page, /grantsIntelligence/);
+  assert.match(page, /operatingFundingList/);
+  assert.match(page, /Operating funding list/);
+  assert.match(page, /Supporting source/);
+  assert.match(page, /Next action/);
+  assert.match(page, /Open-ended/);
   assert.match(page, /FIXTURE — not a live opportunity/);
   assert.match(page, /liveReadError/);
   assert.match(page, /Funding classification/);
@@ -93,6 +99,9 @@ test("fixture labels stay, a live temp row is not a fixture, and incomplete or e
   assert.equal(failed.liveReadFailed, true);
   assert.equal(failed.liveReadError, "Grant Center records could not be read.");
   assert.equal(failed.verifiedOpportunityCount, 0);
+  assert.equal(failed.operatingFundingList.label, "potential_funding");
+  assert.equal(failed.operatingFundingList.readOnly, true);
+  assert.equal(failed.operatingFundingList.items.length, 0);
   assert.equal(failed.rows.length > 0, true);
   assert.equal(failed.rows.every((row) => row.source === "fixture"), true);
   assert.equal(failed.rows.every((row) => row.fixtureLabel === FIXTURE_LABEL), true);
@@ -119,6 +128,8 @@ test("fixture labels stay, a live temp row is not a fixture, and incomplete or e
   await db.run(insert, "lane-submitted", "Submitted request", "County funder", "Submitted application. Personnel salaries allowed.", 1000, "2027-06-01", "grants.gov", "Eligible nonprofit.");
   await db.run(insert, "lane-award", "Award notice", "County funder", "Grant award. Personnel salaries allowed.", 2000, "2027-06-01", "grants.gov", "Eligible nonprofit.");
   await db.run(insert, "lane-received", "Cash posted", "County funder", "Received revenue. Personnel salaries allowed.", 3000, "2027-06-01", "grants.gov", "Eligible nonprofit.");
+  await db.run(insert, "live-unknown-uses", "Neighborhood arts program", "City funder", "Potential funding. Eligibility unknown. Neighborhood arts program.", 4000, "2027-09-01", "manual", "Eligible nonprofit.");
+  await db.run(insert, "live-open-ended-payroll", "Seasonal wages", "City funder", "Potential funding. Personnel salaries allowed.", 12000, "open-ended", "foundation", "Eligible nonprofit.");
   try {
     const section = presentDailyBriefingGrants(await readFounderGrantsBriefing(db));
     assert.equal(section.liveReadFailed, false);
@@ -174,6 +185,58 @@ test("fixture labels stay, a live temp row is not a fixture, and incomplete or e
     assert.equal(section.rows.find((row) => row.id === "lane-submitted")?.fundingStatus, "submitted_application");
     assert.equal(section.rows.find((row) => row.id === "lane-award")?.fundingStatus, "award");
     assert.equal(section.rows.find((row) => row.id === "lane-received")?.fundingStatus, "received_revenue");
+
+    const operating = section.operatingFundingList;
+    assert.equal(operating.label, "potential_funding");
+    assert.equal(operating.readOnly, true);
+    const payrollItem = operating.items.find((item) => item.id === "live-county-payroll");
+    const payrollEvidence = live?.eligibilityEvidence.split(";").map((part) => part.trim()).find((part) => part.startsWith("payroll "));
+    const payrollPhrase = payrollEvidence?.slice(payrollEvidence.indexOf(":") + 1).trim();
+    assert.equal(payrollItem?.source, "live");
+    assert.equal(payrollItem?.fixtureLabel, null);
+    assert.equal(payrollItem?.fundingStatus, "potential_funding");
+    assert.equal(payrollItem?.payroll, "yes");
+    assert.equal(payrollItem?.yesDimensions.includes("payroll"), true);
+    assert.equal(payrollItem?.deadline, "2027-06-01");
+    assert.equal(payrollItem?.openEnded, false);
+    assert.equal(payrollItem?.nextAction, live?.recommendedNextAction);
+    assert.equal(payrollItem?.supportingSource.includes(`payroll: ${payrollPhrase}`), true);
+    assert.equal("estimatedAmount" in (payrollItem ?? {}), false);
+    assert.equal("award" in (payrollItem ?? {}), false);
+    assert.equal("endorsement" in (payrollItem ?? {}), false);
+
+    const openEnded = operating.items.find((item) => item.id === "live-open-ended-payroll");
+    const openEndedRow = section.rows.find((row) => row.id === "live-open-ended-payroll");
+    assert.equal(openEnded?.source, "live");
+    assert.equal(openEnded?.openEnded, true);
+    assert.equal(openEnded?.deadline, "open-ended");
+    assert.equal(openEnded?.nextAction, openEndedRow?.recommendedNextAction);
+    assert.equal(openEnded?.payroll, "yes");
+
+    assert.equal(operating.items.some((item) => item.id.startsWith("fixture-") || item.fixtureLabel != null), false);
+    assert.equal(section.rows.some((row) => row.source === "fixture" && /payroll yes/.test(row.allowableExpenses)), true);
+    assert.equal(operating.items.some((item) => item.id === "fixture-sneak"), false);
+
+    const unknown = section.rows.find((row) => row.id === "live-unknown-uses");
+    assert.equal(unknown?.source, "live");
+    assert.equal(unknown?.fundingStatus, "potential_funding");
+    assert.match(unknown?.allowableExpenses ?? "", /payroll UNKNOWN/);
+    assert.match(unknown?.allowableExpenses ?? "", /hr UNKNOWN/);
+    assert.match(unknown?.allowableExpenses ?? "", /administration UNKNOWN/);
+    assert.equal(operating.items.some((item) => item.id === "live-unknown-uses"), false);
+    for (const item of operating.items) {
+      for (const dimension of ["payroll", "hr", "administration"] as const) {
+        assert.equal(item[dimension] === "yes" || item[dimension] === "no" || item[dimension] === "unknown", true);
+        if (item[dimension] === "unknown") assert.equal(item.yesDimensions.includes(dimension), false);
+        assert.equal(String(item[dimension]) === "allowed", false);
+      }
+    }
+    assert.equal(operating.items.some((item) => item.payroll === "unknown" && item.hr === "unknown" && item.administration === "unknown"), false);
+
+    assert.equal(operating.items.some((item) => item.id === "lane-award" || item.id === "lane-received" || item.id === "lane-submitted"), false);
+    assert.equal(section.rows.find((row) => row.id === "lane-award")?.fundingStatus, "award");
+    assert.equal(section.rows.find((row) => row.id === "lane-received")?.fundingStatus, "received_revenue");
+    assert.equal(section.rows.find((row) => row.id === "lane-submitted")?.fundingStatus, "submitted_application");
 
     const operatingAt = section.rows.findIndex((row) => row.id === "live-county-payroll");
     const suppliesAt = section.rows.findIndex((row) => row.id === "live-supplies");
