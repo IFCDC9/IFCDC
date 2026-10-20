@@ -65,12 +65,26 @@ const SecurityCenterPage: React.FC = () => {
     lastBackup?: { createdAt?: string; filename?: string };
     onDiskSnapshot?: { createdAt?: string; filename?: string } | null;
     offServerBackup?: {
+      objectKey?: string;
       databaseIntegrity?: string;
       applicationRecovery?: string;
       externalCopy?: string;
       fullRecoveryVerified?: boolean;
     };
+    offServerEvidence?: {
+      objectKey?: string;
+      databaseIntegrity?: string;
+      applicationRecovery?: string;
+      externalCopy?: string;
+      fullRecoveryVerified?: boolean;
+    }[];
   } | undefined;
+  const separateOffServerEvidence = (backup?.offServerEvidence ?? []).filter((item) => {
+    if (!item.objectKey) return false;
+    if (item.objectKey === backup?.offServerBackup?.objectKey) return false;
+    if (item.objectKey === backup?.lastBackup?.filename) return false;
+    return item.fullRecoveryVerified !== true && item.externalCopy !== "verified";
+  });
   const recoveryLabel = backup?.offServerBackup?.applicationRecovery === "readable_scheduled_jobs_and_snapshots"
     ? "readable scheduled-job and snapshot rows"
     : (backup?.offServerBackup?.applicationRecovery ?? "not run");
@@ -147,6 +161,19 @@ const SecurityCenterPage: React.FC = () => {
                   <li>Full recovery: {backup.offServerBackup.fullRecoveryVerified ? "verified" : "not verified"}</li>
                 </ul>
               )}
+              {separateOffServerEvidence.map((item) => (
+                <div key={item.objectKey}>
+                  <p style={{ fontSize: "0.75rem", color: "var(--hq-text-dim)" }}>
+                    Separate off-server object: {item.objectKey}
+                  </p>
+                  <ul className="hq-muted-text" style={{ fontSize: "0.8rem", margin: "0.5rem 0", paddingLeft: "1.1rem" }}>
+                    <li>Database integrity: {item.databaseIntegrity === "passed" ? "passed" : item.databaseIntegrity}</li>
+                    <li>Application recovery: {item.applicationRecovery === "readable_scheduled_jobs_and_snapshots" ? "readable scheduled-job and snapshot rows" : (item.applicationRecovery ?? "not run")}</li>
+                    <li>External copy: not verified</li>
+                    <li>Full recovery: not verified</li>
+                  </ul>
+                </div>
+              ))}
               {backup?.lastBackup?.createdAt && (
                 <p style={{ fontSize: "0.75rem", color: "var(--hq-text-dim)" }}>
                   Latest off-server backup: {backup.lastBackup.filename} · {formatDateTime(backup.lastBackup.createdAt)}

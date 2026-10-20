@@ -49,6 +49,18 @@ Recorded from evidence already accepted. This change does not download the objec
 - External copy: not verified
 - Full recovery / off-server restore verified: false
 
+## October 19 15:58:58Z object — separate from the morning record
+
+This object does not inherit the 11:58:23Z integrity evidence.
+
+- Object: `daily/2026-10-19/ifcdc-2026-10-19T15-58-58-133Z.db.enc`
+- Bucket: `ifcdc-hq-db-backups`
+- Scheduler status seen for that run: `uploaded_unverified`, `restoreVerified=false`
+- Live Backup Health at `2de4a3d` reads evidence only for the morning object key and falls back to that constant. It cannot show this object before a deploy of per-object evidence.
+- A later record for this key is appended only when its own hashes and `integrity_check` ok are supplied. The morning audit row stays in place.
+- Full recovery stays false. External copy stays not verified.
+- The ciphertext is not on this Mac. The external destination remains `/Volumes/IFCDC HQ Secure Backups/IFCDC-HQ-R2-VERIFIED-2026-10-19/`. Nothing was downloaded or copied there for this object.
+
 ### External copy — not done
 
 `/Volumes/IFCDC HQ Secure Backups` was mounted. The October 17 copy is still at `IFCDC-HQ-R2-VERIFIED-2026-10-17/`. The October 19 ciphertext is not on this Mac. Render deleted the temp file. R2 credentials and `BACKUP_ENCRYPTION_KEY` were not taken from the environment or from the HQ `.env`, and the disk was not searched for them. No file was written to the secure volume, to `/Volumes/IFCDC`, or to any other backup folder.
