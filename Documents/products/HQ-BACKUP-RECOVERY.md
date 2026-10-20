@@ -56,10 +56,12 @@ This object does not inherit the 11:58:23Z integrity evidence.
 - Object: `daily/2026-10-19/ifcdc-2026-10-19T15-58-58-133Z.db.enc`
 - Bucket: `ifcdc-hq-db-backups`
 - Scheduler status seen for that run: `uploaded_unverified`, `restoreVerified=false`
-- Live Backup Health at `2de4a3d` reads evidence only for the morning object key and falls back to that constant. It cannot show this object before a deploy of per-object evidence.
-- A later record for this key is appended only when its own hashes and `integrity_check` ok are supplied. The morning audit row stays in place.
+- Isolated restore reported `ciphertext_match` yes, `plaintext_match` yes, `integrity_check` ok, and database integrity passed. The hash strings were not pasted with that result. They stay on the `database_backup_unverified` audit row for this object key. This record does not copy the morning ciphertext.
+- Application recovery: not confirmed. The isolated restore did not include an application-recovery line, so this object does not receive `readable_scheduled_jobs_and_snapshots`.
 - Full recovery stays false. External copy stays not verified.
-- The ciphertext is not on this Mac. The external destination remains `/Volumes/IFCDC HQ Secure Backups/IFCDC-HQ-R2-VERIFIED-2026-10-19/`. Nothing was downloaded or copied there for this object.
+- Live Backup Health at `2de4a3d` reads evidence only for the morning object key. It cannot show this object until a deploy that includes `persistVerifiedOffServerObjectEvidence`.
+- Byte counts were not pasted. A missing count is stored as unknown. It is not filled from the morning object.
+- The ciphertext is not on this Mac. The external destination remains `/Volumes/IFCDC HQ Secure Backups/IFCDC-HQ-R2-VERIFIED-2026-10-19/ifcdc-2026-10-19T15-58-58-133Z.db.enc`. The morning file still needs its own copy at `/Volumes/IFCDC HQ Secure Backups/IFCDC-HQ-R2-VERIFIED-2026-10-19/ifcdc-2026-10-19T11-58-23-661Z.db.enc`. Nothing was downloaded or copied there.
 
 ### External copy — not done
 

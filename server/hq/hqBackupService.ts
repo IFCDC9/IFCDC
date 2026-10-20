@@ -726,18 +726,22 @@ export async function persistAcceptedOffServerBackupEvidence(): Promise<void> {
 const OFFSERVER_OBJECT_KEY = /^daily\/\d{4}-\d{2}-\d{2}\/ifcdc-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.db\.enc$/;
 const SHA256_HEX = /^[a-f0-9]{64}$/;
 
+export const OFFSERVER_OBJECT_EVIDENCE_RECORDER = "persistVerifiedOffServerObjectEvidence";
+
+export type OffServerObjectApplicationRecovery = ApplicationRecoveryLevel | "not_confirmed";
+
 export type StoredOffServerEvidence = {
   objectKey: string;
   bucket: "ifcdc-hq-db-backups";
   capturedAt: string;
-  sourceBytes: number;
-  ciphertextBytes: number;
+  sourceBytes: number | null;
+  ciphertextBytes: number | null;
   ciphertextSha256: string;
-  plaintextBytes: number;
+  plaintextBytes: number | null;
   plaintextSha256: string | null;
   integrityCheck: "ok";
   databaseIntegrity: "passed";
-  applicationRecovery: ApplicationRecoveryLevel;
+  applicationRecovery: OffServerObjectApplicationRecovery;
   externalCopy: "not_verified";
   fullRecoveryVerified: false;
   offServerRestoreVerified: false;
@@ -764,6 +768,13 @@ export type OffServerEvidenceWriteResult = {
 
 function wholeByteCount(value: number): boolean {
   return Number.isInteger(value) && value >= 0;
+}
+
+/** Unknown sizes stay null. A missing count is not filled from another object. */
+function providedByteCount(value: unknown): number | null | undefined {
+  if (value == null) return null;
+  if (typeof value !== "number" || !wholeByteCount(value)) return undefined;
+  return value;
 }
 
 /** Read one evidence row. A different object key never receives the morning record. */
@@ -794,28 +805,30 @@ export function parseStoredOffServerEvidence(
   if (
     parsed.applicationRecovery !== "not_run" &&
     parsed.applicationRecovery !== "failed" &&
+    parsed.applicationRecovery !== "not_confirmed" &&
     parsed.applicationRecovery !== "readable_scheduled_jobs_and_snapshots"
   ) {
     return null;
   }
   if (typeof parsed.capturedAt !== "string" || !parsed.capturedAt.trim()) return null;
-  if (!wholeByteCount(parsed.sourceBytes as number) || !wholeByteCount(parsed.ciphertextBytes as number) || !wholeByteCount(parsed.plaintextBytes as number)) {
-    return null;
-  }
+  const sourceBytes = providedByteCount(parsed.sourceBytes);
+  const ciphertextBytes = providedByteCount(parsed.ciphertextBytes);
+  const plaintextBytes = providedByteCount(parsed.plaintextBytes);
+  if (sourceBytes === undefined || ciphertextBytes === undefined || plaintextBytes === undefined) return null;
   const plaintextSha256 = parsed.plaintextSha256;
   if (plaintextSha256 != null && (typeof plaintextSha256 !== "string" || !SHA256_HEX.test(plaintextSha256))) return null;
   return {
     objectKey: entityId,
     bucket: "ifcdc-hq-db-backups",
     capturedAt: parsed.capturedAt,
-    sourceBytes: parsed.sourceBytes as number,
-    ciphertextBytes: parsed.ciphertextBytes as number,
+    sourceBytes,
+    ciphertextBytes,
     ciphertextSha256: parsed.ciphertextSha256,
-    plaintextBytes: parsed.plaintextBytes as number,
+    plaintextBytes,
     plaintextSha256: typeof plaintextSha256 === "string" ? plaintextSha256 : null,
     integrityCheck: "ok",
     databaseIntegrity: "passed",
-    applicationRecovery: parsed.applicationRecovery,
+    applicationRecovery: parsed.applicationRecovery as OffServerObjectApplicationRecovery,
     externalCopy: "not_verified",
     fullRecoveryVerified: false,
     offServerRestoreVerified: false,
@@ -834,12 +847,12 @@ export async function persistVerifiedOffServerObjectEvidence(input: {
   capturedAt: string;
   ciphertextSha256: string;
   plaintextSha256?: string | null;
-  sourceBytes: number;
-  ciphertextBytes: number;
-  plaintextBytes: number;
+  sourceBytes?: number | null;
+  ciphertextBytes?: number | null;
+  plaintextBytes?: number | null;
   integrityCheck: string;
   databaseIntegrity: "passed" | "failed" | "not_run";
-  applicationRecovery: ApplicationRecoveryLevel;
+  applicationRecovery: OffServerObjectApplicationRecovery;
 }): Promise<OffServerEvidenceWriteResult> {
   if (input.objectKey === ACCEPTED_OFFSERVER_BACKUP.objectKey) {
     if (input.ciphertextSha256 !== ACCEPTED_OFFSERVER_BACKUP.ciphertextSha256 || input.integrityCheck !== "ok") {
@@ -852,17 +865,23 @@ export async function persistVerifiedOffServerObjectEvidence(input: {
   if (input.integrityCheck !== "ok") return { stored: false, reason: "integrity_check" };
   if (input.databaseIntegrity !== "passed") return { stored: false, reason: "database_integrity" };
   if (!SHA256_HEX.test(input.ciphertextSha256)) return { stored: false, reason: "ciphertext_sha256" };
-  if (input.ciphertextSha256 === ACCEPTED_OFFSERVER_BACKUP.ciphertextSha256) {
+  if (
+    input.ciphertextSha256 === ACCEPTED_OFFSERVER_BACKUP.ciphertextSha256 ||
+    input.plaintextSha256 === ACCEPTED_OFFSERVER_BACKUP.ciphertextSha256
+  ) {
     return { stored: false, reason: "morning_hash" };
   }
   if (input.plaintextSha256 != null && input.plaintextSha256 !== "" && !SHA256_HEX.test(input.plaintextSha256)) {
     return { stored: false, reason: "plaintext_sha256" };
   }
   if (input.plaintextSha256 === "") return { stored: false, reason: "plaintext_sha256" };
-  if (input.applicationRecovery !== "failed" && input.applicationRecovery !== "readable_scheduled_jobs_and_snapshots") {
+  if (input.applicationRecovery !== "not_confirmed") {
     return { stored: false, reason: "application_recovery" };
   }
-  if (!wholeByteCount(input.sourceBytes) || !wholeByteCount(input.ciphertextBytes) || !wholeByteCount(input.plaintextBytes)) {
+  const sourceBytes = providedByteCount(input.sourceBytes);
+  const ciphertextBytes = providedByteCount(input.ciphertextBytes);
+  const plaintextBytes = providedByteCount(input.plaintextBytes);
+  if (sourceBytes === undefined || ciphertextBytes === undefined || plaintextBytes === undefined) {
     return { stored: false, reason: "byte_count" };
   }
   if (typeof input.capturedAt !== "string" || !input.capturedAt.trim()) return { stored: false, reason: "captured_at" };
@@ -881,14 +900,14 @@ export async function persistVerifiedOffServerObjectEvidence(input: {
     objectKey: input.objectKey,
     bucket: "ifcdc-hq-db-backups",
     capturedAt: input.capturedAt,
-    sourceBytes: input.sourceBytes,
-    ciphertextBytes: input.ciphertextBytes,
+    sourceBytes,
+    ciphertextBytes,
     ciphertextSha256: input.ciphertextSha256,
-    plaintextBytes: input.plaintextBytes,
+    plaintextBytes,
     plaintextSha256: input.plaintextSha256 ?? null,
     integrityCheck: "ok",
     databaseIntegrity: "passed",
-    applicationRecovery: input.applicationRecovery,
+    applicationRecovery: "not_confirmed",
     externalCopy: "not_verified",
     fullRecoveryVerified: false,
     offServerRestoreVerified: false,
@@ -902,7 +921,7 @@ export async function persistVerifiedOffServerObjectEvidence(input: {
     OFFSERVER_BACKUP_EVIDENCE_ACTION,
     "backup",
     input.objectKey,
-    "Off-server backup evidence for this object key only. Database integrity passed. External copy is not verified. Full recovery is not verified. Production was not overwritten.",
+    "Off-server backup evidence for this object key only. Database integrity passed. Application recovery is not confirmed. External copy is not verified. Full recovery is not verified. Production was not overwritten.",
     null,
     "system",
     null,
@@ -1071,6 +1090,12 @@ export async function getBackupHealth() {
     return parsed ? [parsed] : [];
   });
   const separateEvidence = offServerEvidence.filter((item) => item.objectKey !== evidence.objectKey);
+  const separateSentence = (item: StoredOffServerEvidence) => {
+    const recovery = item.applicationRecovery === "readable_scheduled_jobs_and_snapshots"
+      ? "Application recovery for that object is limited to readable scheduled-job and snapshot rows."
+      : "Application recovery is not confirmed for that object.";
+    return `Separate off-server object ${item.objectKey}. Database integrity passed for that object only. ${recovery} External copy is not verified. Full recovery is not verified.`;
+  };
   const offServerAgeHours = (Date.now() - new Date(evidence.capturedAt).getTime()) / 3600000;
 
   let onDiskAgeHours: number | null = null;
@@ -1104,9 +1129,10 @@ export async function getBackupHealth() {
     onDiskSnapshot,
     offServerBackup: evidence,
     offServerEvidence,
+    offServerObjectRecorder: OFFSERVER_OBJECT_EVIDENCE_RECORDER,
     offServerRestoreVerified: false as const,
     message: separateEvidence.length
-      ? `Latest off-server backup: ${evidence.objectKey}. Database integrity passed. Application recovery is limited to readable scheduled-job and snapshot rows. External copy is not verified. Full recovery is not verified. ${separateEvidence.map((item) => `Separate off-server object ${item.objectKey}. Database integrity passed for that object only. External copy is not verified. Full recovery is not verified.`).join(" ")}`
+      ? `Latest off-server backup: ${evidence.objectKey}. Database integrity passed. Application recovery is limited to readable scheduled-job and snapshot rows. External copy is not verified. Full recovery is not verified. ${separateEvidence.map(separateSentence).join(" ")}`
       : `Latest off-server backup: ${evidence.objectKey}. Database integrity passed. Application recovery is limited to readable scheduled-job and snapshot rows. External copy is not verified. Full recovery is not verified.`,
     timestamp: new Date().toISOString(),
   };

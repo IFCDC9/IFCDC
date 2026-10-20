@@ -168,7 +168,7 @@ const SecurityCenterPage: React.FC = () => {
                   </p>
                   <ul className="hq-muted-text" style={{ fontSize: "0.8rem", margin: "0.5rem 0", paddingLeft: "1.1rem" }}>
                     <li>Database integrity: {item.databaseIntegrity === "passed" ? "passed" : item.databaseIntegrity}</li>
-                    <li>Application recovery: {item.applicationRecovery === "readable_scheduled_jobs_and_snapshots" ? "readable scheduled-job and snapshot rows" : (item.applicationRecovery ?? "not run")}</li>
+                    <li>Application recovery: {item.applicationRecovery === "readable_scheduled_jobs_and_snapshots" ? "readable scheduled-job and snapshot rows" : item.applicationRecovery === "not_confirmed" ? "not confirmed" : (item.applicationRecovery ?? "not run")}</li>
                     <li>External copy: not verified</li>
                     <li>Full recovery: not verified</li>
                   </ul>

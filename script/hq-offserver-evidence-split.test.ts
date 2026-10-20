@@ -9,6 +9,7 @@ process.env.IFCDC_DATA_DIR = dataDir;
 
 const MORNING_KEY = "daily/2026-10-19/ifcdc-2026-10-19T11-58-23-661Z.db.enc";
 const AFTERNOON_KEY = "daily/2026-10-19/ifcdc-2026-10-19T15-58-58-133Z.db.enc";
+const OTHER_KEY = "daily/2026-10-18/ifcdc-2026-10-18T01-02-03-004Z.db.enc";
 const MORNING_HASH = "82a36aa544d787592e92f29c32241809ac3e35f60c3c6d8b4c7a85eb23b76dd8";
 const AFTERNOON_HASH = "11".repeat(32);
 const AFTERNOON_PLAINTEXT_HASH = "22".repeat(32);
@@ -50,6 +51,12 @@ test("morning evidence stays on its key and the 15:58:58Z key can be stored only
     morningBefore.offServerEvidence.some((item: { objectKey: string }) => item.objectKey === AFTERNOON_KEY),
     false,
   );
+  assert.equal(
+    morningBefore.offServerEvidence.find((item: { objectKey: string }) => item.objectKey === AFTERNOON_KEY),
+    undefined,
+  );
+  assert.equal(morningBefore.offServerBackup.applicationRecovery, "readable_scheduled_jobs_and_snapshots");
+  assert.equal(morningBefore.offServerBackup.sourceBytes, 794116132);
   assert.equal(parseStoredOffServerEvidence(JSON.stringify({
     objectKey: AFTERNOON_KEY,
     bucket: "ifcdc-hq-db-backups",
@@ -97,17 +104,46 @@ test("morning evidence stays on its key and the 15:58:58Z key can be stored only
   assert.equal(failedIntegrity.stored, false);
   assert.equal(failedIntegrity.reason, "integrity_check");
 
+  const copiedRecovery = await persistVerifiedOffServerObjectEvidence({
+    objectKey: AFTERNOON_KEY,
+    capturedAt: "2026-10-19T15:58:58.133Z",
+    ciphertextSha256: AFTERNOON_HASH,
+    plaintextSha256: AFTERNOON_PLAINTEXT_HASH,
+    sourceBytes: null,
+    ciphertextBytes: null,
+    plaintextBytes: null,
+    integrityCheck: "ok",
+    databaseIntegrity: "passed",
+    applicationRecovery: "readable_scheduled_jobs_and_snapshots",
+  });
+  assert.equal(copiedRecovery.stored, false);
+  assert.equal(copiedRecovery.reason, "application_recovery");
+  const inventedBytes = await persistVerifiedOffServerObjectEvidence({
+    objectKey: AFTERNOON_KEY,
+    capturedAt: "2026-10-19T15:58:58.133Z",
+    ciphertextSha256: AFTERNOON_HASH,
+    plaintextSha256: AFTERNOON_PLAINTEXT_HASH,
+    sourceBytes: -1,
+    ciphertextBytes: 1.5,
+    plaintextBytes: Number.NaN,
+    integrityCheck: "ok",
+    databaseIntegrity: "passed",
+    applicationRecovery: "not_confirmed",
+  });
+  assert.equal(inventedBytes.stored, false);
+  assert.equal(inventedBytes.reason, "byte_count");
+
   const stored = await persistVerifiedOffServerObjectEvidence({
     objectKey: AFTERNOON_KEY,
     capturedAt: "2026-10-19T15:58:58.133Z",
     ciphertextSha256: AFTERNOON_HASH,
     plaintextSha256: AFTERNOON_PLAINTEXT_HASH,
-    sourceBytes: 20,
-    ciphertextBytes: 20,
-    plaintextBytes: 16,
+    sourceBytes: null,
+    ciphertextBytes: null,
+    plaintextBytes: null,
     integrityCheck: "ok",
     databaseIntegrity: "passed",
-    applicationRecovery: "readable_scheduled_jobs_and_snapshots",
+    applicationRecovery: "not_confirmed",
   });
   assert.equal(stored.stored, true);
   const duplicate = await persistVerifiedOffServerObjectEvidence({
@@ -115,12 +151,12 @@ test("morning evidence stays on its key and the 15:58:58Z key can be stored only
     capturedAt: "2026-10-19T15:58:58.133Z",
     ciphertextSha256: AFTERNOON_HASH,
     plaintextSha256: AFTERNOON_PLAINTEXT_HASH,
-    sourceBytes: 20,
-    ciphertextBytes: 20,
-    plaintextBytes: 16,
+    sourceBytes: null,
+    ciphertextBytes: null,
+    plaintextBytes: null,
     integrityCheck: "ok",
     databaseIntegrity: "passed",
-    applicationRecovery: "readable_scheduled_jobs_and_snapshots",
+    applicationRecovery: "not_confirmed",
   });
   assert.equal(duplicate.stored, false);
   assert.equal(duplicate.reason, "already_recorded");
@@ -161,7 +197,12 @@ test("morning evidence stays on its key and the 15:58:58Z key can be stored only
     objectKey?: string;
     ciphertextSha256?: string;
     plaintextSha256?: string;
+    sourceBytes?: number | null;
+    ciphertextBytes?: number | null;
+    plaintextBytes?: number | null;
     integrityCheck?: string;
+    databaseIntegrity?: string;
+    applicationRecovery?: string;
     fullRecoveryVerified?: boolean;
     externalCopy?: string;
     offServerRestoreVerified?: boolean;
@@ -170,7 +211,14 @@ test("morning evidence stays on its key and the 15:58:58Z key can be stored only
   assert.equal(afternoonStored.ciphertextSha256, AFTERNOON_HASH);
   assert.notEqual(afternoonStored.ciphertextSha256, MORNING_HASH);
   assert.equal(afternoonStored.plaintextSha256, AFTERNOON_PLAINTEXT_HASH);
+  assert.equal(afternoonStored.sourceBytes, null);
+  assert.equal(afternoonStored.ciphertextBytes, null);
+  assert.equal(afternoonStored.plaintextBytes, null);
+  assert.notEqual(afternoonStored.sourceBytes, 794116132);
   assert.equal(afternoonStored.integrityCheck, "ok");
+  assert.equal(afternoonStored.databaseIntegrity, "passed");
+  assert.equal(afternoonStored.applicationRecovery, "not_confirmed");
+  assert.notEqual(afternoonStored.applicationRecovery, "readable_scheduled_jobs_and_snapshots");
   assert.equal(afternoonStored.fullRecoveryVerified, false);
   assert.equal(afternoonStored.externalCopy, "not_verified");
   assert.equal(afternoonStored.offServerRestoreVerified, false);
@@ -184,9 +232,15 @@ test("morning evidence stays on its key and the 15:58:58Z key can be stored only
   const afternoonEvidence = health.offServerEvidence.find((item: { objectKey: string }) => item.objectKey === AFTERNOON_KEY);
   assert.equal(afternoonEvidence?.ciphertextSha256, AFTERNOON_HASH);
   assert.equal(afternoonEvidence?.integrityCheck, "ok");
+  assert.equal(afternoonEvidence?.databaseIntegrity, "passed");
+  assert.equal(afternoonEvidence?.applicationRecovery, "not_confirmed");
+  assert.notEqual(afternoonEvidence?.applicationRecovery, health.offServerBackup.applicationRecovery);
   assert.equal(afternoonEvidence?.fullRecoveryVerified, false);
   assert.equal(afternoonEvidence?.externalCopy, "not_verified");
   assert.notEqual(afternoonEvidence?.ciphertextSha256, health.offServerBackup.ciphertextSha256);
+  assert.equal(health.offServerEvidence.some((item: { objectKey: string }) => item.objectKey === OTHER_KEY), false);
+  assert.equal(parseStoredOffServerEvidence(afternoonRow?.metadata_json, OTHER_KEY), null);
+  assert.match(health.message, /Application recovery is not confirmed for that object/);
   const stillThere = await db.get<{ id: string; size_bytes: number }>(
     "SELECT id, size_bytes FROM hq_backup_snapshots WHERE id = ?",
     OCTOBER_13_ID,
@@ -204,4 +258,10 @@ test("morning evidence stays on its key and the 15:58:58Z key can be stored only
   assert.equal(fn.includes("DELETE "), false);
   assert.equal(fn.includes("fullRecoveryVerified: false"), true);
   assert.equal(fn.includes("externalCopy: \"not_verified\""), true);
+  assert.equal(fn.includes("applicationRecovery: \"not_confirmed\""), true);
+  assert.equal(fn.includes("applicationRecovery: input.applicationRecovery"), false);
+  const page = readFileSync(new URL("../client/src/pages/hq/SecurityCenterPage.tsx", import.meta.url), "utf8");
+  assert.match(page, /Separate off-server object/);
+  assert.match(page, /not confirmed/);
+  assert.match(page, /Full recovery: not verified/);
 });
