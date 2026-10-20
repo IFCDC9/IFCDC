@@ -544,6 +544,25 @@ export const hqApi = {
         liveReadFailed: boolean;
         liveReadError: string | null;
         verifiedOpportunityCount: number;
+        operatingFundingList: {
+          label: "potential_funding";
+          readOnly: true;
+          items: Array<{
+            id: string;
+            fundingSource: string;
+            source: "live";
+            supportingSource: string;
+            yesDimensions: Array<"payroll" | "hr" | "administration">;
+            payroll: "yes" | "no" | "unknown";
+            hr: "yes" | "no" | "unknown";
+            administration: "yes" | "no" | "unknown";
+            deadline: string;
+            openEnded: boolean;
+            nextAction: string;
+            fundingStatus: "potential_funding";
+            fixtureLabel: null;
+          }>;
+        };
         rows: Array<{
           id: string;
           fundingSource: string;

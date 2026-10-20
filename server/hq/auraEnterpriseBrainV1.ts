@@ -737,6 +737,7 @@ export type ExecutiveDailyBriefingV1 = {
   founderBriefing: import("./grantApplicationTracking").FounderExecutiveBriefing;
   grantsIntelligence: import("./grantRecurringFundingEngine").GrantsIntelligenceBriefing & {
     verifiedOpportunityCount: number;
+    operatingFundingList: import("./grantRecurringFundingEngine").FounderOperatingFundingList;
   };
   cached: boolean;
   source: string;
@@ -809,12 +810,14 @@ export async function buildExecutiveDailyBriefingV1(): Promise<ExecutiveDailyBri
   });
 
   const { presentDailyBriefingGrants, readFounderGrantsBriefing } = await import("./grantRecurringFundingEngine");
-  let grantsIntelligence;
+  let grantsIntelligence: ExecutiveDailyBriefingV1["grantsIntelligence"];
   try {
     const { getDb } = await import("../db");
-    grantsIntelligence = presentDailyBriefingGrants(await readFounderGrantsBriefing(await getDb()));
+    const presented = presentDailyBriefingGrants(await readFounderGrantsBriefing(await getDb()));
+    grantsIntelligence = { ...presented, operatingFundingList: presented.operatingFundingList };
   } catch {
-    grantsIntelligence = presentDailyBriefingGrants(await readFounderGrantsBriefing(null));
+    const presented = presentDailyBriefingGrants(await readFounderGrantsBriefing(null));
+    grantsIntelligence = { ...presented, operatingFundingList: presented.operatingFundingList };
   }
 
   const content =

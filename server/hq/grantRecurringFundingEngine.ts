@@ -1082,9 +1082,91 @@ function existingBriefingPriority(row: GrantsIntelligenceBriefingRow): number {
   return match ? Number(match[1]) : 0;
 }
 
+export type OperatingFundingUse = "payroll" | "hr" | "administration";
+
+export type OperatingFundingListItem = {
+  id: string;
+  fundingSource: string;
+  source: "live";
+  supportingSource: string;
+  yesDimensions: OperatingFundingUse[];
+  payroll: AllowFlag;
+  hr: AllowFlag;
+  administration: AllowFlag;
+  deadline: string;
+  openEnded: boolean;
+  nextAction: string;
+  fundingStatus: "potential_funding";
+  fixtureLabel: null;
+};
+
+export type FounderOperatingFundingList = {
+  label: "potential_funding";
+  readOnly: true;
+  items: OperatingFundingListItem[];
+};
+
+const OPERATING_FUNDING_USES: readonly OperatingFundingUse[] = ["payroll", "hr", "administration"];
+
+function operatingUseStatus(allowableExpenses: string, id: OperatingFundingUse): AllowFlag {
+  const segment = allowableExpenses
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${id} `));
+  const token = segment?.slice(id.length).trim().split(/\s+/)[0]?.toLowerCase();
+  if (token === "yes") return "yes";
+  if (token === "no") return "no";
+  return "unknown";
+}
+
+function operatingUsePhrase(eligibilityEvidence: string, id: OperatingFundingUse): string {
+  const segment = eligibilityEvidence
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${id} `));
+  const phrase = segment?.slice(segment.indexOf(":") + 1).trim();
+  return phrase ? phrase : "UNKNOWN";
+}
+
+function rowAlreadyOpenEnded(deadline: string): boolean {
+  return /\bopen[- ]ended\b|\brolling\b|\bno deadline\b/i.test(deadline);
+}
+
+function deriveOperatingFundingList(rows: readonly GrantsIntelligenceBriefingRow[]): FounderOperatingFundingList {
+  const items: OperatingFundingListItem[] = [];
+  for (const row of rows) {
+    if (row.source !== "live" || row.fixtureLabel != null || row.fundingStatus !== "potential_funding") continue;
+    const payroll = operatingUseStatus(row.allowableExpenses, "payroll");
+    const hr = operatingUseStatus(row.allowableExpenses, "hr");
+    const administration = operatingUseStatus(row.allowableExpenses, "administration");
+    const statusByUse = { payroll, hr, administration };
+    const yesDimensions = OPERATING_FUNDING_USES.filter((id) => statusByUse[id] === "yes");
+    if (yesDimensions.length === 0) continue;
+    items.push({
+      id: row.id,
+      fundingSource: row.fundingSource,
+      source: "live",
+      supportingSource: yesDimensions.map((id) => `${id}: ${operatingUsePhrase(row.eligibilityEvidence, id)}`).join("; "),
+      yesDimensions,
+      payroll,
+      hr,
+      administration,
+      deadline: row.deadline,
+      openEnded: rowAlreadyOpenEnded(row.deadline),
+      nextAction: row.recommendedNextAction,
+      fundingStatus: "potential_funding",
+      fixtureLabel: null,
+    });
+  }
+  return { label: "potential_funding", readOnly: true, items };
+}
+
 export function presentDailyBriefingGrants(
   briefing: GrantsIntelligenceBriefing,
-): GrantsIntelligenceBriefing & { verifiedOpportunityCount: number } {
+): GrantsIntelligenceBriefing & {
+  verifiedOpportunityCount: number;
+  operatingFundingList: FounderOperatingFundingList;
+} {
   const rows = briefing.rows
     .map((row, index) => ({ row, index }))
     .sort((a, b) => existingBriefingPriority(b.row) - existingBriefingPriority(a.row) || a.index - b.index)
@@ -1093,6 +1175,7 @@ export function presentDailyBriefingGrants(
     ...briefing,
     rows,
     verifiedOpportunityCount: rows.filter((row) => row.source === "live" && row.eligible && row.fixtureLabel == null).length,
+    operatingFundingList: deriveOperatingFundingList(rows),
   };
 }
 
