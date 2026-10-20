@@ -17,7 +17,7 @@ export const AURA_OPERATOR = {
   isFounder: false as const,
   founderMode: false as const,
   isHumanLogin: false as const,
-};
+} as const;
 
 export const AURA_STAGE_ONE_PRIORITIES = [
   { id: "funding_opportunities", label: "Funding opportunities", module: "grants", readActionId: "find_grants" },
@@ -48,6 +48,19 @@ export function auraActorDistinctFrom(session: { id?: string | null; email?: str
     && AURA_OPERATOR.email !== email;
 }
 
+/** Exec identity cannot be treated as the Founder, even when a role or flag says otherwise. */
+export function isExcludedExecIdentity(session: {
+  email?: string | null;
+  role?: string | null;
+}): boolean {
+  const role = (session.role || "").toLowerCase();
+  const email = (session.email || "").toLowerCase();
+  return email === HUMAN_EXEC_EMAIL
+    || role === "exec"
+    || role === "executive"
+    || role === "executive_director";
+}
+
 export function founderApprovalAllowed(session: {
   id?: string | null;
   email?: string | null;
@@ -55,9 +68,8 @@ export function founderApprovalAllowed(session: {
   isFounder?: boolean;
 }): boolean {
   const role = (session.role || "").toLowerCase();
-  const email = (session.email || "").toLowerCase();
   if (session.id === AURA_OPERATOR.id) return false;
-  if (email === HUMAN_EXEC_EMAIL || role === "exec" || role === "executive") return false;
+  if (isExcludedExecIdentity(session)) return false;
   return session.isFounder === true && (role === "owner" || role === "founder");
 }
 
