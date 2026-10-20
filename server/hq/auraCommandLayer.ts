@@ -22,6 +22,7 @@ import {
   type AuraActionResult,
 } from "./auraActionRegistry";
 import { buildAuraMemoryContext, recordAuraTurn } from "./auraMemory";
+import { answerWithToolEvidence, isMacEngineeringCapabilityQuestion, MAC_ENGINEERING_CAPABILITY_REPLY } from "./auraCommandReplies";
 import { withOpenAiCredentialFallback, formatOpenAiAuthError, resolveOpenAiCredentials } from "../lib/openaiConfig";
 import {
   buildAuraIdentitySystemBlock,
@@ -312,6 +313,15 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
       poweredBy: "AURA",
       identity: publicIdentitySummary(identity),
     };
+  }
+
+  // Answer capability questions before keywords inside the question trigger an action.
+  if (isMacEngineeringCapabilityQuestion(command)) {
+    const reply = MAC_ENGINEERING_CAPABILITY_REPLY;
+    await recordAuraTurn({ actorEmail: ctx.actorEmail, module: ctx.module, role: "user", content: command });
+    await recordAuraTurn({ actorEmail: ctx.actorEmail, module: ctx.module, role: "assistant", content: reply });
+    await logAuraIdentityAction({ identity, action: "aura_engineering_capabilities", detail: reply.slice(0, 240) });
+    return { reply, actions: [], approvalsCreated: [], poweredBy: "AURA Engineering Capabilities", identity: publicIdentitySummary(identity) };
   }
 
   if (isAuraStageOneRecommendation(command)) {
@@ -978,7 +988,16 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
       }
     }
 
-    let reply = message?.content?.trim() ?? "";
+    // The first model response precedes execution and has not seen the results.
+    // Compose a final answer from evidence, without exposing tools a second time.
+    let reply = executed.length
+      ? await answerWithToolEvidence(command, executed, async (messages) => {
+          const { result: finalResult } = await withOpenAiCredentialFallback(async (_creds, client) =>
+            client.chat.completions.create({ model: MODEL, temperature: 0.2, max_tokens: 1000, messages })
+          );
+          return finalResult.choices[0]?.message?.content;
+        })
+      : message?.content?.trim() ?? "";
     if (!reply) {
       reply = executed.length
         ? executed.map((e) => e.summary).join("\n\n")
