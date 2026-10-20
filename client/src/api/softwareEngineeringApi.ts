@@ -61,6 +61,22 @@ export const softwareEngineeringApi = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ command }),
+      timeoutMs: 180_000,
+    }),
+  assignTask: (instruction: string) =>
+    hqApiFetch<{
+      ok: boolean;
+      status: string;
+      message: string;
+      prUrl: string | null;
+      branch: string | null;
+      tests: { passed: boolean; command: string; exitCode: number | null } | null;
+      productionExecuted: false;
+    }>("/api/hq/aura/software-engineering/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instruction, openPullRequest: true }),
+      timeoutMs: 180_000,
     }),
   decideApproval: (id: string, decision: "approve" | "reject", note?: string) =>
     hqApiFetch(`/api/hq/aura/software-engineering/approvals/${id}/decide`, {

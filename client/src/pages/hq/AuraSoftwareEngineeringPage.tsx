@@ -10,6 +10,7 @@ import { HqPanel } from "../../components/hq/HqPanel";
 import { StatusBadge } from "../../components/hq/StatusBadge";
 import { HqLoading } from "../../components/hq/HqLoading";
 import { HqWidgetErrorBoundary } from "../../components/hq/HqErrorBoundary";
+import AuraRunnerPanel from "../../components/hq/AuraRunnerPanel";
 
 const EMPTY: SeDashboard = {
   generatedAt: new Date(0).toISOString(),
@@ -38,6 +39,8 @@ const AuraSoftwareEngineeringPage: React.FC = () => {
   const qc = useQueryClient();
   const [command, setCommand] = useState("");
   const [commandReply, setCommandReply] = useState<string | null>(null);
+  const [taskInstruction, setTaskInstruction] = useState("");
+  const [taskReply, setTaskReply] = useState<string | null>(null);
 
   const dash = useQuery({
     queryKey: ["aura-se-dashboard"],
@@ -65,6 +68,17 @@ const AuraSoftwareEngineeringPage: React.FC = () => {
     onSuccess: (res) => {
       setCommandReply(res.reply);
       void qc.invalidateQueries({ queryKey: ["aura-se-dashboard"] });
+    },
+  });
+
+  const assignTask = useMutation({
+    mutationFn: (instruction: string) => softwareEngineeringApi.assignTask(instruction),
+    onSuccess: (res) => {
+      setTaskReply(res.prUrl ? `${res.message}` : res.message);
+      void qc.invalidateQueries({ queryKey: ["aura-se-dashboard"] });
+    },
+    onError: (err: Error) => {
+      setTaskReply(err.message);
     },
   });
 
@@ -239,6 +253,43 @@ const AuraSoftwareEngineeringPage: React.FC = () => {
         </HqPanel>
       </div>
 
+      <HqPanel title="Runner connection">
+        <AuraRunnerPanel />
+      </HqPanel>
+      <div style={{ height: "1rem" }} />
+      <HqPanel title="Assign engineering work">
+        <p className="hq-muted-text" style={{ marginTop: 0 }}>
+          AURA writes the note in an isolated worktree, runs the scoped test, and opens a reviewable pull request.
+          She does not merge, deploy, send mail, or submit a grant.
+        </p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!taskInstruction.trim()) return;
+            setTaskReply(null);
+            assignTask.mutate(taskInstruction.trim());
+          }}
+          style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}
+        >
+          <input
+            className="hq-input"
+            style={{ flex: 1, minWidth: 240 }}
+            value={taskInstruction}
+            onChange={(e) => setTaskInstruction(e.target.value)}
+            placeholder="Describe the note AURA should write, test, and open as a pull request"
+            aria-label="Engineering task instruction"
+          />
+          <button type="submit" className="hq-btn hq-btn-primary" disabled={assignTask.isPending}>
+            Assign to AURA
+          </button>
+        </form>
+        {taskReply && (
+          <p style={{ marginTop: "0.75rem", whiteSpace: "pre-wrap" }}>{taskReply}</p>
+        )}
+      </HqPanel>
+
+      <div style={{ height: "1rem" }} />
+
       <HqPanel title="Founder command">
         <form
           onSubmit={(e) => {
@@ -253,7 +304,7 @@ const AuraSoftwareEngineeringPage: React.FC = () => {
             style={{ flex: 1, minWidth: 240 }}
             value={command}
             onChange={(e) => setCommand(e.target.value)}
-            placeholder="e.g. Check Software Division health and compare GitHub with Render"
+            placeholder="e.g. assign engineering task: record that Headquarters can open a tested pull request"
           />
           <button type="submit" className="hq-btn hq-btn-primary" disabled={runCommand.isPending}>
             Run

@@ -19,17 +19,30 @@ import { getIndexStats, refreshCodeIndex, searchCodeIndex } from "../hq/auraCode
 import { runSoftwareEngineeringTests } from "../hq/auraSoftwareTestRunner";
 import { getLocalGitStatus, summarizeWorkingDiff } from "../hq/auraSoftwareGitEngine";
 import { ensureAuraSoftwareEngineeringTables } from "../hq/auraSoftwareEngineeringSchema";
+import { engineeringApprovalAllowed, runEngineeringTask } from "../hq/auraEngineeringWorkflow";
+import auraRunnerRouter from "./auraRunner.routes";
 
 const router = Router();
+router.use(auraRunnerRouter);
 
 function isFounder(req: Request): boolean {
-  const u = req.hqUser as { role?: string; email?: string; founderMode?: boolean } | undefined;
-  if (!u) return false;
-  if (u.founderMode) return true;
-  if (u.role === "owner" || u.role === "founder") return true;
-  const email = (u.email || "").toLowerCase();
-  const master = (process.env.MASTER_OWNER_EMAIL || "service@ifcdc.org").toLowerCase();
-  return email === master;
+  const u = req.hqUser as { id?: string; role?: string; email?: string; founderMode?: boolean } | undefined;
+  if (!u?.id || !u.email || !u.role) return false;
+  return engineeringApprovalAllowed({
+    id: u.id,
+    email: u.email,
+    role: u.role,
+    founderMode: u.founderMode,
+  });
+}
+
+function taskRequester(req: Request) {
+  const u = req.hqUser;
+  return {
+    id: u?.id || "",
+    email: u?.email || "",
+    role: u?.role || "",
+  };
 }
 
 router.get("/dashboard", hqAuthRequired, requireHQModule("software_division"), async (_req, res) => {
@@ -174,9 +187,62 @@ router.get("/git/diff", hqAuthRequired, requireHQModule("software_division"), as
   res.json(await summarizeWorkingDiff());
 });
 
+router.post("/tasks", hqAuthRequired, async (req: Request, res: Response) => {
+  const instruction = String(req.body?.instruction || "").trim();
+  const edits = Array.isArray(req.body?.edits)
+    ? req.body.edits
+        .filter((edit: { path?: unknown; content?: unknown }) => typeof edit?.path === "string" && typeof edit?.content === "string")
+        .map((edit: { path: string; content: string }) => ({ path: edit.path, content: edit.content }))
+    : undefined;
+  const result = await runEngineeringTask({
+    requester: taskRequester(req),
+    instruction,
+    edits,
+    testCommand: typeof req.body?.testCommand === "string" ? req.body.testCommand : undefined,
+    openPullRequest: req.body?.openPullRequest === true,
+  });
+  const status = result.status === "missing_access" ? 403 : result.status === "success" ? 201 : 400;
+  res.status(status).json({
+    ok: result.ok,
+    status: result.status,
+    message: result.message,
+    requester: result.requester,
+    operator: result.operator,
+    files: result.files,
+    branch: result.branch,
+    commitSha: result.commitSha,
+    prUrl: result.prUrl,
+    tests: result.tests,
+    productionExecuted: result.productionExecuted,
+  });
+});
+
 router.post("/command", hqAuthRequired, requireHQModule("software_division"), async (req: Request, res: Response) => {
   const command = String(req.body?.command || "").trim();
   if (!command) return res.status(400).json({ error: "command is required" });
+  if (/^assign engineering task\b/i.test(command)) {
+    const instruction = command.replace(/^assign engineering task:?\s*/i, "").trim();
+    const result = await runEngineeringTask({
+      requester: taskRequester(req),
+      instruction,
+      openPullRequest: true,
+    });
+    const status = result.status === "missing_access" ? 403 : result.status === "success" ? 200 : 400;
+    return res.status(status).json({
+      reply: result.message,
+      action: result.status,
+      data: {
+        requester: result.requester,
+        operator: result.operator,
+        files: result.files,
+        branch: result.branch,
+        commitSha: result.commitSha,
+        prUrl: result.prUrl,
+        tests: result.tests,
+        productionExecuted: result.productionExecuted,
+      },
+    });
+  }
   const result = await handleSoftwareEngineeringCommand({
     command,
     actorEmail: req.hqUser?.email,

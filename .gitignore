@@ -1,4 +1,6 @@
 node_modules
+.aura-se-workspaces/
+aura-runner.json
 dist
 .DS_Store
 server/public
