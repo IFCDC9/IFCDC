@@ -48,6 +48,8 @@ import {
   executeRunLiveGrantWorkflow,
   executeConfirmGrantPortalSubmission,
   executeMonitorGrantApplication,
+  createInternalExecutiveFollowUp,
+  type ExecutiveFollowUpResult,
 } from "./auraExecutiveOperations";
 
 export type AuraActionKind = "read" | "prepare" | "execute";
@@ -106,6 +108,30 @@ function str(v: unknown): string | undefined {
 
 function ctxRef(ctx: AuraActionContext, key: string): string | undefined {
   return str(ctx.contextRef?.[key]);
+}
+
+function followUpIdentity(ctx: AuraActionContext) {
+  if (ctx.identity) {
+    return {
+      userId: ctx.identity.userId,
+      email: ctx.identity.email,
+      role: ctx.identity.legacyRole,
+      isFounder: ctx.identity.isFounder,
+    };
+  }
+  const email = ctx.actorEmail.toLowerCase();
+  const founder = email === (process.env.MASTER_OWNER_EMAIL || "service@ifcdc.org").toLowerCase();
+  return { email, role: founder ? "owner" : "employee", isFounder: founder };
+}
+
+function followUpActionResult(result: ExecutiveFollowUpResult): AuraActionResult {
+  const failed = result.outcome === "failure" || result.outcome === "missing_access";
+  return {
+    status: failed ? "error" : result.code === "created" ? "prepared" : "done",
+    summary: result.summary,
+    data: result,
+    navigation: result.code === "created" ? APPROVAL_LINK : undefined,
+  };
 }
 
 /** High-impact irreversible verbs — stage for Founder confirmation (not casual email/SMS). */
@@ -603,10 +629,21 @@ const createTask: AuraAction = {
   kind: "prepare",
   description: "Create an executive task assigned to a team member. Appears in Workflow Automation.",
   parameters: {
-    title: { type: "string", description: "Task title (required)." },
-    assignedTo: { type: "string", description: "Assignee email. Optional (defaults to founder)." },
+    title: { type: "string", description: "Task title (required unless linking an operating-funding follow-up)." },
+    assignedTo: { type: "string", description: "Assignee email. Optional (defaults to the signed-in actor)." },
+    linkOperatingFunding: {
+      type: "boolean",
+      description: "When true, review the daily briefing operating-funding list and create a Founder-only internal follow-up. Does not send, submit, or spend.",
+    },
   },
   async run(args, ctx) {
+    if (args.linkOperatingFunding === true) {
+      return followUpActionResult(await createInternalExecutiveFollowUp({
+        identity: followUpIdentity(ctx),
+        title: str(args.title),
+        linkOperatingFunding: true,
+      }));
+    }
     const title = str(args.title);
     if (!title) return { status: "error", summary: "What should the task be?" };
     const result = await executeCopilotAutomation("task_assignment", {
@@ -619,6 +656,29 @@ const createTask: AuraAction = {
       data: result,
       navigation: APPROVAL_LINK,
     };
+  },
+};
+
+const createInternalFollowUp: AuraAction = {
+  id: "create_internal_follow_up",
+  label: "Create Internal Follow-up",
+  module: "executive",
+  kind: "prepare",
+  description:
+    "Founder-only internal HQ follow-up assigned to the Founder. Reviews the same operating-funding list as the daily briefing when linking. Does not send mail, submit a grant, or spend.",
+  parameters: {
+    title: { type: "string", description: "Optional title. A linked follow-up names the opportunity without adding an amount." },
+    linkOperatingFunding: {
+      type: "boolean",
+      description: "True reviews the operating-funding list and links the first qualifying opportunity. False creates an unlinked internal Founder task.",
+    },
+  },
+  async run(args, ctx) {
+    return followUpActionResult(await createInternalExecutiveFollowUp({
+      identity: followUpIdentity(ctx),
+      title: str(args.title),
+      linkOperatingFunding: args.linkOperatingFunding !== false,
+    }));
   },
 };
 
@@ -1916,6 +1976,7 @@ export const AURA_ACTIONS: AuraAction[] = [
   generateReport,
   navigate,
   createTask,
+  createInternalFollowUp,
   explain,
   prepareForApproval,
   fixWorkflow,
