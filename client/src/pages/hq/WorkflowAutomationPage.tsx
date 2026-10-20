@@ -214,7 +214,8 @@ const WorkflowAutomationPage: React.FC = () => {
                         </div>
                       ) : job.lastError ? (
                         <ul className="hq-muted-text" style={{ fontSize: "0.75rem", margin: "0.35rem 0 0", paddingLeft: "1.1rem" }}>
-                          <li>Database integrity: not checked</li>
+                          <li>Verification: unknown</li>
+                          <li>Database integrity: unknown</li>
                           <li>Application recovery: pending</li>
                           <li>External copy: pending</li>
                           <li>Full recovery: false</li>

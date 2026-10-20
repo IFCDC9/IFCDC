@@ -610,7 +610,7 @@ export async function buildEnterpriseMonitoringOverview(opts?: {
     const lastError = snapshotLines?.length
       ? snapshotLines.join(" · ")
       : storedError === "Off-server backup uploaded. Isolated restore has not been approved."
-        ? "Database integrity: not checked. Application recovery: pending. External copy: pending. Full recovery: false."
+        ? "Verification: unknown. Database integrity: unknown. Application recovery: pending. External copy: pending. Full recovery: false."
         : storedError;
     return {
       key: String(j.job_key ?? j.key ?? ""),

@@ -35,14 +35,15 @@ export async function logHqAudit(opts: {
   actorEmail?: string;
   ipAddress?: string;
   metadata?: Record<string, unknown>;
-}): Promise<void> {
+}): Promise<string | null> {
+  const id = auditId();
   try {
     await ensureHqAuditTables();
     const db = await getDb();
     await db.run(
       `INSERT INTO hq_audit_log (id, action, entity_type, entity_id, detail, actor_id, actor_email, ip_address, metadata_json, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      auditId(),
+      id,
       opts.action,
       opts.entityType,
       opts.entityId ?? null,
@@ -53,8 +54,10 @@ export async function logHqAudit(opts: {
       opts.metadata ? JSON.stringify(opts.metadata) : null,
       new Date().toISOString()
     );
+    return id;
   } catch (err) {
     console.error("HQ audit log error:", err);
+    return null;
   }
 }
 

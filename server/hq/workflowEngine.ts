@@ -104,10 +104,8 @@ export const DB_BACKUP_UNVERIFIED_ERROR =
 export const DB_BACKUP_APPROVAL_SENTENCE =
   "Off-server backup uploaded. Isolated restore has not been approved.";
 
-const BACKUP_RUN_MATCH_MS = 2 * 60 * 60 * 1000;
-const BACKUP_OBJECT_STAMP = /ifcdc-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z\.db\.enc$/;
-
 export type BackupRunAudit = {
+  id?: string | null;
   action: string;
   detail: string | null;
   createdAt: string;
@@ -124,7 +122,7 @@ export type BackupObjectEvidence = {
 
 export type DatabaseBackupSnapshotCard = {
   objectKey: string | null;
-  databaseIntegrity: "passed" | "not_checked";
+  databaseIntegrity: "passed" | "unknown";
   applicationRecovery: "pending" | "failed" | "readable_scheduled_jobs_and_snapshots";
   externalCopy: "pending";
   fullRecoveryVerified: false;
@@ -139,62 +137,27 @@ export function objectKeyFromBackupAuditDetail(detail: string | null | undefined
   return objectKey;
 }
 
-export function embeddedBackupObjectTime(objectKey: string): number | null {
-  const match = objectKey.match(BACKUP_OBJECT_STAMP);
-  if (!match) return null;
-  const stamp = Date.parse(`${match[1]}T${match[2]}:${match[3]}:${match[4]}.${match[5]}Z`);
-  return Number.isFinite(stamp) ? stamp : null;
-}
-
-function closestBackupObject(
-  lastRunAt: string,
-  candidates: { objectKey: string; stamps: number[] }[],
-): string | null {
-  const last = Date.parse(lastRunAt);
-  if (!Number.isFinite(last)) return null;
-  const ranked = candidates
-    .map((candidate) => {
-      const distances = candidate.stamps.filter((stamp) => Number.isFinite(stamp)).map((stamp) => Math.abs(stamp - last));
-      if (!distances.length) return null;
-      return { objectKey: candidate.objectKey, distance: Math.min(...distances) };
-    })
-    .filter((candidate): candidate is { objectKey: string; distance: number } => candidate != null && candidate.distance <= BACKUP_RUN_MATCH_MS)
-    .sort((a, b) => a.distance - b.distance);
-  return ranked[0]?.objectKey ?? null;
+function storedBackupObjectKey(value: string | null | undefined): string | null {
+  if (!value?.trim() || /\s/.test(value)) return null;
+  return objectKeyFromBackupAuditDetail(`object=${value.trim()}`);
 }
 
 /**
- * The scheduler row has no object key. Use the unverified audit for this run,
- * and only then an evidence row whose own timestamp is this run. A different
- * object's integrity is not attached.
+ * Evidence is loaded only when this run record stores the object key or the
+ * audit id. A timestamp near last_run_at is not a match, even for one upload.
  */
 export function objectKeyForScheduledBackupRun(input: {
-  lastRunAt: string | null;
-  audits: BackupRunAudit[];
-  evidence?: BackupObjectEvidence[];
+  storedObjectKey?: string | null;
+  storedAuditId?: string | null;
+  audits?: BackupRunAudit[];
 }): string | null {
-  if (!input.lastRunAt) return null;
-  const fromAudits = closestBackupObject(
-    input.lastRunAt,
-    input.audits
-      .filter((row) => row.action === "database_backup_unverified")
-      .flatMap((row) => {
-        const objectKey = objectKeyFromBackupAuditDetail(row.detail);
-        if (!objectKey) return [];
-        const embedded = embeddedBackupObjectTime(objectKey);
-        const created = Date.parse(row.createdAt);
-        return [{ objectKey, stamps: [embedded ?? Number.NaN, created] }];
-      }),
-  );
-  if (fromAudits) return fromAudits;
-  return closestBackupObject(
-    input.lastRunAt,
-    (input.evidence ?? []).map((item) => {
-      const embedded = embeddedBackupObjectTime(item.objectKey);
-      const captured = Date.parse(item.capturedAt);
-      return { objectKey: item.objectKey, stamps: [embedded ?? Number.NaN, captured] };
-    }),
-  );
+  const stored = storedBackupObjectKey(input.storedObjectKey);
+  if (stored) return stored;
+  const auditId = input.storedAuditId?.trim() ?? "";
+  if (!auditId) return null;
+  const row = (input.audits ?? []).find((audit) => audit.id === auditId);
+  if (!row || row.action !== "database_backup_unverified") return null;
+  return objectKeyFromBackupAuditDetail(row.detail);
 }
 
 export function databaseBackupSnapshotCard(input: {
@@ -236,13 +199,14 @@ export function databaseBackupSnapshotCard(input: {
   }
   return {
     objectKey: input.objectKey,
-    databaseIntegrity: "not_checked",
+    databaseIntegrity: "unknown",
     applicationRecovery: "pending",
     externalCopy: "pending",
     fullRecoveryVerified: false,
     lines: [
       input.objectKey ? `Object: ${input.objectKey}` : "Object: not recorded for this run",
-      "Database integrity: not checked",
+      "Verification: unknown",
+      "Database integrity: unknown",
       "Application recovery: pending",
       "External copy: pending",
       "Full recovery: false",
@@ -256,16 +220,18 @@ async function backupSnapshotForScheduledRow(
 ): Promise<DatabaseBackupSnapshotCard | null> {
   const lastRunStatus = job.last_run_status != null ? String(job.last_run_status) : null;
   const lastError = job.last_error != null ? String(job.last_error) : null;
-  const lastRunAt = job.last_run_at != null ? String(job.last_run_at) : null;
+  const storedObjectKey = job.backup_object_key != null ? String(job.backup_object_key) : null;
+  const storedAuditId = job.backup_audit_id != null ? String(job.backup_audit_id) : null;
   if (databaseBackupSnapshotCard({ lastRunStatus, lastError, objectKey: null, evidence: null }) == null) return null;
   let audits: BackupRunAudit[] = [];
   let evidence: BackupObjectEvidence[] = [];
   try {
     const { OFFSERVER_BACKUP_EVIDENCE_ACTION, parseStoredOffServerEvidence } = await import("./hqBackupService");
     const rows = (await db.all(
-      "SELECT action, detail, entity_id, metadata_json, created_at FROM hq_audit_log WHERE action IN ('database_backup_unverified', ?) ORDER BY created_at ASC",
+      "SELECT id, action, detail, entity_id, metadata_json, created_at FROM hq_audit_log WHERE action IN ('database_backup_unverified', ?) ORDER BY created_at ASC",
       OFFSERVER_BACKUP_EVIDENCE_ACTION,
     )) as {
+      id?: string | null;
       action?: string;
       detail?: string | null;
       entity_id?: string | null;
@@ -275,6 +241,7 @@ async function backupSnapshotForScheduledRow(
     audits = rows
       .filter((row) => row.action === "database_backup_unverified")
       .map((row) => ({
+        id: row.id ?? null,
         action: "database_backup_unverified",
         detail: row.detail ?? null,
         createdAt: row.created_at ?? "",
@@ -288,8 +255,8 @@ async function backupSnapshotForScheduledRow(
     audits = [];
     evidence = [];
   }
-  const objectKey = objectKeyForScheduledBackupRun({ lastRunAt, audits, evidence });
-  const matched = evidence.find((item) => item.objectKey === objectKey) ?? null;
+  const objectKey = objectKeyForScheduledBackupRun({ storedObjectKey, storedAuditId, audits });
+  const matched = objectKey ? evidence.find((item) => item.objectKey === objectKey) ?? null : null;
   return databaseBackupSnapshotCard({ lastRunStatus, lastError, objectKey, evidence: matched });
 }
 
@@ -297,6 +264,8 @@ export type ScheduledJobOutcome = {
   status: "ok" | "uploaded_unverified";
   /** Set only after createDatabaseBackup returns, which is after the off-server upload. */
   uploaded?: boolean;
+  objectKey?: string | null;
+  auditId?: string | null;
 };
 
 export type DbBackupRunRecord = {
@@ -304,21 +273,40 @@ export type DbBackupRunRecord = {
   nextRunAt: string;
   lastRunStatus: "success" | "uploaded_unverified" | "failed";
   lastError: string | null;
+  objectKey: string | null;
+  auditId: string | null;
 };
 
 /** Next screen time for db_backup: the stored last_run_at plus the daily interval. */
+function backupIdentityFromOutcome(input: {
+  outcome?: ScheduledJobOutcome;
+  error?: string;
+}): { objectKey: string | null; auditId: string | null } {
+  if (input.error != null) return { objectKey: null, auditId: null };
+  const uploaded = input.outcome?.status === "uploaded_unverified"
+    || (input.outcome?.status === "ok" && input.outcome.uploaded === true);
+  if (!uploaded) return { objectKey: null, auditId: null };
+  return {
+    objectKey: objectKeyFromBackupAuditDetail(input.outcome?.objectKey ? `object=${input.outcome.objectKey}` : null),
+    auditId: input.outcome?.auditId?.trim() || null,
+  };
+}
+
 export function dbBackupRunRecord(input: {
   ranAt: string;
   outcome?: ScheduledJobOutcome;
   error?: string;
 }): DbBackupRunRecord {
   const nextRunAt = new Date(new Date(input.ranAt).getTime() + scheduleIntervalMs("daily")).toISOString();
+  const identity = backupIdentityFromOutcome(input);
   if (input.error != null) {
     return {
       lastRunAt: input.ranAt,
       nextRunAt,
       lastRunStatus: "failed",
       lastError: input.error,
+      objectKey: null,
+      auditId: null,
     };
   }
   if (input.outcome?.status === "uploaded_unverified") {
@@ -327,6 +315,8 @@ export function dbBackupRunRecord(input: {
       nextRunAt,
       lastRunStatus: "uploaded_unverified",
       lastError: DB_BACKUP_UNVERIFIED_ERROR,
+      objectKey: identity.objectKey,
+      auditId: identity.auditId,
     };
   }
   if (input.outcome?.status === "ok" && input.outcome.uploaded === true) {
@@ -335,6 +325,8 @@ export function dbBackupRunRecord(input: {
       nextRunAt,
       lastRunStatus: "success",
       lastError: null,
+      objectKey: identity.objectKey,
+      auditId: identity.auditId,
     };
   }
   return {
@@ -342,6 +334,8 @@ export function dbBackupRunRecord(input: {
     nextRunAt,
     lastRunStatus: "failed",
     lastError: "Database backup stopped: off-server upload did not happen",
+    objectKey: null,
+    auditId: null,
   };
 }
 
@@ -352,17 +346,19 @@ type ScheduledJobWriter = {
 async function persistDbBackupRun(db: ScheduledJobWriter, jobKey: string, record: DbBackupRunRecord): Promise<void> {
   if (record.lastRunStatus === "uploaded_unverified") {
     await db.run(
-      "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'uploaded_unverified', last_error = ? WHERE job_key = ?",
+      "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'uploaded_unverified', last_error = ?, backup_object_key = ?, backup_audit_id = ? WHERE job_key = ?",
       record.lastRunAt,
       record.nextRunAt,
       record.lastError,
+      record.objectKey,
+      record.auditId,
       jobKey,
     );
     return;
   }
   if (record.lastRunStatus === "failed") {
     await db.run(
-      "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'failed', last_error = ? WHERE job_key = ?",
+      "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'failed', last_error = ?, backup_object_key = NULL, backup_audit_id = NULL WHERE job_key = ?",
       record.lastRunAt,
       record.nextRunAt,
       record.lastError,
@@ -371,9 +367,11 @@ async function persistDbBackupRun(db: ScheduledJobWriter, jobKey: string, record
     return;
   }
   await db.run(
-    "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'success', last_error = NULL WHERE job_key = ?",
+    "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'success', last_error = NULL, backup_object_key = ?, backup_audit_id = ? WHERE job_key = ?",
     record.lastRunAt,
     record.nextRunAt,
+    record.objectKey,
+    record.auditId,
     jobKey,
   );
 }
@@ -985,8 +983,13 @@ async function executeScheduledJob(
       const { assertOffServerUploadAuthorized, createDatabaseBackup } = await import("./hqBackupService");
       assertOffServerUploadAuthorized();
       const snapshot = await createDatabaseBackup(actorEmail ?? "scheduled");
-      if (!snapshot.restoreVerified) return { status: "uploaded_unverified", uploaded: true };
-      return { status: "ok", uploaded: true };
+      const recorded = {
+        uploaded: true as const,
+        objectKey: snapshot.filename,
+        auditId: snapshot.auditId,
+      };
+      if (!snapshot.restoreVerified) return { status: "uploaded_unverified", ...recorded };
+      return { status: "ok", ...recorded };
     }
     case "executive_report_daily": {
       const { buildExecutiveReport } = await import("./analyticsReporting");

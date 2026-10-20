@@ -960,10 +960,11 @@ export async function createDatabaseBackup(triggeredBy = "system"): Promise<{
   createdAt: string;
   restoreVerified: false;
   status: "uploaded_unverified";
+  auditId: string | null;
 }> {
   const { logHqAudit } = await import("./hqAuditLog");
   const audit = async (action: string, detail: string) => {
-    await logHqAudit({
+    return logHqAudit({
       action,
       entityType: "backup",
       entityId: "db_backup",
@@ -983,7 +984,7 @@ export async function createDatabaseBackup(triggeredBy = "system"): Promise<{
       triggeredBy,
       verifyRestored: async () => false,
     });
-    await audit(
+    const auditId = await audit(
       "database_backup_unverified",
       `object=${result.objectKey} plaintext_sha256=${result.plaintextSha256} ciphertext_sha256=${result.ciphertextSha256} restoreVerified=false`,
     );
@@ -994,6 +995,7 @@ export async function createDatabaseBackup(triggeredBy = "system"): Promise<{
       createdAt: new Date().toISOString(),
       restoreVerified: false,
       status: "uploaded_unverified",
+      auditId,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Database backup stopped";

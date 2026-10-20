@@ -50,7 +50,7 @@ export interface ScheduledJob {
   sourceModule?: string;
   backupSnapshot?: {
     objectKey: string | null;
-    databaseIntegrity: "passed" | "not_checked";
+    databaseIntegrity: "passed" | "unknown";
     applicationRecovery: "pending" | "failed" | "readable_scheduled_jobs_and_snapshots";
     externalCopy: "pending";
     fullRecoveryVerified: false;
