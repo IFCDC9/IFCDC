@@ -407,6 +407,99 @@ test("a db_backup upload stores its object key and the card reads only that obje
   assert.equal(text.includes(MORNING), false);
   assert.equal(text.includes(CLOSE_EARLY), false);
   assert.equal(text.includes(CLOSE_LATE), false);
+
+  const { OFFSERVER_BACKUP_EVIDENCE_ACTION, persistVerifiedOffServerObjectEvidence } = await import("../server/hq/hqBackupService.ts");
+  const uploadAuditsBefore = (await db.all(
+    "SELECT id, action, detail FROM hq_audit_log WHERE action = 'database_backup_unverified' ORDER BY id ASC",
+  ) as unknown) as { id: string; action: string; detail: string }[];
+  const originalEvidence = await db.get<{ id: string; metadata_json: string; detail: string }>(
+    "SELECT id, metadata_json, detail FROM hq_audit_log WHERE action = ? AND entity_id = ? ORDER BY created_at ASC LIMIT 1",
+    OFFSERVER_BACKUP_EVIDENCE_ACTION,
+    AFTERNOON,
+  );
+  const advanced = await persistVerifiedOffServerObjectEvidence({
+    objectKey: AFTERNOON,
+    capturedAt: AFTERNOON_RUN,
+    ciphertextSha256: "11".repeat(32),
+    plaintextSha256: "22".repeat(32),
+    integrityCheck: "ok",
+    databaseIntegrity: "passed",
+    applicationRecovery: "readable_scheduled_jobs_and_snapshots",
+  });
+  assert.equal(advanced.stored, true);
+  const repeatedAdvance = await persistVerifiedOffServerObjectEvidence({
+    objectKey: AFTERNOON,
+    capturedAt: AFTERNOON_RUN,
+    ciphertextSha256: "11".repeat(32),
+    plaintextSha256: "22".repeat(32),
+    integrityCheck: "ok",
+    databaseIntegrity: "passed",
+    applicationRecovery: "readable_scheduled_jobs_and_snapshots",
+  });
+  assert.equal(repeatedAdvance.stored, false);
+  assert.equal(repeatedAdvance.reason, "already_recorded");
+  const jobAfterAdvance = await db.get<{
+    last_run_status: string;
+    last_error: string;
+    backup_object_key: string | null;
+    backup_audit_id: string | null;
+    next_run_at: string | null;
+  }>(
+    "SELECT last_run_status, last_error, backup_object_key, backup_audit_id, next_run_at FROM hq_scheduled_jobs WHERE job_key = 'db_backup'",
+  );
+  assert.equal(jobAfterAdvance?.last_run_status, "uploaded_unverified");
+  assert.equal(jobAfterAdvance?.last_error, DB_BACKUP_UNVERIFIED_ERROR);
+  assert.notEqual(jobAfterAdvance?.last_run_status, "success");
+  assert.equal(jobAfterAdvance?.backup_object_key, AFTERNOON);
+  assert.equal(jobAfterAdvance?.backup_audit_id, "afternoon-audit");
+  const keptOriginal = await db.get<{ id: string; metadata_json: string; detail: string }>(
+    "SELECT id, metadata_json, detail FROM hq_audit_log WHERE id = ?",
+    originalEvidence?.id,
+  );
+  assert.equal(keptOriginal?.metadata_json, originalEvidence?.metadata_json);
+  assert.equal(keptOriginal?.detail, originalEvidence?.detail);
+  const uploadAuditsAfter = (await db.all(
+    "SELECT id, action, detail FROM hq_audit_log WHERE action = 'database_backup_unverified' ORDER BY id ASC",
+  ) as unknown) as { id: string; action: string; detail: string }[];
+  assert.deepEqual(uploadAuditsAfter, uploadAuditsBefore);
+  const advancedJobs = await listScheduledJobs();
+  const advancedCard = advancedJobs.find((job) => String((job as { job_key?: string }).job_key) === "db_backup") as typeof backup;
+  assert.equal(advancedCard.backupSnapshot?.objectKey, AFTERNOON);
+  assert.equal(advancedCard.backupSnapshot?.databaseIntegrity, "passed");
+  assert.equal(advancedCard.backupSnapshot?.applicationRecovery, "readable_scheduled_jobs_and_snapshots");
+  assert.equal(advancedCard.backupSnapshot?.externalCopy, "pending");
+  assert.equal(advancedCard.backupSnapshot?.fullRecoveryVerified, false);
+  const advancedText = advancedCard.backupSnapshot?.lines.join("\n") ?? "";
+  assert.match(advancedText, /Application recovery: readable scheduled-job and snapshot rows/);
+  assert.equal(advancedText.includes(MORNING), false);
+  assert.equal(advancedText.includes("fully verified"), false);
+
+  await db.run(
+    `UPDATE hq_scheduled_jobs
+     SET backup_object_key = NULL, backup_audit_id = NULL
+     WHERE job_key = 'db_backup'`,
+  );
+  const unknownJobs = await listScheduledJobs();
+  const unknownCard = unknownJobs.find((job) => String((job as { job_key?: string }).job_key) === "db_backup") as typeof backup & {
+    last_run_status?: string;
+    last_error?: string;
+  };
+  assert.equal(unknownCard.backupSnapshot?.objectKey, null);
+  assert.equal(unknownCard.backupSnapshot?.databaseIntegrity, "unknown");
+  assert.equal(unknownCard.backupSnapshot?.fullRecoveryVerified, false);
+  const unknownText = unknownCard.backupSnapshot?.lines.join("\n") ?? "";
+  assert.match(unknownText, /Verification: unknown/);
+  assert.equal(unknownText.includes("passed"), false);
+  assert.equal(unknownText.includes(AFTERNOON), false);
+  assert.equal(unknownText.includes(MORNING), false);
+  const unknownRow = await db.get<{ last_run_status: string; last_error: string; backup_object_key: string | null; backup_audit_id: string | null }>(
+    "SELECT last_run_status, last_error, backup_object_key, backup_audit_id FROM hq_scheduled_jobs WHERE job_key = 'db_backup'",
+  );
+  assert.equal(unknownRow?.last_run_status, "uploaded_unverified");
+  assert.equal(unknownRow?.last_error, DB_BACKUP_UNVERIFIED_ERROR);
+  assert.equal(unknownRow?.backup_object_key, null);
+  assert.equal(unknownRow?.backup_audit_id, null);
+  assert.notEqual(unknownRow?.last_run_status, "success");
 });
 
 test("department reporting next run is last run plus the weekly interval", async () => {
