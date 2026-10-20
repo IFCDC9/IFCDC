@@ -225,8 +225,11 @@ async function backupSnapshotForScheduledRow(
   if (databaseBackupSnapshotCard({ lastRunStatus, lastError, objectKey: null, evidence: null }) == null) return null;
   let audits: BackupRunAudit[] = [];
   let evidence: BackupObjectEvidence[] = [];
+  let currentForObject: (rows: BackupObjectEvidence[], objectKey: string) => BackupObjectEvidence | null = (rows, key) =>
+    rows.find((item) => item.objectKey === key) ?? null;
   try {
-    const { OFFSERVER_BACKUP_EVIDENCE_ACTION, parseStoredOffServerEvidence } = await import("./hqBackupService");
+    const { OFFSERVER_BACKUP_EVIDENCE_ACTION, currentOffServerObjectEvidence, parseStoredOffServerEvidence } = await import("./hqBackupService");
+    currentForObject = (rows, objectKey) => currentOffServerObjectEvidence(rows, objectKey);
     const rows = (await db.all(
       "SELECT id, action, detail, entity_id, metadata_json, created_at FROM hq_audit_log WHERE action IN ('database_backup_unverified', ?) ORDER BY created_at ASC",
       OFFSERVER_BACKUP_EVIDENCE_ACTION,
@@ -256,7 +259,7 @@ async function backupSnapshotForScheduledRow(
     evidence = [];
   }
   const objectKey = objectKeyForScheduledBackupRun({ storedObjectKey, storedAuditId, audits });
-  const matched = objectKey ? evidence.find((item) => item.objectKey === objectKey) ?? null : null;
+  const matched = objectKey ? currentForObject(evidence, objectKey) : null;
   return databaseBackupSnapshotCard({ lastRunStatus, lastError, objectKey, evidence: matched });
 }
 

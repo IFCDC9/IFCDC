@@ -241,6 +241,182 @@ test("morning evidence stays on its key and the 15:58:58Z key can be stored only
   assert.equal(health.offServerEvidence.some((item: { objectKey: string }) => item.objectKey === OTHER_KEY), false);
   assert.equal(parseStoredOffServerEvidence(afternoonRow?.metadata_json, OTHER_KEY), null);
   assert.match(health.message, /Application recovery is not confirmed for that object/);
+
+  const morningBeforeAdvance = await db.get<{ id: string; metadata_json: string; detail: string }>(
+    "SELECT id, metadata_json, detail FROM hq_audit_log WHERE action = ? AND entity_id = ?",
+    OFFSERVER_BACKUP_EVIDENCE_ACTION,
+    MORNING_KEY,
+  );
+  const afternoonBeforeAdvance = await db.get<{ id: string; metadata_json: string; detail: string }>(
+    "SELECT id, metadata_json, detail FROM hq_audit_log WHERE action = ? AND entity_id = ?",
+    OFFSERVER_BACKUP_EVIDENCE_ACTION,
+    AFTERNOON_KEY,
+  );
+  const unrelated = await persistVerifiedOffServerObjectEvidence({
+    objectKey: OTHER_KEY,
+    capturedAt: "2026-10-18T01:02:03.004Z",
+    ciphertextSha256: "55".repeat(32),
+    plaintextSha256: "66".repeat(32),
+    sourceBytes: null,
+    ciphertextBytes: null,
+    plaintextBytes: null,
+    integrityCheck: "ok",
+    databaseIntegrity: "passed",
+    applicationRecovery: "readable_scheduled_jobs_and_snapshots",
+  });
+  assert.equal(unrelated.stored, false);
+  assert.equal(unrelated.reason, "application_recovery");
+  const replacedHash = await persistVerifiedOffServerObjectEvidence({
+    objectKey: AFTERNOON_KEY,
+    capturedAt: "2026-10-19T15:58:58.133Z",
+    ciphertextSha256: "77".repeat(32),
+    plaintextSha256: AFTERNOON_PLAINTEXT_HASH,
+    sourceBytes: null,
+    ciphertextBytes: null,
+    plaintextBytes: null,
+    integrityCheck: "ok",
+    databaseIntegrity: "passed",
+    applicationRecovery: "readable_scheduled_jobs_and_snapshots",
+  });
+  assert.equal(replacedHash.stored, false);
+  assert.equal(replacedHash.reason, "ciphertext_sha256");
+  const advanced = await persistVerifiedOffServerObjectEvidence({
+    objectKey: AFTERNOON_KEY,
+    capturedAt: "2026-10-19T15:58:58.133Z",
+    ciphertextSha256: AFTERNOON_HASH,
+    plaintextSha256: AFTERNOON_PLAINTEXT_HASH,
+    sourceBytes: null,
+    ciphertextBytes: null,
+    plaintextBytes: null,
+    integrityCheck: "ok",
+    databaseIntegrity: "passed",
+    applicationRecovery: "readable_scheduled_jobs_and_snapshots",
+  });
+  assert.equal(advanced.stored, true);
+  assert.equal(advanced.reason, "stored");
+  const repeated = await persistVerifiedOffServerObjectEvidence({
+    objectKey: AFTERNOON_KEY,
+    capturedAt: "2026-10-19T15:58:58.133Z",
+    ciphertextSha256: AFTERNOON_HASH,
+    plaintextSha256: AFTERNOON_PLAINTEXT_HASH,
+    sourceBytes: null,
+    ciphertextBytes: null,
+    plaintextBytes: null,
+    integrityCheck: "ok",
+    databaseIntegrity: "passed",
+    applicationRecovery: "readable_scheduled_jobs_and_snapshots",
+  });
+  assert.equal(repeated.stored, false);
+  assert.equal(repeated.reason, "already_recorded");
+  const downgrade = await persistVerifiedOffServerObjectEvidence({
+    objectKey: AFTERNOON_KEY,
+    capturedAt: "2026-10-19T15:58:58.133Z",
+    ciphertextSha256: AFTERNOON_HASH,
+    plaintextSha256: AFTERNOON_PLAINTEXT_HASH,
+    sourceBytes: null,
+    ciphertextBytes: null,
+    plaintextBytes: null,
+    integrityCheck: "ok",
+    databaseIntegrity: "passed",
+    applicationRecovery: "not_confirmed",
+  });
+  assert.equal(downgrade.stored, false);
+  assert.equal(downgrade.reason, "application_recovery");
+  const skipped = await persistVerifiedOffServerObjectEvidence({
+    objectKey: AFTERNOON_KEY,
+    capturedAt: "2026-10-19T15:58:58.133Z",
+    ciphertextSha256: AFTERNOON_HASH,
+    plaintextSha256: AFTERNOON_PLAINTEXT_HASH,
+    sourceBytes: null,
+    ciphertextBytes: null,
+    plaintextBytes: null,
+    integrityCheck: "ok",
+    databaseIntegrity: "passed",
+    applicationRecovery: "full_recovery" as "not_confirmed",
+  });
+  assert.equal(skipped.stored, false);
+  assert.equal(skipped.reason, "application_recovery");
+
+  const morningAfterAdvance = await db.get<{ id: string; metadata_json: string; detail: string }>(
+    "SELECT id, metadata_json, detail FROM hq_audit_log WHERE action = ? AND entity_id = ?",
+    OFFSERVER_BACKUP_EVIDENCE_ACTION,
+    MORNING_KEY,
+  );
+  assert.equal(morningAfterAdvance?.id, morningBeforeAdvance?.id);
+  assert.equal(morningAfterAdvance?.metadata_json, morningBeforeAdvance?.metadata_json);
+  assert.equal(morningAfterAdvance?.detail, morningBeforeAdvance?.detail);
+  assert.equal(morningCount?.c, 1);
+  const afternoonRows = (await db.all(
+    "SELECT id, metadata_json, detail FROM hq_audit_log WHERE action = ? AND entity_id = ? ORDER BY created_at ASC",
+    OFFSERVER_BACKUP_EVIDENCE_ACTION,
+    AFTERNOON_KEY,
+  ) as unknown) as { id: string; metadata_json: string; detail: string }[];
+  assert.equal(afternoonRows.length, 2);
+  const originalAfternoon = afternoonRows.find((row) => row.id === afternoonBeforeAdvance?.id);
+  assert.equal(originalAfternoon?.metadata_json, afternoonBeforeAdvance?.metadata_json);
+  assert.equal(originalAfternoon?.detail, afternoonBeforeAdvance?.detail);
+  assert.equal(JSON.parse(originalAfternoon?.metadata_json ?? "{}").applicationRecovery, "not_confirmed");
+  const advancedAfternoon = afternoonRows.find((row) => row.id !== afternoonBeforeAdvance?.id);
+  const advancedStored = JSON.parse(advancedAfternoon?.metadata_json ?? "{}") as {
+    objectKey?: string;
+    ciphertextSha256?: string;
+    plaintextSha256?: string;
+    sourceBytes?: number | null;
+    ciphertextBytes?: number | null;
+    plaintextBytes?: number | null;
+    integrityCheck?: string;
+    databaseIntegrity?: string;
+    applicationRecovery?: string;
+    fullRecoveryVerified?: boolean;
+    externalCopy?: string;
+    offServerRestoreVerified?: boolean;
+  };
+  assert.equal(advancedStored.objectKey, AFTERNOON_KEY);
+  assert.notEqual(advancedStored.objectKey, MORNING_KEY);
+  assert.equal(advancedStored.ciphertextSha256, AFTERNOON_HASH);
+  assert.equal(advancedStored.plaintextSha256, AFTERNOON_PLAINTEXT_HASH);
+  assert.equal(advancedStored.sourceBytes, null);
+  assert.equal(advancedStored.ciphertextBytes, null);
+  assert.equal(advancedStored.plaintextBytes, null);
+  assert.equal(advancedStored.integrityCheck, "ok");
+  assert.equal(advancedStored.databaseIntegrity, "passed");
+  assert.equal(advancedStored.applicationRecovery, "readable_scheduled_jobs_and_snapshots");
+  assert.equal(advancedStored.fullRecoveryVerified, false);
+  assert.equal(advancedStored.externalCopy, "not_verified");
+  assert.equal(advancedStored.offServerRestoreVerified, false);
+  const otherCount = await db.get<{ c: number }>(
+    "SELECT COUNT(*) AS c FROM hq_audit_log WHERE action = ? AND entity_id = ?",
+    OFFSERVER_BACKUP_EVIDENCE_ACTION,
+    OTHER_KEY,
+  );
+  assert.equal(otherCount?.c, 0);
+  const morningStill = await db.get<{ c: number }>(
+    "SELECT COUNT(*) AS c FROM hq_audit_log WHERE action = ? AND entity_id = ?",
+    OFFSERVER_BACKUP_EVIDENCE_ACTION,
+    MORNING_KEY,
+  );
+  assert.equal(morningStill?.c, 1);
+
+  const healthAfter = await getBackupHealth();
+  assert.equal(healthAfter.offServerBackup.objectKey, MORNING_KEY);
+  assert.equal(healthAfter.offServerBackup.ciphertextSha256, MORNING_HASH);
+  assert.equal(healthAfter.offServerBackup.fullRecoveryVerified, false);
+  assert.equal(healthAfter.offServerBackup.externalCopy, "not_verified");
+  const afternoonAfter = healthAfter.offServerEvidence.filter((item: { objectKey: string }) => item.objectKey === AFTERNOON_KEY);
+  assert.equal(afternoonAfter.length, 1);
+  assert.equal(afternoonAfter[0]?.ciphertextSha256, AFTERNOON_HASH);
+  assert.equal(afternoonAfter[0]?.integrityCheck, "ok");
+  assert.equal(afternoonAfter[0]?.applicationRecovery, "readable_scheduled_jobs_and_snapshots");
+  assert.equal(afternoonAfter[0]?.fullRecoveryVerified, false);
+  assert.equal(afternoonAfter[0]?.externalCopy, "not_verified");
+  assert.equal(healthAfter.offServerEvidence.some((item: { objectKey: string }) => item.objectKey === MORNING_KEY), true);
+  assert.equal(healthAfter.offServerEvidence.some((item: { objectKey: string }) => item.objectKey === OTHER_KEY), false);
+  assert.match(healthAfter.message, new RegExp(AFTERNOON_KEY.replace(/[.]/g, "\\.")));
+  assert.match(healthAfter.message, /Application recovery for that object is limited to readable scheduled-job and snapshot rows/);
+  assert.equal(healthAfter.message.includes("Application recovery is not confirmed for that object"), false);
+  assert.equal(healthAfter.message.includes("external copy verified"), false);
+  assert.equal(healthAfter.offServerRestoreVerified, false);
+
   const stillThere = await db.get<{ id: string; size_bytes: number }>(
     "SELECT id, size_bytes FROM hq_backup_snapshots WHERE id = ?",
     OCTOBER_13_ID,
@@ -259,6 +435,7 @@ test("morning evidence stays on its key and the 15:58:58Z key can be stored only
   assert.equal(fn.includes("fullRecoveryVerified: false"), true);
   assert.equal(fn.includes("externalCopy: \"not_verified\""), true);
   assert.equal(fn.includes("applicationRecovery: \"not_confirmed\""), true);
+  assert.equal(fn.includes("applicationRecovery: \"readable_scheduled_jobs_and_snapshots\""), true);
   assert.equal(fn.includes("applicationRecovery: input.applicationRecovery"), false);
   const page = readFileSync(new URL("../client/src/pages/hq/SecurityCenterPage.tsx", import.meta.url), "utf8");
   assert.match(page, /Separate off-server object/);

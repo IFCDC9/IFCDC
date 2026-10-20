@@ -837,10 +837,72 @@ export function parseStoredOffServerEvidence(
   };
 }
 
+/** Backup Health and the snapshot card show one current level. A later readable audit wins; earlier audits stay stored. */
+export function currentOffServerObjectEvidence<T extends { objectKey: string; applicationRecovery?: string }>(
+  rows: readonly T[],
+  objectKey: string,
+): T | null {
+  let first: T | null = null;
+  let readable: T | null = null;
+  for (const item of rows) {
+    if (item.objectKey !== objectKey) continue;
+    if (!first) first = item;
+    if (item.applicationRecovery === "readable_scheduled_jobs_and_snapshots") readable = item;
+  }
+  return readable ?? first;
+}
+
+export function currentOffServerEvidenceRows<T extends { objectKey: string; applicationRecovery?: string }>(
+  rows: readonly T[],
+): T[] {
+  const keys: string[] = [];
+  for (const item of rows) {
+    if (!keys.includes(item.objectKey)) keys.push(item.objectKey);
+  }
+  const listed: T[] = [];
+  for (const key of keys) {
+    const current = currentOffServerObjectEvidence(rows, key);
+    if (current) listed.push(current);
+  }
+  return listed;
+}
+
+function evidenceAdvanceMismatch(
+  stored: StoredOffServerEvidence,
+  input: {
+    objectKey: string;
+    capturedAt: string;
+    ciphertextSha256: string;
+    plaintextSha256?: string | null;
+    integrityCheck: string;
+    databaseIntegrity: "passed" | "failed" | "not_run";
+  },
+  sourceBytes: number | null,
+  ciphertextBytes: number | null,
+  plaintextBytes: number | null,
+): OffServerEvidenceWriteResult["reason"] | null {
+  if (input.objectKey !== stored.objectKey) return "object_key";
+  if (input.ciphertextSha256 !== stored.ciphertextSha256) return "ciphertext_sha256";
+  if ((input.plaintextSha256 ?? null) !== stored.plaintextSha256) return "plaintext_sha256";
+  if (
+    sourceBytes !== stored.sourceBytes
+    || ciphertextBytes !== stored.ciphertextBytes
+    || plaintextBytes !== stored.plaintextBytes
+  ) {
+    return "byte_count";
+  }
+  if (input.capturedAt !== stored.capturedAt) return "captured_at";
+  if (input.integrityCheck !== "ok" || stored.integrityCheck !== "ok") return "integrity_check";
+  if (input.databaseIntegrity !== "passed" || stored.databaseIntegrity !== "passed") return "database_integrity";
+  return null;
+}
+
 /**
  * Append evidence for one object key. The morning row is never rewritten.
- * A row is added only when that object's own hashes and integrity_check ok are supplied.
- * Full recovery and external copy stay unverified.
+ * A new object is stored only as not_confirmed, with that object's own hashes and integrity_check ok.
+ * An existing not_confirmed row may advance once to readable_scheduled_jobs_and_snapshots.
+ * The advance appends a new audit and leaves the original audit, hashes, sizes, and object key in place.
+ * Full recovery and external copy stay unverified. No other recovery step is written.
  */
 export async function persistVerifiedOffServerObjectEvidence(input: {
   objectKey: string;
@@ -875,7 +937,10 @@ export async function persistVerifiedOffServerObjectEvidence(input: {
     return { stored: false, reason: "plaintext_sha256" };
   }
   if (input.plaintextSha256 === "") return { stored: false, reason: "plaintext_sha256" };
-  if (input.applicationRecovery !== "not_confirmed") {
+  if (
+    input.applicationRecovery !== "not_confirmed" &&
+    input.applicationRecovery !== "readable_scheduled_jobs_and_snapshots"
+  ) {
     return { stored: false, reason: "application_recovery" };
   }
   const sourceBytes = providedByteCount(input.sourceBytes);
@@ -889,12 +954,61 @@ export async function persistVerifiedOffServerObjectEvidence(input: {
   const { ensureHqAuditTables, auditId } = await import("./hqAuditLog");
   await ensureHqAuditTables();
   const db = await getDb();
-  const existing = await db.get<{ id: string }>(
-    "SELECT id FROM hq_audit_log WHERE action = ? AND entity_id = ? LIMIT 1",
+  const existingRows = (await db.all(
+    "SELECT id, metadata_json FROM hq_audit_log WHERE action = ? AND entity_id = ? ORDER BY created_at ASC",
     OFFSERVER_BACKUP_EVIDENCE_ACTION,
     input.objectKey,
-  );
-  if (existing) return { stored: false, reason: "already_recorded" };
+  ) as unknown) as { id: string; metadata_json: string | null }[];
+  const storedRows = existingRows.flatMap((row) => {
+    const parsed = parseStoredOffServerEvidence(row.metadata_json, input.objectKey);
+    return parsed ? [parsed] : [];
+  });
+  const readable = storedRows.find((row) => row.applicationRecovery === "readable_scheduled_jobs_and_snapshots") ?? null;
+  const original = storedRows.find((row) => row.applicationRecovery === "not_confirmed") ?? null;
+
+  if (input.applicationRecovery === "readable_scheduled_jobs_and_snapshots") {
+    if (readable) return { stored: false, reason: "already_recorded" };
+    if (!original) return { stored: false, reason: "application_recovery" };
+    const mismatch = evidenceAdvanceMismatch(original, input, sourceBytes, ciphertextBytes, plaintextBytes);
+    if (mismatch) return { stored: false, reason: mismatch };
+    const advanced: StoredOffServerEvidence = {
+      objectKey: original.objectKey,
+      bucket: "ifcdc-hq-db-backups",
+      capturedAt: original.capturedAt,
+      sourceBytes: original.sourceBytes,
+      ciphertextBytes: original.ciphertextBytes,
+      ciphertextSha256: original.ciphertextSha256,
+      plaintextBytes: original.plaintextBytes,
+      plaintextSha256: original.plaintextSha256,
+      integrityCheck: "ok",
+      databaseIntegrity: "passed",
+      applicationRecovery: "readable_scheduled_jobs_and_snapshots",
+      externalCopy: "not_verified",
+      fullRecoveryVerified: false,
+      offServerRestoreVerified: false,
+      productionOverwritten: false,
+      productionDatabaseOpened: false,
+    };
+    await db.run(
+      `INSERT INTO hq_audit_log (id, action, entity_type, entity_id, detail, actor_id, actor_email, ip_address, metadata_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      auditId(),
+      OFFSERVER_BACKUP_EVIDENCE_ACTION,
+      "backup",
+      original.objectKey,
+      "Off-server backup evidence for this object key only. Database integrity passed. Application recovery is limited to readable scheduled-job and snapshot rows. External copy is not verified. Full recovery is not verified. Production was not overwritten.",
+      null,
+      "system",
+      null,
+      JSON.stringify(advanced),
+      new Date().toISOString(),
+    );
+    return { stored: true, reason: "stored" };
+  }
+
+  if (readable) return { stored: false, reason: "application_recovery" };
+  if (existingRows.length > 0) return { stored: false, reason: "already_recorded" };
+  if (input.applicationRecovery !== "not_confirmed") return { stored: false, reason: "application_recovery" };
 
   const record: StoredOffServerEvidence = {
     objectKey: input.objectKey,
@@ -1087,10 +1201,10 @@ export async function getBackupHealth() {
   } catch {
     evidenceRows = [];
   }
-  const offServerEvidence = evidenceRows.flatMap((row) => {
+  const offServerEvidence = currentOffServerEvidenceRows(evidenceRows.flatMap((row) => {
     const parsed = parseStoredOffServerEvidence(row.metadata_json, row.entity_id ?? "");
     return parsed ? [parsed] : [];
-  });
+  }));
   const separateEvidence = offServerEvidence.filter((item) => item.objectKey !== evidence.objectKey);
   const separateSentence = (item: StoredOffServerEvidence) => {
     const recovery = item.applicationRecovery === "readable_scheduled_jobs_and_snapshots"
