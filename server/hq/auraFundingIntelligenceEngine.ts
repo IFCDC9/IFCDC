@@ -705,7 +705,7 @@ export async function runFundingIntelligenceScan(opts?: {
     ).catch(() => undefined);
   }
 
-  const recent = await db.all<Record<string, unknown>>(
+  const recent = await db.all<Record<string, unknown>[]>(
     `SELECT id, title, funder, source_type, external_id, assistance_listing, deadline, close_date, url,
             amount_min, amount_max, eligibility_result, qualification_score, fingerprint
      FROM grant_opportunities
@@ -1469,7 +1469,7 @@ export async function answerFundingIntelligenceQuery(opts: {
   }
 
   if (/ready now|application-ready|application ready|apply for right now/.test(q)) {
-    const rows = await db.all<Record<string, unknown>>(
+    const rows = await db.all<Record<string, unknown>[]>(
       `SELECT id, title, funder, url, source_type, external_id, ifcdc_addressable_amount, addressable_status,
               application_readiness_score, readiness_class, best_program_slug, best_program_match_pct, deadline
        FROM grant_opportunities
@@ -1489,7 +1489,7 @@ export async function answerFundingIntelligenceQuery(opts: {
   }
 
   if (/matching fund|cost.?share|needs match/.test(q)) {
-    const rows = await db.all<Record<string, unknown>>(
+    const rows = await db.all<Record<string, unknown>[]>(
       `SELECT id, title, url, match_required, match_type, match_percentage, readiness_class,
               ifcdc_addressable_amount, application_readiness_score
        FROM grant_opportunities
@@ -1505,7 +1505,7 @@ export async function answerFundingIntelligenceQuery(opts: {
   }
 
   if (/missing document|needs documents|document gap/.test(q)) {
-    const rows = await db.all<Record<string, unknown>>(
+    const rows = await db.all<Record<string, unknown>[]>(
       `SELECT id, title, url, readiness_class, document_gaps_json, missing_info_json, application_readiness_score
        FROM grant_opportunities
        WHERE readiness_class = 'needs_documents'
@@ -1553,7 +1553,7 @@ export async function answerFundingIntelligenceQuery(opts: {
   }
 
   if (/unknown.?value|unpublished|unknown award|unknown amount/.test(q)) {
-    const unknownRows = await db.all<Record<string, unknown>>(
+    const unknownRows = await db.all<Record<string, unknown>[]>(
       `SELECT id, title, funder, url, source_type, external_id, eligibility_result,
               qualification_score, funding_amount_status, best_program_slug, best_program_match_pct
        FROM grant_opportunities
@@ -1653,7 +1653,7 @@ export async function answerFundingIntelligenceQuery(opts: {
   sql += ` ORDER BY COALESCE(enriched_final_score, qualification_score, 0) DESC,
                     CASE WHEN funding_amount_status IN ('verified','partial') THEN COALESCE(award_ceiling, amount_max, estimated_funding, 0) ELSE 0 END DESC
            LIMIT 20`;
-  const records = await db.all<Record<string, unknown>>(sql, ...params);
+  const records = await db.all<Record<string, unknown>[]>(sql, ...params);
 
   const whyMatch = q.match(/why.*score.*?(\d{2,3})|score.*?(\d{2,3})/i);
   if (whyMatch) {

@@ -46,6 +46,7 @@ type GraphEnv = {
   MICROSOFT_GRAPH_CLIENT_ID?: string;
   MICROSOFT_GRAPH_CLIENT_SECRET?: string;
   INBOUND_MAILBOX_ADDRESS?: string;
+  [key: string]: string | undefined;
 };
 
 type GraphEmailAddress = { name?: string; address?: string };

@@ -59,13 +59,13 @@ export interface AuraMusicCommandCenter {
   };
   lastHeartbeatAt: string | null;
   lastHeartbeatAgeMs: number | null;
-  bridgeBuild: string | null;
-  bridgeExpectedBuild: string | null;
-  bridgeRestartCount: number;
-  bridgeReconnectAttempts: number;
-  bridgeLastError: string | null;
-  autoRecoveryStatus: string;
-  remoteScriptStatus: string;
+  bridgeBuild?: string | null;
+  bridgeExpectedBuild?: string | null;
+  bridgeRestartCount?: number;
+  bridgeReconnectAttempts?: number;
+  bridgeLastError?: string | null;
+  autoRecoveryStatus?: string;
+  remoteScriptStatus?: string;
   currentJob: AuraMusicJob | null;
   jobQueue: AuraMusicJob[];
   recentExports: AuraMusicExport[];
@@ -521,6 +521,7 @@ function fromRemoteNodeSnapshot(snap: {
     workerAvailable?: boolean;
     masterySnapshot?: {
       overallPercent?: number | null;
+      fullAbletonCapabilityMasteryPercent?: number | null;
       level7Complete?: boolean;
       level9Complete?: boolean;
       vocalComplete?: boolean;
@@ -843,4 +844,80 @@ export async function getAuraMusicCommandCenter(): Promise<AuraMusicCommandCente
   }
 
   return cloudPayload();
+}
+
+export async function getAuraSpinsDashboard(): Promise<Record<string, unknown>> {
+  const local = readJsonFile<Record<string, unknown>>(join(MUSIC_ROOT, "library/aura-spins/status.json"));
+  try {
+    const { getPrimaryAuraMusicNodeSnapshot } = await import("./auraMusicProductionNode");
+    const snap = await getPrimaryAuraMusicNodeSnapshot();
+    const remote = (snap?.heartbeat as { auraSpinsHq?: Record<string, unknown> } | null)?.auraSpinsHq;
+    if (remote) {
+      return { ok: true, source: snap?.online ? "remote_production_node" : "stale_heartbeat", snapshot: remote };
+    }
+  } catch {
+    /* local fallback */
+  }
+  if (local) return { ok: true, source: "local_status_file", snapshot: local };
+  return {
+    ok: false,
+    source: "none",
+    snapshot: {
+      spinsDesktop: "OFFLINE",
+      spinsBridge: "OFFLINE",
+      account: "ACTION REQUIRED",
+      message: "AURA SPINS BRIDGE has not reported yet. Audio stays on the Founder Mac.",
+    },
+  };
+}
+
+export async function getFounderSoundDnaDashboard(): Promise<Record<string, unknown>> {
+  const local = readJsonFile<Record<string, unknown>>(join(MUSIC_ROOT, "library/founder-sound-dna/hq-snapshot.json"));
+  try {
+    const { getPrimaryAuraMusicNodeSnapshot } = await import("./auraMusicProductionNode");
+    const snap = await getPrimaryAuraMusicNodeSnapshot();
+    const remote = (snap?.heartbeat as { founderDnaHq?: Record<string, unknown> } | null)?.founderDnaHq;
+    if (remote) {
+      return { ok: true, source: snap?.online ? "remote_production_node" : "stale_heartbeat", snapshot: remote };
+    }
+  } catch {
+    /* local fallback */
+  }
+  if (local) return { ok: true, source: "local_dna_file", snapshot: local };
+  return {
+    ok: false,
+    source: "none",
+    snapshot: {
+      status: "OPEN",
+      message: "Founder Sound DNA has not been seeded on the production Mac yet.",
+    },
+  };
+}
+
+export async function getCurrentSoundDashboard(): Promise<Record<string, unknown>> {
+  const trend = readJsonFile<Record<string, unknown>>(join(MUSIC_ROOT, "library/current-trend-dna/hq-snapshot.json"));
+  const sound = readJsonFile<Record<string, unknown>>(join(MUSIC_ROOT, "library/current-ifcdc-sound/hq-snapshot.json"));
+  const founder = readJsonFile<Record<string, unknown>>(join(MUSIC_ROOT, "library/founder-sound-dna/hq-snapshot.json"));
+  try {
+    const { getPrimaryAuraMusicNodeSnapshot } = await import("./auraMusicProductionNode");
+    const snap = await getPrimaryAuraMusicNodeSnapshot();
+    const remote = (snap?.heartbeat as { currentTrendHq?: Record<string, unknown> } | null)?.currentTrendHq;
+    if (remote) {
+      return { ok: true, source: snap?.online ? "remote_production_node" : "stale_heartbeat", snapshot: remote, currentIfcdcSound: sound, founderSoundDna: founder };
+    }
+  } catch {
+    /* local fallback */
+  }
+  if (trend) {
+    return {
+      ok: true,
+      source: "local_trend_file",
+      snapshot: { ...trend, currentIfcdcSound: sound, founderSoundDna: founder },
+    };
+  }
+  return {
+    ok: false,
+    source: "none",
+    snapshot: { status: "OPEN", message: "Current Trend DNA has not been rebuilt on the production Mac yet." },
+  };
 }

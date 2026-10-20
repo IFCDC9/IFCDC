@@ -411,6 +411,7 @@ export async function setFounderApproval(
     try {
       const { sendApprovalEmail } = await import("./emailEngine");
       const { getFounderEmail } = await import("./auraFounderTrustEngine");
+    if (opts) {
       await sendApprovalEmail({
         to: getFounderEmail(),
         itemTitle: `Grant application ${applicationId}`,
@@ -419,6 +420,7 @@ export async function setFounderApproval(
         notes: opts.note,
         message: `Grant application ${applicationId} was not approved.`,
       });
+    }
     } catch {
       /* optional */
     }

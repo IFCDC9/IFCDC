@@ -59,7 +59,7 @@ type SendRow = {
   draft_id: string;
   actor_role: string;
   created_at: string;
-  status: string;
+  status: OutboundDeliveryStatus;
   provider_message_id: string | null;
   error_code: string | null;
   duplicate_key: string | null;

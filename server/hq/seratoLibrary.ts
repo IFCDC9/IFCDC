@@ -425,7 +425,7 @@ export async function getLiveSeratoDashboardMerged() {
       },
       domains: {
         ...base.domains,
-        seratoDjPro: bridgeDomains.seratoDjPro || base.domains.seratoDjPro,
+        seratoDjPro: bridgeDomains.seratoDjPro || ("seratoDjPro" in base.domains ? base.domains.seratoDjPro : undefined),
         seratoConnection: base.domains.seratoConnection,
         libraryAccess: base.domains.libraryAccess,
         library: bridgeDomains.library || base.domains.libraryAccess,
@@ -544,8 +544,9 @@ export async function getSeratoDecksForHq() {
 
   const remote = await remoteAuraDjHqFromNode();
   if (remote?.decks) {
-    const a = remote.decks.A as Record<string, unknown> | undefined;
-    const b = remote.decks.B as Record<string, unknown> | undefined;
+    const decks = remote.decks as { A?: Record<string, unknown>; B?: Record<string, unknown> };
+    const a = decks.A;
+    const b = decks.B;
     return {
       ok: remote.ok !== false,
       source: remote.source || "remote_production_node",

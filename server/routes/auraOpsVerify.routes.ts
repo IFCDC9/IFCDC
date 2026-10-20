@@ -293,7 +293,7 @@ router.get("/phase6-sms-status", auraOpsVerifyAuth, requireHQModule("aura"), asy
         to_number: string | null;
         body: string | null;
         created_at: string;
-      }>(
+      }[]>(
         `SELECT id, status, message_sid, to_number, body, created_at
          FROM twilio_communication_events
          WHERE message_sid = ?
@@ -313,7 +313,7 @@ router.get("/phase6-sms-status", auraOpsVerifyAuth, requireHQModule("aura"), asy
         severity: string | null;
         created_at: string;
         metadata_json: string | null;
-      }>(
+      }[]>(
         `SELECT id, event_type, title, detail, entity_id, severity, created_at, metadata_json
          FROM aura_operational_events
          WHERE entity_id = ?

@@ -989,7 +989,7 @@ export async function readMlkApplicationTransmission(db?: MailDb): Promise<{
   bothApprovedPdfsRecorded: boolean;
 }> {
   const hidden = {
-    applicationStatus: MLK_APPLICATION_NOT_SUBMITTED_STATUS,
+    applicationStatus: MLK_APPLICATION_NOT_SUBMITTED_STATUS as typeof MLK_APPLICATION_NOT_SUBMITTED_STATUS,
     providerMessageId: null as string | null,
     deliveryVerification: "UNVERIFIED" as const,
     commissionReview: false as const,

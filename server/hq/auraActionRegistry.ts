@@ -278,7 +278,7 @@ const fundingIntelligenceEnrich: AuraAction = {
     const db = await getDb();
     const limit = typeof args.limit === "number" ? args.limit : 40;
     const onlyUnenriched = args.onlyUnenriched !== false;
-    const rows = await db.all<{ id: string }>(
+    const rows = await db.all<{ id: string }[]>(
       onlyUnenriched
         ? `SELECT id FROM grant_opportunities
            WHERE (duplicate_of_id IS NULL OR duplicate_of_id = '')

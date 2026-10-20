@@ -238,7 +238,7 @@ export async function matchOpportunityToProgramProfiles(opp: Record<string, unkn
     keywords_json: string | null;
     geography: string | null;
     founder_completion_needed_json: string | null;
-  }>(`SELECT * FROM ifcdc_program_profiles`);
+  }[]>(`SELECT * FROM ifcdc_program_profiles`);
 
   const blob = [
     opp.title,
@@ -525,7 +525,7 @@ export async function enrichOpportunitiesBatch(opts?: {
   await ensureGrantTables();
   const db = await getDb();
   const limit = opts?.limit ?? 40;
-  const rows = await db.all<{ id: string }>(
+  const rows = await db.all<{ id: string }[]>(
     opts?.onlyUnenriched
       ? `SELECT id FROM grant_opportunities
          WHERE (duplicate_of_id IS NULL OR duplicate_of_id = '')
