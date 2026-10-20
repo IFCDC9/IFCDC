@@ -60,9 +60,19 @@ This object does not inherit the 11:58:23Z integrity evidence.
 - Application recovery: not confirmed. The isolated restore did not include an application-recovery line, so this object does not receive `readable_scheduled_jobs_and_snapshots`.
 - Full recovery stays false. External copy stays not verified.
 - Live Backup Health at `2de4a3d` reads evidence only for the morning object key. It cannot show this object until a deploy that includes `persistVerifiedOffServerObjectEvidence`.
+- The Database Backup Snapshot card reads the scheduled-job row. `last_run_status` stays `uploaded_unverified` and `last_error` is not cleared. When integrity evidence exists for the same object key, the card shows database integrity passed, application recovery pending, external copy pending, and full recovery false. It does not show an isolated-restore approval gate. The morning object is not used as evidence for the 15:58:58Z run.
 - Byte counts were not pasted. A missing count is stored as unknown. It is not filled from the morning object.
 - The ciphertext is not on this Mac. The external destination remains `/Volumes/IFCDC HQ Secure Backups/IFCDC-HQ-R2-VERIFIED-2026-10-19/ifcdc-2026-10-19T15-58-58-133Z.db.enc`. The morning file still needs its own copy at `/Volumes/IFCDC HQ Secure Backups/IFCDC-HQ-R2-VERIFIED-2026-10-19/ifcdc-2026-10-19T11-58-23-661Z.db.enc`. Nothing was downloaded or copied there.
 
 ### External copy — not done
 
 `/Volumes/IFCDC HQ Secure Backups` was mounted. The October 17 copy is still at `IFCDC-HQ-R2-VERIFIED-2026-10-17/`. The October 19 ciphertext is not on this Mac. Render deleted the temp file. R2 credentials and `BACKUP_ENCRYPTION_KEY` were not taken from the environment or from the HQ `.env`, and the disk was not searched for them. No file was written to the secure volume, to `/Volumes/IFCDC`, or to any other backup folder.
+
+## Department Reporting Schedule
+
+- Job key: `ops_department_reporting`
+- Name: Department Reporting Schedule
+- `schedule_expr`: `weekly`
+- Next run is `last_run_at` plus 7 days. The due runner uses that interval. It does not treat a stored next of last plus 1 day as the cadence.
+- A stored next earlier than last plus the weekly interval is corrected on the due tick. `last_run_status` and `last_error` stay as they were.
+- The funding boot gate does not skip this job. It runs when the weekly interval has elapsed.

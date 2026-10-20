@@ -59,12 +59,15 @@ export async function listScheduledJobs() {
   await ensureWorkflowTables();
   const db = await getDb();
   const rows = (await db.all("SELECT * FROM hq_scheduled_jobs ORDER BY name")) as Record<string, unknown>[];
+  const backupRow = rows.find((job) => String(job.job_key) === "db_backup");
+  const backupSnapshot = backupRow ? await backupSnapshotForScheduledRow(db, backupRow) : null;
   return rows.map((job) => ({
     ...job,
     schedule: job.schedule_expr ?? job.schedule ?? "daily",
     runStatus: job.last_run_status ?? (job.last_run_at ? "success" : "never_run"),
     lastError: job.last_error ?? null,
     sourceModule: job.source_module ?? sourceModuleForJob(String(job.job_key)),
+    ...(String(job.job_key) === "db_backup" ? { backupSnapshot } : {}),
   }));
 }
 
@@ -93,8 +96,202 @@ export async function setScheduledJobEnabled(jobKey: string, enabled: boolean, a
   return db.get("SELECT * FROM hq_scheduled_jobs WHERE job_key = ?", jobKey);
 }
 
+/** Stored when an upload finished and recovery evidence is not on that run yet. */
 export const DB_BACKUP_UNVERIFIED_ERROR =
+  "Off-server backup uploaded. Database integrity has not been checked. Application recovery is pending. External copy is pending. Full recovery is not complete.";
+
+/** Earlier rows stored an approval gate. The card does not display that sentence. */
+export const DB_BACKUP_APPROVAL_SENTENCE =
   "Off-server backup uploaded. Isolated restore has not been approved.";
+
+const BACKUP_RUN_MATCH_MS = 2 * 60 * 60 * 1000;
+const BACKUP_OBJECT_STAMP = /ifcdc-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z\.db\.enc$/;
+
+export type BackupRunAudit = {
+  action: string;
+  detail: string | null;
+  createdAt: string;
+};
+
+export type BackupObjectEvidence = {
+  objectKey: string;
+  capturedAt: string;
+  databaseIntegrity?: string;
+  applicationRecovery?: string;
+  externalCopy?: string;
+  fullRecoveryVerified?: boolean;
+};
+
+export type DatabaseBackupSnapshotCard = {
+  objectKey: string | null;
+  databaseIntegrity: "passed" | "not_checked";
+  applicationRecovery: "pending" | "failed" | "readable_scheduled_jobs_and_snapshots";
+  externalCopy: "pending";
+  fullRecoveryVerified: false;
+  lines: string[];
+};
+
+export function objectKeyFromBackupAuditDetail(detail: string | null | undefined): string | null {
+  if (!detail) return null;
+  const match = detail.match(/(?:^|\s)object=(\S+)/);
+  const objectKey = match?.[1] ?? "";
+  if (!objectKey.endsWith(".db.enc")) return null;
+  return objectKey;
+}
+
+export function embeddedBackupObjectTime(objectKey: string): number | null {
+  const match = objectKey.match(BACKUP_OBJECT_STAMP);
+  if (!match) return null;
+  const stamp = Date.parse(`${match[1]}T${match[2]}:${match[3]}:${match[4]}.${match[5]}Z`);
+  return Number.isFinite(stamp) ? stamp : null;
+}
+
+function closestBackupObject(
+  lastRunAt: string,
+  candidates: { objectKey: string; stamps: number[] }[],
+): string | null {
+  const last = Date.parse(lastRunAt);
+  if (!Number.isFinite(last)) return null;
+  const ranked = candidates
+    .map((candidate) => {
+      const distances = candidate.stamps.filter((stamp) => Number.isFinite(stamp)).map((stamp) => Math.abs(stamp - last));
+      if (!distances.length) return null;
+      return { objectKey: candidate.objectKey, distance: Math.min(...distances) };
+    })
+    .filter((candidate): candidate is { objectKey: string; distance: number } => candidate != null && candidate.distance <= BACKUP_RUN_MATCH_MS)
+    .sort((a, b) => a.distance - b.distance);
+  return ranked[0]?.objectKey ?? null;
+}
+
+/**
+ * The scheduler row has no object key. Use the unverified audit for this run,
+ * and only then an evidence row whose own timestamp is this run. A different
+ * object's integrity is not attached.
+ */
+export function objectKeyForScheduledBackupRun(input: {
+  lastRunAt: string | null;
+  audits: BackupRunAudit[];
+  evidence?: BackupObjectEvidence[];
+}): string | null {
+  if (!input.lastRunAt) return null;
+  const fromAudits = closestBackupObject(
+    input.lastRunAt,
+    input.audits
+      .filter((row) => row.action === "database_backup_unverified")
+      .flatMap((row) => {
+        const objectKey = objectKeyFromBackupAuditDetail(row.detail);
+        if (!objectKey) return [];
+        const embedded = embeddedBackupObjectTime(objectKey);
+        const created = Date.parse(row.createdAt);
+        return [{ objectKey, stamps: [embedded ?? Number.NaN, created] }];
+      }),
+  );
+  if (fromAudits) return fromAudits;
+  return closestBackupObject(
+    input.lastRunAt,
+    (input.evidence ?? []).map((item) => {
+      const embedded = embeddedBackupObjectTime(item.objectKey);
+      const captured = Date.parse(item.capturedAt);
+      return { objectKey: item.objectKey, stamps: [embedded ?? Number.NaN, captured] };
+    }),
+  );
+}
+
+export function databaseBackupSnapshotCard(input: {
+  lastRunStatus: string | null;
+  lastError: string | null;
+  objectKey: string | null;
+  evidence: BackupObjectEvidence | null;
+}): DatabaseBackupSnapshotCard | null {
+  const unverified = input.lastRunStatus === "uploaded_unverified"
+    || input.lastError === DB_BACKUP_UNVERIFIED_ERROR
+    || input.lastError === DB_BACKUP_APPROVAL_SENTENCE;
+  if (!unverified) return null;
+  const evidence = input.evidence && input.objectKey && input.evidence.objectKey === input.objectKey
+    ? input.evidence
+    : null;
+  if (evidence?.databaseIntegrity === "passed" && evidence.fullRecoveryVerified !== true) {
+    const applicationRecovery = evidence.applicationRecovery === "readable_scheduled_jobs_and_snapshots"
+      ? "readable_scheduled_jobs_and_snapshots"
+      : evidence.applicationRecovery === "failed"
+        ? "failed"
+        : "pending";
+    const recoveryLabel = applicationRecovery === "readable_scheduled_jobs_and_snapshots"
+      ? "readable scheduled-job and snapshot rows"
+      : applicationRecovery;
+    return {
+      objectKey: input.objectKey,
+      databaseIntegrity: "passed",
+      applicationRecovery,
+      externalCopy: "pending",
+      fullRecoveryVerified: false,
+      lines: [
+        `Object: ${input.objectKey}`,
+        "Database integrity: passed",
+        `Application recovery: ${recoveryLabel}`,
+        "External copy: pending",
+        "Full recovery: false",
+      ],
+    };
+  }
+  return {
+    objectKey: input.objectKey,
+    databaseIntegrity: "not_checked",
+    applicationRecovery: "pending",
+    externalCopy: "pending",
+    fullRecoveryVerified: false,
+    lines: [
+      input.objectKey ? `Object: ${input.objectKey}` : "Object: not recorded for this run",
+      "Database integrity: not checked",
+      "Application recovery: pending",
+      "External copy: pending",
+      "Full recovery: false",
+    ],
+  };
+}
+
+async function backupSnapshotForScheduledRow(
+  db: ScheduledJobWriter & { all(sql: string, ...params: unknown[]): Promise<unknown[]> },
+  job: Record<string, unknown>,
+): Promise<DatabaseBackupSnapshotCard | null> {
+  const lastRunStatus = job.last_run_status != null ? String(job.last_run_status) : null;
+  const lastError = job.last_error != null ? String(job.last_error) : null;
+  const lastRunAt = job.last_run_at != null ? String(job.last_run_at) : null;
+  if (databaseBackupSnapshotCard({ lastRunStatus, lastError, objectKey: null, evidence: null }) == null) return null;
+  let audits: BackupRunAudit[] = [];
+  let evidence: BackupObjectEvidence[] = [];
+  try {
+    const { OFFSERVER_BACKUP_EVIDENCE_ACTION, parseStoredOffServerEvidence } = await import("./hqBackupService");
+    const rows = (await db.all(
+      "SELECT action, detail, entity_id, metadata_json, created_at FROM hq_audit_log WHERE action IN ('database_backup_unverified', ?) ORDER BY created_at ASC",
+      OFFSERVER_BACKUP_EVIDENCE_ACTION,
+    )) as {
+      action?: string;
+      detail?: string | null;
+      entity_id?: string | null;
+      metadata_json?: string | null;
+      created_at?: string;
+    }[];
+    audits = rows
+      .filter((row) => row.action === "database_backup_unverified")
+      .map((row) => ({
+        action: "database_backup_unverified",
+        detail: row.detail ?? null,
+        createdAt: row.created_at ?? "",
+      }));
+    evidence = rows.flatMap((row) => {
+      if (row.action !== OFFSERVER_BACKUP_EVIDENCE_ACTION) return [];
+      const parsed = parseStoredOffServerEvidence(row.metadata_json, row.entity_id ?? "");
+      return parsed ? [parsed] : [];
+    });
+  } catch {
+    audits = [];
+    evidence = [];
+  }
+  const objectKey = objectKeyForScheduledBackupRun({ lastRunAt, audits, evidence });
+  const matched = evidence.find((item) => item.objectKey === objectKey) ?? null;
+  return databaseBackupSnapshotCard({ lastRunStatus, lastError, objectKey, evidence: matched });
+}
 
 export type ScheduledJobOutcome = {
   status: "ok" | "uploaded_unverified";
@@ -184,8 +381,8 @@ async function persistDbBackupRun(db: ScheduledJobWriter, jobKey: string, record
 export async function runSingleScheduledJob(jobKey: string, actorEmail?: string) {
   await ensureWorkflowTables();
   const db = await getDb();
-  const job = await db.get<{ job_key: string; name: string; enabled: number }>(
-    "SELECT job_key, name, enabled FROM hq_scheduled_jobs WHERE job_key = ?",
+  const job = await db.get<{ job_key: string; name: string; enabled: number; schedule_expr: string | null }>(
+    "SELECT job_key, name, enabled, schedule_expr FROM hq_scheduled_jobs WHERE job_key = ?",
     jobKey
   );
   if (!job) return { ok: false, error: "Job not found" };
@@ -221,7 +418,7 @@ export async function runSingleScheduledJob(jobKey: string, actorEmail?: string)
     await db.run(
       "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'success', last_error = NULL WHERE job_key = ?",
       now,
-      computeNextRunAt(job.job_key),
+      computeNextRunAt(job.job_key, job.schedule_expr, now),
       jobKey
     );
     await logHqAudit({
@@ -239,8 +436,9 @@ export async function runSingleScheduledJob(jobKey: string, actorEmail?: string)
       await persistDbBackupRun(db, jobKey, record);
     } else {
       await db.run(
-        "UPDATE hq_scheduled_jobs SET last_run_at = ?, last_run_status = 'failed', last_error = ? WHERE job_key = ?",
+        "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'failed', last_error = ? WHERE job_key = ?",
         now,
+        computeNextRunAt(job.job_key, job.schedule_expr, now),
         message,
         jobKey
       );
@@ -491,8 +689,8 @@ export async function runScheduledJobs(actorEmail?: string): Promise<{ ran: stri
   await ensureWorkflowTables();
   const db = await getDb();
   const jobs = (await db.all(
-    "SELECT job_key, name FROM hq_scheduled_jobs WHERE enabled = 1"
-  )) as { job_key: string; name: string }[];
+    "SELECT job_key, name, schedule_expr FROM hq_scheduled_jobs WHERE enabled = 1"
+  )) as { job_key: string; name: string; schedule_expr: string | null }[];
   const ran: string[] = [];
   const errors: string[] = [];
   const now = new Date().toISOString();
@@ -519,7 +717,7 @@ export async function runScheduledJobs(actorEmail?: string): Promise<{ ran: stri
       }
       await db.run(
         "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'success', last_error = NULL WHERE job_key = ?",
-        now, computeNextRunAt(job.job_key), job.job_key
+        now, computeNextRunAt(job.job_key, job.schedule_expr, now), job.job_key
       );
       ran.push(job.job_key);
       await logHqAudit({
@@ -537,8 +735,9 @@ export async function runScheduledJobs(actorEmail?: string): Promise<{ ran: stri
         await persistDbBackupRun(db, job.job_key, record);
       } else {
         await db.run(
-          "UPDATE hq_scheduled_jobs SET last_run_at = ?, last_run_status = 'failed', last_error = ? WHERE job_key = ?",
+          "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'failed', last_error = ? WHERE job_key = ?",
           now,
+          computeNextRunAt(job.job_key, job.schedule_expr, now),
           message,
           job.job_key
         );
@@ -557,8 +756,11 @@ function scheduleIntervalMs(schedule: string): number {
   }
 }
 
-/** A pre-fix failure left next_run_at earlier than last_run_at. That screen time is not a new run. */
-export function staleDbBackupNextRun(input: {
+/**
+ * The screen time is behind the cadence. next earlier than last, or earlier than
+ * last plus the job's own interval, is not a new run. Status and last_error stay.
+ */
+export function staleScheduledNextRun(input: {
   lastRunAt: string | null;
   nextRunAt: string | null;
   scheduleExpr?: string | null;
@@ -566,8 +768,22 @@ export function staleDbBackupNextRun(input: {
   if (!input.lastRunAt || !input.nextRunAt) return null;
   const last = new Date(input.lastRunAt).getTime();
   const next = new Date(input.nextRunAt).getTime();
-  if (!Number.isFinite(last) || !Number.isFinite(next) || next >= last) return null;
-  return new Date(last + scheduleIntervalMs(input.scheduleExpr ?? "daily")).toISOString();
+  if (!Number.isFinite(last) || !Number.isFinite(next)) return null;
+  const correctedMs = last + scheduleIntervalMs(input.scheduleExpr ?? "daily");
+  if (next >= correctedMs) return null;
+  return new Date(correctedMs).toISOString();
+}
+
+export function staleDbBackupNextRun(input: {
+  lastRunAt: string | null;
+  nextRunAt: string | null;
+  scheduleExpr?: string | null;
+}): string | null {
+  return staleScheduledNextRun({
+    lastRunAt: input.lastRunAt,
+    nextRunAt: input.nextRunAt,
+    scheduleExpr: input.scheduleExpr ?? "daily",
+  });
 }
 
 export function isDbBackupOverlapError(message: string): boolean {
@@ -576,7 +792,7 @@ export function isDbBackupOverlapError(message: string): boolean {
 
 let dueScheduledRun: Promise<void> | null = null;
 
-function computeNextRunAt(jobKey: string): string {
+function computeNextRunAt(jobKey: string, scheduleExpr?: string | null, fromIso?: string): string {
   const schedules: Record<string, string> = {
     warehouse_snapshot: "hourly",
     grant_deadlines: "daily",
@@ -584,9 +800,15 @@ function computeNextRunAt(jobKey: string): string {
     db_backup: "daily",
     executive_report_daily: "daily",
     onboarding_check: "daily",
+    ops_task_reminders: "daily",
+    ops_deadline_notifications: "daily",
+    ops_compliance_alerts: "daily",
+    ops_approval_digest: "daily",
+    ops_department_reporting: "weekly",
   };
-  const schedule = schedules[jobKey] ?? "daily";
-  return new Date(Date.now() + scheduleIntervalMs(schedule)).toISOString();
+  const schedule = scheduleExpr?.trim() || schedules[jobKey] || "daily";
+  const base = fromIso ? new Date(fromIso).getTime() : Date.now();
+  return new Date((Number.isFinite(base) ? base : Date.now()) + scheduleIntervalMs(schedule)).toISOString();
 }
 
 export async function runDueScheduledJobs(
@@ -655,20 +877,18 @@ async function runDueScheduledJobsOnce(
   ];
 
   for (const job of ordered) {
-    if (job.job_key === "db_backup") {
-      const corrected = staleDbBackupNextRun({
-        lastRunAt: job.last_run_at,
-        nextRunAt: job.next_run_at,
-        scheduleExpr: job.schedule_expr,
-      });
-      if (corrected) {
-        await db.run(
-          "UPDATE hq_scheduled_jobs SET next_run_at = ? WHERE job_key = ?",
-          corrected,
-          job.job_key,
-        );
-        job.next_run_at = corrected;
-      }
+    const corrected = staleScheduledNextRun({
+      lastRunAt: job.last_run_at,
+      nextRunAt: job.next_run_at,
+      scheduleExpr: job.schedule_expr,
+    });
+    if (corrected) {
+      await db.run(
+        "UPDATE hq_scheduled_jobs SET next_run_at = ? WHERE job_key = ?",
+        corrected,
+        job.job_key,
+      );
+      job.next_run_at = corrected;
     }
 
     const interval = scheduleIntervalMs(job.schedule_expr ?? "daily");
@@ -705,7 +925,7 @@ async function runDueScheduledJobsOnce(
       }
       await db.run(
         "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'success', last_error = NULL WHERE job_key = ?",
-        ts, computeNextRunAt(job.job_key), job.job_key
+        ts, computeNextRunAt(job.job_key, job.schedule_expr, ts), job.job_key
       );
       ran.push(job.job_key);
       await logHqAudit({
@@ -731,8 +951,9 @@ async function runDueScheduledJobsOnce(
         }
       } else {
         await db.run(
-          "UPDATE hq_scheduled_jobs SET last_run_at = ?, last_run_status = 'failed', last_error = ? WHERE job_key = ?",
+          "UPDATE hq_scheduled_jobs SET last_run_at = ?, next_run_at = ?, last_run_status = 'failed', last_error = ? WHERE job_key = ?",
           ts,
+          computeNextRunAt(job.job_key, job.schedule_expr, ts),
           message,
           job.job_key
         );

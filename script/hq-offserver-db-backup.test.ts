@@ -330,7 +330,9 @@ test("a scheduled backup stores uploaded_unverified or the gate failure and adva
     });
     assert.equal(uploaded.lastRunStatus, "uploaded_unverified");
     assert.equal(uploaded.lastError, DB_BACKUP_UNVERIFIED_ERROR);
-    assert.equal(uploaded.lastError, "Off-server backup uploaded. Isolated restore has not been approved.");
+    assert.equal(uploaded.lastError, "Off-server backup uploaded. Database integrity has not been checked. Application recovery is pending. External copy is pending. Full recovery is not complete.");
+    assert.equal(uploaded.lastError.includes("approved"), false);
+    assert.equal(uploaded.lastError.includes("Isolated restore"), false);
     assert.equal(uploaded.lastRunAt, ranAt);
     assert.equal(uploaded.nextRunAt, nextDay);
     assert.notEqual(uploaded.lastRunStatus, "success");
