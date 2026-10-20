@@ -93,7 +93,7 @@ export async function getOperationsCopilotBriefing() {
       ...(warehouse.grants?.complianceDue ? [`${warehouse.grants.complianceDue} grant compliance reports due`] : []),
       ...((compliance as { overdue?: number }).overdue ? [`${(compliance as { overdue: number }).overdue} overdue compliance deadlines`] : []),
       ...(threats.failedLogins24h > 5 ? [`${threats.failedLogins24h} failed logins in 24h — review Security Center`] : []),
-      ...(backup.status !== "healthy" ? ["Database backup needs attention"] : []),
+      ...(backup.status === "warning" ? ["Database backup needs attention"] : []),
       "Review Executive Dashboard KPIs and grant pipeline",
     ].slice(0, 6),
     metrics: {

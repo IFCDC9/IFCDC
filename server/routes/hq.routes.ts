@@ -996,9 +996,9 @@ router.get("/aura/resolve/status", hqAuthRequired, requireHQModule("aura"), asyn
         "brandPromoted is the product/program — separate from the production company.",
         "Phase 7: autonomous production — Aura plans, searches, generates only missing media, builds in Resolve, returns draft. Founder does not operate Resolve or Cursor for normal production.",
       ],
-      lastHeartbeat: node.lastSeenAt,
-      heartbeatAgeMs: node.ageMs ?? null,
-      heartbeatTtlMs: node.heartbeatTtlMs ?? 45_000,
+      lastHeartbeat: "lastSeenAt" in node ? node.lastSeenAt : undefined,
+      heartbeatAgeMs: ("ageMs" in node ? node.ageMs : undefined) ?? null,
+      heartbeatTtlMs: ("heartbeatTtlMs" in node ? node.heartbeatTtlMs : undefined) ?? 45_000,
       lastSuccessfulCommand: beat.lastSuccessfulCommand || jobs.find((job) => job.status === "complete") || null,
       jobs,
       generation: beat.generation || null,
@@ -1085,7 +1085,7 @@ router.post("/aura/resolve/generate", hqAuthRequired, requireHQModule("aura"), a
 
     // Queue Mac library + Resolve ingest for generated video (local file ingest; no extra Runway credits).
     let macIngest: unknown = null;
-    if (result.ok && result.kind === "provider_video" && req.body?.ingestToMac !== false) {
+    if (result.ok && "kind" in result && result.kind === "provider_video" && req.body?.ingestToMac !== false) {
       try {
         const { getAuraResolveNodeSnapshot, queueAuraResolveCommand } = await import("../hq/auraResolveProductionNode");
         const node = await getAuraResolveNodeSnapshot();
@@ -1095,7 +1095,7 @@ router.post("/aura/resolve/generate", hqAuthRequired, requireHQModule("aura"), a
             base64: result.fileBase64,
             project: req.body?.project || "IFCDC-PHASE6C-RUNWAY",
             instruction: String(req.body?.prompt || "").slice(0, 240),
-            durationSeconds: result.durationSeconds ?? 2,
+            durationSeconds: "durationSeconds" in result && typeof result.durationSeconds === "number" ? result.durationSeconds : 2,
             // HQ already stored preview during generate — avoid duplicate upload unless asked.
             uploadPreview: req.body?.reuploadPreview === true,
             publish: false,
@@ -1108,6 +1108,8 @@ router.post("/aura/resolve/generate", hqAuthRequired, requireHQModule("aura"), a
 
     // Never return giant base64 to browser by default — keep metadata + job id.
     const { fileBase64, ...safe } = result as Record<string, unknown>;
+    const failureReason = "reason" in result && result.reason ? result.reason : undefined;
+    const failureBlocker = "blocker" in result && result.blocker ? result.blocker : undefined;
     res.json({
       ok: Boolean(result.ok),
       publish: false,
@@ -1116,10 +1118,10 @@ router.post("/aura/resolve/generate", hqAuthRequired, requireHQModule("aura"), a
       hasBytes: Boolean(fileBase64),
       macIngest,
       message: result.ok
-        ? result.kind === "provider_video"
+        ? "kind" in result && result.kind === "provider_video"
           ? "Runway video written on HQ + HQ preview stored. Mac ingest queued when Production Mac is online."
           : "Provider media written on HQ. Queue Start production on Mac for Resolve ingest + draft preview."
-        : result.reason || result.blocker,
+        : failureReason || failureBlocker,
     });
   } catch (error) {
     console.error("POST /aura/resolve/generate error:", error);
@@ -1147,7 +1149,7 @@ router.post("/aura/resolve/founder-identity/designate", hqAuthRequired, requireH
       mimeType: req.body?.mimeType || null,
     });
     if (!stored.ok) {
-      res.status(400).json({ ok: false, publish: false, phase: "6B", ...stored });
+      res.status(400).json({ publish: false, phase: "6B", ...stored });
       return;
     }
 

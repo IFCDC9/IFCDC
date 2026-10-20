@@ -3,7 +3,7 @@
  * Never calls a localhost microservice in production by default.
  * POSTMARK_SERVER_TOKEN is read from the environment and is never logged.
  */
-import { sendTransactionalEmail, type TransactionalEmailCategory } from "./transactionalEmail";
+import { sendTransactionalEmail, type TransactionalEmailCategory, type TransactionalSendResult } from "./transactionalEmail";
 import {
   createNotificationService,
   createTwilioSmsProvider,
@@ -267,7 +267,7 @@ export async function sendFounderSecurityEmail(opts: {
   subject: string;
   body: string;
   html?: string;
-}): Promise<HqDeliveryResult> {
+}): Promise<TransactionalSendResult> {
   const text = opts.body;
   let html = opts.html || "";
   if (!html) {

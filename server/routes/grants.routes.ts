@@ -2076,7 +2076,7 @@ router.post("/funding-intelligence/enrich", async (req: Request, res: Response) 
     const db = await getDb();
     const limit = typeof req.body?.limit === "number" ? req.body.limit : 40;
     const onlyUnenriched = req.body?.onlyUnenriched !== false;
-    const rows = await db.all<{ id: string }>(
+    const rows = await db.all<{ id: string }[]>(
       onlyUnenriched
         ? `SELECT id FROM grant_opportunities
            WHERE (duplicate_of_id IS NULL OR duplicate_of_id = '')
@@ -2184,7 +2184,7 @@ router.get("/funding-intelligence/evidence-vault", async (req, res) => {
 router.get("/funding-intelligence/opportunities/:id/requirements", async (req, res) => {
   const { getOpportunityRequirementChecklist } = await import("../hq/auraGrantEvidenceVaultEngine");
   const payload = await getOpportunityRequirementChecklist(String(req.params.id));
-  if (!payload.opportunity && !(payload as { opportunityId?: string }).opportunityId) {
+  if (!("opportunity" in payload) && !payload.opportunityId) {
     // engine may return { opportunityId, requirements, gapReport }
   }
   res.json(payload);

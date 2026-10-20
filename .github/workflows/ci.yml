@@ -65,6 +65,8 @@ jobs:
           IFCDC_GRANTS_QA=1 \
           JWT_SECRET=ci-grants-qa-secret \
           FOUNDER_SEED_PASSWORD='CiGrantsQa!2026' \
+          GRANTS_OPERATOR_EMAIL=grants-operator@ifcdc.org \
+          GRANTS_OPERATOR_PASSWORD='CiGrantsOp!2026' \
           MASTER_OWNER_EMAIL=service@ifcdc.org \
           PUBLIC_APP_URL=http://127.0.0.1:5000 \
           node dist/index.cjs &

@@ -213,7 +213,7 @@ async function inventoryHqDocuments(): Promise<Array<{ id: string; title: string
   const db = await getDb();
   const rows: Array<{ id: string; title: string; category: string }> = [];
   try {
-    const hq = await db.all<{ id: string; title: string; category: string }>(
+    const hq = await db.all<{ id: string; title: string; category: string }[]>(
       `SELECT id, title, category FROM hq_documents ORDER BY datetime(updated_at) DESC LIMIT 200`
     );
     rows.push(...(hq || []));
@@ -221,7 +221,7 @@ async function inventoryHqDocuments(): Promise<Array<{ id: string; title: string
     /* table may not exist */
   }
   try {
-    const gd = await db.all<{ id: string; name: string; doc_type: string; doc_category: string }>(
+    const gd = await db.all<{ id: string; name: string; doc_type: string; doc_category: string }[]>(
       `SELECT id, name, doc_type, doc_category FROM grant_documents
        WHERE file_url IS NOT NULL AND file_url != ''
        ORDER BY datetime(COALESCE(uploaded_at, created_at)) DESC LIMIT 200`
@@ -763,7 +763,7 @@ export async function runAwardabilityVerificationBatch(opts?: {
   const onlyQualified = opts?.onlyQualified !== false;
   let requalified = 0;
 
-  let rows = await db.all<{ id: string }>(
+  let rows = await db.all<{ id: string }[]>(
     onlyQualified
       ? `SELECT id FROM grant_opportunities
          WHERE eligibility_result IN ('eligible', 'possibly_eligible')
@@ -779,7 +779,7 @@ export async function runAwardabilityVerificationBatch(opts?: {
   // Production may lose Phase 8A qualification fields after redeploy — re-qualify recent live rows.
   if (onlyQualified && rows.length === 0 && opts?.requalifyIfEmpty !== false) {
     const { enrichAndQualifyOpportunity } = await import("./auraFundingIntelligenceEngine");
-    const candidates = await db.all<{ id: string }>(
+    const candidates = await db.all<{ id: string }[]>(
       `SELECT id FROM grant_opportunities
        WHERE (duplicate_of_id IS NULL OR duplicate_of_id = '')
          AND (is_live = 1 OR source_type = 'grants_gov')
@@ -795,7 +795,7 @@ export async function runAwardabilityVerificationBatch(opts?: {
       requalified++;
       await new Promise((r) => setTimeout(r, 120));
     }
-    rows = await db.all<{ id: string }>(
+    rows = await db.all<{ id: string }[]>(
       `SELECT id FROM grant_opportunities
        WHERE eligibility_result IN ('eligible', 'possibly_eligible')
          AND (duplicate_of_id IS NULL OR duplicate_of_id = '')
@@ -890,7 +890,7 @@ export async function selectFirstPilotRecommendation(): Promise<{
     } else deadlinePts = 3;
     const compliance = r.can_ifcdc_apply === "yes" ? 10 : r.can_ifcdc_apply === "possibly" ? 6 : 2;
     const composite = elig + fit + addr + ready + deadlinePts + compliance;
-    return { ...r, pilotComposite: Math.round(composite) };
+    return Object.assign({}, r, { pilotComposite: Math.round(composite) });
   });
 
   scored.sort((a, b) => Number(b.pilotComposite) - Number(a.pilotComposite));
