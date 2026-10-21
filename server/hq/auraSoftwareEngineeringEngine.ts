@@ -25,6 +25,7 @@ import {
 } from "./auraSoftwareEngineeringPolicy";
 import { SOFTWARE_DIVISION_APPS, pollAllApps, getHqPublicBase } from "./appRegistry";
 import { fetchGitHubIntegrationSnapshot } from "./githubIntegrationEngine";
+import { explainSoftwarePortfolio } from "./auraCommandReplies";
 
 export type SeSeverity = "critical" | "high" | "medium" | "low";
 
@@ -624,7 +625,7 @@ export async function handleSoftwareEngineeringCommand(opts: {
   if (/\b(portfolio|software division|all ifcdc app|application health|failed builds?)\b/i.test(command)) {
     const dash = await buildSoftwareEngineeringDashboard();
     return {
-      reply: `Software portfolio: ${dash.apps.length} apps, ${dash.apps.filter((a) => a.healthy === false).length} unhealthy, deploy ${dash.github?.deploymentStatus ?? "unknown"}, ${dash.pendingApprovals.length} Founder approvals waiting.`,
+      reply: explainSoftwarePortfolio(dash),
       action: "portfolio",
       data: dash,
     };

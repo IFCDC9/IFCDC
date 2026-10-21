@@ -1699,7 +1699,7 @@ const sePortfolioStatus: AuraAction = {
     const data = await buildSoftwareEngineeringDashboard();
     return {
       status: "done",
-      summary: `Portfolio: ${data.apps.length} apps, deploy ${data.github?.deploymentStatus ?? "unknown"}, ${data.pendingApprovals.length} approvals waiting.`,
+      summary: (await import("./auraCommandReplies")).explainSoftwarePortfolio(data),
       data,
       navigation: { path: "/hq/software-engineering", label: "Open Software Engineering" },
     };
