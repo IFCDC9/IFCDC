@@ -1,4 +1,4 @@
-/** Outbound-only repository inspection worker. No listener, edits, shell, push or deploy. */
+/** Outbound-only inspection and explicitly enabled isolated package staging. No tests, push or deploy. */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
@@ -12,6 +12,7 @@ const remoteAllowed = (url) => /^(?:https:\/\/github\.com\/|git@github\.com:|ssh
 export function validateRunnerConfig(config) {
   if (!config || typeof config !== "object" || typeof config.hqUrl !== "string" ||
       typeof config.repoRoot !== "string" || !path.isAbsolute(config.repoRoot) ||
+      (config.allowPackageStaging !== undefined && typeof config.allowPackageStaging !== "boolean") ||
       !/^aura_runner_[a-f0-9-]{36}\.[A-Za-z0-9_-]{43}$/.test(config.runnerToken || "")) {
     throw new Error("Invalid runner configuration.");
   }
@@ -58,14 +59,33 @@ export async function runRunnerOnce(input) {
     if (!response.ok) throw Object.assign(new Error(`HQ runner request failed (${response.status}).`), { status: response.status });
     return response.json();
   }
-  const { job } = await request("/runner/claim");
+  const capabilities = ["inspect_repository", ...(config.allowPackageStaging === true ? ["stage_change_package_v1"] : [])];
+  const { job } = await request("/runner/claim", { capabilities });
   if (!job) return { status: "idle" };
-  if (job.kind !== "inspect_repository" || !/^[a-f0-9-]{36}$/.test(job.id) || !/^[A-Za-z0-9_-]{43}$/.test(job.lease)) {
+  if (!capabilities.includes(job.kind) || !/^[a-f0-9-]{36}$/.test(job.id) || !/^[A-Za-z0-9_-]{43}$/.test(job.lease) ||
+      !Number.isSafeInteger(job.lease_until) || job.lease_until <= Date.now()) {
     throw new Error("HQ returned an unsupported job.");
   }
-  const result = await inspectRepository(config.repoRoot);
+  let result;
+  let localReview;
+  if (job.kind === "stage_change_package_v1") {
+    const { stageChangePackage, reviewChangePackage } = await import("./aura-change-package.mjs");
+    const review = reviewChangePackage(job.changePackage);
+    if (job.reviewedSha256 !== review.packageSha256) throw new Error("HQ returned a changed package.");
+    try {
+      localReview = await stageChangePackage({ repoRoot: config.repoRoot, changePackage: job.changePackage,
+        reviewedSha256: job.reviewedSha256 });
+      result = { status: "succeeded", packageSha256: review.packageSha256, baseCommit: review.baseCommit,
+        fileCount: review.files.length, reviewId: path.basename(path.dirname(localReview.workspace)),
+        testsRun: false, productionExecuted: false };
+    } catch {
+      result = { status: "failed", error: "package_staging_failed", packageSha256: review.packageSha256,
+        testsRun: false, productionExecuted: false };
+    }
+  } else result = await inspectRepository(config.repoRoot);
   await request(`/runner/jobs/${job.id}/result`, { lease: job.lease, result });
-  return { jobId: job.id, status: result.status };
+  // Paths stay on the local terminal; HQ receives only a bounded receipt.
+  return { jobId: job.id, status: result.status, ...(localReview ? { workspace: localReview.workspace, patchPath: localReview.patchPath } : {}) };
 }
 
 async function main() {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -23,12 +23,13 @@ const { getDb } = await import("../server/db.ts");
 // This worker is deliberately plain Node: the Mac needs no paid agent or tsx.
 // @ts-ignore plain JS CLI exports
 const { runRunnerOnce, inspectRepository, validateRunnerConfig } = await import("./aura-mac-runner.mjs");
+const { reviewChangePackage } = await import("../shared/auraChangePackage.mjs");
 await exec("git", ["init", repo]);
 const git = (...args: string[]) => exec("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.test", ...args]);
 await git("commit", "--allow-empty", "-m", "init");
 await git("remote", "add", "origin", "https://github.com/IFCDC9/IFCDC.git");
 const app = express();
-app.use(express.json({ limit: "16kb" }));
+app.use(express.json({ limit: "300kb" }));
 app.use("/api/hq/aura/software-engineering", router);
 const server = app.listen(0, "127.0.0.1");
 await new Promise<void>((resolve) => server.once("listening", resolve));
@@ -125,4 +126,94 @@ test("worker refuses another repository or a child folder, and accepts HTTPS ori
   const runner = await bridge.enrollRunner("Config Mac", "founder");
   assert.throws(() => validateRunnerConfig({ hqUrl: "http://example.com", repoRoot: repo, runnerToken: runner.token }));
   assert.throws(() => validateRunnerConfig({ hqUrl: "https://example.com/path", repoRoot: repo, runnerToken: runner.token }));
+});
+
+async function stagingFixture(label: string) {
+  rmSync(path.join(repo, "local.txt"), { force: true });
+  const device = await bridge.enrollRunner(label, "founder");
+  const changePackage = { version: 1, repository: "IFCDC9/IFCDC", baseCommit: (await git("rev-parse", "HEAD")).stdout.trim(),
+    summary: "Record the reviewed staging milestone", files: [{ path: "Documents/products/staging-check.md",
+      beforeSha256: null, content: "Reviewed staging — no test execution.\n" }] };
+  const reviewedSha256 = reviewChangePackage(changePackage).packageSha256;
+  return { device, changePackage, reviewedSha256, config: { hqUrl, repoRoot: repo, runnerToken: device.token } };
+}
+
+test("Founder review and explicit approval dispatch immutable content; locally enabled worker stages and reports a receipt", async () => {
+  const { device, changePackage, reviewedSha256, config } = await stagingFixture("Staging Mac");
+  const reviewResponse = await request("/runner-change-review", founder, { changePackage });
+  assert.equal(reviewResponse.status, 200);
+  assert.equal((await reviewResponse.json()).packageSha256, reviewedSha256);
+  const queued = await request("/runner-change-jobs", founder, { runnerId: device.id, changePackage, reviewedSha256, approved: true });
+  assert.equal(queued.status, 201);
+  const job = await queued.json();
+  // Capability opt-in is local and absent by default; old workers do not consume staging jobs.
+  assert.equal((await runRunnerOnce(config)).status, "idle");
+  assert.equal((await (await getDb()).get("SELECT status FROM aura_runner_jobs WHERE id = ?", job.id)).status, "queued");
+  const originalContent = changePackage.files[0].content;
+  changePackage.files[0].content = "Changed after approval";
+  const result = await runRunnerOnce({ ...config, allowPackageStaging: true });
+  assert.equal(result.status, "succeeded");
+  try {
+    assert.equal(readFileSync(path.join(result.workspace, "Documents/products/staging-check.md"), "utf8"), originalContent);
+    assert.match(readFileSync(result.patchPath, "utf8"), /Reviewed staging/);
+    assert.equal((await git("status", "--porcelain")).stdout.trim(), "");
+    const listing = await (await request("/runners", founder)).json();
+    const saved = listing.jobs.find((item: { id: string }) => item.id === job.id);
+    assert.equal(saved.result.packageSha256, reviewedSha256);
+    assert.equal(saved.result.fileCount, 1);
+    assert.equal(saved.result.testsRun, false);
+    assert.equal(saved.result.productionExecuted, false);
+    assert.equal(JSON.stringify(listing).includes(result.workspace), false);
+    assert.equal(JSON.stringify(listing).includes(originalContent), false);
+    assert.equal(JSON.stringify(listing).includes(device.token), false);
+  } finally { if (result.workspace) rmSync(path.dirname(result.workspace), { recursive: true, force: true }); }
+});
+
+test("staging routes require Founder authority, explicit approval and the exact review digest", async () => {
+  const { device, changePackage, reviewedSha256 } = await stagingFixture("Approval Mac");
+  for (const token of [undefined, device.token, staff]) {
+    const expected = token === staff ? 403 : 401;
+    assert.equal((await request("/runner-change-review", token, { changePackage })).status, expected);
+    assert.equal((await request("/runner-change-jobs", token, { runnerId: device.id, changePackage, reviewedSha256, approved: true })).status, expected);
+  }
+  assert.equal((await request("/runner-change-jobs", founder, { runnerId: device.id, changePackage, reviewedSha256 })).status, 400);
+  assert.equal((await request("/runner-change-jobs", founder, { runnerId: device.id, changePackage, reviewedSha256: "0".repeat(64), approved: true })).status, 400);
+  assert.equal((await request("/runner-change-review", founder, { changePackage: { ...changePackage, command: "npm run deploy" } })).status, 400);
+  assert.throws(() => validateRunnerConfig({ hqUrl, repoRoot: repo, runnerToken: device.token, allowPackageStaging: "true" }));
+});
+
+test("staging receipts are bound to their job and lease; replay, revocation and claimed test execution are rejected", async () => {
+  const { device, changePackage, reviewedSha256 } = await stagingFixture("Receipt Mac");
+  const other = await bridge.enrollRunner("Other staging Mac", "founder");
+  await bridge.queueRunnerChangePackage(device.id, changePackage, reviewedSha256, true, "founder");
+  const job = (await bridge.claimRunnerJob(device.id, ["stage_change_package_v1"]))!;
+  const good = { status: "succeeded", packageSha256: reviewedSha256, baseCommit: changePackage.baseCommit,
+    reviewId: "aura-review-test", fileCount: 1, testsRun: false, productionExecuted: false, workspace: "/private/local-path" };
+  await assert.rejects(bridge.completeRunnerJob(other.id, job.id, job.lease, good), /not assigned/);
+  await assert.rejects(bridge.completeRunnerJob(device.id, job.id, job.lease, { ...good, testsRun: true }), /approved package/);
+  await assert.rejects(bridge.completeRunnerJob(device.id, job.id, job.lease, { ...good, packageSha256: "0".repeat(64) }), /approved package/);
+  await assert.rejects(bridge.completeRunnerJob(device.id, job.id, job.lease, { ...good, fileCount: 2 }), /Invalid staging/);
+  const saved = await bridge.completeRunnerJob(device.id, job.id, job.lease, good);
+  assert.equal(JSON.stringify(saved).includes("/private/local-path"), false);
+  await assert.rejects(bridge.completeRunnerJob(device.id, job.id, job.lease, good), /completed/);
+  await bridge.queueRunnerChangePackage(device.id, changePackage, reviewedSha256, true, "founder");
+  const second = (await bridge.claimRunnerJob(device.id, ["stage_change_package_v1"]))!;
+  await bridge.revokeRunner(device.id, "founder");
+  await assert.rejects(bridge.completeRunnerJob(device.id, second.id, second.lease, good), /not assigned/);
+});
+
+test("stale-base staging fails without changes; expired queued packages never run", async () => {
+  const { device, changePackage, config } = await stagingFixture("Stale Mac");
+  changePackage.baseCommit = "0".repeat(40);
+  const digest = reviewChangePackage(changePackage).packageSha256;
+  const queued = await bridge.queueRunnerChangePackage(device.id, changePackage, digest, true, "founder");
+  assert.equal((await runRunnerOnce({ ...config, allowPackageStaging: true })).status, "failed");
+  assert.equal((await git("status", "--porcelain")).stdout.trim(), "");
+  const listing = await bridge.listRunnersAndJobs();
+  assert.equal(listing.jobs.find((item) => item.id === queued.id)?.result.error, "package_staging_failed");
+  const next = await bridge.queueRunnerChangePackage(device.id, changePackage, digest, true, "founder");
+  const db = await getDb();
+  await db.run("UPDATE aura_runner_jobs SET created_at = ? WHERE id = ?", Date.now() - 31 * 60_000, next.id);
+  assert.equal(await bridge.claimRunnerJob(device.id, ["stage_change_package_v1"]), null);
+  assert.equal((await db.get("SELECT status FROM aura_runner_jobs WHERE id = ?", next.id)).status, "expired");
 });

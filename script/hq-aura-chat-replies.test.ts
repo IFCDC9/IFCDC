@@ -34,8 +34,10 @@ test("real dispatcher answers capability questions without keys or executing act
     assert.equal(result.poweredBy, "AURA Engineering Capabilities");
     assert.deepEqual(result.actions, []);
     assert.deepEqual(result.approvalsCreated, []);
-    assert.match(result.reply, /only inspect_repository/);
-    assert.match(result.reply, /cannot send code-editing or test-execution jobs/);
+    assert.match(result.reply, /supports inspect_repository/);
+    assert.match(result.reply, /Founder-reviewed change package/);
+    assert.match(result.reply, /does not run tests/);
+    assert.match(result.reply, /explicitly enables package staging/);
     assert.doesNotMatch(result.reply, /Portfolio:|approvals waiting|tests passed/);
   }
 });

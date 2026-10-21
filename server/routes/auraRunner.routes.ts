@@ -2,7 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from "express"
 import { hqAuthRequired } from "../middleware/hqAuth";
 import { engineeringApprovalAllowed } from "../hq/auraEngineeringWorkflow";
 import { authenticateRunner, claimRunnerJob, completeRunnerJob, enrollRunner, listRunnersAndJobs,
-  queueRunnerInspection, revokeRunner, RunnerBridgeError } from "../hq/auraRunnerBridge";
+  queueRunnerInspection, queueRunnerChangePackage, reviewRunnerChangePackage, revokeRunner, RunnerBridgeError } from "../hq/auraRunnerBridge";
 
 const router = Router();
 router.use((_req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
@@ -31,12 +31,19 @@ router.post("/runners/:id/revoke", hqAuthRequired, founder, handled(async (req, 
 router.post("/runner-jobs", hqAuthRequired, founder, handled(async (req, res) => {
   res.status(201).json(await queueRunnerInspection(req.body?.runnerId, req.body?.kind, req.hqUser!.id));
 }));
+router.post("/runner-change-review", hqAuthRequired, founder, handled(async (req, res) => {
+  res.json(reviewRunnerChangePackage(req.body?.changePackage));
+}));
+router.post("/runner-change-jobs", hqAuthRequired, founder, handled(async (req, res) => {
+  res.status(201).json(await queueRunnerChangePackage(req.body?.runnerId, req.body?.changePackage,
+    req.body?.reviewedSha256, req.body?.approved, req.hqUser!.id));
+}));
 
 // Worker credentials never grant Founder access or accept HQ session tokens.
 router.post("/runner/claim", handled(async (req, res) => {
   const runnerId = await authenticateRunner(req.get("authorization"));
   res.set("Cache-Control", "no-store");
-  res.json({ job: await claimRunnerJob(runnerId) });
+  res.json({ job: await claimRunnerJob(runnerId, req.body?.capabilities) });
 }));
 router.post("/runner/jobs/:id/result", handled(async (req, res) => {
   const runnerId = await authenticateRunner(req.get("authorization"));
