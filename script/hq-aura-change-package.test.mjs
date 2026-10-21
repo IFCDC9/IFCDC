@@ -75,7 +75,7 @@ test("rejects command fields, traversal, secret/config paths, portable collision
   const { value } = fixture(t);
   assert.throws(() => reviewChangePackage({ ...value, testCommand: "npm run deploy" }));
   for (const target of ["../escape.md", "Documents/../escape.md", "Documents/CON.txt", "Documents/a.md.",
-    "Documents/link\\escape.md", "Documents/.env", ".github/workflows/ci.js", "server/auth.ts", "script/aura-mac-runner.mjs"]) {
+    "Documents/link\\escape.md", "Documents/.env", ".github/workflows/ci.js", "server/auth.ts", "script/aura-mac-runner.mjs", "shared/auraChangePackage.mjs"]) {
     assert.throws(() => reviewChangePackage({ ...value, files: [{ ...value.files[0], path: target }] }), target);
   }
   assert.throws(() => reviewChangePackage({ ...value, files: [value.files[0], { ...value.files[0], path: "Documents/NOTE.md" }] }));

@@ -39,9 +39,10 @@ export function isMacEngineeringCapabilityQuestion(command: string): boolean {
 }
 
 export const MAC_ENGINEERING_CAPABILITY_REPLY =
-  "The Mac runner bridge currently supports only inspect_repository: it can report the approved repository's commit, branch, and changed/untracked file counts. " +
-  "It cannot send code-editing or test-execution jobs to your Mac. The separate local engineering workflow is not forwarded through this bridge. " +
-  "The next implementation step is an isolated workspace and a reviewed change-package protocol, followed by controlled test execution and result reporting. " +
+  "The runner bridge supports inspect_repository, which reports the approved repository's commit, branch, and changed/untracked file counts. " +
+  "It also supports staging an exact Founder-reviewed change package in a separate local workspace when that computer's private configuration explicitly enables package staging. " +
+  "Staging leaves the active checkout unchanged and reports a receipt; it does not run tests, commit, open a pull request, merge, or deploy. The separate local engineering workflow is not forwarded through this bridge. " +
+  "The next implementation step is controlled test execution and result reporting. " +
   "Production merges and deployments require Founder approval. This capability answer does not perform an inspection or confirm that a runner is online.";
 
 export type ToolReplyEvidence = { id: string; status: string; summary: string };
