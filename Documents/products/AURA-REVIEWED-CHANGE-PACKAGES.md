@@ -87,8 +87,8 @@ payload contents, credentials and local absolute paths. The current UI accepts
 Mac and Windows repository paths, but staging still needs a real Windows trial.
 
 The independent clone is filesystem isolation, not an execution sandbox. Do not
-run package-supplied code with production credentials. Controlled test execution
-and test result reporting are remaining milestones. Production merges and deployments
+run package-supplied code with production credentials. A separate, locally opted-in
+container test job is described in AURA-CONTROLLED-PACKAGE-TESTS.md. Production merges and deployments
 require Founder approval. This release does not generate engineering packages
 from natural-language instructions; a package must be prepared and reviewed first.
 

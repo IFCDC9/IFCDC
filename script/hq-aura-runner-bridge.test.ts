@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -216,4 +216,123 @@ test("stale-base staging fails without changes; expired queued packages never ru
   await db.run("UPDATE aura_runner_jobs SET created_at = ? WHERE id = ?", Date.now() - 31 * 60_000, next.id);
   assert.equal(await bridge.claimRunnerJob(device.id, ["stage_change_package_v1"]), null);
   assert.equal((await db.get("SELECT status FROM aura_runner_jobs WHERE id = ?", next.id)).status, "expired");
+});
+
+async function queuedTestFixture(label: string) {
+  const f = await stagingFixture(label);
+  const staged = await bridge.queueRunnerChangePackage(f.device.id, f.changePackage, f.reviewedSha256, true, "founder");
+  const result = await runRunnerOnce({ ...f.config, allowPackageStaging: true });
+  if (result.workspace) rmSync(path.dirname(result.workspace), { recursive: true, force: true });
+  const input = { stagingJobId: staged.id, reviewedSha256: f.reviewedSha256, testProfile: "package-validator-v1", approved: true };
+  return { ...f, staged, input };
+}
+
+test("test dispatch requires successful staging, Founder approval, exact digest and fixed profile", async () => {
+  const f = await queuedTestFixture("Test approval Mac");
+  for (const token of [undefined, f.device.token, staff]) {
+    assert.equal((await request("/runner-test-jobs", token, f.input)).status, token === staff ? 403 : 401);
+  }
+  for (const invalid of [{ ...f.input, approved: false }, { ...f.input, testProfile: "run_shell" },
+    { ...f.input, command: "anything" }]) assert.equal((await request("/runner-test-jobs", founder, invalid)).status, 400);
+  assert.equal((await request("/runner-test-jobs", founder, { ...f.input, reviewedSha256: "0".repeat(64) })).status, 409);
+  assert.equal((await request("/runner-test-jobs", founder, { ...f.input, stagingJobId: "missing" })).status, 409);
+  assert.throws(() => validateRunnerConfig({ ...f.config, allowPackageTests: "true" }));
+  assert.throws(() => validateRunnerConfig({ ...f.config, packageTestImage: "node:latest" }));
+  const queued = await request("/runner-test-jobs", founder, f.input);
+  assert.equal(queued.status, 201);
+  assert.equal((await runRunnerOnce({ ...f.config, allowPackageStaging: true })).status, "idle");
+  // Missing local image configuration fails closed, never falls back to host execution.
+  const outcome = await runRunnerOnce({ ...f.config, allowPackageTests: true });
+  assert.equal(outcome.status, "failed");
+  const listing = await bridge.listRunnersAndJobs();
+  const receipt = listing.jobs.find((j) => j.id === outcome.jobId)!.result;
+  assert.equal(receipt.error, "test_sandbox_unavailable");
+  assert.equal(receipt.testsRun, false);
+});
+
+test("test receipts bind staging, digest, profile, computer and lease; reject contradictory pass claims", async () => {
+  const f = await queuedTestFixture("Test receipt Mac");
+  const queued = await bridge.queueRunnerPackageTests(f.input, "founder");
+  const claimed = (await bridge.claimRunnerJob(f.device.id, ["test_change_package_v1"]))!;
+  assert.equal(claimed.id, queued.id);
+  const good = { status: "succeeded", outcome: "passed", testsRun: true, exitCode: 0, durationMs: 10,
+    packageSha256: f.reviewedSha256, baseCommit: f.changePackage.baseCommit, testProfile: "package-validator-v1",
+    stagingJobId: f.staged.id, productionExecuted: false, stdout: "secret must not leave worker" };
+  for (const bad of [{ ...good, exitCode: 1 }, { ...good, testsRun: false }, { ...good, productionExecuted: true },
+    { ...good, stagingJobId: "other" }, { ...good, packageSha256: "0".repeat(64) }, { ...good, durationMs: -1 }]) {
+    await assert.rejects(bridge.completeRunnerJob(f.device.id, claimed.id, claimed.lease, bad));
+  }
+  const other = await bridge.enrollRunner("Other test Mac", "founder");
+  await assert.rejects(bridge.completeRunnerJob(other.id, claimed.id, claimed.lease, good), /not assigned/);
+  const saved = await bridge.completeRunnerJob(f.device.id, claimed.id, claimed.lease, good);
+  assert.equal(saved.testsRun, true);
+  assert.equal(JSON.stringify(saved).includes("secret must not leave worker"), false);
+  await assert.rejects(bridge.completeRunnerJob(f.device.id, claimed.id, claimed.lease, good), /completed/);
+});
+
+test("plain worker executes the fixed harness through a Docker CLI stand-in and reports pass/fail, without changing the active checkout", async () => {
+  // This verifies the process protocol, NOT real container isolation. Live Docker validation is separate.
+  if (process.platform === "win32") return;
+  mkdirSync(path.join(repo, "shared"), { recursive: true });
+  writeFileSync(path.join(repo, "shared/auraChangePackage.mjs"), readFileSync(new URL("../shared/auraChangePackage.mjs", import.meta.url)));
+  await git("add", "shared/auraChangePackage.mjs"); await git("commit", "-m", "test validator fixture");
+  const bin = mkdtempSync(path.join(tmpdir(), "aura-docker-standin-"));
+  const originalPath = process.env.PATH;
+  const docker = path.join(bin, "docker");
+  writeFileSync(docker, `#!/usr/bin/env node
+const fs = require('node:fs');
+const cp = require('node:child_process');
+const args = process.argv.slice(2);
+const marker = require('node:path').join(require('node:path').dirname(process.argv[1]), 'mode');
+if (args[0] === 'image') process.exit(0);
+if (args[0] === 'rm') { fs.writeFileSync(marker + '.cleaned', 'yes'); process.exit(0); }
+if (fs.existsSync(marker)) { process.stdout.write('x'.repeat(100000)); setInterval(() => {}, 1000); return; }
+if (!args.includes('--network=none') || !args.includes('--pull=never') || !args.includes('--read-only')) process.exit(125);
+if (process.env.AURA_SECRET_TEST) process.exit(125);
+const mount = args[args.indexOf('--mount') + 1];
+const root = mount.split(',').find(x => x.startsWith('source=')).slice(7);
+if (fs.existsSync(root + '/.git') || fs.existsSync(root + '/.env')) process.exit(125);
+const run = cp.spawnSync(process.execPath, ['--test', 'script/aura-package-validator-suite.mjs'], {cwd: root, env: {PATH: process.env.PATH}, stdio: 'pipe'});
+process.stdout.write(run.stdout || '');
+process.exit(run.status ?? 1);
+`);
+  chmodSync(docker, 0o755);
+  process.env.PATH = bin + path.delimiter + originalPath;
+  process.env.AURA_SECRET_TEST = "not-for-tests";
+  try {
+    const f = await queuedTestFixture("Sandbox protocol Mac");
+    await bridge.queueRunnerPackageTests(f.input, "founder");
+    const result = await runRunnerOnce({ ...f.config, allowPackageTests: true, packageTestImage: "sha256:" + "a".repeat(64) });
+    assert.equal(result.status, "succeeded");
+    assert.equal((await git("status", "--porcelain")).stdout, "");
+    const listed = await bridge.listRunnersAndJobs();
+    assert.equal(listed.jobs.find((j) => j.id === result.jobId)!.result.outcome, "passed");
+    writeFileSync(path.join(bin, "mode"), "overflow");
+    rmSync(path.join(bin, "mode.cleaned"), { force: true });
+    await bridge.queueRunnerPackageTests(f.input, "founder");
+    const limited = await runRunnerOnce({ ...f.config, allowPackageTests: true, packageTestImage: "sha256:" + "a".repeat(64) });
+    assert.equal(limited.error, "test_limit_exceeded");
+    assert.equal(readFileSync(path.join(bin, "mode.cleaned"), "utf8"), "yes");
+    const uncertain = (await bridge.listRunnersAndJobs()).jobs.find((j) => j.id === limited.jobId)!.result;
+    assert.equal(uncertain.testsRun, null);
+    rmSync(path.join(bin, "mode"));
+    // Break the baseline module after successful staging. Tests refuse the now-stale base before execution.
+    writeFileSync(path.join(repo, "shared/auraChangePackage.mjs"), "export const broken = true;\n");
+    await bridge.queueRunnerPackageTests(f.input, "founder");
+    const failed = await runRunnerOnce({ ...f.config, allowPackageTests: true, packageTestImage: "sha256:" + "a".repeat(64) });
+    assert.equal(failed.error, "test_staging_failed");
+    await git("restore", "shared/auraChangePackage.mjs");
+    // A broken, committed validator is reported as a failing test run, never a pass.
+    writeFileSync(path.join(repo, "shared/auraChangePackage.mjs"), "export const broken = true;\n");
+    await git("add", "shared/auraChangePackage.mjs"); await git("commit", "-m", "broken validator fixture");
+    const broken = await queuedTestFixture("Failing unit tests Mac");
+    await bridge.queueRunnerPackageTests(broken.input, "founder");
+    const failing = await runRunnerOnce({ ...broken.config, allowPackageTests: true, packageTestImage: "sha256:" + "a".repeat(64) });
+    assert.equal(failing.status, "failed");
+    const receipt = (await bridge.listRunnersAndJobs()).jobs.find((j) => j.id === failing.jobId)!.result;
+    assert.equal(receipt.testsRun, true); assert.equal(receipt.outcome, "failed"); assert.ok(receipt.exitCode > 0);
+  } finally {
+    process.env.PATH = originalPath; delete process.env.AURA_SECRET_TEST;
+    rmSync(bin, { recursive: true, force: true });
+  }
 });

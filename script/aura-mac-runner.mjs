@@ -1,4 +1,4 @@
-/** Outbound-only inspection and explicitly enabled isolated package staging. No tests, push or deploy. */
+/** Outbound-only inspection and explicitly enabled isolated package staging. Fixed-profile container tests require separate local opt-in. No push or deploy. */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
@@ -12,6 +12,8 @@ const remoteAllowed = (url) => /^(?:https:\/\/github\.com\/|git@github\.com:|ssh
 export function validateRunnerConfig(config) {
   if (!config || typeof config !== "object" || typeof config.hqUrl !== "string" ||
       typeof config.repoRoot !== "string" || !path.isAbsolute(config.repoRoot) ||
+      (config.allowPackageTests !== undefined && typeof config.allowPackageTests !== "boolean") ||
+      (config.packageTestImage !== undefined && !/^sha256:[a-f0-9]{64}$/.test(config.packageTestImage)) ||
       (config.allowPackageStaging !== undefined && typeof config.allowPackageStaging !== "boolean") ||
       !/^aura_runner_[a-f0-9-]{36}\.[A-Za-z0-9_-]{43}$/.test(config.runnerToken || "")) {
     throw new Error("Invalid runner configuration.");
@@ -59,7 +61,8 @@ export async function runRunnerOnce(input) {
     if (!response.ok) throw Object.assign(new Error(`HQ runner request failed (${response.status}).`), { status: response.status });
     return response.json();
   }
-  const capabilities = ["inspect_repository", ...(config.allowPackageStaging === true ? ["stage_change_package_v1"] : [])];
+  const capabilities = ["inspect_repository", ...(config.allowPackageStaging === true ? ["stage_change_package_v1"] : []),
+    ...(config.allowPackageTests === true ? ["test_change_package_v1"] : [])];
   const { job } = await request("/runner/claim", { capabilities });
   if (!job) return { status: "idle" };
   if (!capabilities.includes(job.kind) || !/^[a-f0-9-]{36}$/.test(job.id) || !/^[A-Za-z0-9_-]{43}$/.test(job.lease) ||
@@ -68,7 +71,25 @@ export async function runRunnerOnce(input) {
   }
   let result;
   let localReview;
-  if (job.kind === "stage_change_package_v1") {
+  if (job.kind === "test_change_package_v1") {
+    const { runPackageTests } = await import("./aura-package-tests.mjs");
+    const { reviewChangePackage } = await import("../shared/auraChangePackage.mjs");
+    const review = reviewChangePackage(job.changePackage);
+    if (job.reviewedSha256 !== review.packageSha256 || job.testProfile !== "package-validator-v1" ||
+        !/^[a-f0-9-]{36}$/.test(job.stagingJobId || "")) throw new Error("HQ returned an unsupported test request.");
+    const binding = { packageSha256: review.packageSha256, baseCommit: review.baseCommit,
+      testProfile: job.testProfile, stagingJobId: job.stagingJobId, productionExecuted: false };
+    try {
+      const tested = await runPackageTests({ repoRoot: config.repoRoot, changePackage: job.changePackage,
+        reviewedSha256: review.packageSha256, testProfile: job.testProfile, testImage: config.packageTestImage });
+      result = { ...binding, ...tested, status: tested.outcome === "passed" ? "succeeded" : "failed" };
+    } catch (error) {
+      const allowed = ["test_profile_refused", "test_sandbox_unavailable", "test_staging_failed", "test_snapshot_refused",
+        "test_limit_exceeded", "test_cleanup_failed"];
+      result = { ...binding, status: "failed", outcome: "error", testsRun: error.testsRun === false ? false : null,
+        error: allowed.includes(error.code) ? error.code : "package_tests_failed" };
+    }
+  } else if (job.kind === "stage_change_package_v1") {
     const { stageChangePackage, reviewChangePackage } = await import("./aura-change-package.mjs");
     const review = reviewChangePackage(job.changePackage);
     if (job.reviewedSha256 !== review.packageSha256) throw new Error("HQ returned a changed package.");
@@ -85,7 +106,7 @@ export async function runRunnerOnce(input) {
   } else result = await inspectRepository(config.repoRoot);
   await request(`/runner/jobs/${job.id}/result`, { lease: job.lease, result });
   // Paths stay on the local terminal; HQ receives only a bounded receipt.
-  return { jobId: job.id, status: result.status, ...(localReview ? { workspace: localReview.workspace, patchPath: localReview.patchPath } : {}) };
+  return { jobId: job.id, status: result.status, ...(job.kind === "test_change_package_v1" ? { outcome: result.outcome, error: result.error, testProfile: result.testProfile } : {}), ...(localReview ? { workspace: localReview.workspace, patchPath: localReview.patchPath } : {}) };
 }
 
 async function main() {

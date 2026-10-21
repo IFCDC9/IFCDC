@@ -2,7 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from "express"
 import { hqAuthRequired } from "../middleware/hqAuth";
 import { engineeringApprovalAllowed } from "../hq/auraEngineeringWorkflow";
 import { authenticateRunner, claimRunnerJob, completeRunnerJob, enrollRunner, listRunnersAndJobs,
-  queueRunnerInspection, queueRunnerChangePackage, reviewRunnerChangePackage, revokeRunner, RunnerBridgeError } from "../hq/auraRunnerBridge";
+  queueRunnerInspection, queueRunnerChangePackage, queueRunnerPackageTests, reviewRunnerChangePackage, revokeRunner, RunnerBridgeError } from "../hq/auraRunnerBridge";
 
 const router = Router();
 router.use((_req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
@@ -37,6 +37,10 @@ router.post("/runner-change-review", hqAuthRequired, founder, handled(async (req
 router.post("/runner-change-jobs", hqAuthRequired, founder, handled(async (req, res) => {
   res.status(201).json(await queueRunnerChangePackage(req.body?.runnerId, req.body?.changePackage,
     req.body?.reviewedSha256, req.body?.approved, req.hqUser!.id));
+}));
+
+router.post("/runner-test-jobs", hqAuthRequired, founder, handled(async (req, res) => {
+  res.status(201).json(await queueRunnerPackageTests(req.body, req.hqUser!.id));
 }));
 
 // Worker credentials never grant Founder access or accept HQ session tokens.
