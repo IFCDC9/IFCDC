@@ -1,4 +1,38 @@
 /** Reply-only helpers. These never select or execute an action. */
+type SoftwarePortfolioEvidence = {
+  apps: Array<{ name: string; healthy: boolean | null; healthError?: string | null }>;
+  github: { deploymentStatus?: string | null } | null;
+  pendingApprovals: unknown[];
+};
+
+/** Explain the monitor's evidence without claiming a diagnosis or running more work. */
+export function explainSoftwarePortfolio(data: SoftwarePortfolioEvidence): string {
+  const failed = data.apps.filter((app) => app.healthy === false);
+  const healthy = data.apps.filter((app) => app.healthy === true).length;
+  const unknown = data.apps.length - failed.length - healthy;
+  const unconfigured = failed.filter((app) => /Set HQ_\w+_HEALTH_URL\b/i.test(app.healthError ?? ""));
+  const alignment = data.github?.deploymentStatus ?? "unknown";
+  const next = failed.length
+    ? unconfigured.length
+      ? "Verify the health endpoint configuration for " + unconfigured.map((app) => app.name).join(", ") +
+        ", then recheck health and investigate any remaining failures using service logs."
+      : "Inspect the health endpoint configuration and service logs for " + failed.map((app) => app.name).join(", ") +
+        ", then recheck health to distinguish a monitoring problem from an application failure."
+    : unknown
+      ? "Obtain the missing health results before concluding that the portfolio is healthy."
+      : alignment !== "aligned"
+        ? "Verify the monitored repository's GitHub and live commits before considering a deployment."
+        : "Verify each application's main user flows; the health monitor alone cannot confirm them.";
+  return [
+    `The software portfolio monitor reports ${data.apps.length} apps: ${healthy} healthy, ${failed.length} with failed or unconfigured health checks, and ${unknown} with unknown health. ` +
+      `Deployment alignment for the monitored repository is ${alignment}. There are ${data.pendingApprovals.length} pending Founder approvals in this dashboard.`,
+    failed.length ? `Affected apps: ${failed.map((app) => app.name).join(", ")}.` : "",
+    "What remains unverified: these health results do not establish whether each app's user flows work or identify a failure's root cause. " +
+      "Deployment alignment does not verify all applications. Missing health configuration can produce a failed check even when an app is running.",
+    `Next action: ${next} This report has not changed configuration, repaired code, run tests, or deployed anything. Production merges and deployments require Founder approval.`,
+  ].filter(Boolean).join("\n\n");
+}
+
 export function isMacEngineeringCapabilityQuestion(command: string): boolean {
   return /\b(mac|runner|bridge|engineering|code[- ]editing|test[- ]execution|repository|cursor)\b/i.test(command)
     && /\b(capabilit(?:y|ies)|what can you (?:do|execute|run|access|edit|inspect|send|build|test)|what you can (?:do|execute|run|access|edit)|what (?:is|remains) missing|can you currently|available (?:tool|job)|assess (?:your )?actual)\b/i.test(command);
