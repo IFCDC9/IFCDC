@@ -5,6 +5,7 @@ import { hqApiFetch } from "../../api/hqApiFetch";
 type Runner = { id: string; label: string; revoked_at: number | null; last_seen_at: number | null };
 type Job = { id: string; runner_id: string; kind: string; status: string; result: {
   commit?: string; branch?: string | null; changedFiles?: number; untrackedFiles?: number; error?: string;
+  testProfile?: string; outcome?: string; exitCode?: number; durationMs?: number; testsRun?: boolean | null;
   packageSha256?: string; fileCount?: number; reviewId?: string;
 } | null };
 type PackageReview = { packageSha256: string; baseCommit: string; summary: string;
@@ -22,6 +23,8 @@ export default function AuraRunnerPanel() {
   const [message, setMessage] = useState("");
   const [packageText, setPackageText] = useState("");
   const [selectedRunner, setSelectedRunner] = useState("");
+  const [testJobId, setTestJobId] = useState("");
+  const [testApproved, setTestApproved] = useState(false);
   const [approved, setApproved] = useState(false);
   const [review, setReview] = useState<{ source: string; data: PackageReview } | null>(null);
   const validRepoPath = /^(?:\/|[A-Za-z]:[\\/])/.test(repoRoot.trim());
@@ -45,6 +48,13 @@ export default function AuraRunnerPanel() {
     return post("/runner-change-jobs", { runnerId: selectedRunner, changePackage: JSON.parse(review.source),
       reviewedSha256: review.data.packageSha256, approved: true });
   }, onSuccess: () => { setApproved(false); setReview(null); setMessage("Staging queued for the selected computer. Its runner must have package staging enabled locally. No tests or deployment were requested."); refresh(); },
+  onError: (error: Error) => setMessage(error.message) });
+  const testPackage = useMutation({ mutationFn: () => {
+    const job = runners.data?.jobs.find((item) => item.id === testJobId && item.kind === "stage_change_package_v1" && item.status === "succeeded");
+    if (!job?.result?.packageSha256 || !testApproved) throw new Error("Select and approve a successfully staged package first.");
+    return post("/runner-test-jobs", { stagingJobId: job.id, reviewedSha256: job.result.packageSha256,
+      testProfile: "package-validator-v1", approved: true });
+  }, onSuccess: () => { setTestApproved(false); setMessage("Package-validator tests queued on the computer that staged this package. Results will appear above. The runner needs test execution enabled locally and a configured Docker image."); refresh(); },
   onError: (error: Error) => setMessage(error.message) });
   function downloadConfig() {
     if (!enrollment || !validRepoPath) return;
@@ -76,11 +86,33 @@ export default function AuraRunnerPanel() {
       </>}
     </li>)}</ul>
     <ul>{runners.data?.jobs.slice(0, 10).map((job) => <li key={job.id}>
-      {job.kind === "stage_change_package_v1" ? "Package staging" : "Repository inspection"}: {job.status}
+      {job.kind === "test_change_package_v1" ? "Package tests" : job.kind === "stage_change_package_v1" ? "Package staging" : "Repository inspection"}: {job.status}
       {job.result?.commit && <span> — runner reported commit {job.result.commit.slice(0, 7)}, {job.result.changedFiles} changed files, {job.result.untrackedFiles} untracked files</span>}
+      {job.kind === "test_change_package_v1" && job.result && <span> — {job.result.testProfile}: {job.result.outcome};
+        {job.result.testsRun === true ? ` exit ${job.result.exitCode}, ${job.result.durationMs} ms` : job.result.testsRun === false ? " tests did not start" : " execution uncertain; inspect locally before retrying"}.
+        Package {job.result.packageSha256?.slice(0, 12)}. This profile checks only package validation.</span>}
       {job.result?.error && <span> — {job.result.error}</span>}
       {job.result?.reviewId && <span> — runner reported {job.result.fileCount} staged files; local review {job.result.reviewId}. Tests have not run.</span>}
     </li>)}</ul>
+    <h4>Test a staged package</h4>
+    <p>Package validator v1 runs four unit tests for package format, content digests and rejected paths.
+      It does not test app screens, grants, builds, or other changed files. Tests run in a separate container
+      with no network or connection credentials; your active checkout stays unchanged.</p>
+    <label>Staged package <select className="hq-input" aria-label="Staged package for tests" value={testJobId}
+      onChange={(event) => { setTestJobId(event.target.value); setTestApproved(false); }}>
+      <option value="">Choose a staged package</option>
+      {runners.data?.jobs.filter((job) => job.kind === "stage_change_package_v1" && job.status === "succeeded" &&
+        runners.data.runners.some((runner) => runner.id === job.runner_id && !runner.revoked_at)).map((job) => <option key={job.id} value={job.id}>
+        {runners.data.runners.find((runner) => runner.id === job.runner_id)?.label} — {job.result?.packageSha256?.slice(0, 12)} — {job.result?.reviewId}
+      </option>)}
+    </select></label>
+    {testJobId && <p>Approved package SHA-256: <code style={{ overflowWrap: "anywhere" }}>
+      {runners.data?.jobs.find((job) => job.id === testJobId)?.result?.packageSha256}
+    </code></p>}
+    <p><label><input type="checkbox" checked={testApproved} onChange={(event) => setTestApproved(event.target.checked)} />
+      I approve running the package validator v1 tests for this exact staged package on its computer.</label></p>
+    <button className="hq-btn" disabled={!testApproved || !testJobId || testPackage.isPending}
+      onClick={() => testPackage.mutate()}>Approve and queue package tests</button>
     <h4>Review a change package</h4>
     <p>Upload a package JSON file or paste its contents. Review the complete file contents below before approving isolated staging on a computer.</p>
     <input type="file" accept=".json,application/json" aria-label="Upload change package" onChange={async (event) => {

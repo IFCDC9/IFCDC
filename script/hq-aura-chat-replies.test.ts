@@ -38,6 +38,8 @@ test("real dispatcher answers capability questions without keys or executing act
     assert.match(result.reply, /Founder-reviewed change package/);
     assert.match(result.reply, /does not run tests/);
     assert.match(result.reply, /explicitly enables package staging/);
+    assert.match(result.reply, /test_change_package_v1/);
+    assert.match(result.reply, /not app flows or all changed files/);
     assert.doesNotMatch(result.reply, /Portfolio:|approvals waiting|tests passed/);
   }
 });

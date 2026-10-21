@@ -42,7 +42,7 @@ export const MAC_ENGINEERING_CAPABILITY_REPLY =
   "The runner bridge supports inspect_repository, which reports the approved repository's commit, branch, and changed/untracked file counts. " +
   "It also supports staging an exact Founder-reviewed change package in a separate local workspace when that computer's private configuration explicitly enables package staging. " +
   "Staging leaves the active checkout unchanged and reports a receipt; it does not run tests, commit, open a pull request, merge, or deploy. The separate local engineering workflow is not forwarded through this bridge. " +
-  "The next implementation step is controlled test execution and result reporting. " +
+  "A separate test_change_package_v1 job can run the package-validator-v1 unit profile after successful staging and explicit Founder approval. It requires local test opt-in and a configured immutable Docker image; it reports a bounded result tied to the package digest. This checks package validation only, not app flows or all changed files. No host execution fallback is allowed. " +
   "Production merges and deployments require Founder approval. This capability answer does not perform an inspection or confirm that a runner is online.";
 
 export type ToolReplyEvidence = { id: string; status: string; summary: string };
