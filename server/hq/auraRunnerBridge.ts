@@ -4,6 +4,7 @@ import { getDb } from "../db";
 import { logHqAudit } from "./hqAuditLog";
 import { validateChangePackage, reviewChangePackage, type ChangePackage } from "../../shared/auraChangePackage.mjs";
 
+import { GRANT_NAV_PROFILE, applicationTestScope } from "../../shared/auraTestProfiles.mjs";
 const hash = (text: string) => crypto.createHash("sha256").update(text).digest("hex");
 export const RUNNER_LEASE_MS = 5 * 60_000;
 
@@ -11,7 +12,7 @@ export class RunnerBridgeError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
-async function database() {
+export async function runnerDatabase() {
   const db = await getDb();
   await db.exec(`
     CREATE TABLE IF NOT EXISTS aura_runner_devices (
@@ -26,6 +27,10 @@ async function database() {
     CREATE INDEX IF NOT EXISTS idx_aura_runner_queue ON aura_runner_jobs(runner_id, status, created_at);
     CREATE TABLE IF NOT EXISTS aura_runner_test_requests (
       job_id TEXT PRIMARY KEY, staging_job_id TEXT NOT NULL, test_profile TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS aura_runner_pull_requests (
+      test_job_id TEXT PRIMARY KEY, package_sha256 TEXT NOT NULL UNIQUE, base_commit TEXT NOT NULL,
+      branch TEXT NOT NULL, status TEXT NOT NULL, url TEXT, created_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS aura_runner_change_payloads (
       job_id TEXT PRIMARY KEY, package_sha256 TEXT NOT NULL, package_json TEXT NOT NULL
@@ -43,7 +48,7 @@ export async function enrollRunner(label: unknown, requesterId: string) {
   if (typeof label !== "string" || !/^[\w .-]{1,60}$/.test(label.trim())) {
     throw new RunnerBridgeError(400, "Use a runner name of 1–60 letters, numbers, spaces, dots or dashes.");
   }
-  const db = await database();
+  const db = await runnerDatabase();
   const id = crypto.randomUUID();
   const token = `aura_runner_${id}.${crypto.randomBytes(32).toString("base64url")}`;
   await db.run("INSERT INTO aura_runner_devices (id, label, token_hash, created_at) VALUES (?, ?, ?, ?)",
@@ -55,7 +60,7 @@ export async function enrollRunner(label: unknown, requesterId: string) {
 export async function authenticateRunner(authorization?: string) {
   const match = /^Bearer (aura_runner_([a-f0-9-]{36})\.[A-Za-z0-9_-]{43})$/.exec(authorization || "");
   if (!match) throw new RunnerBridgeError(401, "Runner authentication required.");
-  const db = await database();
+  const db = await runnerDatabase();
   const row = await db.get<{ id: string; token_hash: string; revoked_at: number | null }>(
     "SELECT id, token_hash, revoked_at FROM aura_runner_devices WHERE id = ?", match[2]);
   if (!row || row.revoked_at !== null || !crypto.timingSafeEqual(Buffer.from(row.token_hash), Buffer.from(hash(match[1])))) {
@@ -65,7 +70,7 @@ export async function authenticateRunner(authorization?: string) {
 }
 
 export async function revokeRunner(id: string, requesterId: string) {
-  const db = await database();
+  const db = await runnerDatabase();
   const result = await db.run("UPDATE aura_runner_devices SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL", Date.now(), id);
   if (!result.changes) throw new RunnerBridgeError(404, "Active runner not found.");
   await db.run("UPDATE aura_runner_jobs SET status = 'cancelled', lease_hash = NULL WHERE runner_id = ? AND status IN ('queued', 'running')", id);
@@ -73,25 +78,26 @@ export async function revokeRunner(id: string, requesterId: string) {
 }
 
 async function expireJobs() {
-  const db = await database();
+  const db = await runnerDatabase();
   // Never silently retry an uncertain task. Founder can request a new inspection.
   await db.run("UPDATE aura_runner_jobs SET status = 'expired', lease_hash = NULL WHERE status = 'running' AND lease_until < ?", Date.now());
   await db.run("UPDATE aura_runner_jobs SET status = 'expired' WHERE status = 'queued' AND created_at < ?", Date.now() - 30 * 60_000);
 }
 
 export async function listRunnersAndJobs() {
-  const db = await database();
+  const db = await runnerDatabase();
   await expireJobs();
   const runners = await db.all("SELECT id, label, created_at, revoked_at, last_seen_at FROM aura_runner_devices ORDER BY created_at DESC LIMIT 100");
   const rows = await db.all("SELECT id, runner_id, kind, status, created_at, result_json FROM aura_runner_jobs ORDER BY created_at DESC LIMIT 100");
-  return { runners, jobs: rows.map(({ result_json, ...row }) => ({ ...row, result: result_json ? JSON.parse(result_json) : null })) };
+  const pullRequests = await db.all("SELECT test_job_id, package_sha256, branch, status, url FROM aura_runner_pull_requests ORDER BY created_at DESC LIMIT 100");
+  return { runners, pullRequests, jobs: rows.map(({ result_json, ...row }) => ({ ...row, result: result_json ? JSON.parse(result_json) : null })) };
 }
 
 export async function queueRunnerInspection(runnerId: unknown, kind: unknown, requesterId: string) {
   if (typeof runnerId !== "string" || kind !== "inspect_repository") {
     throw new RunnerBridgeError(400, "This bridge accepts repository inspection only.");
   }
-  const db = await database();
+  const db = await runnerDatabase();
   await expireJobs();
   const id = crypto.randomUUID();
   const added = await db.run(`INSERT INTO aura_runner_jobs (id, runner_id, kind, status, requester_id, created_at)
@@ -116,7 +122,7 @@ export async function queueRunnerChangePackage(runnerId: unknown, input: unknown
     throw new RunnerBridgeError(400, "Explicit approval of the exact reviewed package is required.");
   }
   const value = validateChangePackage(input);
-  const db = await database();
+  const db = await runnerDatabase();
   await expireJobs();
   const id = crypto.randomUUID();
   // Save immutable content before making the job claimable. Failure removes only this payload.
@@ -141,11 +147,11 @@ export async function queueRunnerPackageTests(input: unknown, requesterId: strin
   const value = input as Record<string, unknown>;
   if (!value || typeof value !== "object" || Array.isArray(value) ||
       Object.keys(value).sort().join(",") !== "approved,reviewedSha256,stagingJobId,testProfile" ||
-      value.approved !== true || value.testProfile !== "package-validator-v1" ||
+      value.approved !== true || !["package-validator-v1", GRANT_NAV_PROFILE].includes(String(value.testProfile)) ||
       typeof value.stagingJobId !== "string" || typeof value.reviewedSha256 !== "string") {
     throw new RunnerBridgeError(400, "Approve the exact staged package and the supported test profile.");
   }
-  const db = await database();
+  const db = await runnerDatabase();
   await expireJobs();
   const staged = await db.get<{ runner_id: string; package_sha256: string; package_json: string }>(`
     SELECT j.runner_id, p.package_sha256, p.package_json FROM aura_runner_jobs j
@@ -153,6 +159,9 @@ export async function queueRunnerPackageTests(input: unknown, requesterId: strin
     WHERE j.id = ? AND j.kind = 'stage_change_package_v1' AND j.status = 'succeeded'`, value.stagingJobId);
   if (!staged || staged.package_sha256 !== value.reviewedSha256) {
     throw new RunnerBridgeError(409, "Successful staging of this exact package is required first.");
+  }
+  if (value.testProfile === GRANT_NAV_PROFILE && !applicationTestScope(validateChangePackage(JSON.parse(staged.package_json)))) {
+    throw new RunnerBridgeError(400, "Grant navigation tests require a package modifying only the existing GrantSubNav.tsx component.");
   }
   const id = crypto.randomUUID();
   await db.run("INSERT INTO aura_runner_change_payloads (job_id, package_sha256, package_json) VALUES (?, ?, ?)",
@@ -176,22 +185,24 @@ export async function queueRunnerPackageTests(input: unknown, requesterId: strin
 }
 
 export async function claimRunnerJob(runnerId: string, capabilities: unknown = []) {
-  const db = await database();
+  const db = await runnerDatabase();
   await expireJobs();
   const lease = crypto.randomBytes(32).toString("base64url");
   const now = Date.now();
   // One atomic statement prevents two poll requests from claiming the same task.
   const testing = Array.isArray(capabilities) && capabilities.includes("test_change_package_v1");
+  const applicationTesting = Array.isArray(capabilities) && capabilities.includes("test_grant_subnav_v1");
   const staging = Array.isArray(capabilities) && capabilities.includes("stage_change_package_v1");
   const job = await db.get<{ id: string; kind: "inspect_repository" | "stage_change_package_v1" | "test_change_package_v1"; lease_until: number }>(`
     UPDATE aura_runner_jobs SET status = 'running', lease_hash = ?, lease_until = ?
     WHERE id = (SELECT id FROM aura_runner_jobs WHERE runner_id = ? AND status = 'queued'
       AND (kind = 'inspect_repository' OR (kind = 'stage_change_package_v1' AND ? = 1)
-        OR (kind = 'test_change_package_v1' AND ? = 1)) ORDER BY created_at, id LIMIT 1)
+        OR (kind = 'test_change_package_v1' AND EXISTS (SELECT 1 FROM aura_runner_test_requests t WHERE t.job_id = aura_runner_jobs.id
+          AND ((t.test_profile = 'package-validator-v1' AND ? = 1) OR (t.test_profile = 'grant-subnav-v1' AND ? = 1))))) ORDER BY created_at, id LIMIT 1)
     AND status = 'queued'
     AND EXISTS (SELECT 1 FROM aura_runner_devices WHERE id = ? AND revoked_at IS NULL)
     AND NOT EXISTS (SELECT 1 FROM aura_runner_jobs WHERE runner_id = ? AND status = 'running')
-    RETURNING id, kind, lease_until`, hash(lease), now + RUNNER_LEASE_MS, runnerId, staging ? 1 : 0, testing ? 1 : 0, runnerId, runnerId);
+    RETURNING id, kind, lease_until`, hash(lease), now + RUNNER_LEASE_MS, runnerId, staging ? 1 : 0, testing ? 1 : 0, applicationTesting ? 1 : 0, runnerId, runnerId);
   await db.run("UPDATE aura_runner_devices SET last_seen_at = ? WHERE id = ? AND revoked_at IS NULL", now, runnerId);
   if (!job) return null;
   await audit("claimed", job.id);
@@ -232,7 +243,7 @@ function packageTestResult(body: unknown, digest: string, baseCommit: string,
       value.productionExecuted !== false) throw new RunnerBridgeError(400, "Test result does not match the approved request.");
   const binding = { packageSha256: digest, baseCommit, testProfile: expected.test_profile,
     stagingJobId: expected.staging_job_id, productionExecuted: false };
-  const errors = ["test_profile_refused", "test_sandbox_unavailable", "test_staging_failed", "test_snapshot_refused",
+  const errors = ["test_profile_refused", "test_scope_refused", "test_incomplete", "test_sandbox_unavailable", "test_staging_failed", "test_snapshot_refused",
     "test_limit_exceeded", "test_cleanup_failed", "package_tests_failed"];
   if (value.status === "failed" && value.outcome === "error" && (value.testsRun === false || value.testsRun === null) && errors.includes(String(value.error))) {
     return { ...binding, status: "failed", outcome: "error", error: value.error, testsRun: value.testsRun };
@@ -269,7 +280,7 @@ function inspectionResult(body: unknown) {
 
 export async function completeRunnerJob(runnerId: string, id: string, lease: unknown, body: unknown) {
   if (typeof lease !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(lease)) throw new RunnerBridgeError(409, "Invalid job lease.");
-  const db = await database();
+  const db = await runnerDatabase();
   const job = await db.get<{ kind: string }>(`SELECT kind FROM aura_runner_jobs WHERE id = ? AND runner_id = ?
     AND status = 'running' AND lease_hash = ? AND lease_until >= ?
     AND EXISTS (SELECT 1 FROM aura_runner_devices WHERE id = ? AND revoked_at IS NULL)`,

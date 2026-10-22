@@ -16,3 +16,13 @@ test('mutable image names, ambiguous mounts, arbitrary profiles and missing imag
   await assert.rejects(runPackageTests({ testProfile: 'run_shell' }), /test_profile_refused/);
   await assert.rejects(runPackageTests({ testProfile: 'package-validator-v1' }), /test_sandbox_unavailable/);
 });
+
+test('application profile has its own trusted harness and refuses unrelated or new files', async () => {
+  const args = sandboxArguments(image, '/tmp/suite', 'aura-test-fixed', 'grant-subnav-v1');
+  assert.equal(args.at(-1), 'script/aura-grant-subnav-suite.mjs');
+  assert.ok(args.includes('--test-reporter=tap'));
+  for (const files of [[], [{ path: 'client/src/other.tsx', beforeSha256: 'a'.repeat(64) }],
+    [{ path: 'client/src/components/hq/grants/GrantSubNav.tsx', beforeSha256: null }]]) {
+    await assert.rejects(runPackageTests({ testProfile: 'grant-subnav-v1', changePackage: { files } }), /test_scope_refused/);
+  }
+});

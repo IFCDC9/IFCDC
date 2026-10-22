@@ -8,6 +8,7 @@ type Job = { id: string; runner_id: string; kind: string; status: string; result
   testProfile?: string; outcome?: string; exitCode?: number; durationMs?: number; testsRun?: boolean | null;
   packageSha256?: string; fileCount?: number; reviewId?: string;
 } | null };
+type PullRequest = { test_job_id: string; package_sha256: string; status: string; branch: string; url: string | null };
 type PackageReview = { packageSha256: string; baseCommit: string; summary: string;
   files: { path: string; operation: string; afterSha256: string; bytes: number }[] };
 const base = "/api/hq/aura/software-engineering";
@@ -27,6 +28,9 @@ export default function AuraRunnerPanel() {
   const draftRevision = useRef(0);
   const [selectedRunner, setSelectedRunner] = useState("");
   const [testJobId, setTestJobId] = useState("");
+  const [testProfile, setTestProfile] = useState("package-validator-v1");
+  const [publishTestId, setPublishTestId] = useState("");
+  const [publishApproved, setPublishApproved] = useState(false);
   const [testApproved, setTestApproved] = useState(false);
   const [approved, setApproved] = useState(false);
   const [review, setReview] = useState<{ source: string; data: PackageReview } | null>(null);
@@ -47,7 +51,7 @@ export default function AuraRunnerPanel() {
     },
     onError: (error: Error) => setMessage(error.message),
   });
-  const runners = useQuery({ queryKey: ["aura-runners"], queryFn: () => hqApiFetch<{ runners: Runner[]; jobs: Job[] }>(base + "/runners"),
+  const runners = useQuery({ queryKey: ["aura-runners"], queryFn: () => hqApiFetch<{ runners: Runner[]; jobs: Job[]; pullRequests?: PullRequest[] }>(base + "/runners"),
     refetchInterval: 15_000, retry: false });
   const enroll = useMutation({ mutationFn: () => post<{ id: string; token: string }>("/runners", { label }),
     onSuccess: (result) => { setEnrollment(result); setMessage("Runner registered. Download its private configuration on the selected computer; keep it confidential."); refresh(); },
@@ -71,9 +75,17 @@ export default function AuraRunnerPanel() {
     const job = runners.data?.jobs.find((item) => item.id === testJobId && item.kind === "stage_change_package_v1" && item.status === "succeeded");
     if (!job?.result?.packageSha256 || !testApproved) throw new Error("Select and approve a successfully staged package first.");
     return post("/runner-test-jobs", { stagingJobId: job.id, reviewedSha256: job.result.packageSha256,
-      testProfile: "package-validator-v1", approved: true });
-  }, onSuccess: () => { setTestApproved(false); setMessage("Package-validator tests queued on the computer that staged this package. Results will appear above. The runner needs test execution enabled locally and a configured Docker image."); refresh(); },
+      testProfile, approved: true });
+  }, onSuccess: () => { setTestApproved(false); setMessage("Selected tests queued on the computer that staged this package. Results will appear above. The runner needs test execution enabled locally and a configured Docker image."); refresh(); },
   onError: (error: Error) => setMessage(error.message) });
+  const publishPackage = useMutation({ mutationFn: () => {
+    const job = runners.data?.jobs.find((item) => item.id === publishTestId && item.status === "succeeded" &&
+      item.result?.testProfile === "grant-subnav-v1" && item.result.testsRun === true && item.result.exitCode === 0);
+    if (!job?.result?.packageSha256 || !publishApproved) throw new Error("Select and approve a passing application test first.");
+    return post<{ url: string }>("/runner-draft-pr", { testJobId: job.id,
+      reviewedSha256: job.result.packageSha256, approved: true }, 150_000);
+  }, onSuccess: () => { setPublishApproved(false); setMessage("Draft pull request published. Review its diff and CI before separately approving merge or deployment."); refresh(); },
+  onError: (error: Error) => { setMessage(error.message); setPublishApproved(false); refresh(); } });
   function downloadConfig() {
     if (!enrollment || !validRepoPath) return;
     const url = URL.createObjectURL(new Blob([JSON.stringify({ hqUrl: window.location.origin,
@@ -108,7 +120,7 @@ export default function AuraRunnerPanel() {
       {job.result?.commit && <span> — runner reported commit {job.result.commit.slice(0, 7)}, {job.result.changedFiles} changed files, {job.result.untrackedFiles} untracked files</span>}
       {job.kind === "test_change_package_v1" && job.result && <span> — {job.result.testProfile}: {job.result.outcome};
         {job.result.testsRun === true ? ` exit ${job.result.exitCode}, ${job.result.durationMs} ms` : job.result.testsRun === false ? " tests did not start" : " execution uncertain; inspect locally before retrying"}.
-        Package {job.result.packageSha256?.slice(0, 12)}. This profile checks only package validation.</span>}
+        Package {job.result.packageSha256?.slice(0, 12)}. {job.result.testProfile === "grant-subnav-v1" ? "Four Grants navigation component checks; full Grants Center and build are not tested." : "This profile checks only package validation."}</span>}
       {job.result?.error && <span> — {job.result.error}</span>}
       {job.result?.reviewId && <span> — runner reported {job.result.fileCount} staged files; local review {job.result.reviewId}. Tests have not run.</span>}
     </li>)}</ul>
@@ -116,6 +128,14 @@ export default function AuraRunnerPanel() {
     <p>Package validator v1 runs four unit tests for package format, content digests and rejected paths.
       It does not test app screens, grants, builds, or other changed files. Tests run in a separate container
       with no network or connection credentials; your active checkout stays unchanged.</p>
+    <p>Grant navigation v1 executes the proposed GrantSubNav.tsx component and checks four DOM behaviors.
+      It accepts changes to that existing component only. It requires a separate application test image and local opt-in;
+      it does not test the full Grants Center, grant APIs, or a production build.</p>
+    <label>Test profile <select className="hq-input" aria-label="Package test profile" value={testProfile}
+      onChange={(event) => { setTestProfile(event.target.value); setTestApproved(false); }}>
+      <option value="package-validator-v1">Package integrity only</option>
+      <option value="grant-subnav-v1">Grants navigation component</option>
+    </select></label>
     <label>Staged package <select className="hq-input" aria-label="Staged package for tests" value={testJobId}
       onChange={(event) => { setTestJobId(event.target.value); setTestApproved(false); }}>
       <option value="">Choose a staged package</option>
@@ -128,9 +148,30 @@ export default function AuraRunnerPanel() {
       {runners.data?.jobs.find((job) => job.id === testJobId)?.result?.packageSha256}
     </code></p>}
     <p><label><input type="checkbox" checked={testApproved} onChange={(event) => setTestApproved(event.target.checked)} />
-      I approve running the package validator v1 tests for this exact staged package on its computer.</label></p>
+      I approve running {testProfile === "grant-subnav-v1" ? "the Grants navigation component tests" : "the package validator tests"} for this exact staged package on its computer.</label></p>
     <button className="hq-btn" disabled={!testApproved || !testJobId || testPackage.isPending}
       onClick={() => testPackage.mutate()}>Approve and queue package tests</button>
+    <h4>Publish a tested change for review</h4>
+    <p>Create a draft pull request for an approved package that passed Grants navigation component tests.
+      This publishes the proposed file to GitHub. Merge and deployment require separate approval.</p>
+    <label>Passing application test <select className="hq-input" aria-label="Passing application test for PR" value={publishTestId}
+      onChange={(event) => { setPublishTestId(event.target.value); setPublishApproved(false); }}>
+      <option value="">Choose a passing application test</option>
+      {runners.data?.jobs.filter((job) => job.kind === "test_change_package_v1" && job.status === "succeeded" &&
+        job.result?.testProfile === "grant-subnav-v1" && job.result.testsRun === true && job.result.exitCode === 0 &&
+        runners.data.runners.some((runner) => runner.id === job.runner_id && !runner.revoked_at)).map((job) =>
+        <option key={job.id} value={job.id}>{job.result?.packageSha256?.slice(0, 12)} — {job.result?.testProfile}</option>)}
+    </select></label>
+    {publishTestId && <p>Package SHA-256: <code style={{ overflowWrap: "anywhere" }}>
+      {runners.data?.jobs.find((job) => job.id === publishTestId)?.result?.packageSha256}</code></p>}
+    <p><label><input type="checkbox" checked={publishApproved} onChange={(event) => setPublishApproved(event.target.checked)} />
+      I approve publishing this exact tested package as a draft pull request to IFCDC9/IFCDC.</label></p>
+    <button className="hq-btn" disabled={!publishTestId || !publishApproved || publishPackage.isPending}
+      onClick={() => publishPackage.mutate()}>Approve and publish draft PR</button>
+    <ul>{runners.data?.pullRequests?.map((pr) => <li key={pr.test_job_id}>
+      {pr.package_sha256.slice(0, 12)} — {pr.status}: {pr.url ? <a href={pr.url} target="_blank" rel="noreferrer">Open draft PR</a> :
+        <span>{pr.branch} — inspect GitHub before retrying</span>}
+    </li>)}</ul>
     <h4>Ask AURA to prepare changes</h4>
     <p>Describe a small fix and select up to five source files in IFCDC9/IFCDC (one repository path per line).
       AURA reads those files at the current main commit and drafts their replacement contents for your review.

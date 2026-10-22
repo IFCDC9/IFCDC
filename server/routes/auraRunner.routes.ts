@@ -1,3 +1,4 @@
+import { publishTestedPullRequest } from "../hq/auraTestedPullRequest";
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { hqAuthRequired } from "../middleware/hqAuth";
 import { engineeringApprovalAllowed } from "../hq/auraEngineeringWorkflow";
@@ -46,6 +47,10 @@ router.post("/runner-change-jobs", hqAuthRequired, founder, handled(async (req, 
 
 router.post("/runner-test-jobs", hqAuthRequired, founder, handled(async (req, res) => {
   res.status(201).json(await queueRunnerPackageTests(req.body, req.hqUser!.id));
+}));
+
+router.post("/runner-draft-pr", hqAuthRequired, founder, handled(async (req, res) => {
+  res.json(await publishTestedPullRequest(req.body, req.hqUser!.id));
 }));
 
 // Worker credentials never grant Founder access or accept HQ session tokens.

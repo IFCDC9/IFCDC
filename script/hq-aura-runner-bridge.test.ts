@@ -340,3 +340,159 @@ process.exit(run.status ?? 1);
     rmSync(bin, { recursive: true, force: true });
   }
 });
+
+async function navigationFixture(label: string, content?: string) {
+  const crypto = await import('node:crypto');
+  const target = 'client/src/components/hq/grants/GrantSubNav.tsx';
+  const original = readFileSync(new URL('../' + target, import.meta.url), 'utf8');
+  mkdirSync(path.join(repo, path.dirname(target)), { recursive: true });
+  writeFileSync(path.join(repo, target), original);
+  await git('add', target);
+  // May already contain the same trusted fixture from a previous case.
+  if ((await git('diff', '--cached', '--name-only')).stdout.trim()) await git('commit', '-m', 'navigation fixture');
+  const device = await bridge.enrollRunner(label, 'founder');
+  const changePackage = { version: 1, repository: 'IFCDC9/IFCDC',
+    baseCommit: (await git('rev-parse', 'HEAD')).stdout.trim(), summary: label, files: [{ path: target,
+      beforeSha256: crypto.createHash('sha256').update(original).digest('hex'),
+      content: content ?? original + '\n// Proposed navigation change fixture.\n' }] };
+  const reviewedSha256 = reviewChangePackage(changePackage).packageSha256;
+  const staged = await bridge.queueRunnerChangePackage(device.id, changePackage, reviewedSha256, true, 'founder');
+  const config = { hqUrl, repoRoot: repo, runnerToken: device.token, allowPackageStaging: true };
+  const stage = await runRunnerOnce(config);
+  assert.equal(stage.status, 'succeeded');
+  rmSync(path.dirname(stage.workspace), { recursive: true, force: true });
+  return { device, changePackage, reviewedSha256, staged, config,
+    input: { stagingJobId: staged.id, reviewedSha256, testProfile: 'grant-subnav-v1', approved: true } };
+}
+
+test('application tests enforce scope and are not claimed by older or opted-out runners', async () => {
+  const unrelated = await queuedTestFixture('Wrong app scope');
+  await assert.rejects(bridge.queueRunnerPackageTests({ ...unrelated.input, testProfile: 'grant-subnav-v1' }, 'founder'), /only the existing/);
+  const f = await navigationFixture('App profile opt in');
+  await bridge.queueRunnerPackageTests(f.input, 'founder');
+  assert.equal(await bridge.claimRunnerJob(f.device.id, ['test_change_package_v1']), null);
+  assert.equal((await runRunnerOnce({ ...f.config, allowPackageTests: true })).status, 'idle');
+  const result = await runRunnerOnce({ ...f.config, allowApplicationTests: true });
+  assert.equal(result.error, 'test_sandbox_unavailable');
+  assert.throws(() => validateRunnerConfig({ ...f.config, allowApplicationTests: 'true' }));
+  assert.throws(() => validateRunnerConfig({ ...f.config, applicationTestImage: 'node:24' }));
+});
+
+test('application harness executes a trusted fixture, detects broken clicks, and rejects premature exit through a Docker CLI stand-in', async () => {
+  // Process protocol only; this stand-in does not establish real Docker isolation.
+  if (process.platform === 'win32') return;
+  const bin = mkdtempSync(path.join(tmpdir(), 'aura-app-docker-'));
+  const originalPath = process.env.PATH;
+  const modules = path.resolve('node_modules');
+  const harness = readFileSync(new URL('./aura-grant-subnav-suite.mjs', import.meta.url), 'utf8');
+  writeFileSync(path.join(bin, 'docker'), `#!/usr/bin/env node
+const fs = require('node:fs'), cp = require('node:child_process'), path = require('node:path');
+const args = process.argv.slice(2);
+if (args[0] === 'image' || args[0] === 'rm') process.exit(0);
+if (!args.includes('--network=none') || !args.includes('--read-only')) process.exit(125);
+const root = args[args.indexOf('--mount') + 1].split(',').find(x => x.startsWith('source=')).slice(7);
+if (fs.existsSync(root + '/.git') || fs.existsSync(root + '/.env') || fs.existsSync(root + '/node_modules')) process.exit(125);
+let harness = ${JSON.stringify(harness)};
+harness = harness.replaceAll('/opt/aura/package.json', ${JSON.stringify(modules + '/react/package.json')})
+  .replaceAll('/opt/aura/node_modules', ${JSON.stringify(modules)})
+  .replaceAll('/suite/', root + '/').replaceAll('/tmp/aura-component.mjs', root + '/component.mjs');
+const suite = root + '/fixture-suite.mjs'; fs.writeFileSync(suite, harness);
+const result = cp.spawnSync(process.execPath, ['--test', '--test-reporter=tap', suite], { env: {PATH: process.env.PATH}, stdio: 'pipe' });
+process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr || ''); process.exit(result.status ?? 1);
+`);
+  chmodSync(path.join(bin, 'docker'), 0o755);
+  process.env.PATH = bin + path.delimiter + originalPath;
+  try {
+    for (const [label, content, expected] of [
+      ['Working navigation', undefined, 'passed'],
+      ['Broken navigation', 'import React from "react"; export const GrantSubNav = () => <nav aria-label="Section navigation"><button type="button">Broken</button></nav>;', 'failed'],
+      ['Premature exit', 'process.exit(0); export const GrantSubNav = () => null;', 'error'],
+    ] as const) {
+      const f = await navigationFixture(label, content);
+      await bridge.queueRunnerPackageTests(f.input, 'founder');
+      const result = await runRunnerOnce({ ...f.config, allowApplicationTests: true, applicationTestImage: 'sha256:' + 'a'.repeat(64) });
+      assert.equal(result.outcome, expected, label);
+      if (expected === 'error') assert.equal(result.error, 'test_incomplete');
+      assert.equal((await git('status', '--porcelain')).stdout, '');
+    }
+  } finally { process.env.PATH = originalPath; rmSync(bin, { recursive: true, force: true }); }
+});
+
+async function passingNavigation(label: string) {
+  const f = await navigationFixture(label);
+  const queued = await bridge.queueRunnerPackageTests(f.input, 'founder');
+  const job = (await bridge.claimRunnerJob(f.device.id, ['test_grant_subnav_v1']))!;
+  await bridge.completeRunnerJob(f.device.id, job.id, job.lease, { status: 'succeeded', outcome: 'passed', testsRun: true,
+    exitCode: 0, durationMs: 10, packageSha256: f.reviewedSha256, baseCommit: f.changePackage.baseCommit,
+    testProfile: 'grant-subnav-v1', stagingJobId: f.staged.id, productionExecuted: false });
+  return { ...f, publish: { testJobId: queued.id, reviewedSha256: f.reviewedSha256, approved: true } };
+}
+
+test('draft PR requires Founder authorization, application pass, exact approval and configured publisher credential', async () => {
+  const f = await passingNavigation('PR gate');
+  for (const token of [undefined, staff, f.device.token]) {
+    assert.equal((await request('/runner-draft-pr', token, f.publish)).status, token === staff ? 403 : 401);
+  }
+  for (const body of [{ ...f.publish, approved: false }, { ...f.publish, command: 'run' }]) {
+    assert.equal((await request('/runner-draft-pr', founder, body)).status, 400);
+  }
+  assert.equal((await request('/runner-draft-pr', founder, { ...f.publish, reviewedSha256: '0'.repeat(64) })).status, 409);
+  assert.equal((await request('/runner-draft-pr', founder, { ...f.publish, testJobId: f.staged.id })).status, 409);
+  const saved = process.env.AURA_GITHUB_PR_TOKEN; delete process.env.AURA_GITHUB_PR_TOKEN;
+  try { assert.equal((await request('/runner-draft-pr', founder, f.publish)).status, 503); }
+  finally { if (saved) process.env.AURA_GITHUB_PR_TOKEN = saved; }
+  await bridge.revokeRunner(f.device.id, 'founder');
+  assert.equal((await request('/runner-draft-pr', founder, f.publish)).status, 409);
+});
+
+test('publisher uses the exact tested bytes and parent, creates only a draft branch/PR, and deduplicates completion', async () => {
+  const { publishTestedPullRequest } = await import('../server/hq/auraTestedPullRequest.ts');
+  const f = await passingNavigation('PR publisher');
+  const another = await passingNavigation('PR uncertain');
+  const savedFetch = globalThis.fetch, savedToken = process.env.AURA_GITHUB_PR_TOKEN;
+  process.env.AURA_GITHUB_PR_TOKEN = 'fixture-not-a-real-credential';
+  const calls: { endpoint: string; body: any }[] = [];
+  let moved = true, brokenSource = false, failWrite = false;
+  globalThis.fetch = (async (url: any, options: any) => {
+    const endpoint = String(url).split('/IFCDC9/IFCDC/')[1];
+    const body = options.body ? JSON.parse(options.body) : undefined;
+    calls.push({ endpoint, body });
+    if (endpoint === 'branches/main') return Response.json({ commit: { sha: moved ? '0'.repeat(40) : f.changePackage.baseCommit } });
+    if (endpoint.startsWith('contents/')) {
+      const bytes = readFileSync(path.join(repo, f.changePackage.files[0].path));
+      return Response.json({ type: 'file', encoding: 'base64', size: bytes.length, content: brokenSource ? 'wrong' : bytes.toString('base64') });
+    }
+    if (endpoint === 'git/commits/' + f.changePackage.baseCommit) return Response.json({ tree: { sha: 'b'.repeat(40) } });
+    if (failWrite) throw new Error('timeout with private diagnostic');
+    if (endpoint === 'git/blobs') { assert.equal(body.content, f.changePackage.files[0].content); return Response.json({ sha: 'c'.repeat(40) }); }
+    if (endpoint === 'git/trees') { assert.equal(body.base_tree, 'b'.repeat(40)); assert.equal(body.tree.length, 1); assert.equal(body.tree[0].path, f.changePackage.files[0].path); return Response.json({ sha: 'd'.repeat(40) }); }
+    if (endpoint === 'git/commits') { assert.deepEqual(body.parents, [f.changePackage.baseCommit]); return Response.json({ sha: 'e'.repeat(40) }); }
+    if (endpoint === 'git/refs') { assert.match(body.ref, /^refs\/heads\/aura\/review-/); return Response.json({}); }
+    assert.equal(endpoint, 'pulls'); assert.equal(body.draft, true); assert.equal(body.base, 'main');
+    assert.match(body.body, new RegExp(f.reviewedSha256)); return Response.json({ draft: true, html_url: 'https://github.com/IFCDC9/IFCDC/pull/999' });
+  }) as typeof fetch;
+  try {
+    await assert.rejects(publishTestedPullRequest(f.publish, 'founder'), /Main moved/);
+    assert.equal(calls.filter(c => c.body).length, 0);
+    moved = false; brokenSource = true;
+    await assert.rejects(publishTestedPullRequest(f.publish, 'founder'), /Source content/);
+    brokenSource = false;
+    const concurrent = await Promise.allSettled([publishTestedPullRequest(f.publish, 'founder'), publishTestedPullRequest(f.publish, 'founder')]);
+    const result = (concurrent.find((r) => r.status === 'fulfilled') as PromiseFulfilledResult<any>).value;
+    assert.equal(calls.filter(c => c.endpoint === 'pulls').length, 1, 'concurrent approvals publish only once');
+    assert.equal(result.url, 'https://github.com/IFCDC9/IFCDC/pull/999');
+    const count = calls.length;
+    assert.equal((await publishTestedPullRequest(f.publish, 'founder')).url, result.url);
+    assert.equal(calls.length, count);
+    // Preflight uses the same baseline/component. Failure must leave a durable attempt and never repeat writes.
+    failWrite = true;
+    await assert.rejects(publishTestedPullRequest(another.publish, 'founder'), /did not confirm/);
+    const beforeRetry = calls.length;
+    await assert.rejects(publishTestedPullRequest(another.publish, 'founder'), /attempt already exists/);
+    assert.equal(calls.length, beforeRetry);
+    const listing = await bridge.listRunnersAndJobs();
+    assert.equal(listing.pullRequests.find((p) => p.test_job_id === another.publish.testJobId)?.status, 'uncertain');
+  } finally { globalThis.fetch = savedFetch;
+    if (savedToken) process.env.AURA_GITHUB_PR_TOKEN = savedToken; else delete process.env.AURA_GITHUB_PR_TOKEN;
+  }
+});
