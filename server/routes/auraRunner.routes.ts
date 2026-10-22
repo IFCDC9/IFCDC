@@ -1,6 +1,8 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { hqAuthRequired } from "../middleware/hqAuth";
 import { engineeringApprovalAllowed } from "../hq/auraEngineeringWorkflow";
+import { PackageDraftError } from "../hq/auraPackageDraft";
+import { draftRunnerChangePackage } from "../hq/auraPackageDraftProviders";
 import { authenticateRunner, claimRunnerJob, completeRunnerJob, enrollRunner, listRunnersAndJobs,
   queueRunnerInspection, queueRunnerChangePackage, queueRunnerPackageTests, reviewRunnerChangePackage, revokeRunner, RunnerBridgeError } from "../hq/auraRunnerBridge";
 
@@ -9,7 +11,7 @@ router.use((_req, res, next) => { res.set("Cache-Control", "no-store"); next(); 
 type Handler = (req: Request, res: Response) => Promise<unknown>;
 const handled = (handler: Handler) => (req: Request, res: Response, next: NextFunction) => {
   Promise.resolve().then(() => handler(req, res)).catch((error) => {
-    if (error instanceof RunnerBridgeError) res.status(error.status).json({ error: error.message });
+    if (error instanceof RunnerBridgeError || error instanceof PackageDraftError) res.status(error.status).json({ error: error.message });
     else next(error);
   });
 };
@@ -30,6 +32,9 @@ router.post("/runners/:id/revoke", hqAuthRequired, founder, handled(async (req, 
 }));
 router.post("/runner-jobs", hqAuthRequired, founder, handled(async (req, res) => {
   res.status(201).json(await queueRunnerInspection(req.body?.runnerId, req.body?.kind, req.hqUser!.id));
+}));
+router.post("/runner-change-draft", hqAuthRequired, founder, handled(async (req, res) => {
+  res.json(await draftRunnerChangePackage(req.body, req.hqUser!.id));
 }));
 router.post("/runner-change-review", hqAuthRequired, founder, handled(async (req, res) => {
   res.json(reviewRunnerChangePackage(req.body?.changePackage));
