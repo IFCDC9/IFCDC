@@ -12,6 +12,7 @@ export const GrantSubNav: React.FC<{
         type="button"
         className={`hq-btn hq-btn-sm ${active === item.id ? "hq-btn-primary" : "hq-btn-secondary"}`}
         onClick={() => onChange(item.id)}
+        aria-current={active === item.id ? "page" : undefined}
       >
         {item.label}
       </button>
