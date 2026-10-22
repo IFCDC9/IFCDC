@@ -74,6 +74,10 @@ test("Founder enrollment, queue, plain Node worker and result complete a real HT
 test("runner credentials cannot use Founder routes and Founder sessions cannot claim worker jobs", async () => {
   const runner = await bridge.enrollRunner("Restricted Mac", "founder");
   assert.equal((await request("/runners", runner.token)).status, 401);
+  assert.equal((await request("/runner-change-draft", undefined, {})).status, 401);
+  assert.equal((await request("/runner-change-draft", runner.token, {})).status, 401);
+  assert.equal((await request("/runner-change-draft", staff, {})).status, 403);
+  assert.equal((await request("/runner-change-draft", founder, { instruction: "x", paths: [".env"] })).status, 400);
   assert.equal((await request("/runner/claim", founder, {})).status, 401);
   assert.equal((await request("/runner/claim", "invalid", {})).status, 401);
   assert.equal((await request("/runner-jobs", founder, { runnerId: runner.id, kind: "run_shell", command: "anything" })).status, 400);

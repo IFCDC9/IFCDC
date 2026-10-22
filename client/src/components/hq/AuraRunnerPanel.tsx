@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { hqApiFetch } from "../../api/hqApiFetch";
 
@@ -11,8 +11,8 @@ type Job = { id: string; runner_id: string; kind: string; status: string; result
 type PackageReview = { packageSha256: string; baseCommit: string; summary: string;
   files: { path: string; operation: string; afterSha256: string; bytes: number }[] };
 const base = "/api/hq/aura/software-engineering";
-const post = <T,>(endpoint: string, body = {}) => hqApiFetch<T>(base + endpoint, {
-  method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+const post = <T,>(endpoint: string, body = {}, timeoutMs = 20_000) => hqApiFetch<T>(base + endpoint, {
+  method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), timeoutMs,
 });
 
 export default function AuraRunnerPanel() {
@@ -22,6 +22,9 @@ export default function AuraRunnerPanel() {
   const [enrollment, setEnrollment] = useState<{ id: string; token: string } | null>(null);
   const [message, setMessage] = useState("");
   const [packageText, setPackageText] = useState("");
+  const [draftInstruction, setDraftInstruction] = useState("");
+  const [draftPaths, setDraftPaths] = useState("");
+  const draftRevision = useRef(0);
   const [selectedRunner, setSelectedRunner] = useState("");
   const [testJobId, setTestJobId] = useState("");
   const [testApproved, setTestApproved] = useState(false);
@@ -29,6 +32,21 @@ export default function AuraRunnerPanel() {
   const [review, setReview] = useState<{ source: string; data: PackageReview } | null>(null);
   const validRepoPath = /^(?:\/|[A-Za-z]:[\\/])/.test(repoRoot.trim());
   const refresh = () => void qc.invalidateQueries({ queryKey: ["aura-runners"] });
+  const draftPackage = useMutation({
+    mutationFn: (request: { instruction: string; paths: string[]; revision: number }) =>
+      post<{ changePackage: unknown }>("/runner-change-draft", { instruction: request.instruction, paths: request.paths }, 150_000),
+    onSuccess: (result, request) => {
+      if (draftRevision.current !== request.revision) {
+        setMessage("Draft discarded because you changed the inputs while AURA was preparing it. Your current work is preserved.");
+        return;
+      }
+      draftRevision.current++;
+      setPackageText(JSON.stringify(result.changePackage, null, 2));
+      setReview(null); setApproved(false); setSelectedRunner("");
+      setMessage("AURA prepared a draft from the selected GitHub files. Validate and review it below before approving staging. No tests have run.");
+    },
+    onError: (error: Error) => setMessage(error.message),
+  });
   const runners = useQuery({ queryKey: ["aura-runners"], queryFn: () => hqApiFetch<{ runners: Runner[]; jobs: Job[] }>(base + "/runners"),
     refetchInterval: 15_000, retry: false });
   const enroll = useMutation({ mutationFn: () => post<{ id: string; token: string }>("/runners", { label }),
@@ -113,17 +131,35 @@ export default function AuraRunnerPanel() {
       I approve running the package validator v1 tests for this exact staged package on its computer.</label></p>
     <button className="hq-btn" disabled={!testApproved || !testJobId || testPackage.isPending}
       onClick={() => testPackage.mutate()}>Approve and queue package tests</button>
+    <h4>Ask AURA to prepare changes</h4>
+    <p>Describe a small fix and select up to five source files in IFCDC9/IFCDC (one repository path per line).
+      AURA reads those files at the current main commit and drafts their replacement contents for your review.
+      This uses HQ's configured AI provider. Drafting does not stage, test, commit, or deploy changes.</p>
+    <label>Work instruction<textarea className="hq-input" aria-label="AURA change instruction" rows={3}
+      style={{ width: "100%", boxSizing: "border-box" }} maxLength={4000} value={draftInstruction}
+      placeholder="Describe the problem, expected behavior, and limits of the change"
+      onChange={(event) => { draftRevision.current++; setDraftInstruction(event.target.value); }} /></label>
+    <label>Source files<textarea className="hq-input" aria-label="Source files for AURA draft" rows={3}
+      style={{ width: "100%", boxSizing: "border-box" }} maxLength={2000} value={draftPaths}
+      placeholder="client/src/components/hq/grants/GrantSubNav.tsx"
+      onChange={(event) => { draftRevision.current++; setDraftPaths(event.target.value); }} /></label>
+    <button className="hq-btn" disabled={draftPackage.isPending || !draftInstruction.trim() || !draftPaths.trim()}
+      onClick={() => draftPackage.mutate({ instruction: draftInstruction.trim(),
+        paths: draftPaths.split(/\r?\n/).map((line) => line.trim()).filter(Boolean), revision: draftRevision.current })}>
+      {draftPackage.isPending ? "AURA is preparing a draft…" : "Draft changes for review"}
+    </button>
     <h4>Review a change package</h4>
     <p>Upload a package JSON file or paste its contents. Review the complete file contents below before approving isolated staging on a computer.</p>
     <input type="file" accept=".json,application/json" aria-label="Upload change package" onChange={async (event) => {
       const file = event.target.files?.[0];
+      draftRevision.current++;
       setReview(null); setApproved(false); setPackageText("");
       if (!file) return;
       if (file.size > 250_000) { setMessage("Package exceeds the 250,000-byte limit."); return; }
       try { setPackageText(await file.text()); } catch { setMessage("Could not read the selected package."); }
     }} />
     <textarea className="hq-input" aria-label="Change package JSON" rows={6} style={{ width: "100%", boxSizing: "border-box" }}
-      value={packageText} onChange={(event) => { setPackageText(event.target.value); setReview(null); setApproved(false); }} />
+      value={packageText} onChange={(event) => { draftRevision.current++; setPackageText(event.target.value); setReview(null); setApproved(false); }} />
     <button className="hq-btn" disabled={reviewPackage.isPending || !packageText.trim() || new Blob([packageText]).size > 250_000}
       onClick={() => reviewPackage.mutate(packageText)}>Validate package for review</button>
     {review && review.source === packageText && <div>
