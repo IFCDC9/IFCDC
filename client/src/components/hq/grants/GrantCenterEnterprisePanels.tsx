@@ -1,3 +1,5 @@
+import { GrantEligibilityReviewPanel } from "./GrantEligibilityReviewPanel";
+import type { GrantEligibilityAssessment } from "../../../../../shared/grantEligibility";
 import React, { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { BookOpen, Sparkles, FileText, AlertTriangle, RefreshCw, Zap, MessageSquare } from "lucide-react";
@@ -105,6 +107,8 @@ export const GrantWriterStudioPanel: React.FC<{
     refetchInterval: draftProgress ? 3000 : false,
   });
 
+  const eligibility = useQuery({ queryKey: ["grant-eligibility", selectedApplicationId], queryFn: () => grantsApi.applicationEligibility(String(selectedApplicationId)), enabled: !!selectedApplicationId });
+  const canDraft = eligibility.data?.canDraft === true && !eligibility.isError;
   const versions = useQuery({
     queryKey: ["grant-writer-versions", selectedApplicationId, activeSection],
     queryFn: () => grantsApi.writerSectionVersions(String(selectedApplicationId), activeSection),
@@ -220,11 +224,12 @@ export const GrantWriterStudioPanel: React.FC<{
           <QueryError message="Writer studio failed to load. Verify the application still exists." />
         ) : (
           <>
+            <GrantEligibilityReviewPanel key={selectedApplicationId} applicationId={selectedApplicationId} />
             <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem", alignItems: "center" }}>
               <StatusBadge label={`${studio.data?.writerSections?.completionPct ?? 0}% complete`} variant="gold" />
               {completeness && (
                 <StatusBadge
-                  label={`Confidence: ${completeness.confidence}`}
+                  label={`Section coverage: ${completeness.confidence}`}
                   variant={completeness.confidence === "high" ? "success" : completeness.confidence === "medium" ? "warning" : "muted"}
                 />
               )}
@@ -271,10 +276,10 @@ export const GrantWriterStudioPanel: React.FC<{
               <button type="button" className="hq-btn hq-btn-primary" disabled={saveSection.isPending || isGenerating} onClick={() => saveSection.mutate({ sectionKey: activeSection, content })}>
                 <FileText size={14} /> Save Section
               </button>
-              <button type="button" className="hq-btn hq-btn-secondary" disabled={aiAssist.isPending || isGenerating} onClick={() => aiAssist.mutate(activeSection)}>
+              <button type="button" className="hq-btn hq-btn-secondary" disabled={!canDraft || aiAssist.isPending || isGenerating} onClick={() => aiAssist.mutate(activeSection)}>
                 <Sparkles size={14} /> {aiAssist.isPending ? "AURA drafting…" : "AURA Draft"}
               </button>
-              <button type="button" className="hq-btn hq-btn-secondary" disabled={isGenerating} onClick={() => generateFullDraft.mutate()}>
+              <button type="button" className="hq-btn hq-btn-secondary" disabled={!canDraft || isGenerating} onClick={() => generateFullDraft.mutate()}>
                 <Sparkles size={14} /> {isGenerating ? "Generating full proposal…" : "Generate Full Proposal"}
               </button>
               <button type="button" className="hq-btn hq-btn-ghost" onClick={() => setShowVersions((v) => !v)}>
@@ -305,7 +310,7 @@ export const GrantWriterStudioPanel: React.FC<{
               </div>
             )}
             <p className="hq-muted-text" style={{ marginTop: "0.75rem", fontSize: "0.75rem" }}>
-              AURA uses live IFCDC organizational data, SAM.gov status, Grants.gov opportunity details, and prior approved narratives.
+              AURA drafts from Founder-confirmed facts and reviewed notice requirements. Missing facts remain verification placeholders. Section coverage measures filled text, not accuracy or eligibility.
               Sections auto-save. <strong>Founder approval is required before any federal submission.</strong>
             </p>
             {studio.data?.application && (
@@ -451,7 +456,7 @@ export const GrantIntelligencePanel: React.FC<{
                             disabled={startApp.isPending}
                             onClick={() => startApp.mutate(String(o.id))}
                           >
-                            Start Application
+                            Review Opportunity
                           </button>
                         )}
                       </td>
@@ -670,7 +675,7 @@ export const GrantOpportunityFinderPanel: React.FC<{
   });
 
   const startApp = useMutation({
-    mutationFn: (opportunityId: string) => grantsApi.startGrantApplication(opportunityId, true),
+    mutationFn: (opportunityId: string) => grantsApi.startGrantApplication(opportunityId, false),
     onSuccess: (data) => {
       setActionError(null);
       if (data.applicationId) onStartApplication?.(data.applicationId);
@@ -703,6 +708,7 @@ export const GrantOpportunityFinderPanel: React.FC<{
         ))}
         <input className="hq-input" placeholder="Search opportunities…" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 200, flex: "1 1 160px" }} />
       </div>
+      <p className="hq-muted-text">Reviewed eligible opportunities appear first, prioritizing documented multi-year, renewable, operating and administrative support. Scholarships for individuals and school-only awards require a separate recipient or partnership.</p>
       {actionError && <p className="hq-muted-text" role="alert">{actionError}</p>}
       {finder.isLoading ? <HqLoading /> : finder.isError ? (
         <QueryError message={grantCallFailureText(finder.error, "Opportunity finder unavailable. Check your connection and retry.")} />
@@ -711,9 +717,9 @@ export const GrantOpportunityFinderPanel: React.FC<{
       ) : (
         <div className="hq-table-scroll">
           <table className="hq-table">
-            <thead><tr><th>Title</th><th>Funder</th><th>Source</th><th>Deadline</th><th>Max Award</th><th>Match</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Title</th><th>Funder</th><th>Source</th><th>Deadline</th><th>Max Award</th><th>Research fit / eligibility</th><th>Actions</th></tr></thead>
             <tbody>
-              {(list as { id: string; title: string; funder: string; deadline?: string; amount_max?: number; dataSourceLabel?: string }[]).map((o) => {
+              {(list as { id: string; title: string; funder: string; deadline?: string; amount_max?: number; dataSourceLabel?: string; eligibilityReview?: GrantEligibilityAssessment }[]).map((o) => {
                 const intel = scores[o.id];
                 return (
                 <tr key={String(o.id)}>
@@ -724,10 +730,13 @@ export const GrantOpportunityFinderPanel: React.FC<{
                   <td>{o.amount_max ? `$${o.amount_max.toLocaleString()}` : "—"}</td>
                   <td>
                     {intel ? (
-                      <StatusBadge label={`${intel.composite ?? intel.matchScore ?? 0}% · ${String(intel.priority ?? "—")}`} variant={Number(intel.composite) >= 70 ? "success" : "warning"} />
+                      <StatusBadge label={`${intel.composite ?? intel.matchScore ?? 0}% research fit`} variant={Number(intel.composite) >= 70 ? "success" : "warning"} />
                     ) : (
                       <span className="hq-muted-text">—</span>
                     )}
+                    <p>{o.eligibilityReview?.status === "eligible" ? "Eligible — Founder reviewed" : o.eligibilityReview?.status === "ineligible" ? "Not eligible" : "Eligibility needs review"}</p>
+                    {o.eligibilityReview?.reasons.map((r) => <p key={r} className="hq-muted-text">{r}</p>)}
+                    {o.eligibilityReview?.canDraft && <p>{o.eligibilityReview.review?.fundingFeatures.map((f) => f.replace(/_/g, " ")).join(" · ")}</p>}
                   </td>
                   <td>
                     {canManage && (

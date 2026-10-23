@@ -1,3 +1,4 @@
+import type { GrantFact, GrantEligibilityAssessment } from "../../../shared/grantEligibility";
 const GRANT_AI_TIMEOUT_MS = 120_000;
 
 async function apiFetch<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
@@ -139,6 +140,9 @@ export type GrantFoundationDashboard = {
 };
 
 export const grantsApi = {
+  applicationEligibility: (id: string) => apiFetch<GrantEligibilityAssessment>(`/applications/${id}/eligibility-review`),
+  saveVerifiedProfile: (facts: GrantFact[]) => apiFetch("/verified-profile", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ facts }) }),
+  saveEligibilityReview: (id: string, data: unknown) => apiFetch(`/opportunities/${id}/eligibility-review`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
   overview: () => apiFetch<GrantOverview>("/overview"),
   dashboard: () => apiFetch<GrantOverview>("/dashboard"),
   foundationDashboard: () => apiFetch<GrantFoundationDashboard>("/foundation/dashboard"),

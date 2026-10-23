@@ -168,6 +168,7 @@ import {
   normalizeFunderType,
 } from "../hq/grantFoundationEngine";
 
+import { getVerifiedGrantProfile, saveVerifiedGrantProfile, getOpportunityEligibility, getApplicationEligibility, saveGrantNoticeReview } from "../hq/grantEligibilityReview";
 const router = Router();
 
 /** Production Founder Mode — only verified Founder/owner may approve grants for submission. */
@@ -246,6 +247,28 @@ router.use((req, res, next) => {
   if (hasPermission(req.hqUser?.role as string, "hq.grants.manage")) return next();
   return res.status(403).json({ error: "Grant manage permission required for this action" });
 });
+
+router.get("/verified-profile", async (_req, res) => {
+  res.json({ profile: await getVerifiedGrantProfile() });
+});
+router.put("/verified-profile", async (req, res) => {
+  if (!requireFounderMode(req, res)) return;
+  try { res.json({ profile: await saveVerifiedGrantProfile(req.body, req.hqUser!.email!) }); }
+  catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "Profile verification failed" }); }
+});
+router.get("/opportunities/:id/eligibility-review", async (req, res) => {
+  res.json(await getOpportunityEligibility(req.params.id));
+});
+router.put("/opportunities/:id/eligibility-review", async (req, res) => {
+  if (!requireFounderMode(req, res)) return;
+  try { res.json(await saveGrantNoticeReview(req.params.id, req.body, req.hqUser!.email!)); }
+  catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "Eligibility review failed" }); }
+});
+router.get("/applications/:id/eligibility-review", async (req, res) => {
+  try { res.json(await getApplicationEligibility(req.params.id)); }
+  catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "Eligibility review unavailable" }); }
+});
+
 
 function actor(req: Request) {
   return { email: req.hqUser?.email };

@@ -1,3 +1,4 @@
+import { grantApprovalEvidenceBlockers } from "./grantEligibilityReview";
 /**
  * Grant Intelligence Engine — unified discovery, matching, scoring, drafting, and AURA advisory.
  */
@@ -311,6 +312,10 @@ export async function setFounderApproval(
   const app = await db.get<{ id: string; status: string }>("SELECT id, status FROM grant_applications WHERE id = ?", applicationId);
   if (!app) return { ok: false, error: "Application not found" };
 
+  if (action === "approve" || action === "mark_ready") {
+    const blockers = await grantApprovalEvidenceBlockers(applicationId);
+    if (blockers.length) return { ok: false, error: `Application review required: ${blockers.join(" ")}` };
+  }
   const now = new Date().toISOString();
   if (action === "approve") {
     await db.run(
@@ -453,6 +458,8 @@ export async function assertFounderApprovedForSubmit(applicationId: string): Pro
       code: "founder_approval_required",
     };
   }
+  const blockers = await grantApprovalEvidenceBlockers(applicationId);
+  if (blockers.length) return { ok: false, error: `Application review required: ${blockers.join(" ")}`, code: "eligibility_review_required" };
   if (!Number(app.ready_to_submit)) {
     return {
       ok: false,
