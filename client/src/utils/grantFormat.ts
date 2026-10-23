@@ -3,9 +3,12 @@ import { formatCurrency } from "./safeFormat";
 /** Display grant deadline — never show a blank dash for missing dates. */
 export function fmtGrantDeadline(d: string | null | undefined): string {
   if (!d?.trim()) return "No deadline listed";
-  const parsed = new Date(d);
+  if (d.trim().toLowerCase() === "rolling") return "Rolling";
+  // A funder calendar date is not a UTC instant. Keep Nov 2 as Nov 2 in every timezone.
+  const calendarOnly = /^\d{4}-\d{2}-\d{2}$/.test(d.trim());
+  const parsed = new Date(calendarOnly ? `${d.trim()}T00:00:00Z` : d);
   if (Number.isNaN(parsed.getTime())) return "No deadline listed";
-  return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", ...(calendarOnly ? { timeZone: "UTC" } : {}) });
 }
 
 export function fmtGrantAmount(min?: number | null, max?: number | null): string {

@@ -1,3 +1,4 @@
+import { getOpportunityEligibility, compareReviewedFunding } from "./grantEligibilityReview";
 /**
  * Grant Center — unified enterprise platform (modular command hub)
  */
@@ -313,7 +314,12 @@ export async function buildOpportunityFinder(filters?: { category?: string; geog
   if (filters?.geography) { sql += " AND o.geography = ?"; params.push(filters.geography); }
   sql += " ORDER BY o.deadline ASC LIMIT 100";
   const raw = await db.all(sql, ...params) as Record<string, unknown>[];
-  const local = raw.map(annotateOpportunity);
+  const local: (Record<string, unknown> & ReturnType<typeof annotateOpportunity> & { eligibilityReview: Awaited<ReturnType<typeof getOpportunityEligibility>> })[] = await Promise.all(raw.map(async (row) => ({
+    ...annotateOpportunity(row),
+    eligibilityReview: await getOpportunityEligibility(String(row.id)),
+  })));
+  // Eligibility is a gate, fit is only a research aid. Prefer documented recurring support.
+  local.sort(compareReviewedFunding);
   const categorized = {
     federal: local.filter((o) => o.funder_category === "federal"),
     state: local.filter((o) => o.funder_category === "state"),

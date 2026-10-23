@@ -1,3 +1,4 @@
+import { getApplicationEligibility, getOpportunityEligibility } from "./grantEligibilityReview";
 /**
  * Grant Production Lifecycle — end-to-end readiness, Founder review, and stage reports.
  * Composes Writer Studio, KB grounding, Founder gates, and submission package prep.
@@ -113,7 +114,12 @@ export async function computeGrantReadinessReport(applicationId: string): Promis
   const hasOpportunity = Boolean(app.opportunity_id);
   const hasDeadline = Boolean(app.deadline);
 
+  const eligibility = await getApplicationEligibility(applicationId).catch(() => null);
   const items: GrantReadinessItem[] = [
+    { id: "verified_budget", label: "Verified request and budget", ok: eligibility?.review?.requestedAmount != null && eligibility.review.requestedAmount === amountRequested, severity: "critical", detail: "The application request must match the document-backed budget reviewed for this component." },
+    { id: "verification_placeholders", label: "Verification placeholders resolved", ok: !sectionRows.some((s) => /\[VERIFICATION NEEDED\b/i.test(s.content)), severity: "critical", detail: "Resolve missing-fact placeholders before Founder approval." },
+    { id: "eligibility_review", label: "Documented eligibility review", ok: eligibility?.canDraft === true, severity: "critical",
+      detail: eligibility?.canDraft ? "All recorded conditions met against Founder-reviewed evidence" : eligibility?.reasons.join(" ") || "Eligibility review unavailable" },
     {
       id: "narratives",
       label: "Required narratives",
@@ -376,14 +382,12 @@ export async function runGrantProductionLifecycle(opts: {
     try {
       const { scoreOpportunityIntelligence } = await import("./grantIntelligenceEngine");
       const intel = await scoreOpportunityIntelligence(opportunityId, { actorEmail: opts.actorEmail });
-      const score = Number(intel?.composite ?? intel?.eligibility ?? 0);
+      const reviewed = await getOpportunityEligibility(opportunityId);
       stages.push({
         id: "eligibility",
-        label: "Analyze eligibility",
-        status: score >= 40 || intel != null ? "PASS" : "WARN",
-        detail: intel
-          ? `Eligibility ${intel.eligibility}% · composite ${intel.composite}% · ${intel.eligibilityGrade}`
-          : "Eligibility analysis returned limited data",
+        label: "Review documented eligibility",
+        status: reviewed.canDraft ? "PASS" : "BLOCKED",
+        detail: `${reviewed.status}: ${reviewed.reasons.join(" ") || "All recorded conditions met"}. Research fit: ${intel?.composite ?? "unscored"}; not an award probability.`,
       });
     } catch (err) {
       stages.push({
