@@ -1,3 +1,4 @@
+// This is a sandbox-only USD 10.00 checkout pilot. Mocked tests do not establish actual PayPal connectivity or production readiness.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createSandboxClient } from './paypal.mjs';
