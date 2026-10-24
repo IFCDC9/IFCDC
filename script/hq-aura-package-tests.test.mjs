@@ -26,3 +26,16 @@ test('application profile has its own trusted harness and refuses unrelated or n
     await assert.rejects(runPackageTests({ testProfile: 'grant-subnav-v1', changePackage: { files } }), /test_scope_refused/);
   }
 });
+
+test('checkout scope accepts only the two fixed paths and has a trusted offline harness', async () => {
+  const { checkoutTestScope, CHECKOUT_PATH, CHECKOUT_TEST_PATH } = await import('../shared/auraTestProfiles.mjs');
+  assert.equal(checkoutTestScope({ files: [{path: CHECKOUT_PATH}, {path: CHECKOUT_TEST_PATH}] }), true);
+  for (const files of [[], [{path: CHECKOUT_PATH}], [{path: CHECKOUT_PATH}, {path: CHECKOUT_PATH}],
+    [{path: CHECKOUT_PATH}, {path: 'script/other.mjs'}]]) {
+    assert.equal(checkoutTestScope({files}), false);
+    await assert.rejects(runPackageTests({ testProfile: 'checkout-sandbox-v1', changePackage: {files} }), /test_scope_refused/);
+  }
+  const args = sandboxArguments(image, '/tmp/suite', 'fixed', 'checkout-sandbox-v1');
+  assert.equal(args.at(-1), 'script/aura-checkout-suite.mjs');
+  assert.ok(args.includes('--network=none'));
+});

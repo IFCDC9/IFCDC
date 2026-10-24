@@ -80,7 +80,7 @@ export default function AuraRunnerPanel() {
   onError: (error: Error) => setMessage(error.message) });
   const publishPackage = useMutation({ mutationFn: () => {
     const job = runners.data?.jobs.find((item) => item.id === publishTestId && item.status === "succeeded" &&
-      item.result?.testProfile === "grant-subnav-v1" && item.result.testsRun === true && item.result.exitCode === 0);
+      ["grant-subnav-v1", "checkout-sandbox-v1"].includes(item.result?.testProfile || "") && item.result?.testsRun === true && item.result.exitCode === 0);
     if (!job?.result?.packageSha256 || !publishApproved) throw new Error("Select and approve a passing application test first.");
     return post<{ url: string }>("/runner-draft-pr", { testJobId: job.id,
       reviewedSha256: job.result.packageSha256, approved: true }, 150_000);
@@ -120,7 +120,7 @@ export default function AuraRunnerPanel() {
       {job.result?.commit && <span> — runner reported commit {job.result.commit.slice(0, 7)}, {job.result.changedFiles} changed files, {job.result.untrackedFiles} untracked files</span>}
       {job.kind === "test_change_package_v1" && job.result && <span> — {job.result.testProfile}: {job.result.outcome};
         {job.result.testsRun === true ? ` exit ${job.result.exitCode}, ${job.result.durationMs} ms` : job.result.testsRun === false ? " tests did not start" : " execution uncertain; inspect locally before retrying"}.
-        Package {job.result.packageSha256?.slice(0, 12)}. {job.result.testProfile === "grant-subnav-v1" ? "Four Grants navigation component checks; full Grants Center and build are not tested." : "This profile checks only package validation."}</span>}
+        Package {job.result.packageSha256?.slice(0, 12)}. {job.result.testProfile === "grant-subnav-v1" ? "Four Grants navigation component checks; full Grants Center and build are not tested." : job.result.testProfile === "checkout-sandbox-v1" ? "47 trusted offline mocked checkout checks; actual PayPal sandbox, website and deployment are unverified." : "This profile checks only package validation."}</span>}
       {job.result?.error && <span> — {job.result.error}</span>}
       {job.result?.reviewId && <span> — runner reported {job.result.fileCount} staged files; local review {job.result.reviewId}. Tests have not run.</span>}
     </li>)}</ul>
@@ -131,10 +131,14 @@ export default function AuraRunnerPanel() {
     <p>Grant navigation v1 executes the proposed GrantSubNav.tsx component and checks four DOM behaviors.
       It accepts changes to that existing component only. It requires a separate application test image and local opt-in;
       it does not test the full Grants Center, grant APIs, or a production build.</p>
+    <p>Checkout sandbox v1 runs 47 trusted offline payment contract checks against the proposed PayPal adapter.
+      It accepts exactly the adapter and checkout test file. The package-supplied test file is not executed.
+      Actual PayPal sandbox checkout, website behavior and deployment remain unverified. Enable checkout testing on the runner first.</p>
     <label>Test profile <select className="hq-input" aria-label="Package test profile" value={testProfile}
       onChange={(event) => { setTestProfile(event.target.value); setTestApproved(false); }}>
       <option value="package-validator-v1">Package integrity only</option>
       <option value="grant-subnav-v1">Grants navigation component</option>
+      <option value="checkout-sandbox-v1">Checkout payment contracts (offline)</option>
     </select></label>
     <label>Staged package <select className="hq-input" aria-label="Staged package for tests" value={testJobId}
       onChange={(event) => { setTestJobId(event.target.value); setTestApproved(false); }}>
@@ -148,17 +152,17 @@ export default function AuraRunnerPanel() {
       {runners.data?.jobs.find((job) => job.id === testJobId)?.result?.packageSha256}
     </code></p>}
     <p><label><input type="checkbox" checked={testApproved} onChange={(event) => setTestApproved(event.target.checked)} />
-      I approve running {testProfile === "grant-subnav-v1" ? "the Grants navigation component tests" : "the package validator tests"} for this exact staged package on its computer.</label></p>
+      I approve running {testProfile === "grant-subnav-v1" ? "the Grants navigation component tests" : testProfile === "checkout-sandbox-v1" ? "the offline checkout payment tests" : "the package validator tests"} for this exact staged package on its computer.</label></p>
     <button className="hq-btn" disabled={!testApproved || !testJobId || testPackage.isPending}
       onClick={() => testPackage.mutate()}>Approve and queue package tests</button>
     <h4>Publish a tested change for review</h4>
-    <p>Create a draft pull request for an approved package that passed Grants navigation component tests.
-      This publishes the proposed file to GitHub. Merge and deployment require separate approval.</p>
+    <p>Create a draft pull request for an approved package that passed supported application tests.
+      This publishes the proposed files to GitHub. Merge and deployment require separate approval.</p>
     <label>Passing application test <select className="hq-input" aria-label="Passing application test for PR" value={publishTestId}
       onChange={(event) => { setPublishTestId(event.target.value); setPublishApproved(false); }}>
       <option value="">Choose a passing application test</option>
       {runners.data?.jobs.filter((job) => job.kind === "test_change_package_v1" && job.status === "succeeded" &&
-        job.result?.testProfile === "grant-subnav-v1" && job.result.testsRun === true && job.result.exitCode === 0 &&
+        ["grant-subnav-v1", "checkout-sandbox-v1"].includes(job.result?.testProfile || "") && job.result?.testsRun === true && job.result.exitCode === 0 &&
         runners.data.runners.some((runner) => runner.id === job.runner_id && !runner.revoked_at)).map((job) =>
         <option key={job.id} value={job.id}>{job.result?.packageSha256?.slice(0, 12)} — {job.result?.testProfile}</option>)}
     </select></label>

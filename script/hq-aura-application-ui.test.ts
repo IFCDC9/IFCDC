@@ -20,7 +20,9 @@ test('UI requires separate test and publishing approvals; integrity-only passes 
         { id: 'integrity', runner_id: 'mac', kind: 'test_change_package_v1', status: 'succeeded',
           result: { packageSha256: digest, testProfile: 'package-validator-v1', testsRun: true, exitCode: 0 } },
         { id: 'application', runner_id: 'mac', kind: 'test_change_package_v1', status: 'succeeded',
-          result: { packageSha256: digest, testProfile: 'grant-subnav-v1', testsRun: true, exitCode: 0 } }], pullRequests: [] });
+          result: { packageSha256: digest, testProfile: 'grant-subnav-v1', testsRun: true, exitCode: 0 } },
+        { id: 'checkout', runner_id: 'mac', kind: 'test_change_package_v1', status: 'succeeded',
+          result: { packageSha256: digest, testProfile: 'checkout-sandbox-v1', testsRun: true, exitCode: 0 } }], pullRequests: [] });
     requests.push({ url: String(input), body: JSON.parse(options.body) });
     return Response.json({ url: 'https://github.com/IFCDC9/IFCDC/pull/999' });
   }) as typeof fetch;
@@ -46,20 +48,20 @@ test('UI requires separate test and publishing approvals; integrity-only passes 
     await select('Staged package for tests', 'stage');
     await check('I approve running');
     assert.equal(button('Approve and queue package tests').disabled, false);
-    await select('Package test profile', 'grant-subnav-v1');
+    await select('Package test profile', 'checkout-sandbox-v1');
     assert.equal(button('Approve and queue package tests').disabled, true, 'profile change clears approval');
     await check('I approve running');
     await React.act(async () => { button('Approve and queue package tests').click(); await flush(); });
-    assert.deepEqual(requests[0].body, { stagingJobId: 'stage', reviewedSha256: digest, testProfile: 'grant-subnav-v1', approved: true });
+    assert.deepEqual(requests[0].body, { stagingJobId: 'stage', reviewedSha256: digest, testProfile: 'checkout-sandbox-v1', approved: true });
     assert.equal(requests.length, 1, 'tests do not automatically publish');
     const choices = document.querySelector('select[aria-label="Passing application test for PR"]') as HTMLSelectElement;
-    assert.deepEqual([...choices.options].map(o => o.value), ['', 'application']);
-    await select('Passing application test for PR', 'application');
+    assert.deepEqual([...choices.options].map(o => o.value), ['', 'application', 'checkout']);
+    await select('Passing application test for PR', 'checkout');
     assert.equal(button('Approve and publish draft PR').disabled, true);
     await check('I approve publishing');
     await React.act(async () => { button('Approve and publish draft PR').click(); await flush(); });
     assert.ok(requests[1].url.endsWith('/runner-draft-pr'));
-    assert.deepEqual(requests[1].body, { testJobId: 'application', reviewedSha256: digest, approved: true });
+    assert.deepEqual(requests[1].body, { testJobId: 'checkout', reviewedSha256: digest, approved: true });
     assert.equal(button('Approve and publish draft PR').disabled, true, 'publishing consumes approval');
   } finally {
     await React.act(async () => root.unmount()); client.clear(); globalThis.fetch = savedFetch; dom.window.close();
