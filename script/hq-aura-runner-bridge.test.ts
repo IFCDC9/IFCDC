@@ -496,3 +496,115 @@ test('publisher uses the exact tested bytes and parent, creates only a draft bra
     if (savedToken) process.env.AURA_GITHUB_PR_TOKEN = savedToken; else delete process.env.AURA_GITHUB_PR_TOKEN;
   }
 });
+
+async function checkoutFixture(label: string, adapter?: string) {
+  const device = await bridge.enrollRunner(label, 'founder');
+  const paths = ['script/ifcdc-checkout-pilot/paypal.mjs', 'script/ifcdc-checkout-pilot/checkout.test.mjs'];
+  const files = paths.map(target => ({ path: target, beforeSha256: null,
+    content: target.endsWith('/paypal.mjs') ? adapter ?? readFileSync(new URL('../' + target, import.meta.url), 'utf8') :
+      'throw new Error("Package-supplied tests must never execute");\n' }));
+  const changePackage = { version: 1, repository: 'IFCDC9/IFCDC', baseCommit: (await git('rev-parse', 'HEAD')).stdout.trim(), summary: label, files };
+  const reviewedSha256 = reviewChangePackage(changePackage).packageSha256;
+  const staged = await bridge.queueRunnerChangePackage(device.id, changePackage, reviewedSha256, true, 'founder');
+  const config = { hqUrl, repoRoot: repo, runnerToken: device.token, allowPackageStaging: true };
+  const stage = await runRunnerOnce(config);
+  assert.equal(stage.status, 'succeeded');
+  rmSync(path.dirname(stage.workspace), { recursive: true, force: true });
+  return { device, changePackage, reviewedSha256, staged, config,
+    input: { stagingJobId: staged.id, reviewedSha256, testProfile: 'checkout-sandbox-v1', approved: true } };
+}
+
+test('checkout profile enforces exact scope, independent opt-in, and immutable image', async () => {
+  const unrelated = await queuedTestFixture('Wrong checkout scope');
+  await assert.rejects(bridge.queueRunnerPackageTests({ ...unrelated.input, testProfile: 'checkout-sandbox-v1' }, 'founder'), /exactly paypal/);
+  const f = await checkoutFixture('Checkout opt in');
+  await bridge.queueRunnerPackageTests(f.input, 'founder');
+  assert.equal(await bridge.claimRunnerJob(f.device.id, ['test_change_package_v1', 'test_grant_subnav_v1']), null);
+  assert.equal((await runRunnerOnce({ ...f.config, allowPackageTests: true, allowApplicationTests: true })).status, 'idle');
+  assert.throws(() => validateRunnerConfig({ ...f.config, allowCheckoutTests: 'true' }));
+  assert.throws(() => validateRunnerConfig({ ...f.config, checkoutTestImage: 'node:24' }));
+  assert.equal((await runRunnerOnce({ ...f.config, allowCheckoutTests: true })).error, 'test_sandbox_unavailable');
+});
+
+test('checkout trusted harness passes reference, rejects broken adapter and premature exit through a Docker CLI stand-in', async () => {
+  // Validates process protocol only, not real container isolation.
+  if (process.platform === 'win32') return;
+  const bin = mkdtempSync(path.join(tmpdir(), 'aura-checkout-docker-'));
+  const originalPath = process.env.PATH;
+  writeFileSync(path.join(bin, 'docker'), `#!/usr/bin/env node
+const fs = require('node:fs'), cp = require('node:child_process');
+const args = process.argv.slice(2);
+if (args[0] === 'image' || args[0] === 'rm') process.exit(0);
+for (const flag of ['--network=none', '--read-only', '--cap-drop=ALL', '--user=65534:65534', '--pull=never']) if (!args.includes(flag)) process.exit(125);
+const root = args[args.indexOf('--mount') + 1].split(',').find(x => x.startsWith('source=')).slice(7);
+for (const forbidden of ['/.git', '/.env', '/node_modules', '/script/ifcdc-checkout-pilot/checkout.test.mjs']) if (fs.existsSync(root + forbidden)) process.exit(125);
+if (process.env.AURA_SECRET_TEST) process.exit(125);
+const result = cp.spawnSync(process.execPath, args.slice(args.indexOf('--test')), { cwd: root, env: { PATH: process.env.PATH }, stdio: 'pipe' });
+process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr || ''); process.exit(result.status ?? 1);
+`);
+  chmodSync(path.join(bin, 'docker'), 0o755);
+  process.env.PATH = bin + path.delimiter + originalPath;
+  process.env.AURA_SECRET_TEST = 'never-forward';
+  try {
+    for (const [label, content, outcome] of [
+      ['Valid checkout', undefined, 'passed'],
+      ['Broken checkout', 'export function createSandboxClient() { return {}; }', 'failed'],
+      ['Early checkout exit', 'process.exit(0); export function createSandboxClient() {}', 'error'],
+    ] as const) {
+      const f = await checkoutFixture(label, content);
+      await bridge.queueRunnerPackageTests(f.input, 'founder');
+      const result = await runRunnerOnce({ ...f.config, allowCheckoutTests: true, checkoutTestImage: 'sha256:' + 'a'.repeat(64) });
+      assert.equal(result.outcome, outcome, label);
+      if (outcome === 'error') assert.equal(result.error, 'test_incomplete');
+      assert.equal((await git('status', '--porcelain')).stdout, '');
+    }
+  } finally { process.env.PATH = originalPath; delete process.env.AURA_SECRET_TEST; rmSync(bin, { recursive: true, force: true }); }
+});
+
+test('checkout publisher creates both exact tested files, refuses existing create targets and never publishes integrity receipts', async () => {
+  const { publishTestedPullRequest } = await import('../server/hq/auraTestedPullRequest.ts');
+  const f = await checkoutFixture('Checkout publishing');
+  const queued = await bridge.queueRunnerPackageTests(f.input, 'founder');
+  const job = (await bridge.claimRunnerJob(f.device.id, ['test_checkout_sandbox_v1']))!;
+  await bridge.completeRunnerJob(f.device.id, job.id, job.lease, { status: 'succeeded', outcome: 'passed', testsRun: true,
+    exitCode: 0, durationMs: 10, packageSha256: f.reviewedSha256, baseCommit: f.changePackage.baseCommit,
+    testProfile: 'checkout-sandbox-v1', stagingJobId: f.staged.id, productionExecuted: false });
+  const input = { testJobId: queued.id, reviewedSha256: f.reviewedSha256, approved: true };
+  const savedFetch = globalThis.fetch, savedToken = process.env.AURA_GITHUB_PR_TOKEN;
+  process.env.AURA_GITHUB_PR_TOKEN = 'fixture-only';
+  let existing = true, unsafeParent = false;
+  const writes: { endpoint: string; body: any }[] = [];
+  globalThis.fetch = (async (url: any, options: any) => {
+    const endpoint = String(url).split('/IFCDC9/IFCDC/')[1];
+    const body = options.body ? JSON.parse(options.body) : undefined;
+    if (body) writes.push({ endpoint, body });
+    if (endpoint === 'branches/main') return Response.json({ commit: { sha: f.changePackage.baseCommit } });
+    if (endpoint.startsWith('contents/script?')) return Response.json(unsafeParent ? { type: 'symlink' } : []);
+    if (endpoint.startsWith('contents/')) return existing ? Response.json({ type: 'file' }) : Response.json({}, { status: 404 });
+    if (endpoint.startsWith('git/commits/')) return Response.json({ tree: { sha: 'b'.repeat(40) } });
+    if (endpoint === 'git/blobs') return Response.json({ sha: 'c'.repeat(40) });
+    if (endpoint === 'git/trees') return Response.json({ sha: 'd'.repeat(40) });
+    if (endpoint === 'git/commits') return Response.json({ sha: 'e'.repeat(40) });
+    if (endpoint === 'git/refs') return Response.json({});
+    assert.equal(endpoint, 'pulls');
+    assert.equal(body.draft, true); assert.match(body.body, /47 trusted offline/); assert.match(body.body, /deployment are unverified/);
+    return Response.json({ draft: true, html_url: 'https://github.com/IFCDC9/IFCDC/pull/1000' });
+  }) as typeof fetch;
+  try {
+    await assert.rejects(publishTestedPullRequest(input, 'founder'), /already exists/);
+    assert.equal(writes.length, 0);
+    existing = false; unsafeParent = true;
+    await assert.rejects(publishTestedPullRequest(input, 'founder'), /preflight failed/);
+    assert.equal(writes.length, 0);
+    unsafeParent = false;
+    assert.equal((await publishTestedPullRequest(input, 'founder')).status, 'published');
+    assert.deepEqual(writes.filter(c => c.endpoint === 'git/blobs').map(c => c.body.content), [...f.changePackage.files].sort((a, b) => a.path.localeCompare(b.path)).map(file => file.content));
+    assert.deepEqual(writes.find(c => c.endpoint === 'git/trees')!.body.tree.map((entry: any) => entry.path), [...f.changePackage.files].sort((a, b) => a.path.localeCompare(b.path)).map(file => file.path));
+    assert.deepEqual(writes.find(c => c.endpoint === 'git/commits')!.body.parents, [f.changePackage.baseCommit]);
+    const length = writes.length;
+    await publishTestedPullRequest(input, 'founder'); assert.equal(writes.length, length);
+    const db = await bridge.runnerDatabase();
+    await db.run("UPDATE aura_runner_test_requests SET test_profile = 'package-validator-v1' WHERE job_id = ?", queued.id);
+    await assert.rejects(publishTestedPullRequest(input, 'founder'), /passing application test/);
+  } finally { globalThis.fetch = savedFetch; if (savedToken) process.env.AURA_GITHUB_PR_TOKEN = savedToken; else delete process.env.AURA_GITHUB_PR_TOKEN; }
+});

@@ -4,7 +4,7 @@ import { getDb } from "../db";
 import { logHqAudit } from "./hqAuditLog";
 import { validateChangePackage, reviewChangePackage, type ChangePackage } from "../../shared/auraChangePackage.mjs";
 
-import { GRANT_NAV_PROFILE, applicationTestScope } from "../../shared/auraTestProfiles.mjs";
+import { GRANT_NAV_PROFILE, CHECKOUT_PROFILE, supportedApplicationScope } from "../../shared/auraTestProfiles.mjs";
 const hash = (text: string) => crypto.createHash("sha256").update(text).digest("hex");
 export const RUNNER_LEASE_MS = 5 * 60_000;
 
@@ -147,7 +147,7 @@ export async function queueRunnerPackageTests(input: unknown, requesterId: strin
   const value = input as Record<string, unknown>;
   if (!value || typeof value !== "object" || Array.isArray(value) ||
       Object.keys(value).sort().join(",") !== "approved,reviewedSha256,stagingJobId,testProfile" ||
-      value.approved !== true || !["package-validator-v1", GRANT_NAV_PROFILE].includes(String(value.testProfile)) ||
+      value.approved !== true || !["package-validator-v1", GRANT_NAV_PROFILE, CHECKOUT_PROFILE].includes(String(value.testProfile)) ||
       typeof value.stagingJobId !== "string" || typeof value.reviewedSha256 !== "string") {
     throw new RunnerBridgeError(400, "Approve the exact staged package and the supported test profile.");
   }
@@ -160,8 +160,8 @@ export async function queueRunnerPackageTests(input: unknown, requesterId: strin
   if (!staged || staged.package_sha256 !== value.reviewedSha256) {
     throw new RunnerBridgeError(409, "Successful staging of this exact package is required first.");
   }
-  if (value.testProfile === GRANT_NAV_PROFILE && !applicationTestScope(validateChangePackage(JSON.parse(staged.package_json)))) {
-    throw new RunnerBridgeError(400, "Grant navigation tests require a package modifying only the existing GrantSubNav.tsx component.");
+  if ((value.testProfile === GRANT_NAV_PROFILE || value.testProfile === CHECKOUT_PROFILE) && !supportedApplicationScope(validateChangePackage(JSON.parse(staged.package_json)), value.testProfile)) {
+    throw new RunnerBridgeError(400, value.testProfile === CHECKOUT_PROFILE ? "Checkout tests require exactly paypal.mjs and checkout.test.mjs in script/ifcdc-checkout-pilot." : "Grant navigation tests require a package modifying only the existing GrantSubNav.tsx component.");
   }
   const id = crypto.randomUUID();
   await db.run("INSERT INTO aura_runner_change_payloads (job_id, package_sha256, package_json) VALUES (?, ?, ?)",
@@ -192,17 +192,18 @@ export async function claimRunnerJob(runnerId: string, capabilities: unknown = [
   // One atomic statement prevents two poll requests from claiming the same task.
   const testing = Array.isArray(capabilities) && capabilities.includes("test_change_package_v1");
   const applicationTesting = Array.isArray(capabilities) && capabilities.includes("test_grant_subnav_v1");
+  const checkoutTesting = Array.isArray(capabilities) && capabilities.includes("test_checkout_sandbox_v1");
   const staging = Array.isArray(capabilities) && capabilities.includes("stage_change_package_v1");
   const job = await db.get<{ id: string; kind: "inspect_repository" | "stage_change_package_v1" | "test_change_package_v1"; lease_until: number }>(`
     UPDATE aura_runner_jobs SET status = 'running', lease_hash = ?, lease_until = ?
     WHERE id = (SELECT id FROM aura_runner_jobs WHERE runner_id = ? AND status = 'queued'
       AND (kind = 'inspect_repository' OR (kind = 'stage_change_package_v1' AND ? = 1)
         OR (kind = 'test_change_package_v1' AND EXISTS (SELECT 1 FROM aura_runner_test_requests t WHERE t.job_id = aura_runner_jobs.id
-          AND ((t.test_profile = 'package-validator-v1' AND ? = 1) OR (t.test_profile = 'grant-subnav-v1' AND ? = 1))))) ORDER BY created_at, id LIMIT 1)
+          AND ((t.test_profile = 'package-validator-v1' AND ? = 1) OR (t.test_profile = 'grant-subnav-v1' AND ? = 1) OR (t.test_profile = 'checkout-sandbox-v1' AND ? = 1))))) ORDER BY created_at, id LIMIT 1)
     AND status = 'queued'
     AND EXISTS (SELECT 1 FROM aura_runner_devices WHERE id = ? AND revoked_at IS NULL)
     AND NOT EXISTS (SELECT 1 FROM aura_runner_jobs WHERE runner_id = ? AND status = 'running')
-    RETURNING id, kind, lease_until`, hash(lease), now + RUNNER_LEASE_MS, runnerId, staging ? 1 : 0, testing ? 1 : 0, applicationTesting ? 1 : 0, runnerId, runnerId);
+    RETURNING id, kind, lease_until`, hash(lease), now + RUNNER_LEASE_MS, runnerId, staging ? 1 : 0, testing ? 1 : 0, applicationTesting ? 1 : 0, checkoutTesting ? 1 : 0, runnerId, runnerId);
   await db.run("UPDATE aura_runner_devices SET last_seen_at = ? WHERE id = ? AND revoked_at IS NULL", now, runnerId);
   if (!job) return null;
   await audit("claimed", job.id);

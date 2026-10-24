@@ -6,13 +6,15 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { GRANT_NAV_PROFILE } from '../shared/auraTestProfiles.mjs';
+import { GRANT_NAV_PROFILE, CHECKOUT_PROFILE } from '../shared/auraTestProfiles.mjs';
 const exec = promisify(execFile);
 const remoteAllowed = (url) => /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)IFCDC9\/IFCDC(?:\.git)?$/i.test(url.trim());
 
 export function validateRunnerConfig(config) {
   if (!config || typeof config !== "object" || typeof config.hqUrl !== "string" ||
       typeof config.repoRoot !== "string" || !path.isAbsolute(config.repoRoot) ||
+      (config.allowCheckoutTests !== undefined && typeof config.allowCheckoutTests !== "boolean") ||
+      (config.checkoutTestImage !== undefined && !/^sha256:[a-f0-9]{64}$/.test(config.checkoutTestImage)) ||
       (config.allowApplicationTests !== undefined && typeof config.allowApplicationTests !== "boolean") ||
       (config.applicationTestImage !== undefined && !/^sha256:[a-f0-9]{64}$/.test(config.applicationTestImage)) ||
       (config.allowPackageTests !== undefined && typeof config.allowPackageTests !== "boolean") ||
@@ -66,10 +68,11 @@ export async function runRunnerOnce(input) {
   }
   const capabilities = ["inspect_repository", ...(config.allowPackageStaging === true ? ["stage_change_package_v1"] : []),
     ...(config.allowPackageTests === true ? ["test_change_package_v1"] : []),
-    ...(config.allowApplicationTests === true ? ["test_grant_subnav_v1"] : [])];
+    ...(config.allowApplicationTests === true ? ["test_grant_subnav_v1"] : []),
+    ...(config.allowCheckoutTests === true ? ["test_checkout_sandbox_v1"] : [])];
   const { job } = await request("/runner/claim", { capabilities });
   if (!job) return { status: "idle" };
-  if (!(capabilities.includes(job.kind) || (job.kind === "test_change_package_v1" && config.allowApplicationTests === true && job.testProfile === GRANT_NAV_PROFILE)) || !/^[a-f0-9-]{36}$/.test(job.id) || !/^[A-Za-z0-9_-]{43}$/.test(job.lease) ||
+  if (!(capabilities.includes(job.kind) || (job.kind === "test_change_package_v1" && (config.allowApplicationTests === true && job.testProfile === GRANT_NAV_PROFILE || config.allowCheckoutTests === true && job.testProfile === CHECKOUT_PROFILE))) || !/^[a-f0-9-]{36}$/.test(job.id) || !/^[A-Za-z0-9_-]{43}$/.test(job.lease) ||
       !Number.isSafeInteger(job.lease_until) || job.lease_until <= Date.now()) {
     throw new Error("HQ returned an unsupported job.");
   }
@@ -80,13 +83,14 @@ export async function runRunnerOnce(input) {
     const { reviewChangePackage } = await import("../shared/auraChangePackage.mjs");
     const review = reviewChangePackage(job.changePackage);
     if (job.reviewedSha256 !== review.packageSha256 || !(job.testProfile === "package-validator-v1" && config.allowPackageTests === true ||
-          job.testProfile === GRANT_NAV_PROFILE && config.allowApplicationTests === true) ||
+          job.testProfile === GRANT_NAV_PROFILE && config.allowApplicationTests === true ||
+          job.testProfile === CHECKOUT_PROFILE && config.allowCheckoutTests === true) ||
         !/^[a-f0-9-]{36}$/.test(job.stagingJobId || "")) throw new Error("HQ returned an unsupported test request.");
     const binding = { packageSha256: review.packageSha256, baseCommit: review.baseCommit,
       testProfile: job.testProfile, stagingJobId: job.stagingJobId, productionExecuted: false };
     try {
       const tested = await runPackageTests({ repoRoot: config.repoRoot, changePackage: job.changePackage,
-        reviewedSha256: review.packageSha256, testProfile: job.testProfile, testImage: job.testProfile === GRANT_NAV_PROFILE ? config.applicationTestImage : config.packageTestImage });
+        reviewedSha256: review.packageSha256, testProfile: job.testProfile, testImage: job.testProfile === CHECKOUT_PROFILE ? config.checkoutTestImage : job.testProfile === GRANT_NAV_PROFILE ? config.applicationTestImage : config.packageTestImage });
       result = { ...binding, ...tested, status: tested.outcome === "passed" ? "succeeded" : "failed" };
     } catch (error) {
       const allowed = ["test_profile_refused", "test_scope_refused", "test_incomplete", "test_sandbox_unavailable", "test_staging_failed", "test_snapshot_refused",
