@@ -1,3 +1,4 @@
+// This is a sandbox-only USD 10.00 checkout pilot. Mocked tests do not establish actual PayPal connectivity or production readiness.
 // Isolated sandbox reference adapter. Not mounted in HQ or a public application.
 const BASE = 'https://api-m.sandbox.paypal.com';
 const ORDER_ID = /^[A-Z0-9]{1,36}$/;
