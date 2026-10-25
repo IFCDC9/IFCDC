@@ -22,10 +22,12 @@ import { ensureAuraSoftwareEngineeringTables } from "../hq/auraSoftwareEngineeri
 import { engineeringApprovalAllowed, runEngineeringTask } from "../hq/auraEngineeringWorkflow";
 import auraRunnerRouter from "./auraRunner.routes";
 
+import liveCheckoutRouter from "./auraLiveCheckout.routes";
 import sandboxCheckoutRouter from "./auraSandboxCheckout.routes";
 
 const router = Router();
 router.use("/sandbox-checkout", sandboxCheckoutRouter);
+router.use("/live-checkout", liveCheckoutRouter);
 router.use(auraRunnerRouter);
 
 function isFounder(req: Request): boolean {
