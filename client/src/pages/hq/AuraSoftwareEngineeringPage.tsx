@@ -10,6 +10,7 @@ import { HqPanel } from "../../components/hq/HqPanel";
 import { StatusBadge } from "../../components/hq/StatusBadge";
 import { HqLoading } from "../../components/hq/HqLoading";
 import { HqWidgetErrorBoundary } from "../../components/hq/HqErrorBoundary";
+import AuraSandboxCheckoutPanel from "../../components/hq/AuraSandboxCheckoutPanel";
 import AuraRunnerPanel from "../../components/hq/AuraRunnerPanel";
 
 const EMPTY: SeDashboard = {
@@ -253,6 +254,10 @@ const AuraSoftwareEngineeringPage: React.FC = () => {
         </HqPanel>
       </div>
 
+      <HqPanel title="AURA sandbox checkout">
+        <AuraSandboxCheckoutPanel />
+      </HqPanel>
+      <div style={{ height: "1rem" }} />
       <HqPanel title="Runner connection">
         <AuraRunnerPanel />
       </HqPanel>

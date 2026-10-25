@@ -1,5 +1,5 @@
 // This is a sandbox-only USD 10.00 checkout pilot. Mocked tests do not establish actual PayPal connectivity or production readiness.
-// Isolated sandbox reference adapter. Not mounted in HQ or a public application.
+// Sandbox adapter for the Founder-only HQ pilot. Never connects to live PayPal.
 const BASE = 'https://api-m.sandbox.paypal.com';
 const ORDER_ID = /^[A-Z0-9]{1,36}$/;
 const REQUEST_ID = /^[A-Za-z0-9_-]{1,108}$/;
@@ -75,13 +75,25 @@ export function createSandboxClient({ clientId, clientSecret, merchantId, fetchI
     return order;
   }
 
-  async function createOrder({ requestId } = {}) {
+  async function createOrder({ requestId, returnUrl, cancelUrl } = {}) {
+    let paymentSource;
+    if (returnUrl !== undefined || cancelUrl !== undefined) {
+      for (const value of [returnUrl, cancelUrl]) {
+        let url;
+        try { url = new URL(value); } catch { fail('Invalid checkout return URL'); }
+        if (typeof value !== 'string' || url.protocol !== 'https:' || url.username || url.password || url.hash) fail('Invalid checkout return URL');
+      }
+      if (new URL(returnUrl).origin !== new URL(cancelUrl).origin) fail('Checkout return origins must match');
+      paymentSource = { paypal: { experience_context: { return_url: returnUrl, cancel_url: cancelUrl,
+        shipping_preference: 'NO_SHIPPING', user_action: 'PAY_NOW' } } };
+    }
     checkRequestId(requestId);
     const accessToken = await token();
     const order = await request('/v2/checkout/orders', {
       method: 'POST', headers: headers(accessToken, requestId),
       body: JSON.stringify({ intent: 'CAPTURE', purchase_units: [{ reference_id: 'pilot-product',
-        amount: { currency_code: 'USD', value: '10.00' }, payee: { merchant_id: merchantId } }] }),
+        amount: { currency_code: 'USD', value: '10.00' }, payee: { merchant_id: merchantId } }],
+        ...(paymentSource ? { payment_source: paymentSource } : {}) }),
     });
     if (typeof order.id !== 'string' || !ORDER_ID.test(order.id)) fail('Invalid created order ID');
     const unit = checkOrder(order, order.id);
@@ -104,5 +116,13 @@ export function createSandboxClient({ clientId, clientSecret, merchantId, fetchI
     });
     return checkCapture(captured, orderId, unit);
   }
-  return Object.freeze({ createOrder, captureOrder });
+  async function reconcileOrder({ orderId } = {}) {
+    if (typeof orderId !== 'string' || !ORDER_ID.test(orderId)) fail('Invalid order ID');
+    const accessToken = await token();
+    const order = await request(`/v2/checkout/orders/${orderId}`, { method: 'GET', headers: headers(accessToken) });
+    const unit = checkOrder(order, orderId);
+    if (unit.reference_id !== 'pilot-product') fail('Unknown product');
+    return checkCapture(order, orderId, unit);
+  }
+  return Object.freeze({ createOrder, captureOrder, reconcileOrder });
 }

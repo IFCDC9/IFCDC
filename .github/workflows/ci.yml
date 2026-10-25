@@ -34,6 +34,9 @@ jobs:
       - name: Type Check
         run: npm run check
 
+      - name: Sandbox checkout regression tests
+        run: node --import tsx --test script/hq-aura-sandbox-checkout.test.ts script/hq-aura-sandbox-checkout-ui.test.ts script/aura-checkout-suite.mjs
+
       - name: Run Tests
         run: npm test
 
