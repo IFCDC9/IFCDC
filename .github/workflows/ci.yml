@@ -37,6 +37,9 @@ jobs:
       - name: Sandbox checkout regression tests
         run: node --import tsx --test script/hq-aura-sandbox-checkout.test.ts script/hq-aura-sandbox-checkout-ui.test.ts script/aura-checkout-suite.mjs
 
+      - name: Live checkout regression tests (mocked provider)
+        run: node --import tsx --test script/hq-aura-live-checkout.test.ts script/hq-aura-live-checkout-ui.test.ts script/aura-live-checkout-contract.test.mjs
+
       - name: Run Tests
         run: npm test
 
