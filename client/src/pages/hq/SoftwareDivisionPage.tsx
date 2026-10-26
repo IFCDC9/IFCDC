@@ -57,7 +57,7 @@ function AppCard({
       <p className="hq-app-desc">{app.description}</p>
       <div className="hq-app-meta">
         <StatusBadge label={app.status} variant={STATUS_VARIANT[app.status] ?? "muted"} />
-        <span className="hq-app-meta-item">v{app.version ?? "1.0.0"}</span>
+        {app.version && <span className="hq-app-meta-item">v{app.version}</span>}
         {app.health && <span className="hq-app-meta-item">{app.health.latencyMs}ms</span>}
       </div>
       {app.health?.error && <div className="hq-app-error">{app.health.error}</div>}
