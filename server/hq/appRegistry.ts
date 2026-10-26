@@ -165,8 +165,8 @@ export async function pollAppHealth(app: SoftwareApp): Promise<{
     const contentUrl = "https://ifcdc.org/api/public/website/content";
     try {
       const [page, feed] = await Promise.all([
-        fetch(homepageUrl, { signal: AbortSignal.timeout(8000), redirect: "error", cache: "no-store" }),
-        fetch(contentUrl, { signal: AbortSignal.timeout(8000), redirect: "error", cache: "no-store" }),
+        fetch(homepageUrl, { signal: AbortSignal.timeout(8000), redirect: "error", headers: { "Cache-Control": "no-cache" } }),
+        fetch(contentUrl, { signal: AbortSignal.timeout(8000), redirect: "error", headers: { "Cache-Control": "no-cache" } }),
       ]);
       const html = await page.text();
       const homepageHealthy = page.ok && (page.headers.get("content-type") || "").includes("text/html")
@@ -174,9 +174,10 @@ export async function pollAppHealth(app: SoftwareApp): Promise<{
       let contentHealthy = false;
       let publishedItems: number | undefined;
       if (feed.ok && (feed.headers.get("content-type") || "").includes("application/json")) {
-        const body = await feed.json();
-        contentHealthy = Array.isArray(body?.items);
-        if (contentHealthy) publishedItems = body.items.length;
+        const body: unknown = await feed.json();
+        const items = body && typeof body === "object" && "items" in body ? body.items : undefined;
+        contentHealthy = Array.isArray(items);
+        if (Array.isArray(items)) publishedItems = items.length;
       }
       const healthy = homepageHealthy && contentHealthy;
       return { id: app.id, healthy, latencyMs: Date.now() - start, deployment: "production",
