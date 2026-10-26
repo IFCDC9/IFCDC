@@ -40,6 +40,9 @@ jobs:
       - name: Live checkout regression tests (mocked provider)
         run: node --import tsx --test script/hq-aura-live-checkout.test.ts script/hq-aura-live-checkout-ui.test.ts script/aura-live-checkout-contract.test.mjs
 
+      - name: Public support payments (mocked provider and browser DOM)
+        run: node --import tsx --test script/public-support.test.ts script/public-support-ui.test.mjs
+
       - name: Run Tests
         run: npm test
 
