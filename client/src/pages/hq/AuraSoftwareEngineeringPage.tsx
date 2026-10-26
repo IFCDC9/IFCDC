@@ -12,6 +12,7 @@ import { HqLoading } from "../../components/hq/HqLoading";
 import { HqWidgetErrorBoundary } from "../../components/hq/HqErrorBoundary";
 import AuraLiveCheckoutPanel from "../../components/hq/AuraLiveCheckoutPanel";
 import PublicSupportPanel from "../../components/hq/PublicSupportPanel";
+import CreativeAssetStudioPanel from "../../components/hq/CreativeAssetStudioPanel";
 import PublicWebsitePanel from "../../components/hq/PublicWebsitePanel";
 import AuraSandboxCheckoutPanel from "../../components/hq/AuraSandboxCheckoutPanel";
 import AuraRunnerPanel from "../../components/hq/AuraRunnerPanel";
@@ -259,6 +260,7 @@ const AuraSoftwareEngineeringPage: React.FC = () => {
 
       <HqPanel title="AURA live checkout — real payments">
         <PublicWebsitePanel />
+        <CreativeAssetStudioPanel />
         <PublicSupportPanel />
         <AuraLiveCheckoutPanel />
       </HqPanel>
