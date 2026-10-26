@@ -4,6 +4,7 @@ import fs from "fs";
 import twilio from "twilio";
 import cookieParser from "cookie-parser";
 import donationsRouter from "../routes/donations";
+import publicSupportRouter from "../routes/publicSupport.routes";
 import adminFundingRouter from "../routes/adminFunding";
 import hqRouter from "../routes/hq.routes";
 import enterpriseApiRouter from "../routes/enterpriseApi.routes";
@@ -57,6 +58,7 @@ export async function mountApplication(app: Express, opts: MountApplicationOptio
   registerTwilioAuraRoutes(app);
 
   app.use(cookieParser());
+  app.use("/api/public/support", publicSupportRouter);
   app.use("/api", donationsRouter);
   app.use("/api/admin", adminFundingRouter);
   app.use("/api/hq", hqRouter);
