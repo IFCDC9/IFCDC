@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { websiteOrigins } from "./publicWebsite";
 import { getDb } from "../db";
 import { liveConfiguration } from "./auraLiveCheckout";
 import { publicPayPal, ProviderError } from "./publicSupportPayPal";
@@ -200,8 +201,11 @@ export function createSupportService(options: { env?: NodeJS.ProcessEnv; fetchIm
       return { ready: cfg.ready, clientId: cfg.ready ? cfg.clientId : null, currency: "USD", donationAmounts: [10, 25, 50, 100],
         membershipAmounts: [10, 20, 40, 60], services, bookUrl: cfg.bookUrl || null, contact: "service@ifcdc.org" };
     },
-    async create(input: any, ip: string) {
-      const cfg = config(); exact(input, ["id", "proof", "kind", "amount", "approved", "recurringApproved"]);
+    async create(input: any, ip: string, returnOrigin?: string) {
+      const cfg = config();
+      const callbackOrigin = returnOrigin || cfg.origin;
+      if (![cfg.origin, ...websiteOrigins(env)].includes(callbackOrigin)) throw new SupportError(403, "Invalid checkout origin.");
+      exact(input, ["id", "proof", "kind", "amount", "approved", "recurringApproved"]);
       if (!UUID.test(input.id) || !SECRET.test(input.proof) || !["donation", "membership"].includes(input.kind) || input.approved !== true ||
           (input.kind === "membership" && input.recurringApproved !== true)) throw new SupportError(400, "Approve the payment amount and any monthly renewal first.");
       const cents = amountCents(input.amount, input.kind === "membership" ? 100_000 : 1_000_000);
@@ -213,6 +217,10 @@ export function createSupportService(options: { env?: NodeJS.ProcessEnv; fetchIm
           VALUES (?, ?, ?, ?, 'creating', ?, ?, ?)`, input.id, digest(input.proof), input.kind, cents, cfg.merchantId, digest(cfg.clientId), now());
       }
       row = await owned(input.id, input.proof);
+      await db.exec("CREATE TABLE IF NOT EXISTS ifcdc_support_return_origins (checkout_id TEXT PRIMARY KEY, origin TEXT NOT NULL)");
+      await db.run("INSERT OR IGNORE INTO ifcdc_support_return_origins VALUES (?, ?)", row.id, callbackOrigin);
+      const savedOrigin = await db.get<{ origin: string }>("SELECT origin FROM ifcdc_support_return_origins WHERE checkout_id = ?", row.id);
+      if (savedOrigin?.origin !== callbackOrigin) throw new SupportError(409, "Continue this payment on the website where it was started.");
       if (row.kind !== input.kind || row.cents !== cents) throw new SupportError(409, "Keep the original amount for this payment attempt.");
       if (row.provider_id) return { ...await view(row), approvalUrl: row.approval_url };
       if (now() - row.created_at > TTL) throw new SupportError(409, "This attempt expired. Contact IFCDC before making another payment.");
@@ -228,7 +236,7 @@ export function createSupportService(options: { env?: NodeJS.ProcessEnv; fetchIm
         } else {
           const planId = await planFor(cents);
           await db.run("UPDATE ifcdc_support_orders SET plan_id = ? WHERE id = ?", planId, row.id);
-          const callback = (result: string) => `${cfg.origin}/support?membership=${row!.id}&result=${result}`;
+          const callback = (result: string) => `${callbackOrigin}/support?membership=${row!.id}&result=${result}`;
           const sub = await api("/v1/billing/subscriptions", "POST", { plan_id: planId, custom_id: row.id,
             application_context: { brand_name: "IFCDC", shipping_preference: "NO_SHIPPING", user_action: "SUBSCRIBE_NOW", return_url: callback("approved"), cancel_url: callback("cancelled") } }, `support-sub-${row.id}`);
           if (!/^I-[A-Z0-9]+$/.test(sub.id) || sub.plan_id !== planId || sub.custom_id !== row.id || sub.status !== "APPROVAL_PENDING") throw new Error("Invalid subscription");

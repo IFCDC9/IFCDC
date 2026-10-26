@@ -208,3 +208,14 @@ test("HTTP routes reject cross-origin mutations, missing proof and foreign HQ us
   mode = "fail"; const response = await post(env.AURA_CHECKOUT_LIVE_ORIGIN, input()); mode = "normal";
   assert.equal(response.status, 502); const text = await response.text(); assert.ok(!text.includes("PRIVATE_SECRET")); assert.ok(!text.includes("customer@example.test"));
 });
+test('public-domain membership returns to its original domain and retries cannot change the callback origin', async () => {
+  const value = input('membership');
+  const result = await service.create(value, 'domain-membership', 'https://ifcdc.org');
+  const creation = calls.filter(call => call.path === "/v1/billing/subscriptions" && call.options.method === "POST").map(call => ({ body: JSON.parse(call.options.body) })).find(call => call.body.custom_id === value.id && call.body.application_context?.return_url);
+  assert.ok(creation, 'subscription create call recorded');
+  assert.ok(creation.body.application_context.return_url.startsWith('https://ifcdc.org/support?membership='));
+  assert.ok(creation.body.application_context.cancel_url.startsWith('https://ifcdc.org/support?membership='));
+  await assert.rejects(service.create(value, 'domain-membership', env.AURA_CHECKOUT_LIVE_ORIGIN), /where it was started/);
+  await assert.rejects(service.create(input(), 'foreign-domain', 'https://evil.test'), /Invalid checkout origin/);
+  assert.equal(result.status, 'approval_pending');
+});
