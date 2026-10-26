@@ -127,7 +127,7 @@ async function waitForTask(taskId: string, timeoutMs = 180_000) {
         task,
       };
     }
-    await new Promise((r) => setTimeout(r, 2500));
+    await new Promise((r) => setTimeout(r, 5000));
   }
   return {
     ok: false as const,
@@ -499,4 +499,18 @@ export function readImageBytesSafe(filePath: string): Buffer | null {
   } catch {
     return null;
   }
+}
+
+/** Bounded asynchronous creative jobs. Shares the existing private Runway credential. */
+export async function requestRunwayCreative(path: string, body?: Record<string, unknown>, fetchImpl: typeof fetch = fetch) {
+  if (!/^\/(text_to_image|text_to_video|tasks\/[a-f0-9-]{36})$/.test(path)) throw new Error('Invalid Runway operation');
+  if (runwayApiKeyPresence() !== 'PRESENT') throw new Error('Runway credential missing');
+  const response = await fetchImpl(`${RUNWAY_API_BASE}${path}`, {
+    method: body ? 'POST' : 'GET', redirect: 'error', signal: AbortSignal.timeout(12000),
+    headers: { 'Content-Type':'application/json', Authorization:`Bearer ${credentialRaw()}`, 'X-Runway-Version':RUNWAY_VERSION },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  let data: unknown = null;
+  try { data = await response.json(); } catch {}
+  return { ok:response.ok, status:response.status, data };
 }

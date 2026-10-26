@@ -1,3 +1,4 @@
+import creativeAssetStudioRouter from "../routes/creativeAssetStudio.routes";
 import express, { type Express } from "express";
 import path from "path";
 import fs from "fs";
@@ -61,6 +62,7 @@ export async function mountApplication(app: Express, opts: MountApplicationOptio
   app.use(cookieParser());
   app.use("/api/public/support", publicSupportRouter);
   app.use("/api/public/website", publicWebsiteRouter);
+  app.use("/api/hq/creative-assets", creativeAssetStudioRouter);
   app.use("/api", donationsRouter);
   app.use("/api/admin", adminFundingRouter);
   app.use("/api/hq", hqRouter);
