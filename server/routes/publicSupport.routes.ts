@@ -1,3 +1,4 @@
+import { websiteOrigins } from "../hq/publicWebsite";
 import { Router, type Request, type Response } from "express";
 import { createSupportService, supportConfiguration, SupportError } from "../hq/publicSupport";
 import { hqAuthRequired } from "../middleware/hqAuth";
@@ -27,11 +28,11 @@ export function publicSupportRouter(options: Parameters<typeof createSupportServ
   router.get("/catalog", handled(async (_req, res) => res.json(await service.catalog())));
   router.use((req, res, next) => {
     const { origin } = supportConfiguration(options.env);
-    if (req.method !== "POST" || !origin || req.get("origin") !== origin || !req.is("application/json")) { res.status(403).json({ error: "Use the IFCDC support page to submit this request." }); return; }
+    if (req.method !== "POST" || !origin || ![origin, ...websiteOrigins(options.env)].includes(req.get("origin") || "") || !req.is("application/json")) { res.status(403).json({ error: "Use the IFCDC support page to submit this request." }); return; }
     next();
   });
   const proof = (req: Request) => req.get("X-IFCDC-Receipt");
-  router.post("/payments", handled(async (req, res) => res.status(201).json(await service.create(req.body, req.ip || req.socket.remoteAddress || "unknown"))));
+  router.post("/payments", handled(async (req, res) => res.status(201).json(await service.create(req.body, req.ip || req.socket.remoteAddress || "unknown", req.get("origin")))));
   router.post("/payments/:id/capture", handled(async (req, res) => res.json(await service.capture(req.params.id, proof(req), req.body))));
   router.post("/payments/:id/recheck", handled(async (req, res) => res.json(await service.recheck(req.params.id, proof(req)))));
   router.post("/payments/:id/cancel", handled(async (req, res) => res.json(await service.cancel(req.params.id, proof(req), req.body))));
