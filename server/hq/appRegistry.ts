@@ -113,12 +113,11 @@ export const SOFTWARE_DIVISION_APPS: SoftwareApp[] = [
   {
     id: "imperial",
     name: "Imperial Foundation CDC Website",
-    description: "Public website and community platform (Headquarters host)",
-    status: "development",
-    version: "1.0.0",
+    description: "Official public IFCDC website — programs, services, media, and support",
+    status: "production",
     path: "Apps/IMPERIAL-FOUNDATION-CDC/",
-    healthUrl: selfHealthUrl(),
-    launchUrl: `${getHqPublicBase()}/`,
+    healthUrl: "https://ifcdc.org/",
+    launchUrl: "https://ifcdc.org/",
     priority: 5,
   },
   {
@@ -159,6 +158,37 @@ export async function pollAppHealth(app: SoftwareApp): Promise<{
   error?: string;
 }> {
   const start = Date.now();
+  // Public-site health must check the public domain, never the private HQ health endpoint.
+  if (app.id === "imperial") {
+    const checkedAt = new Date().toISOString();
+    const homepageUrl = "https://ifcdc.org/";
+    const contentUrl = "https://ifcdc.org/api/public/website/content";
+    try {
+      const [page, feed] = await Promise.all([
+        fetch(homepageUrl, { signal: AbortSignal.timeout(8000), redirect: "error", headers: { "Cache-Control": "no-cache" } }),
+        fetch(contentUrl, { signal: AbortSignal.timeout(8000), redirect: "error", headers: { "Cache-Control": "no-cache" } }),
+      ]);
+      const html = await page.text();
+      const homepageHealthy = page.ok && (page.headers.get("content-type") || "").includes("text/html")
+        && html.includes('href="https://ifcdc.org/"') && html.includes('/website.js');
+      let contentHealthy = false;
+      let publishedItems: number | undefined;
+      if (feed.ok && (feed.headers.get("content-type") || "").includes("application/json")) {
+        const body: unknown = await feed.json();
+        const items = body && typeof body === "object" && "items" in body ? body.items : undefined;
+        contentHealthy = Array.isArray(items);
+        if (Array.isArray(items)) publishedItems = items.length;
+      }
+      const healthy = homepageHealthy && contentHealthy;
+      return { id: app.id, healthy, latencyMs: Date.now() - start, deployment: "production",
+        data: { checkedAt, homepageUrl, contentUrl, homepageHealthy, contentHealthy, publishedItems },
+        ...(healthy ? {} : { error: "Public website check failed: " + [!homepageHealthy && "homepage", !contentHealthy && "content feed"].filter(Boolean).join(", ") }),
+      };
+    } catch (error) {
+      return { id: app.id, healthy: false, latencyMs: Date.now() - start, deployment: "production",
+        data: { checkedAt, homepageUrl, contentUrl }, error: error instanceof Error ? error.message : "Public website unreachable" };
+    }
+  }
   const deployment = process.env[`HQ_${app.id.toUpperCase()}_DEPLOYMENT`] || (app.locked ? "production" : "development");
   const barbersLiveUrl = app.id === "barbers" ? process.env.HQ_BARBERS_HEALTH_URL?.trim() : undefined;
   const healthUrl = barbersLiveUrl || app.healthUrl;
