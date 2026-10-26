@@ -44,7 +44,7 @@ jobs:
         run: node --import tsx --test script/public-support.test.ts script/public-support-ui.test.mjs
 
       - name: Public website routes, enquiries, media, and privacy
-        run: node --import tsx --test script/public-website.test.ts script/public-website-ui.test.mjs script/public-website-monitor.test.ts
+        run: node --import tsx --test script/public-website.test.ts script/public-website-ui.test.mjs script/public-website-monitor.test.ts script/app-designer-ui.test.mjs
 
       - name: Run Tests
         run: npm test
