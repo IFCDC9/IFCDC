@@ -75,3 +75,28 @@ test('quote submission sends approved details and renders server response as tex
   const request = ui.requests.find(item => item.url.endsWith('/inquiries')); assert.equal(request.body.consent, true); assert.equal(request.body.service, 'Custom software development');
   assert.equal(ui.$('quote-result').querySelector('img'), null); assert.match(ui.$('quote-result').textContent, /QUOTE1/); ui.dom.window.close();
 });
+test('mobile navigation toggles and section links close it while retaining real anchor destinations', async () => {
+  const ui = await setup(); const nav = ui.$('page-nav'); const toggle = ui.$('menu-toggle');
+  toggle.click(); assert.equal(toggle.getAttribute('aria-expanded'), 'true'); assert.ok(nav.classList.contains('is-open'));
+  for (const link of nav.querySelectorAll('a')) assert.ok(ui.window.document.querySelector(link.getAttribute('href')));
+  const membership = nav.querySelector('a[href="#membership"]'); membership.click(); await settle();
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false'); assert.equal(nav.classList.contains('is-open'), false);
+  assert.equal(ui.window.location.hash, '#membership'); assert.equal(membership.getAttribute('aria-current'), 'location'); ui.dom.window.close();
+});
+test('every service card preselects its matching quote category without sending a request', async () => {
+  const ui = await setup();
+  for (const button of ui.window.document.querySelectorAll('[data-service]')) {
+    button.click(); assert.equal(ui.$('quote-service').value, button.dataset.service);
+    assert.equal(ui.window.document.activeElement.id, 'quote-name'); assert.match(ui.$('quote-result').textContent, /selected/);
+  }
+  assert.equal(ui.requests.filter(item => item.url.endsWith('/inquiries')).length, 0); ui.dom.window.close();
+});
+test('unavailable payments explain each disabled action and provide a working contact link', async () => {
+  const ui = await setup({ ready: false });
+  for (const kind of ['donation', 'membership']) {
+    assert.match(ui.$(`${kind}-start`).textContent, /coming soon/);
+    assert.equal(ui.$(`${kind}-start`).getAttribute('aria-describedby'), `${kind}-availability`);
+    assert.equal(ui.$(`${kind}-availability`).querySelector('a').getAttribute('href'), 'mailto:service@ifcdc.org');
+  }
+  assert.ok(ui.$('book-unavailable').querySelector('a').href.startsWith('mailto:')); ui.dom.window.close();
+});

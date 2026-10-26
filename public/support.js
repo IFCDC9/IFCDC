@@ -74,6 +74,48 @@ function loadSdk() {
     script.src = url.href; script.dataset.namespace = 'ifcdcSupportPayPal'; script.onload = () => resolve(window.ifcdcSupportPayPal); script.onerror = () => { sdk = null; script.remove(); reject(new Error('PayPal payment methods could not load. Try again.')); }; document.head.append(script);
   }); return sdk;
 }
+// Section links work as normal anchors without JavaScript; enhancements add feedback.
+const menu = byId('menu-toggle');
+const navigation = byId('page-nav');
+document.body.classList.add('navigation-ready');
+window.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && menu.getAttribute('aria-expanded') === 'true') {
+    menu.setAttribute('aria-expanded', 'false'); navigation.classList.remove('is-open'); menu.focus();
+  }
+});
+menu.addEventListener('click', () => {
+  const open = menu.getAttribute('aria-expanded') !== 'true';
+  menu.setAttribute('aria-expanded', String(open)); navigation.classList.toggle('is-open', open);
+});
+function markSection() {
+  const hash = window.location.hash || '#mission';
+  for (const link of navigation.querySelectorAll('a')) {
+    if (link.getAttribute('href') === hash) link.setAttribute('aria-current', 'location');
+    else link.removeAttribute('aria-current');
+  }
+}
+for (const link of document.querySelectorAll('a[href^="#"]')) link.addEventListener('click', () => {
+  menu.setAttribute('aria-expanded', 'false'); navigation.classList.remove('is-open');
+  const section = document.querySelector(link.getAttribute('href'));
+  if (section) { section.classList.remove('nav-arrival'); void section.offsetWidth; section.classList.add('nav-arrival'); }
+});
+window.addEventListener('hashchange', markSection); markSection();
+for (const button of document.querySelectorAll('[data-service]')) button.addEventListener('click', () => {
+  byId('quote-service').value = button.dataset.service;
+  byId('quote-form').scrollIntoView?.({ behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
+  byId('quote-name').focus({ preventScroll: true });
+  byId('quote-result').textContent = `${button.dataset.service} selected. Tell us about your project below.`;
+});
+function paymentAvailability(ready) {
+  for (const kind of ['donation', 'membership']) {
+    const status = byId(`${kind}-availability`); status.replaceChildren();
+    if (ready) { status.textContent = kind === 'donation' ? 'Secure one-time checkout · choose an amount to begin.' : 'Monthly support · your amount, your choice.'; continue; }
+    status.append(document.createTextNode('Online payments are not open yet. You can explore amounts. '));
+    const contact = document.createElement('a'); contact.href = 'mailto:service@ifcdc.org'; contact.textContent = 'Contact IFCDC for updates ↗'; status.append(contact);
+    byId(`${kind}-start`).textContent = 'Online payments coming soon';
+    byId(`${kind}-start`).setAttribute('aria-describedby', `${kind}-availability`);
+  }
+}
 for (const group of document.querySelectorAll('.amounts')) {
   const field = byId(group.dataset.target);
   group.addEventListener('click', event => { const button = event.target.closest('button[data-amount]'); if (!button) return; field.value = button.dataset.amount; field.dispatchEvent(new Event('input')); });
@@ -126,6 +168,7 @@ byId('quote-form').addEventListener('submit', async event => {
 });
 try {
   catalog = await api('/catalog');
+  paymentAvailability(catalog.ready);
   byId('setup-notice').hidden = catalog.ready;
   for (const kind of ['donation', 'membership']) byId(`${kind}-start`).disabled = !catalog.ready;
   if (catalog.bookUrl) { const url = new URL(catalog.bookUrl); if (url.protocol === 'https:' && ['amazon.com', 'www.amazon.com', 'a.co'].includes(url.hostname)) { byId('book-link').href = url.href; byId('book-link').hidden = false; byId('book-unavailable').hidden = true; } }
@@ -141,4 +184,4 @@ try {
     try { showReceipt(kind, await api(`/payments/${value.id}/recheck`, {}, value)); }
     catch (error) { message(kind, `${error.message} Your original attempt is retained for retry.`, true); }
   }
-} catch { byId('setup-notice').hidden = false; byId('setup-notice').textContent = 'Payment status is temporarily unavailable. Please try again later or contact service@ifcdc.org.'; }
+} catch { paymentAvailability(false); byId('setup-notice').hidden = false; byId('setup-notice').textContent = 'Payment status is temporarily unavailable. Please try again later or contact service@ifcdc.org.'; }
