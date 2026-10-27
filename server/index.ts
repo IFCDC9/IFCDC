@@ -98,6 +98,8 @@ async function startServer() {
 
   const { mountApplication, mountDevVite } = await import("./bootstrap/mountApplication");
   await mountApplication(app, { isDev });
+  const {startProjectRevenueWorker}=await import("./hq/projectNotifications");
+  startProjectRevenueWorker();
   if (isDev) {
     await mountDevVite(app, server);
   }

@@ -1,3 +1,4 @@
+import {createProjectBillingService} from '../hq/projectBilling';
 import { websiteOrigins } from "../hq/publicWebsite";
 import { Router, type Request, type Response } from "express";
 import { createSupportService, supportConfiguration, SupportError } from "../hq/publicSupport";
@@ -5,7 +6,7 @@ import { hqAuthRequired } from "../middleware/hqAuth";
 import { engineeringApprovalAllowed } from "../hq/auraEngineeringWorkflow";
 
 export function publicSupportRouter(options: Parameters<typeof createSupportService>[0] = {}) {
-  const router = Router(); const service = createSupportService(options);
+  const router = Router(); const service = createSupportService(options); const projects = createProjectBillingService(options);
   const handled = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response) => {
     Promise.resolve().then(() => fn(req, res)).catch(error => res.status(error instanceof SupportError ? error.status : 502).json({
       error: error instanceof SupportError ? error.message : "Payment service could not confirm this request. Please recheck before starting another payment.",
@@ -15,7 +16,9 @@ export function publicSupportRouter(options: Parameters<typeof createSupportServ
   router.post("/webhook", handled(async (req, res) => {
     const headers: Record<string, string | undefined> = {};
     for (const key of ["paypal-auth-algo", "paypal-cert-url", "paypal-transmission-id", "paypal-transmission-sig", "paypal-transmission-time"]) headers[key] = req.get(key);
-    return res.json(await service.webhook(headers, req.body));
+    const result=await service.webhook(headers, req.body);
+    await projects.verifiedWebhook(req.body);
+    return res.json(result);
   }));
   router.get("/admin", hqAuthRequired, handled(async (req, res) => {
     if (!req.hqUser?.id || !req.hqUser.email || !engineeringApprovalAllowed(req.hqUser) ||
