@@ -1,0 +1,30 @@
+import {Router} from 'express';
+import {hqAuthRequired} from '../middleware/hqAuth';
+import {getSuperAdminEmail} from '../config/credentials';
+import {websiteOrigins} from '../hq/publicWebsite';
+import {ClientError,clientDb,startClientLogin,verifyClientLogin,clientSession,endClientSession,listClientProjects,readClientProject,saveClientProject,submitClientProject,clientProjectQueue,reviewClientProject} from '../hq/clientPortal';
+const cookie='ifcdc_client';
+const options=()=>({httpOnly:true,secure:process.env.NODE_ENV==='production',sameSite:'strict' as const,path:'/api/client',maxAge:7*86400000});
+export function clientPortalRouter(providerOptions: {fetchImpl?: typeof fetch} = {}){const router=Router();const run=(fn:any)=>(req:any,res:any)=>Promise.resolve().then(()=>fn(req,res)).catch(error=>res.status(error instanceof ClientError?error.status:503).json({error:error instanceof ClientError?error.message:'Client service is temporarily unavailable. Your saved projects are retained.'}));
+ router.use((_req,res,next)=>{res.set({'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'});next();});
+ router.use((req,res,next)=>{if(req.method==='POST'&&(!req.is('application/json')||!websiteOrigins().includes(req.get('origin')||''))){res.status(403).json({error:'Use the IFCDC website to submit this request.'});return;}next();});
+ router.get('/availability',run(async(_req:any,res:any)=>{await (await clientDb()).get('SELECT 1');return res.json({service:'ifcdc-client-portal',storageReady:true,emailSignInConfigured:!!process.env.POSTMARK_SERVER_TOKEN?.trim()});}));
+ router.post('/auth/start',run(async(req:any,res:any)=>{if(req.body?.consent!==true)throw new ClientError(400,'Accept the privacy notice to continue.');return res.json(await startClientLogin(req.body.email,req.ip||'unknown',providerOptions.fetchImpl));}));
+ router.post('/auth/verify',run(async(req:any,res:any)=>{const session=await verifyClientLogin(req.body?.challengeId,req.body?.code,req.ip||'unknown');res.cookie(cookie,session.token,options());return res.json({client:session.client});}));
+ router.post('/auth/logout',run(async(req:any,res:any)=>{await endClientSession(req.cookies?.[cookie]||'');res.clearCookie(cookie,{httpOnly:true,secure:process.env.NODE_ENV==='production',sameSite:'strict',path:'/api/client'});return res.json({signedOut:true});}));
+ router.use(authenticatedClientPortalRouter());
+ router.use((error:any,_req:any,res:any,_next:any)=>res.status(error.status===413?413:400).json({error:'Client request is invalid or too large.'}));
+ return router;
+}
+export function authenticatedClientPortalRouter(){const router=Router();const run=(fn:any)=>(req:any,res:any)=>Promise.resolve().then(()=>fn(req,res)).catch(error=>res.status(error instanceof ClientError?error.status:503).json({error:error instanceof ClientError?error.message:'Client service is temporarily unavailable.'}));
+ router.use((req:any,res,next)=>{void clientSession(req.cookies?.[cookie]).then(client=>{req.clientIdentity=client;next();}).catch(()=>res.status(401).json({error:'Sign in to your client account.'}));});
+ router.get('/me',run(async(req:any,res:any)=>res.json({client:req.clientIdentity})));
+ router.get('/projects',run(async(req:any,res:any)=>res.json({projects:await listClientProjects(req.clientIdentity.id)})));
+ router.get('/projects/:id',run(async(req:any,res:any)=>res.json({project:await readClientProject(req.clientIdentity.id,req.params.id)})));
+ router.post('/projects',run(async(req:any,res:any)=>res.json({project:await saveClientProject(req.clientIdentity.id,req.body)})));
+ router.post('/projects/:id/submit',run(async(req:any,res:any)=>res.json({project:await submitClientProject(req.clientIdentity.id,req.params.id,req.body?.version)})));
+ return router;
+}
+export function clientQueueRouter(){const router=Router();router.use(hqAuthRequired);router.use((req,res,next)=>{if(req.hqUser?.email?.toLowerCase()!==getSuperAdminEmail()||!['owner','founder'].includes(req.hqUser.role)){res.status(403).json({error:'Founder access required.'});return;}res.set('Cache-Control','no-store');next();});
+ router.get('/',(_req,res)=>{void clientProjectQueue().then(result=>res.json(result)).catch(()=>res.status(503).json({error:'Queue unavailable.'}));});
+ router.post('/:id',(req,res)=>{if(!req.is('application/json')||!websiteOrigins().includes(req.get('origin')||'')){res.status(403).json({error:'Use IFCDC HQ.'});return;}void reviewClientProject(req.hqUser!.id,req.params.id,req.body).then(result=>res.json(result)).catch(error=>res.status(error instanceof ClientError?error.status:503).json({error:error instanceof ClientError?error.message:'Queue unavailable.'}));});return router;}

@@ -7,3 +7,5 @@ Disallow: /login
 Disallow: /register
 Disallow: /dashboard
 Sitemap: https://ifcdc.org/website-sitemap.xml
+
+Disallow: /client

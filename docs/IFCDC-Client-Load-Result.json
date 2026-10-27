@@ -1,0 +1,28 @@
+{
+  "environment": "Isolated local synthetic HTTP benchmark; not Render production capacity certification",
+  "fixture": "Mocked Postmark; no real emails, Runway generations, or payments",
+  "concurrentClients": 100,
+  "verifiedAccounts": 100,
+  "durableSubmittedProjects": 100,
+  "onboarding": {
+    "requests": 200,
+    "p50Ms": 938,
+    "p95Ms": 1183,
+    "p99Ms": 1236,
+    "maxMs": 1241
+  },
+  "projectOperations": {
+    "requests": 2300,
+    "p50Ms": 191,
+    "p95Ms": 373,
+    "p99Ms": 567,
+    "maxMs": 999
+  },
+  "totalSeconds": 6.78,
+  "httpErrors": 0,
+  "eventLoopP99Ms": 57,
+  "peakRssMiB": 206,
+  "hostCpuCount": 1,
+  "node": "v24.22.1",
+  "passed": true
+}

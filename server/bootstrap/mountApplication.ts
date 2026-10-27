@@ -1,3 +1,4 @@
+import {clientPortalRouter,clientQueueRouter} from "../routes/clientPortal.routes";
 import creativeAssetStudioRouter from "../routes/creativeAssetStudio.routes";
 import express, { type Express } from "express";
 import path from "path";
@@ -60,6 +61,8 @@ export async function mountApplication(app: Express, opts: MountApplicationOptio
   registerTwilioAuraRoutes(app);
 
   app.use(cookieParser());
+  app.use("/api/client",clientPortalRouter());
+  app.use("/api/hq/client-projects",clientQueueRouter());
   app.use("/api/public/support", publicSupportRouter);
   app.use("/api/public/website", publicWebsiteRouter);
   app.use("/api/hq/creative-assets", creativeAssetStudioRouter);

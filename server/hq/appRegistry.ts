@@ -164,9 +164,10 @@ export async function pollAppHealth(app: SoftwareApp): Promise<{
     const homepageUrl = "https://ifcdc.org/";
     const contentUrl = "https://ifcdc.org/api/public/website/content";
     try {
-      const [page, feed] = await Promise.all([
+      const [page, feed, clients] = await Promise.all([
         fetch(homepageUrl, { signal: AbortSignal.timeout(8000), redirect: "error", headers: { "Cache-Control": "no-cache" } }),
         fetch(contentUrl, { signal: AbortSignal.timeout(8000), redirect: "error", headers: { "Cache-Control": "no-cache" } }),
+        fetch('https://ifcdc.org/api/client/availability', { signal: AbortSignal.timeout(8000), redirect: 'error', headers: { 'Cache-Control':'no-cache' } }),
       ]);
       const html = await page.text();
       const homepageHealthy = page.ok && (page.headers.get("content-type") || "").includes("text/html")
@@ -179,10 +180,12 @@ export async function pollAppHealth(app: SoftwareApp): Promise<{
         contentHealthy = Array.isArray(items);
         if (Array.isArray(items)) publishedItems = items.length;
       }
-      const healthy = homepageHealthy && contentHealthy;
+      let clientPortalHealthy=false;
+      if(clients.ok && (clients.headers.get('content-type')||'').includes('application/json')){const info=await clients.json() as Record<string,unknown>;clientPortalHealthy=info.service==='ifcdc-client-portal'&&info.storageReady===true&&info.emailSignInConfigured===true;}
+      const healthy = homepageHealthy && contentHealthy && clientPortalHealthy;
       return { id: app.id, healthy, latencyMs: Date.now() - start, deployment: "production",
-        data: { checkedAt, homepageUrl, contentUrl, homepageHealthy, contentHealthy, publishedItems },
-        ...(healthy ? {} : { error: "Public website check failed: " + [!homepageHealthy && "homepage", !contentHealthy && "content feed"].filter(Boolean).join(", ") }),
+        data: { checkedAt, homepageUrl, contentUrl, homepageHealthy, contentHealthy, clientPortalHealthy, publishedItems },
+        ...(healthy ? {} : { error: "Public website check failed: " + [!homepageHealthy && "homepage", !contentHealthy && "content feed", !clientPortalHealthy && "client accounts"].filter(Boolean).join(", ") }),
       };
     } catch (error) {
       return { id: app.id, healthy: false, latencyMs: Date.now() - start, deployment: "production",
