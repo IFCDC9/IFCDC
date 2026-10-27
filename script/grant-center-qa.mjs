@@ -61,6 +61,10 @@ async function login(email, password) {
   return (res.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).join("; ");
 }
 
+export function founderOnlyReadIsBlocked(response) {
+  return response?.res?.status === 403 && response?.body?.code === "hq_founder_only";
+}
+
 function boardAuthHeader() {
   const token = jwt.sign(
     { id: "qa-board-user", email: "qa-board@ifcdc.org", role: "board_member", name: "QA Board" },
@@ -153,9 +157,9 @@ async function main() {
   const unauth = await jsonFetch(`${BASE}/api/hq/grants/center/platform`);
   log(unauth.res.status === 401 ? "pass" : "fail", "Unauthenticated API blocked", String(unauth.res.status));
 
-  // RBAC — board member read OK, write blocked
+  // HQ is private to the Founder. Non-Founder reads and writes must both be blocked.
   const boardRead = await jsonFetch(`${BASE}/api/hq/grants/center/platform`, { headers: boardAuthHeader() });
-  log(boardRead.ok ? "pass" : "fail", "Board member read access");
+  log(founderOnlyReadIsBlocked(boardRead) ? "pass" : "fail", "Non-Founder HQ read blocked", `${boardRead.res.status} (${boardRead.body?.code || "no boundary code"})`);
 
   let oppId;
   if (!productionGrantOpportunityWritesAllowed()) {
