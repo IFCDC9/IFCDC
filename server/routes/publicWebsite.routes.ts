@@ -1,3 +1,4 @@
+import {creativeCatalog,creativeSearch,inspirationAsset,CreativeLibraryError} from '../hq/creativeLibrary';
 import express, { Router, type Request, type Response } from 'express';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -6,10 +7,14 @@ import { getDataDir } from '../config/dataPaths';
 import { hqAuthRequired } from '../middleware/hqAuth';
 import { engineeringApprovalAllowed } from '../hq/auraEngineeringWorkflow';
 import { mediaItem, saveWebsiteInquiry, websiteDb, websiteOrigins, websiteLimit, WebsiteError } from '../hq/publicWebsite';
-export function publicWebsiteRouter() {
+export function publicWebsiteRouter(libraryOptions: {fetchImpl?: typeof fetch} = {}) {
   const router = Router();
-  const handle = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response) => { Promise.resolve().then(() => fn(req,res)).catch(error => res.status(error instanceof WebsiteError ? error.status : 503).json({ error: error instanceof WebsiteError ? error.message : 'Website service is temporarily unavailable. Contact service@ifcdc.org.' })); };
+  const handle = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response) => { Promise.resolve().then(() => fn(req,res)).catch(error => res.status(error instanceof WebsiteError || error instanceof CreativeLibraryError ? error.status : 503).json({ error: error instanceof WebsiteError || error instanceof CreativeLibraryError ? error.message : 'Website service is temporarily unavailable. Contact service@ifcdc.org.' })); };
   router.use((_req,res,next) => { res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' }); next(); });
+  const searchLibrary=creativeSearch(libraryOptions);
+  router.get('/creative-library/themes',handle(async(_req,res)=>res.set('Cache-Control','public, max-age=3600').json(await creativeCatalog())));
+  router.get('/creative-library/search',handle(async(req,res)=>res.json(await searchLibrary(req.query.topic,Number(req.query.offset||0),req.ip||'unknown',req.query.q||''))));
+  router.get('/creative-library/assets/:id',handle(async(req,res)=>{await websiteLimit(req.ip||'unknown','read',180);return res.json({asset:await inspirationAsset(req.params.id)});}));
   router.get('/content', handle(async (req,res) => {
     await websiteLimit(req.ip || 'unknown', 'read', 180);
     return res.json({ items: await (await websiteDb()).all('SELECT id,kind,section,title,description,url FROM ifcdc_website_content WHERE published = 1 ORDER BY updated_at DESC LIMIT 60') });
