@@ -13,11 +13,12 @@ test('public website checks actual homepage and feed, rejects false positives an
   const originalDeployment = process.env.HQ_IMPERIAL_DEPLOYMENT;
   process.env.HQ_IMPERIAL_DEPLOYMENT = 'development';
   try {
-    for (const scenario of ['healthy','suspended','wrong-page','broken-feed','outage']) {
+    for (const scenario of ['healthy','suspended','wrong-page','broken-feed','client-unconfigured','outage']) {
       const calls: string[] = [];
       globalThis.fetch = (async (url: any) => {
         calls.push(String(url));
         if (scenario === 'outage') throw new Error('unreachable');
+        if (String(url).endsWith('/availability')) return new Response(JSON.stringify({service:'ifcdc-client-portal',storageReady:true,emailSignInConfigured:scenario!=='client-unconfigured'}),{headers:{'content-type':'application/json'}});
         if (String(url).endsWith('/content')) return new Response(scenario === 'broken-feed' ? '{}' : '{"items":[]}', {headers:{'content-type':'application/json'}});
         return new Response(scenario === 'suspended' ? 'This service has been suspended by its owner.' : scenario === 'wrong-page' ? '<html>HQ login</html>' : '<link href="https://ifcdc.org/"><script src="/website.js">', {headers:{'content-type':'text/html'}});
       }) as typeof fetch;

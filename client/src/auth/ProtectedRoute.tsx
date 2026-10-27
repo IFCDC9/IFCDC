@@ -36,6 +36,8 @@ const ProtectedRoute: React.FC<Props> = ({
     return <Navigate to="/login" replace />;
   }
 
+  if (requiredRoute?.startsWith("/hq") && !["owner", "founder"].includes(user.role)) return <Navigate to="/client" replace />;
+
   if (requiredPermission && !hasPermission(requiredPermission)) {
     return <Navigate to="/unauthorized" replace />;
   }

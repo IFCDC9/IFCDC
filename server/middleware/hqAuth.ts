@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import {getSuperAdminEmail} from "../config/credentials";
 import { canAccessModule, hasPermission, type Permission } from "../hq/enterpriseRoles";
 import { JWT_SECRET } from "../config/auth";
 import { getDb } from "../db";
@@ -83,6 +84,10 @@ export function hqAuthRequired(req: Request, res: Response, next: NextFunction) 
       name?: string;
       mfaVerified?: boolean;
     };
+    if ((process.env.NODE_ENV === "production" || process.env.IFCDC_HQ_FOUNDER_ONLY === "true") &&
+        (payload.email?.toLowerCase() !== getSuperAdminEmail() || !["owner", "founder"].includes(payload.role))) {
+      return res.status(403).json({ error: "HQ is private to the Founder. Use your assigned website portal.", code: "hq_founder_only" });
+    }
     req.hqUser = {
       id: payload.id,
       email: payload.email,
