@@ -1,3 +1,4 @@
+import {readEngagement,founderEngagement,clientEngagementDecision,listProjectMessages,addProjectMessage,engagementHistory} from '../hq/clientEngagement';
 import {Router} from 'express';
 import {hqAuthRequired} from '../middleware/hqAuth';
 import {getSuperAdminEmail} from '../config/credentials';
@@ -22,9 +23,19 @@ export function authenticatedClientPortalRouter(){const router=Router();const ru
  router.get('/projects',run(async(req:any,res:any)=>res.json({projects:await listClientProjects(req.clientIdentity.id)})));
  router.get('/projects/:id',run(async(req:any,res:any)=>res.json({project:await readClientProject(req.clientIdentity.id,req.params.id)})));
  router.post('/projects',run(async(req:any,res:any)=>res.json({project:await saveClientProject(req.clientIdentity.id,req.body)})));
+ router.get('/projects/:id/engagement',run(async(req:any,res:any)=>res.json({engagement:await readEngagement(req.params.id,req.clientIdentity.id)})));
+ router.post('/projects/:id/decision',run(async(req:any,res:any)=>res.json({engagement:await clientEngagementDecision(req.clientIdentity.id,req.params.id,req.body)})));
+ router.get('/projects/:id/messages',run(async(req:any,res:any)=>res.json(await listProjectMessages(req.params.id,req.clientIdentity.id,Number(req.query.after||0)))));
+ router.post('/projects/:id/messages',run(async(req:any,res:any)=>res.json(await addProjectMessage(req.clientIdentity.id,req.params.id,req.body,req.clientIdentity.id))));
  router.post('/projects/:id/submit',run(async(req:any,res:any)=>res.json({project:await submitClientProject(req.clientIdentity.id,req.params.id,req.body?.version)})));
  return router;
 }
 export function clientQueueRouter(){const router=Router();router.use(hqAuthRequired);router.use((req,res,next)=>{if(req.hqUser?.email?.toLowerCase()!==getSuperAdminEmail()||!['owner','founder'].includes(req.hqUser.role)){res.status(403).json({error:'Founder access required.'});return;}res.set('Cache-Control','no-store');next();});
+ const run=(fn:any)=>(req:any,res:any)=>Promise.resolve().then(()=>fn(req,res)).catch(error=>res.status(error instanceof ClientError?error.status:503).json({error:error instanceof ClientError?error.message:'Project service unavailable.'}));
+ router.use((req,res,next)=>{if(req.method==='POST'&&(!req.is('application/json')||!websiteOrigins().includes(req.get('origin')||''))){res.status(403).json({error:'Use IFCDC HQ.'});return;}next();});
+ router.get('/:id/engagement',run(async(req:any,res:any)=>res.json({engagement:await readEngagement(req.params.id),history:await engagementHistory(req.params.id)})));
+ router.post('/:id/engagement',run(async(req:any,res:any)=>res.json({engagement:await founderEngagement(req.hqUser.id,req.params.id,req.body)})));
+ router.get('/:id/messages',run(async(req:any,res:any)=>res.json(await listProjectMessages(req.params.id,undefined,Number(req.query.after||0)))));
+ router.post('/:id/messages',run(async(req:any,res:any)=>res.json(await addProjectMessage(req.hqUser.id,req.params.id,req.body))));
  router.get('/',(_req,res)=>{void clientProjectQueue().then(result=>res.json(result)).catch(()=>res.status(503).json({error:'Queue unavailable.'}));});
  router.post('/:id',(req,res)=>{if(!req.is('application/json')||!websiteOrigins().includes(req.get('origin')||'')){res.status(403).json({error:'Use IFCDC HQ.'});return;}void reviewClientProject(req.hqUser!.id,req.params.id,req.body).then(result=>res.json(result)).catch(error=>res.status(error instanceof ClientError?error.status:503).json({error:error instanceof ClientError?error.message:'Queue unavailable.'}));});return router;}
