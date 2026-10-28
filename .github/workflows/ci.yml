@@ -44,7 +44,7 @@ jobs:
         run: node --import tsx --test script/public-support.test.ts script/public-support-ui.test.mjs
 
       - name: Public website routes, enquiries, media, and privacy
-        run: node --import tsx --test script/public-website.test.ts script/public-website-ui.test.mjs script/public-website-monitor.test.ts script/app-designer-ui.test.mjs script/creative-asset-studio.test.ts script/client-portal.test.ts script/client-portal-ui.test.mjs script/client-engagement.test.ts script/client-engagement-ui.test.mjs script/client-engagement-hq-ui.test.mjs script/grant-qa-boundary.test.mjs script/creative-library.test.ts script/creative-library-ui.test.mjs script/project-billing.test.ts script/project-billing-routes.test.ts script/project-billing-ui.test.mjs script/project-notifications.test.ts
+        run: node --import tsx --test script/public-website.test.ts script/public-website-ui.test.mjs script/public-website-monitor.test.ts script/app-designer-ui.test.mjs script/creative-asset-studio.test.ts script/client-portal.test.ts script/client-portal-ui.test.mjs script/client-engagement.test.ts script/client-engagement-ui.test.mjs script/client-engagement-hq-ui.test.mjs script/grant-qa-boundary.test.mjs script/creative-library.test.ts script/creative-library-ui.test.mjs script/project-billing.test.ts script/project-billing-routes.test.ts script/project-billing-ui.test.mjs script/project-notifications.test.ts script/project-reliability-ui.test.mjs
 
       - name: Run Tests
         run: npm test

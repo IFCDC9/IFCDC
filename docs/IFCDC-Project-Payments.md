@@ -65,3 +65,13 @@ Official references:
 - https://developer.paypal.com/api/subscriptions/v1/subscriptions-transactions
 - https://developer.paypal.com/api/rest/webhooks/rest/
 - https://postmarkapp.com/developer/api/email-api
+
+## Project diagnostics and scoped email recovery
+
+HQ now fetches billing and notification status independently. An email-status failure does not hide available billing records. Project request failures display the server's safe error code and reference; matching server logs include the reference and, for SQLite errors, a bounded database diagnostic. No credentials or request bodies are logged.
+
+Schema setup is shared once per process rather than repeated on each billing/status read. Failed initialization remains retryable. Refreshing notification status discovers current durable events but does not send email. The panel shows whether the background worker started, its last successful cycle and its last recorded failure code.
+
+If pending notices need processing, check **Send pending email notices for this project** and click **Process this project's email queue**. This Founder-only, same-origin action sends at most five due notices for that project through the existing transport and rate limits. It does not capture payments, process another project's emails, resend accepted notices or retry uncertain sends. Remaining queued notices use subsequent worker cycles or another explicit processing action.
+
+These changes improve fault isolation and recovery; the screenshot alone did not establish the live failure's root cause. If an error remains after deployment, record its displayed reference and check the corresponding Render log entry. The update requires no new environment variables and preserves the existing checkout/notification enable flags.
