@@ -2,7 +2,13 @@
 import { clientDb, clientLimit } from './clientPortal';
 import { getSuperAdminEmail } from '../config/credentials';
 import { projectBillingDb, createProjectBillingService } from './projectBilling';
-export async function projectNotificationDb() {
+let notificationSchema: Promise<any> | undefined;
+export function projectNotificationDb() {
+    if (!notificationSchema)
+        notificationSchema = initializeNotificationDb().catch(error => { notificationSchema = undefined; throw error; });
+    return notificationSchema;
+}
+async function initializeNotificationDb() {
     const db = await projectBillingDb();
     await db.exec(`
 CREATE TABLE IF NOT EXISTS ifcdc_project_notification_settings(id INTEGER PRIMARY KEY,installed_at INTEGER NOT NULL);
@@ -42,11 +48,12 @@ export async function seedProjectNotifications() {
     await db.run(`INSERT OR IGNORE INTO ifcdc_project_notifications(id,project_id,recipient,subject,body,created_at)
  SELECT 'subscription:'||b.id||':'||b.status,b.project_id,c.email,'IFCDC: maintenance subscription status','Maintenance status: '||b.status||'. Subscription: '||b.provider_id||'. USD '||printf('%.2f',b.cents/100.0)||' monthly. First scheduled charge: '||b.start_at||'. Active authorization is not proof of a completed payment. Manage future renewals at https://ifcdc.org/client. Project reference: '||b.project_id,b.verified_at FROM ifcdc_project_billing b JOIN ifcdc_client_projects p ON p.id=b.project_id JOIN ifcdc_clients c ON c.id=p.client_id WHERE b.kind='maintenance' AND b.verified_at>=? AND b.status IN('ACTIVE','SUSPENDED','CANCELLED','EXPIRED')`, since);
 }
-export async function projectNotificationStatus(id: string, env: NodeJS.ProcessEnv = process.env) { const db = await projectNotificationDb(); return { ...projectNotificationConfiguration(env), counts: await db.all('SELECT status,COUNT(*) AS count FROM ifcdc_project_notifications WHERE project_id=? GROUP BY status', id) }; }
+export async function projectNotificationStatus(id: string, env: NodeJS.ProcessEnv = process.env) { await seedProjectNotifications(); const db = await projectNotificationDb(); return { ...projectNotificationConfiguration(env), worker: { ...workerState }, counts: await db.all('SELECT status,COUNT(*) AS count FROM ifcdc_project_notifications WHERE project_id=? GROUP BY status', id) }; }
 export async function deliverProjectNotifications(options: {
     env?: NodeJS.ProcessEnv;
     fetchImpl?: typeof fetch;
     now?: () => number;
+    projectId?: string;
 } = {}) {
     const env = options.env || process.env;
     const now = options.now || Date.now;
@@ -56,7 +63,7 @@ export async function deliverProjectNotifications(options: {
         return;
     const db = await projectNotificationDb();
     await db.run("UPDATE ifcdc_project_notifications SET status='UNCERTAIN' WHERE status='SENDING' AND claimed_at<?", now() - 120000);
-    const rows = await db.all("SELECT * FROM ifcdc_project_notifications WHERE status IN('QUEUED','FAILED') AND attempts<5 AND next_at<=? ORDER BY created_at LIMIT 5", now());
+    const rows = await db.all("SELECT * FROM ifcdc_project_notifications WHERE status IN('QUEUED','FAILED') AND attempts<5 AND next_at<=?" + (options.projectId ? ' AND project_id=?' : '') + " ORDER BY created_at LIMIT 5", ...[now(), ...(options.projectId ? [options.projectId] : [])]);
     for (const row of rows) {
         if (!/^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/.test(row.recipient)) {
             await db.run("UPDATE ifcdc_project_notifications SET status='INVALID_RECIPIENT' WHERE id=?", row.id);
@@ -75,7 +82,7 @@ export async function deliverProjectNotifications(options: {
         let state = 'UNCERTAIN';
         let messageId = null;
         try {
-            const response = await (options.fetchImpl || fetch)('https://api.postmarkapp.com/email', { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(12000), headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Postmark-Server-Token': env.POSTMARK_SERVER_TOKEN! }, body: JSON.stringify({ From: 'IFCDC Projects <service@ifcdc.org>', To: row.recipient, Subject: row.subject, TextBody: row.body, MessageStream: 'outbound', Tag: 'ifcdc-project', TrackOpens: false, TrackLinks: 'None', Metadata: { notification: row.id.slice(0, 255), project: row.project_id } }) });
+            const response = await (options.fetchImpl || fetch)('https://api.postmarkapp.com/email', { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(12000), headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Postmark-Server-Token': env.POSTMARK_SERVER_TOKEN!.trim() }, body: JSON.stringify({ From: 'IFCDC Projects <service@ifcdc.org>', To: row.recipient, Subject: row.subject, TextBody: row.body, MessageStream: 'outbound', Tag: 'ifcdc-project', TrackOpens: false, TrackLinks: 'None', Metadata: { notification: row.id.slice(0, 255), project: row.project_id } }) });
             const data: any = await response.json();
             if (response.ok && data.ErrorCode === 0 && typeof data.MessageID === 'string' && data.MessageID.length <= 100) {
                 state = 'ACCEPTED';
@@ -88,16 +95,19 @@ export async function deliverProjectNotifications(options: {
         await db.run('UPDATE ifcdc_project_notifications SET status=?,message_id=?,next_at=? WHERE id=?', state, messageId, now() + 3600000 * Math.min(24, 2 ** row.attempts), row.id);
     }
 }
+const workerState = { startedAt: null as number | null, lastCycleAt: null as number | null, lastSuccessAt: null as number | null, lastErrorCode: '' };
 let timer: ReturnType<typeof setInterval> | undefined;
 let running = false;
 let ticks = 0;
 export function startProjectRevenueWorker() {
     if (timer || process.env.NODE_ENV !== 'production')
         return;
+    workerState.startedAt = Date.now();
     const tick = async () => {
         if (running)
             return;
         running = true;
+        workerState.lastCycleAt = Date.now();
         try {
             await projectNotificationDb();
             if (process.env.IFCDC_PROJECT_PAYMENTS_ENABLED === 'true' && ticks++ % 10 === 0) {
@@ -112,8 +122,11 @@ export function startProjectRevenueWorker() {
                 }
             }
             await deliverProjectNotifications();
+            workerState.lastSuccessAt = Date.now();
+            workerState.lastErrorCode = '';
         }
-        catch {
+        catch (error: any) {
+            workerState.lastErrorCode = typeof error?.code === 'string' && /^SQLITE_[A-Z_]+$/.test(error.code) ? error.code : 'WORKER_CYCLE_FAILED';
             console.warn('IFCDC project revenue worker could not complete this cycle; saved records are retained.');
         }
         finally {

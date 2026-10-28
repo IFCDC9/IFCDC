@@ -11,7 +11,13 @@ const uuid = /^[a-f0-9-]{36}$/;
 const providerId = /^[A-Z0-9-]{1,64}$/;
 const money = (n: number) => (n / 100).toFixed(2);
 const PRODUCT = 'IFCDC-PROJECT-MAINTENANCE-V1';
-export async function projectBillingDb() {
+let billingSchema: Promise<any> | undefined;
+export function projectBillingDb() {
+    if (!billingSchema)
+        billingSchema = initializeBillingDb().catch(error => { billingSchema = undefined; throw error; });
+    return billingSchema;
+}
+async function initializeBillingDb() {
     const db = await clientDb();
     await db.exec(`
 CREATE TABLE IF NOT EXISTS ifcdc_project_billing(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,kind TEXT NOT NULL,cents INTEGER NOT NULL,terms_hash TEXT NOT NULL,terms_json TEXT NOT NULL,status TEXT NOT NULL,merchant TEXT NOT NULL,app_hash TEXT NOT NULL,provider_id TEXT UNIQUE,plan_id TEXT,approval_url TEXT,start_at TEXT,origin TEXT,created_at INTEGER NOT NULL,attempt_at INTEGER,verified_at INTEGER,lock_until INTEGER NOT NULL DEFAULT 0,UNIQUE(project_id,kind));
