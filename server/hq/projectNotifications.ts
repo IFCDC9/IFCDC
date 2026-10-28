@@ -34,6 +34,12 @@ export async function seedProjectNotifications() {
         await db.run(`INSERT OR IGNORE INTO ifcdc_project_notifications(id,project_id,recipient,subject,body,created_at)
  SELECT 'decision:'||h.project_id||':'||h.version,h.project_id,CASE WHEN h.event IN('OFFER_QUOTE','WITHDRAW_QUOTE','SHARE_DELIVERY') THEN c.email ELSE ? END,'IFCDC: project update','Your project has an update ('||h.event||'). Sign in at https://ifcdc.org/client to review it. Founder: use your private HQ. Project reference: '||p.id,h.created_at FROM ifcdc_client_engagement_history h JOIN ifcdc_client_projects p ON p.id=h.project_id JOIN ifcdc_clients c ON c.id=p.client_id WHERE h.created_at>=?`, founder, since);
     }
+    const productionEvents=await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='ifcdc_production_events'");
+    if(productionEvents){await db.run(`INSERT OR IGNORE INTO ifcdc_project_notifications(id,project_id,recipient,subject,body,created_at)
+ SELECT 'production:'||e.id,e.project_id,CASE WHEN e.event IN('CLIENT_APPROVE','CLIENT_CHANGES') THEN ? ELSE c.email END,'IFCDC: website production update','Website project update: '||e.event||'. Sign in at https://ifcdc.org/client to review your website builds and hosted-site status. Founder: use private HQ. Project reference: '||p.id,e.created_at FROM ifcdc_production_events e JOIN ifcdc_client_projects p ON p.id=e.project_id JOIN ifcdc_clients c ON c.id=p.client_id WHERE e.created_at>=? AND e.event!='BUILD_CREATED'`,founder,since);}
+    const siteInquiries=await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='ifcdc_production_inquiries'");
+    if(siteInquiries){await db.run(`INSERT OR IGNORE INTO ifcdc_project_notifications(id,project_id,recipient,subject,body,created_at)
+ SELECT 'site-inquiry:'||r.id,r.project_id,c.email,'IFCDC: new website service request','A request is waiting in your private client workspace. Sign in at https://ifcdc.org/client. Project reference: '||p.id,r.created_at FROM ifcdc_production_inquiries r JOIN ifcdc_client_projects p ON p.id=r.project_id JOIN ifcdc_clients c ON c.id=p.client_id WHERE r.created_at>=?`,since);}
     const messages = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='ifcdc_client_messages'");
     if (messages)
         await db.run(`INSERT OR IGNORE INTO ifcdc_project_notifications(id,project_id,recipient,subject,body,created_at)
