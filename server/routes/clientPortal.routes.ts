@@ -1,3 +1,5 @@
+import {createProjectBillingService} from '../hq/projectBilling';
+import {projectNotificationStatus} from '../hq/projectNotifications';
 import {readEngagement,founderEngagement,clientEngagementDecision,listProjectMessages,addProjectMessage,engagementHistory} from '../hq/clientEngagement';
 import {Router} from 'express';
 import {hqAuthRequired} from '../middleware/hqAuth';
@@ -13,12 +15,16 @@ export function clientPortalRouter(providerOptions: {fetchImpl?: typeof fetch} =
  router.post('/auth/start',run(async(req:any,res:any)=>{if(req.body?.consent!==true)throw new ClientError(400,'Accept the privacy notice to continue.');return res.json(await startClientLogin(req.body.email,req.ip||'unknown',providerOptions.fetchImpl));}));
  router.post('/auth/verify',run(async(req:any,res:any)=>{const session=await verifyClientLogin(req.body?.challengeId,req.body?.code,req.ip||'unknown');res.cookie(cookie,session.token,options());return res.json({client:session.client});}));
  router.post('/auth/logout',run(async(req:any,res:any)=>{await endClientSession(req.cookies?.[cookie]||'');res.clearCookie(cookie,{httpOnly:true,secure:process.env.NODE_ENV==='production',sameSite:'strict',path:'/api/client'});return res.json({signedOut:true});}));
- router.use(authenticatedClientPortalRouter());
+ router.use(authenticatedClientPortalRouter(providerOptions));
  router.use((error:any,_req:any,res:any,_next:any)=>res.status(error.status===413?413:400).json({error:'Client request is invalid or too large.'}));
  return router;
 }
-export function authenticatedClientPortalRouter(){const router=Router();const run=(fn:any)=>(req:any,res:any)=>Promise.resolve().then(()=>fn(req,res)).catch(error=>res.status(error instanceof ClientError?error.status:503).json({error:error instanceof ClientError?error.message:'Client service is temporarily unavailable.'}));
+export function authenticatedClientPortalRouter(providerOptions: {fetchImpl?: typeof fetch} = {}){const billing=createProjectBillingService(providerOptions);const router=Router();const run=(fn:any)=>(req:any,res:any)=>Promise.resolve().then(()=>fn(req,res)).catch(error=>res.status(error instanceof ClientError?error.status:503).json({error:error instanceof ClientError?error.message:'Client service is temporarily unavailable.'}));
  router.use((req:any,res,next)=>{void clientSession(req.cookies?.[cookie]).then(client=>{req.clientIdentity=client;next();}).catch(()=>res.status(401).json({error:'Sign in to your client account.'}));});
+ router.get('/projects/:id/billing',run(async(req:any,res:any)=>res.json({billing:await billing.view(req.params.id,req.clientIdentity.id)})));
+ router.post('/projects/:id/billing',run(async(req:any,res:any)=>res.json({billing:await billing.create(req.clientIdentity.id,req.params.id,req.body,req.get('origin'))})));
+ router.post('/projects/:id/billing/check',run(async(req:any,res:any)=>{if(req.body?.capture===true&&req.body?.consent!==true)throw new ClientError(400,'Confirm payment before capture.');return res.json({billing:await billing.recheck(req.clientIdentity.id,req.params.id,req.body?.kind,req.body?.capture===true)});}));
+ router.post('/projects/:id/billing/cancel',run(async(req:any,res:any)=>res.json({billing:await billing.cancel(req.clientIdentity.id,req.params.id,req.body)})));
  router.get('/me',run(async(req:any,res:any)=>res.json({client:req.clientIdentity})));
  router.get('/projects',run(async(req:any,res:any)=>res.json({projects:await listClientProjects(req.clientIdentity.id)})));
  router.get('/projects/:id',run(async(req:any,res:any)=>res.json({project:await readClientProject(req.clientIdentity.id,req.params.id)})));
@@ -30,9 +36,12 @@ export function authenticatedClientPortalRouter(){const router=Router();const ru
  router.post('/projects/:id/submit',run(async(req:any,res:any)=>res.json({project:await submitClientProject(req.clientIdentity.id,req.params.id,req.body?.version)})));
  return router;
 }
-export function clientQueueRouter(){const router=Router();router.use(hqAuthRequired);router.use((req,res,next)=>{if(req.hqUser?.email?.toLowerCase()!==getSuperAdminEmail()||!['owner','founder'].includes(req.hqUser.role)){res.status(403).json({error:'Founder access required.'});return;}res.set('Cache-Control','no-store');next();});
+export function clientQueueRouter(providerOptions: {fetchImpl?: typeof fetch} = {}){const billing=createProjectBillingService(providerOptions);const router=Router();router.use(hqAuthRequired);router.use((req,res,next)=>{if(req.hqUser?.email?.toLowerCase()!==getSuperAdminEmail()||!['owner','founder'].includes(req.hqUser.role)){res.status(403).json({error:'Founder access required.'});return;}res.set('Cache-Control','no-store');next();});
  const run=(fn:any)=>(req:any,res:any)=>Promise.resolve().then(()=>fn(req,res)).catch(error=>res.status(error instanceof ClientError?error.status:503).json({error:error instanceof ClientError?error.message:'Project service unavailable.'}));
  router.use((req,res,next)=>{if(req.method==='POST'&&(!req.is('application/json')||!websiteOrigins().includes(req.get('origin')||''))){res.status(403).json({error:'Use IFCDC HQ.'});return;}next();});
+ router.get('/:id/billing',run(async(req:any,res:any)=>res.json({billing:await billing.view(req.params.id),notifications:await projectNotificationStatus(req.params.id)})));
+ router.post('/:id/billing',run(async(req:any,res:any)=>res.json({billing:await billing.release(req.hqUser.id,req.params.id,req.body)})));
+ router.post('/:id/billing/check',run(async(req:any,res:any)=>res.json({billing:await billing.recheck(undefined,req.params.id,req.body?.kind)})));
  router.get('/:id/engagement',run(async(req:any,res:any)=>res.json({engagement:await readEngagement(req.params.id),history:await engagementHistory(req.params.id)})));
  router.post('/:id/engagement',run(async(req:any,res:any)=>res.json({engagement:await founderEngagement(req.hqUser.id,req.params.id,req.body)})));
  router.get('/:id/messages',run(async(req:any,res:any)=>res.json(await listProjectMessages(req.params.id,undefined,Number(req.query.after||0)))));
