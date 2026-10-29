@@ -1,3 +1,4 @@
+import {founderProductionRouter,clientProductionRouter} from './clientProduction.routes';
 import { createProjectBillingService } from '../hq/projectBilling';
 import crypto from 'node:crypto';
 import { projectNotificationStatus, deliverProjectNotifications } from '../hq/projectNotifications';
@@ -40,6 +41,7 @@ export function authenticatedClientPortalRouter(providerOptions: {
     router.post('/projects/:id/billing/check', run(async (req: any, res: any) => { if (req.body?.capture === true && req.body?.consent !== true)
         throw new ClientError(400, 'Confirm payment before capture.'); return res.json({ billing: await billing.recheck(req.clientIdentity.id, req.params.id, req.body?.kind, req.body?.capture === true) }); }));
     router.post('/projects/:id/billing/cancel', run(async (req: any, res: any) => res.json({ billing: await billing.cancel(req.clientIdentity.id, req.params.id, req.body) })));
+    router.use('/projects/:id/production',clientProductionRouter());
     router.get('/me', run(async (req: any, res: any) => res.json({ client: req.clientIdentity })));
     router.get('/projects', run(async (req: any, res: any) => res.json({ projects: await listClientProjects(req.clientIdentity.id) })));
     router.get('/projects/:id', run(async (req: any, res: any) => res.json({ project: await readClientProject(req.clientIdentity.id, req.params.id) })));
@@ -68,6 +70,7 @@ export function clientQueueRouter(providerOptions: {
         res.status(403).json({ error: 'Use IFCDC HQ.' });
         return;
     } next(); });
+    router.use('/:id/production',founderProductionRouter());
     router.get('/:id/billing', run(async (req: any, res: any) => { const result = await billing.view(req.params.id); try {
         return res.json({ billing: result, notifications: await projectNotificationStatus(req.params.id) });
     }

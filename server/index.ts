@@ -39,6 +39,7 @@ const GRANTS_OPERATOR = {
 
 // Lightweight middleware + health only — bind PORT before heavy route imports (Render stability).
 // Document Center and evidence ingest send base64 PDFs — default 100kb is too small.
+app.use("/client-sites", express.json({ limit: "16kb" }));
 app.use("/api/client", express.json({ limit: "16kb" }));
 app.use("/api/hq/client-projects", express.json({ limit: "16kb" }));
 app.use("/api/public/support", express.json({ limit: "100kb" }));
