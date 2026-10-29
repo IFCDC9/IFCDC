@@ -38,7 +38,16 @@ function log(status, msg, detail = "") {
   results[status === "pass" ? "pass" : "fail"]++;
 }
 
+export function assertQaRequestAllowed(url, opts = {}, env = process.env) {
+  const method = String(opts.method || "GET").toUpperCase();
+  if (!productionGrantOpportunityWritesAllowed(env) && !["GET", "HEAD"].includes(method)
+      && !(method === "POST" && new URL(url).pathname === "/api/auth/login")) {
+    throw new Error("Production grant QA blocks fixture writes; use an isolated test database for CRUD checks.");
+  }
+}
+
 async function jsonFetch(url, opts = {}) {
+  assertQaRequestAllowed(url, opts);
   const res = await fetch(url, {
     ...opts,
     headers: { ...(opts.headers || {}), ...(opts.body ? { "Content-Type": "application/json" } : {}) },
@@ -207,6 +216,12 @@ async function main() {
     });
     log("pass", "CRUD: Close QA opportunity (cleanup)");
   }
+  }
+
+  if (!productionGrantOpportunityWritesAllowed()) {
+    log("pass", "Production QA skips all fixture writes (applications, narratives, templates and funders)");
+    emitReport(results.fail > 0 ? 1 : 0);
+    return;
   }
 
   const createApp = await jsonFetch(`${BASE}/api/hq/grants/applications`, {

@@ -1,3 +1,4 @@
+import { excludeQaApplicationsSql, excludeQuarantinedOpportunitySql } from "./grantQaFixtureQuarantine";
 /**
  * Enterprise Funding Pipeline — live discovery, 12-stage workflow, metrics, founder command, notifications.
  */
@@ -5,7 +6,7 @@ import crypto from "crypto";
 import { getDb } from "../db";
 import { logGrantActivity } from "./grantsSchema";
 import { productionGrantOpportunitySqlFilter } from "./grantProductionPolicy";
-import { excludeQuarantinedLinkedOpportunitySql, excludeQuarantinedOpportunitySql } from "./grantQaFixtureQuarantine";
+import { excludeQuarantinedLinkedOpportunitySql } from "./grantQaFixtureQuarantine";
 import {
   enrichAllOpportunities,
   enrichMissingDeadlines,
@@ -257,9 +258,9 @@ export async function buildEnterprisePipelineBoard(limitPerStage = 20) {
 
   const stageStats = (await db.all(`
     SELECT pipeline_stage as stage, COUNT(*) as c, COALESCE(SUM(val), 0) as v FROM (
-      SELECT pipeline_stage, COALESCE(amount_max, 0) as val FROM grant_opportunities WHERE pipeline_stage IS NOT NULL
+      SELECT pipeline_stage, COALESCE(amount_max, 0) as val FROM grant_opportunities WHERE 1=1${excludeQuarantinedOpportunitySql("id")} AND pipeline_stage IS NOT NULL
       UNION ALL
-      SELECT pipeline_stage, COALESCE(amount_requested, 0) as val FROM grant_applications WHERE pipeline_stage IS NOT NULL
+      SELECT pipeline_stage, COALESCE(amount_requested, 0) as val FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")} AND pipeline_stage IS NOT NULL
     ) GROUP BY pipeline_stage
   `)) as { stage: string; c: number; v: number }[];
   const statsByStage = new Map(stageStats.map((s) => [s.stage, s]));
@@ -268,14 +269,14 @@ export async function buildEnterprisePipelineBoard(limitPerStage = 20) {
     `SELECT o.*,
       (SELECT composite_score FROM grant_opportunity_scores WHERE opportunity_id = o.id ORDER BY created_at DESC LIMIT 1) as composite_score
      FROM grant_opportunities o
-     WHERE o.pipeline_stage IS NOT NULL${prodFilter}
+     WHERE 1=1${excludeQuarantinedOpportunitySql("o.id")} AND o.pipeline_stage IS NOT NULL${prodFilter}
      ORDER BY o.pipeline_stage, o.updated_at DESC`
   )) as Record<string, unknown>[];
 
   const appRows = (await db.all(
     `SELECT a.*, o.funder, o.deadline as opp_deadline
      FROM grant_applications a LEFT JOIN grant_opportunities o ON o.id = a.opportunity_id
-     WHERE a.pipeline_stage IS NOT NULL
+     WHERE 1=1${excludeQaApplicationsSql("a.id")} AND a.pipeline_stage IS NOT NULL
      ORDER BY a.pipeline_stage, a.updated_at DESC`
   )) as Record<string, unknown>[];
 
@@ -320,11 +321,11 @@ export async function buildPipelineMetricsDashboard() {
   const db = await getDb();
 
   const totalOpportunities = (await db.get<{ c: number }>(
-    `SELECT COUNT(*) as c FROM grant_opportunities WHERE status IN ('open','active','researching')${productionGrantOpportunitySqlFilter()}`
+    `SELECT COUNT(*) as c FROM grant_opportunities WHERE 1=1${excludeQuarantinedOpportunitySql("id")} AND status IN ('open','active','researching')${productionGrantOpportunitySqlFilter()}`
   ))?.c ?? 0;
 
   const pipelineValue = (await db.get<{ v: number }>(`
-    SELECT COALESCE(SUM(amount_requested), 0) as v FROM grant_applications WHERE status NOT IN ('denied','withdrawn')
+    SELECT COALESCE(SUM(amount_requested), 0) as v FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")} AND status NOT IN ('denied','withdrawn')
   `))?.v ?? 0;
 
   const estimatedPotential = (await db.get<{ v: number }>(`
@@ -335,7 +336,7 @@ export async function buildPipelineMetricsDashboard() {
   const byProgram = (await db.all(`
     SELECT COALESCE(a.matched_program_slug, 'unassigned') as program,
       COUNT(*) as count, COALESCE(SUM(a.amount_requested), 0) as value
-    FROM grant_applications a WHERE a.status NOT IN ('denied','withdrawn')
+    FROM grant_applications a WHERE 1=1${excludeQaApplicationsSql("a.id")} AND a.status NOT IN ('denied','withdrawn')
     GROUP BY a.matched_program_slug ORDER BY value DESC LIMIT 15
   `)) as { program: string; count: number; value: number }[];
 
@@ -350,9 +351,9 @@ export async function buildPipelineMetricsDashboard() {
     SELECT pipeline_stage as status, COUNT(*) as count,
       COALESCE(SUM(CASE WHEN 1=1 THEN 1 ELSE 0 END), 0) as entities
     FROM (
-      SELECT pipeline_stage FROM grant_opportunities WHERE pipeline_stage IS NOT NULL
+      SELECT pipeline_stage FROM grant_opportunities WHERE pipeline_stage IS NOT NULL${excludeQuarantinedOpportunitySql("id")}
       UNION ALL
-      SELECT pipeline_stage FROM grant_applications WHERE pipeline_stage IS NOT NULL
+      SELECT pipeline_stage FROM grant_applications WHERE pipeline_stage IS NOT NULL${excludeQaApplicationsSql("id")}
     ) GROUP BY pipeline_stage
   `)) as { status: string; count: number }[];
 
@@ -368,13 +369,13 @@ export async function buildPipelineMetricsDashboard() {
   )) ?? { c: 0, v: 0 };
 
   const inProgress = (await db.get<{ c: number }>(
-    "SELECT COUNT(*) as c FROM grant_applications WHERE status IN ('draft','submitted','under_review')"
+    `SELECT COUNT(*) as c FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")} AND status IN ('draft','submitted','under_review')`
   ))?.c ?? 0;
 
   const decided = (await db.get<{ awarded: number; total: number }>(`
     SELECT
-      (SELECT COUNT(*) FROM grant_applications WHERE status = 'awarded') as awarded,
-      (SELECT COUNT(*) FROM grant_applications WHERE status IN ('awarded','denied')) as total
+      (SELECT COUNT(*) FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")} AND status = 'awarded') as awarded,
+      (SELECT COUNT(*) FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")} AND status IN ('awarded','denied')) as total
   `)) ?? { awarded: 0, total: 0 };
 
   const successRate = decided.total > 0 ? Math.round((decided.awarded / decided.total) * 100) : 0;
@@ -493,7 +494,7 @@ export async function buildFounderCommandCenter(filters: FounderCommandFilters =
       o.pipeline_stage as opp_pipeline_stage
     FROM grant_applications a
     LEFT JOIN grant_opportunities o ON o.id = a.opportunity_id
-    WHERE 1=1`;
+    WHERE 1=1${excludeQaApplicationsSql("a.id")}`;
   const params: unknown[] = [];
 
   if (filters.program) {

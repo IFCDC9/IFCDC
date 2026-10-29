@@ -3,6 +3,7 @@
  * Live opportunity DB, division profiles, v2 pipeline, executive analytics, enhanced AURA.
  */
 import { getDb } from "../db";
+import { getOpportunityEligibility } from "./grantEligibilityReview";
 import { logHqAudit } from "./hqAuditLog";
 import { auraExecutiveChat } from "../lib/ifcdc";
 import { buildAuraExecutiveContext } from "./auraExecutiveContext";
@@ -361,7 +362,9 @@ export async function scoreOpportunityDual(
     );
   }
 
-  if (eligibility.score >= 60 && (strategic?.score ?? 0) >= 50) {
+  // Research fit never establishes organizational eligibility.
+  const reviewedEligibility = await getOpportunityEligibility(opportunityId);
+  if (reviewedEligibility.canDraft) {
     await db.run(
       `UPDATE grant_opportunities SET funding_status = 'eligible' WHERE id = ? AND funding_status IN ('identified', 'reviewing')`,
       opportunityId

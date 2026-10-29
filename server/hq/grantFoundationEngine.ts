@@ -1,3 +1,4 @@
+import { excludeQaApplicationsSql, excludeQuarantinedOpportunitySql } from "./grantQaFixtureQuarantine";
 /**
  * Build 59 — Enterprise Grant Center Foundation
  * Canonical product vocabulary, executive dashboard, workspace, doc links, calendar, reports.
@@ -171,36 +172,36 @@ export async function buildGrantFoundationDashboard(): Promise<GrantFoundationDa
 
   const totalActiveGrants = base.activeAwards;
   const grantsAwarded = (await db.get<{ c: number }>(
-    "SELECT COUNT(*) as c FROM grant_applications WHERE status = 'awarded'"
+    `SELECT COUNT(*) as c FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")} AND status = 'awarded'`
   ))?.c ?? 0;
 
   const totalFundingRequested = (await db.get<{ t: number }>(
     `SELECT COALESCE(SUM(amount_requested), 0) as t FROM grant_applications
-     WHERE status IN ('draft','submitted','under_review','awarded')`
+     WHERE 1=1${excludeQaApplicationsSql("id")} AND status IN ('draft','submitted','under_review','awarded')`
   ))?.t ?? 0;
 
   const totalFundingAwarded = base.totalAwarded;
 
   const decided = (await db.get<{ c: number }>(
-    "SELECT COUNT(*) as c FROM grant_applications WHERE status IN ('awarded','denied')"
+    `SELECT COUNT(*) as c FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")} AND status IN ('awarded','denied')`
   ))?.c ?? 0;
   const successRate = decided > 0 ? Math.round((grantsAwarded / decided) * 100) : base.winRate;
 
   const drafting = (await db.get<{ c: number }>(
-    "SELECT COUNT(*) as c FROM grant_applications WHERE status = 'draft' AND COALESCE(pipeline_stage, 'drafting') IN ('drafting','ready_for_submission','')"
+    `SELECT COUNT(*) as c FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")} AND status = 'draft' AND COALESCE(pipeline_stage, 'drafting') IN ('drafting','ready_for_submission','')`
   ))?.c ?? 0;
   const internalReview = (await db.get<{ c: number }>(
     `SELECT COUNT(*) as c FROM grant_applications
-     WHERE status = 'draft' AND (
+     WHERE 1=1${excludeQaApplicationsSql("id")} AND status = 'draft' AND (
        COALESCE(pipeline_stage, '') IN ('internal_review','founder_approval')
        OR COALESCE(founder_approval_status, 'pending') IN ('pending','changes_requested')
      )`
   ))?.c ?? 0;
   const submitted = (await db.get<{ c: number }>(
-    "SELECT COUNT(*) as c FROM grant_applications WHERE status = 'submitted'"
+    `SELECT COUNT(*) as c FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")} AND status = 'submitted'`
   ))?.c ?? 0;
   const underEvaluation = (await db.get<{ c: number }>(
-    "SELECT COUNT(*) as c FROM grant_applications WHERE status = 'under_review'"
+    `SELECT COUNT(*) as c FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")} AND status = 'under_review'`
   ))?.c ?? 0;
 
   const overdue = (await db.get<{ c: number }>(
@@ -212,7 +213,7 @@ export async function buildGrantFoundationDashboard(): Promise<GrantFoundationDa
 
   const apps = (await db.all(
     `SELECT id, status, amount_requested, pipeline_stage, founder_approval_status, ready_to_submit
-     FROM grant_applications`
+     FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")}`
   )) as Record<string, unknown>[];
 
   const stageBuckets = new Map<string, { count: number; value: number }>();
@@ -235,7 +236,7 @@ export async function buildGrantFoundationDashboard(): Promise<GrantFoundationDa
 
   const funderRows = (await db.all(
     `SELECT LOWER(COALESCE(funder_type, 'unknown')) as funder_type, COUNT(*) as c
-     FROM grant_opportunities WHERE status = 'open'${LIVE_OPP_FILTER}
+     FROM grant_opportunities WHERE 1=1${excludeQuarantinedOpportunitySql("id")} AND status = 'open'${LIVE_OPP_FILTER}
      GROUP BY LOWER(COALESCE(funder_type, 'unknown'))`
   )) as { funder_type: string; c: number }[];
 
@@ -253,7 +254,7 @@ export async function buildGrantFoundationDashboard(): Promise<GrantFoundationDa
             COALESCE(SUM(CASE WHEN status IN ('draft','submitted','under_review','awarded') THEN amount_requested ELSE 0 END), 0) as requested,
             COALESCE(SUM(CASE WHEN status = 'awarded' THEN amount_requested ELSE 0 END), 0) as awarded
      FROM grant_applications
-     WHERE COALESCE(submitted_at, created_at) >= date('now', '-5 months')
+     WHERE 1=1${excludeQaApplicationsSql("id")} AND COALESCE(submitted_at, created_at) >= date('now', '-5 months')
      GROUP BY strftime('%Y-%m', COALESCE(submitted_at, created_at))
      ORDER BY month ASC`
   )) as { month: string; requested: number; awarded: number }[];
@@ -292,7 +293,7 @@ export async function buildGrantFoundationPipelineBoard() {
     `SELECT a.*, o.title as opportunity_title, o.deadline as opportunity_deadline, o.funder_type
      FROM grant_applications a
      LEFT JOIN grant_opportunities o ON o.id = a.opportunity_id
-     ORDER BY a.updated_at DESC`
+     WHERE 1=1${excludeQaApplicationsSql("a.id")} ORDER BY a.updated_at DESC`
   )) as Record<string, unknown>[];
 
   const columns = GRANT_PRODUCT_STAGES.map((stage) => ({
@@ -582,7 +583,7 @@ export async function buildGrantFoundationExecutiveReport() {
   const byProgram = (await db.all(
     `SELECT COALESCE(program_id, 'unassigned') as program_id, COUNT(*) as applications,
             COALESCE(SUM(amount_requested), 0) as requested
-     FROM grant_applications
+     FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")}
      GROUP BY COALESCE(program_id, 'unassigned')
      ORDER BY requested DESC LIMIT 20`
   )) as Record<string, unknown>[];
@@ -590,7 +591,7 @@ export async function buildGrantFoundationExecutiveReport() {
   const byDepartment = (await db.all(
     `SELECT COALESCE(department_id, 'unassigned') as department_id, COUNT(*) as applications,
             COALESCE(SUM(amount_requested), 0) as requested
-     FROM grant_applications
+     FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")}
      GROUP BY COALESCE(department_id, 'unassigned')
      ORDER BY requested DESC LIMIT 20`
   )) as Record<string, unknown>[];
@@ -619,7 +620,7 @@ export async function buildGrantFoundationExecutiveReport() {
 
 export async function listOpportunitiesByFunderType(funderType?: string, q?: string) {
   const db = await getDb();
-  let sql = `SELECT * FROM grant_opportunities WHERE status = 'open'${LIVE_OPP_FILTER}`;
+  let sql = `SELECT * FROM grant_opportunities WHERE 1=1${excludeQuarantinedOpportunitySql("id")} AND status = 'open'${LIVE_OPP_FILTER}`;
   const params: unknown[] = [];
   if (funderType) {
     const normalized = normalizeFunderType(funderType) ?? funderType.toLowerCase();

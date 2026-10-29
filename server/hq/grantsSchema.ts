@@ -522,7 +522,7 @@ async function migrateGrantPhase5(): Promise<void> {
   `);
 
   await db.run(`
-    UPDATE grant_opportunities SET funding_status = 'eligible'
+    UPDATE grant_opportunities SET funding_status = 'reviewing'
     WHERE funding_status = 'identified'
       AND id IN (
         SELECT opportunity_id FROM grant_opportunity_scores

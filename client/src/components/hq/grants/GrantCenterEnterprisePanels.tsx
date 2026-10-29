@@ -1,3 +1,4 @@
+import { grantOpportunityAvailability } from "../../../../../shared/grantOpportunityAvailability";
 import { GrantEligibilityReviewPanel } from "./GrantEligibilityReviewPanel";
 import type { GrantEligibilityAssessment } from "../../../../../shared/grantEligibility";
 import React, { useState, useEffect, useRef } from "react";
@@ -226,11 +227,11 @@ export const GrantWriterStudioPanel: React.FC<{
           <>
             <GrantEligibilityReviewPanel key={selectedApplicationId} applicationId={selectedApplicationId} />
             <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem", alignItems: "center" }}>
-              <StatusBadge label={`${studio.data?.writerSections?.completionPct ?? 0}% complete`} variant="gold" />
+              <StatusBadge label={`${studio.data?.writerSections?.completionPct ?? 0}% draft sections filled`} variant="muted" />
               {completeness && (
                 <StatusBadge
                   label={`Section coverage: ${completeness.confidence}`}
-                  variant={completeness.confidence === "high" ? "success" : completeness.confidence === "medium" ? "warning" : "muted"}
+                  variant="muted"
                 />
               )}
               <StatusBadge
@@ -245,6 +246,7 @@ export const GrantWriterStudioPanel: React.FC<{
               )}
               {saveSection.isPending && <StatusBadge label="Auto-saving…" variant="muted" />}
             </div>
+            <p className="hq-muted-text">Section coverage measures text presence only. It does not verify factual accuracy, eligibility, budget, Founder approval or submission readiness. Existing drafts require review against current supporting documents.</p>
             {completeness?.missingSections?.length ? (
               <p className="hq-muted-text" style={{ fontSize: "0.75rem", marginBottom: "0.75rem" }}>
                 Missing sections: {completeness.missingSections.join(", ")}
@@ -430,7 +432,7 @@ export const GrantIntelligencePanel: React.FC<{
               <KpiCard label="Submitted" value={summary.submitted} />
               <KpiCard label="Awards" value={summary.awards} variant="gold" />
               <KpiCard label="Rejections" value={summary.rejections} />
-              <KpiCard label="Pipeline Value" value={formatCurrency(summary.totalPipelineValue)} />
+              <KpiCard label="Potential requests — not secured" value={formatCurrency(summary.totalPipelineValue)} />
               <KpiCard label="Funding Secured" value={formatCurrency(summary.totalFundingSecured)} variant="gold" />
             </div>
             <p className="hq-muted-text" style={{ fontSize: "0.75rem", marginBottom: "0.75rem" }}>
@@ -453,7 +455,8 @@ export const GrantIntelligencePanel: React.FC<{
                           <button
                             type="button"
                             className="hq-btn hq-btn-sm hq-btn-primary"
-                            disabled={startApp.isPending}
+                            disabled={startApp.isPending || !grantOpportunityAvailability({ status: o.status ?? "open", deadline: o.deadline }).canStart}
+                            title={grantOpportunityAvailability({ status: o.status ?? "open", deadline: o.deadline }).reason}
                             onClick={() => startApp.mutate(String(o.id))}
                           >
                             Review Opportunity
@@ -546,7 +549,8 @@ export const GrantIntelligencePanel: React.FC<{
                         <button
                           type="button"
                           className="hq-btn hq-btn-sm hq-btn-primary"
-                          disabled={startApp.isPending}
+                          disabled={startApp.isPending || !grantOpportunityAvailability({ status: "open", deadline: m.deadline }).canStart}
+                          title={grantOpportunityAvailability({ status: "open", deadline: m.deadline }).reason}
                           onClick={() => startApp.mutate(m.opportunityId)}
                         >
                           Start
@@ -689,7 +693,7 @@ export const GrantOpportunityFinderPanel: React.FC<{
 
   const data = finder.data as {
     categorized?: Record<string, unknown[]>;
-    opportunities?: { id: string; title: string; funder: string; deadline?: string; amount_max?: number; dataSourceLabel?: string }[];
+    opportunities?: { id: string; title: string; funder: string; deadline?: string; status?: string; amount_max?: number; dataSourceLabel?: string }[];
     source?: string;
     externalFeedCount?: number;
     dataSourceBreakdown?: Record<string, number>;
@@ -719,8 +723,9 @@ export const GrantOpportunityFinderPanel: React.FC<{
           <table className="hq-table">
             <thead><tr><th>Title</th><th>Funder</th><th>Source</th><th>Deadline</th><th>Max Award</th><th>Research fit / eligibility</th><th>Actions</th></tr></thead>
             <tbody>
-              {(list as { id: string; title: string; funder: string; deadline?: string; amount_max?: number; dataSourceLabel?: string; eligibilityReview?: GrantEligibilityAssessment }[]).map((o) => {
+              {(list as { id: string; title: string; funder: string; deadline?: string; status?: string; amount_max?: number; dataSourceLabel?: string; eligibilityReview?: GrantEligibilityAssessment }[]).map((o) => {
                 const intel = scores[o.id];
+                const availability = grantOpportunityAvailability(o);
                 return (
                 <tr key={String(o.id)}>
                   <td>{o.title}</td>
@@ -752,10 +757,11 @@ export const GrantOpportunityFinderPanel: React.FC<{
                         <button
                           type="button"
                           className="hq-btn hq-btn-sm hq-btn-primary"
-                          disabled={startApp.isPending}
+                          disabled={startApp.isPending || !availability.canStart}
+                          title={availability.reason}
                           onClick={() => startApp.mutate(o.id)}
                         >
-                          Start Application
+                          {availability.canStart ? "Start Application" : "Unavailable — review notice"}
                         </button>
                       </div>
                     )}

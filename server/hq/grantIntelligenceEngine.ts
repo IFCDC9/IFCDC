@@ -1,4 +1,7 @@
+import { excludeQaApplicationsSql, excludeQuarantinedOpportunitySql } from "./grantQaFixtureQuarantine";
 import { grantApprovalEvidenceBlockers } from "./grantEligibilityReview";
+import { grantOpportunityAvailability } from "../../shared/grantOpportunityAvailability";
+import { isQaOpportunityRecord } from "./grantQaFixtureQuarantine";
 /**
  * Grant Intelligence Engine — unified discovery, matching, scoring, drafting, and AURA advisory.
  */
@@ -48,6 +51,7 @@ export type EnrichedOpportunityRow = {
   programFit: { slugs: string[]; labels: string[] };
   status: string;
   statusLabel: string;
+  startAvailability: ReturnType<typeof grantOpportunityAvailability>;
   lastSynced: string | null;
   sourceType: string;
   dataSourceLabel: string;
@@ -141,6 +145,7 @@ async function mapOpportunityRow(row: Record<string, unknown>): Promise<Enriched
     programFit: { slugs, labels },
     status: disp.status,
     statusLabel: disp.label,
+    startAvailability: grantOpportunityAvailability(fresh),
     lastSynced: syncRow?.last_sync_at ?? (fresh.updated_at ? String(fresh.updated_at) : null),
     sourceType: String(fresh.source_type ?? "manual"),
     dataSourceLabel: sourceLabel(fresh.source_type ? String(fresh.source_type) : null),
@@ -162,7 +167,7 @@ export async function buildEnrichedOpportunityList(opts?: {
     SELECT o.*,
       (SELECT composite_score FROM grant_opportunity_scores WHERE opportunity_id = o.id ORDER BY created_at DESC LIMIT 1) as composite_score
     FROM grant_opportunities o
-    WHERE o.status IN ('open','active','researching')${productionGrantOpportunitySqlFilter("o")}`;
+    WHERE o.status IN ('open','active','researching')${productionGrantOpportunitySqlFilter("o")}${excludeQuarantinedOpportunitySql("o.id")}`;
   const params: unknown[] = [];
 
   if (opts?.q) {
@@ -586,7 +591,7 @@ export async function listEnrichedApplications(opts?: { status?: string; limit?:
     SELECT a.*, o.title as opportunity_title, o.funder, o.deadline as opportunity_deadline, o.amount_max
     FROM grant_applications a
     LEFT JOIN grant_opportunities o ON o.id = a.opportunity_id
-    WHERE 1=1`;
+    WHERE 1=1${excludeQaApplicationsSql("a.id")}`;
   const params: unknown[] = [];
 
   if (opts?.status === "drafts") {
@@ -805,7 +810,7 @@ export async function enrichOpportunityPrograms(opportunityId: string): Promise<
 export async function enrichAllOpportunities(limit = 200): Promise<number> {
   const db = await getDb();
   const rows = (await db.all(
-    `SELECT id FROM grant_opportunities WHERE status IN ('open','active','researching')${productionGrantOpportunitySqlFilter()}
+    `SELECT id FROM grant_opportunities WHERE 1=1${excludeQuarantinedOpportunitySql("id")} AND status IN ('open','active','researching')${productionGrantOpportunitySqlFilter()}
      ORDER BY updated_at DESC LIMIT ?`,
     limit
   )) as { id: string }[];
@@ -927,7 +932,7 @@ export async function matchOpportunitiesForProgram(programSlug: string, limit = 
   const like = `%${programSlug}%`;
   const rows = (await db.all(
     `SELECT o.* FROM grant_opportunities o
-     WHERE o.status IN ('open','active','researching')${productionGrantOpportunitySqlFilter("o")}
+     WHERE o.status IN ('open','active','researching')${productionGrantOpportunitySqlFilter("o")}${excludeQuarantinedOpportunitySql("o.id")}
        AND (o.division_slugs LIKE ? OR o.program_areas LIKE ? OR o.title LIKE ? OR o.description LIKE ?)
      ORDER BY o.deadline ASC LIMIT ?`,
     like,
@@ -1014,7 +1019,7 @@ export async function buildOrgWideGrantMatches(opts?: {
   const minScore = opts?.minScore ?? 40;
 
   let sql = `SELECT o.* FROM grant_opportunities o
-    WHERE o.status IN ('open','active','researching')${productionGrantOpportunitySqlFilter("o")}`;
+    WHERE o.status IN ('open','active','researching')${productionGrantOpportunitySqlFilter("o")}${excludeQuarantinedOpportunitySql("o.id")}`;
   const params: unknown[] = [];
 
   if (opts?.programSlug) {
@@ -1134,7 +1139,7 @@ export async function buildProgramGrantQueues(opts?: { programSlug?: string; lim
       const like = `%${prog.slug}%`;
       const newMatchRows = (await db.all(
         `SELECT o.* FROM grant_opportunities o
-         WHERE o.status IN ('open','active','researching')${productionGrantOpportunitySqlFilter("o")}
+         WHERE o.status IN ('open','active','researching')${productionGrantOpportunitySqlFilter("o")}${excludeQuarantinedOpportunitySql("o.id")}
            AND (o.division_slugs LIKE ? OR o.program_areas LIKE ? OR o.title LIKE ?)
            AND NOT EXISTS (
              SELECT 1 FROM grant_applications a
@@ -1413,7 +1418,7 @@ export async function getLiveOpportunityFeed(opts?: { sinceHours?: number; limit
     `SELECT o.*,
       (SELECT composite_score FROM grant_opportunity_scores WHERE opportunity_id = o.id ORDER BY created_at DESC LIMIT 1) as composite_score
      FROM grant_opportunities o
-     WHERE o.status IN ('open','active','researching')${productionGrantOpportunitySqlFilter("o")}
+     WHERE o.status IN ('open','active','researching')${productionGrantOpportunitySqlFilter("o")}${excludeQuarantinedOpportunitySql("o.id")}
        AND (o.created_at >= ? OR o.updated_at >= ?)
      ORDER BY o.updated_at DESC LIMIT ?`,
     cutoff,
@@ -1456,7 +1461,7 @@ export async function buildGrantIntelligenceDashboard() {
 
   const pipeline = await db.all(`
     SELECT status, COUNT(*) as count, COALESCE(SUM(amount_requested), 0) as value
-    FROM grant_applications GROUP BY status
+    FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")} GROUP BY status
   `) as { status: string; count: number; value: number }[];
 
   const writing = (pipeline.find((p) => p.status === "draft")?.count ?? 0) +
@@ -1498,8 +1503,12 @@ export async function startGrantApplicationWorkflow(
   const opp = await db.get<Record<string, unknown>>("SELECT * FROM grant_opportunities WHERE id = ?", opportunityId);
   if (!opp) return { ok: false, error: "Opportunity not found" };
 
+  if (isQaOpportunityRecord(opp)) return { ok: false, error: "QA opportunity is excluded from working applications." };
+  const availability = grantOpportunityAvailability(opp);
+  if (!availability.canStart) return { ok: false, error: availability.reason };
+
   const existing = await db.get<{ id: string }>(
-    "SELECT id FROM grant_applications WHERE opportunity_id = ? AND status NOT IN ('denied','withdrawn') ORDER BY created_at DESC LIMIT 1",
+    `SELECT id FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")} AND opportunity_id = ? AND status NOT IN ('denied','withdrawn') ORDER BY created_at DESC LIMIT 1`,
     opportunityId
   );
   if (existing) {
@@ -1528,7 +1537,7 @@ export async function startGrantApplicationWorkflow(
     appId,
     opportunityId,
     title,
-    opp.amount_max != null ? Number(opp.amount_max) : null,
+    null, // Request stays blank until the budget is reviewed; listing ceiling is not a request.
     opts?.actorEmail ?? "",
     "Created via Grant Intelligence Engine — requires human review before submission.",
     matchedSlug,
@@ -1555,7 +1564,7 @@ export async function startGrantApplicationWorkflow(
 
   await logGrantActivity("application", appId, "intelligence_workflow_started", title, opts?.actorEmail);
   await db.run(
-    `UPDATE grant_opportunities SET funding_status = 'eligible', lifecycle_stage = 'eligibility_review', updated_at = ? WHERE id = ?`,
+    `UPDATE grant_opportunities SET funding_status = 'reviewing', lifecycle_stage = 'eligibility_review', updated_at = ? WHERE id = ?`,
     now,
     opportunityId
   );
