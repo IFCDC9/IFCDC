@@ -26,7 +26,7 @@ export type ErcCheck = {
   module: string;
   path?: string;
   status: ErcCheckStatus;
-  score: number;
+  score: number | null;
   detail: string;
   latencyMs: number;
   live: boolean;

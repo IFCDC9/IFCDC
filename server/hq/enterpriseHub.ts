@@ -35,6 +35,7 @@ export interface EnterpriseNotification {
 }
 
 const MODULE_REGISTRY: Omit<EnterpriseModuleStatus, "metric" | "metricLabel" | "connected">[] = [
+  { id: "enterprise_readiness", name: "Enterprise Readiness", path: "/hq/enterprise-readiness", section: "System", status: "live" },
   { id: "executive", name: "Executive Dashboard", path: "/hq", section: "Command", status: "live" },
   { id: "analytics", name: "Organization Analytics", path: "/hq/analytics", section: "Command", status: "live" },
   { id: "notifications", name: "Enterprise Notifications", path: "/hq/notifications", section: "Command", status: "live" },

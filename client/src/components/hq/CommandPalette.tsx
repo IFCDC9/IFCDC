@@ -2,8 +2,9 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Search, LayoutDashboard, Users, FileText, LayoutGrid, ArrowRight, Wallet, Receipt, Handshake, Shield, FolderOpen } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { enterpriseApi, type EnterpriseSearchResult } from "../../api/enterpriseApi";
+import { enterpriseApi } from "../../api/enterpriseApi";
 import { HQ_NAV_ITEMS } from "../../config/hqNavigation";
+import { commandPaletteResults } from "../../utils/commandPaletteResults";
 
 const TYPE_ICONS: Record<string, React.ElementType> = {
   module: LayoutDashboard,
@@ -43,17 +44,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ open, onClose })
     staleTime: 15_000,
   });
 
-  const defaultResults: EnterpriseSearchResult[] = query.length === 0
-    ? HQ_NAV_ITEMS.slice(0, 8).map((item) => ({
-        type: "module" as const,
-        id: item.path,
-        title: item.label,
-        subtitle: item.section,
-        path: item.path,
-      }))
-    : [];
-
-  const results = debouncedQuery.length >= 2 ? (data?.results ?? []) : defaultResults;
+  const results = commandPaletteResults(query, HQ_NAV_ITEMS,
+    debouncedQuery === query && query.trim().length >= 2 ? (data?.results ?? []) : []);
 
   const go = useCallback((path: string) => {
     navigate(path);
@@ -76,7 +68,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ open, onClose })
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
-      if (e.key === "ArrowDown") { e.preventDefault(); setSelected((s) => Math.min(s + 1, results.length - 1)); }
+      if (e.key === "ArrowDown") { e.preventDefault(); setSelected((s) => Math.max(0, Math.min(s + 1, results.length - 1))); }
       if (e.key === "ArrowUp") { e.preventDefault(); setSelected((s) => Math.max(s - 1, 0)); }
       if (e.key === "Enter" && results[selected]) go(results[selected].path);
     };
