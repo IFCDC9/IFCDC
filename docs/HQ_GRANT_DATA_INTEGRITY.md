@@ -67,3 +67,19 @@ Validation commands: `node --import tsx --test` for the four server/data suites 
 for the two existing DOM tests (their shared UI timer keeps the process alive).
 TypeScript: `node node_modules/typescript/bin/tsc --noEmit --incremental false`.
 Production build: `node --import tsx script/build.ts`.
+
+## CI follow-up (PR 57)
+
+The first GitHub grants-qa run failed two old CRUD expectations: QA opportunity
+visibility in working lists, and creating an application after the fixture was
+closed. The follow-up checks that QA opportunities are excluded, creates and edits
+its application while the fixture is open, then closes it and verifies a second
+application is rejected with HTTP 409. It also checks that the QA application is
+excluded from the working application list. Production write guards stay intact.
+
+An isolated local production server exercised the full QA script: 37 checks
+passed, including both corrected behaviors and both added exclusion/closed-start
+checks. The remaining local gate failure was the pre-existing external live-feed
+requirement (zero providers connected in the isolated environment); the original
+GitHub job had passed that readiness sub-suite. No live-feed result was forced
+or bypassed. GitHub must rerun the full gate after the follow-up commit.
