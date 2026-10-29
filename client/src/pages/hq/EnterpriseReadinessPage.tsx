@@ -11,7 +11,7 @@ import {
   type ErcIssueStatus,
 } from "../../api/enterpriseReadinessApi";
 import { KpiCard } from "../../components/hq/KpiCard";
-import { StatusBadge } from "../../components/hq/StatusBadge";
+import { ReadinessStatusBadge as StatusBadge } from "../../components/hq/ReadinessStatusBadge";
 import { HqLoading } from "../../components/hq/HqLoading";
 import { HqApiError } from "../../api/hqApiFetch";
 
@@ -116,6 +116,14 @@ const EnterpriseReadinessPage: React.FC = () => {
           variant={issues.length ? "warning" : "success"}
         />
       </div>
+
+      {d.latest && !dash.isError && (
+        <p style={{ fontSize: "0.85rem", marginBottom: "1rem" }}>
+          Latest checklist: {checks.filter((c) => c.status === "fail").length} failed checks;
+          {" "}{checks.filter((c) => c.status === "pending_manual").length} checks awaiting verification.
+          Findings below are from this run only. Prior runs remain in assessment history.
+        </p>
+      )}
 
       <div className="hq-grid-2" style={{ marginBottom: "1rem" }}>
         <div className="hq-panel">
