@@ -16,6 +16,7 @@ import {
   type EnterpriseMonitoringOverview,
 } from "./enterpriseMonitoringEngine";
 import { testReadOnlyIntegrationProvider, runReadOnlyModuleProbe, REQUIRED_ACCEPTANCE_TESTS } from "./readOnlyReadinessProbes";
+import { probeCommunicationsStorage } from "./communicationsReadiness";
 
 export const ERC_VERSION = "1.1" as const;
 export const ERC_CERTIFICATION_TARGET = 100;
@@ -285,14 +286,7 @@ async function moduleProbes(): Promise<ModuleProbe[]> {
       path: "/hq/communications",
       category: "communications",
       probe: async () => {
-        const db = await getDb();
-        const row = await db.get<{ c: number }>(
-          `SELECT COUNT(*) as c FROM sqlite_master WHERE type='table' AND name LIKE 'comm%'`
-        ).catch(() => ({ c: 0 }));
-        return {
-          ok: (row?.c || 0) > 0,
-          detail: (row?.c || 0) > 0 ? "Communications schema present" : "Communications tables missing",
-        };
+        return probeCommunicationsStorage(await getDb());
       },
     },
     {
@@ -1095,6 +1089,9 @@ export async function getLatestCertificationRun(): Promise<ErcCertificationRun |
     completed_at: string;
   }>(`SELECT * FROM aura_erc_runs ORDER BY completed_at DESC LIMIT 1`);
   if (!row) return null;
+  const currentIssues = await listCertificationIssues({ runId: row.id, limit: 300 });
+  const openIssues = currentIssues.filter((i) => i.status === "open");
+  const blocking = openIssues.filter((i) => i.severity === "critical" || i.severity === "high");
   return {
     id: row.id,
     version: ERC_VERSION,
@@ -1105,29 +1102,28 @@ export async function getLatestCertificationRun(): Promise<ErcCertificationRun |
     certificationStatus: row.certified ? "certified" : "not_certified",
     pillars: JSON.parse(row.pillars_json) as ErcPillarScores,
     checks: JSON.parse(row.checks_json) as ErcCheck[],
-    issues: JSON.parse(row.issues_json) as ErcIssue[],
-    outstandingIssueCount: (JSON.parse(row.issues_json) as ErcIssue[]).filter((i) => i.status === "open").length,
+    issues: currentIssues,
+    outstandingIssueCount: openIssues.length,
     deepQualityRan: Boolean(row.deep_quality),
     host: (row.host as ErcCertificationRun["host"]) || "unknown",
     actorEmail: row.actor_email,
-    speechSummary: row.speech_summary,
+    speechSummary: `Saved assessment completed ${row.completed_at}: ${row.certified ? "CERTIFIED" : "NOT CERTIFIED"}; ${row.overall_readiness}% scored-check result (not completion). ${openIssues.length} current open findings (${blocking.length} critical/high). Reviewing findings does not change recorded check outcomes.`,
   };
 }
 
-export async function listCertificationIssues(opts?: { status?: ErcIssueStatus; limit?: number }): Promise<ErcIssue[]> {
+export async function listCertificationIssues(opts?: { status?: ErcIssueStatus; limit?: number; runId?: string }): Promise<ErcIssue[]> {
   await ensureEnterpriseReadinessCertificationTables();
   const db = await getDb();
   const limit = Math.min(Math.max(opts?.limit ?? 100, 1), 300);
-  const rows = (opts?.status
-    ? await db.all(
-      `SELECT * FROM aura_erc_issues WHERE status = ? ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at DESC LIMIT ?`,
-      opts.status,
-      limit
-    )
-    : await db.all(
-      `SELECT * FROM aura_erc_issues ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at DESC LIMIT ?`,
-      limit
-    )) as Array<Record<string, unknown>> | null;
+  const where: string[] = [];
+  const params: Array<string | number> = [];
+  if (opts?.status) { where.push("status = ?"); params.push(opts.status); }
+  if (opts?.runId) { where.push("run_id = ?"); params.push(opts.runId); }
+  const rows = await db.all(
+    `SELECT * FROM aura_erc_issues ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+     ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at DESC LIMIT ?`,
+    ...params, limit,
+  ) as Array<Record<string, unknown>> | null;
   return (rows || []).map((r: Record<string, unknown>) => ({
     id: String(r.id),
     module: String(r.module),
@@ -1170,7 +1166,8 @@ export async function updateCertificationIssueStatus(opts: {
 
 export async function buildEnterpriseReadinessDashboard() {
   const latest = await getLatestCertificationRun();
-  const openIssues = await listCertificationIssues({ status: "open", limit: 50 });
+  // Keep previous runs for history; never mix their findings into the current dashboard.
+  const openIssues = latest?.issues.filter((i) => i.status === "open") ?? [];
   return {
     version: ERC_VERSION,
     target: ERC_CERTIFICATION_TARGET,
