@@ -114,6 +114,17 @@ async function probePayPalOrderCreation(token: string): Promise<boolean> {
   return Boolean(data.id && (data.status === "CREATED" || data.status === "PAYER_ACTION_REQUIRED"));
 }
 
+/** Authentication-only assessment. Never calls the checkout/order probe. */
+export async function probePayPalAuthentication(): Promise<{ authenticated: boolean }> {
+  if (!getPayPalEnvStatus().ready) return { authenticated: false };
+  try {
+    await fetchPayPalAccessToken();
+    return { authenticated: true };
+  } catch {
+    return { authenticated: false };
+  }
+}
+
 /** Live OAuth + order-creation probe (does not capture funds). */
 export async function probePayPalApi(): Promise<PayPalProbeResult> {
   const envStatus = getPayPalEnvStatus();

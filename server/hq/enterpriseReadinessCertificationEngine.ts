@@ -15,9 +15,9 @@ import {
   buildEnterpriseMonitoringOverview,
   type EnterpriseMonitoringOverview,
 } from "./enterpriseMonitoringEngine";
-import { testIntegrationHubProvider } from "./integrationsHubEngine";
+import { testReadOnlyIntegrationProvider, runReadOnlyModuleProbe, REQUIRED_ACCEPTANCE_TESTS } from "./readOnlyReadinessProbes";
 
-export const ERC_VERSION = "1.0" as const;
+export const ERC_VERSION = "1.1" as const;
 export const ERC_CERTIFICATION_TARGET = 100;
 
 export type ErcSeverity = "critical" | "high" | "medium" | "low";
@@ -598,7 +598,8 @@ const INTEGRATION_PROVIDERS: Array<{ id: string; label: string; category: ErcCat
   { id: "render", label: "Render", category: "deployment" },
   { id: "github", label: "GitHub", category: "deployment" },
   { id: "twilio", label: "Twilio Voice/SMS", category: "communications" },
-  { id: "resend", label: "Resend Email", category: "communications" },
+  { id: "transactional_email", label: "Transactional Email (Postmark / Resend)", category: "communications" },
+  { id: "quickbooks", label: "QuickBooks", category: "integration" },
   { id: "grants_gov", label: "Grants.gov", category: "integration" },
   { id: "sam_gov", label: "SAM.gov", category: "integration" },
   { id: "paypal", label: "PayPal", category: "integration" },
@@ -778,7 +779,7 @@ export async function runEnterpriseReadinessCertification(opts?: {
   // Modules
   const probes = await moduleProbes();
   for (const p of probes) {
-    const r = await timed(() => p.probe());
+    const r = await timed(() => runReadOnlyModuleProbe(p));
     if (r.error) {
       const check: ErcCheck = {
         id: p.id,
@@ -854,10 +855,10 @@ export async function runEnterpriseReadinessCertification(opts?: {
     }
   }
 
-  // Integrations — real hub live tests
+  // Integrations — reviewed read-only probes only. No operational tests/repair.
   if (liveIntegrations) {
     for (const provider of INTEGRATION_PROVIDERS) {
-      const r = await timed(() => testIntegrationHubProvider(provider.id));
+      const r = await timed(() => testReadOnlyIntegrationProvider(provider.id));
       if (r.error) {
         const check: ErcCheck = {
           id: `int-${provider.id}`,
@@ -884,7 +885,7 @@ export async function runEnterpriseReadinessCertification(opts?: {
         );
         continue;
       }
-      const result = r.value as { success?: boolean; message?: string };
+      const result = r.value as { success?: boolean; pending?: boolean; message?: string };
       const ok = Boolean(result?.success);
       const check: ErcCheck = {
         id: `int-${provider.id}`,
@@ -892,15 +893,15 @@ export async function runEnterpriseReadinessCertification(opts?: {
         label: provider.label,
         module: provider.label,
         path: "/hq/integrations",
-        status: ok ? "pass" : "fail",
-        score: ok ? 100 : 0,
-        detail: result?.message || (ok ? "Live test passed" : "Live test failed"),
+        status: result.pending ? "pending_manual" : ok ? "pass" : "fail",
+        score: result.pending ? null : ok ? 100 : 0,
+        detail: result?.message || (ok ? "Read-only probe passed" : "Read-only probe failed"),
         latencyMs: r.latencyMs,
-        live: true,
+        live: !result.pending,
         filesAffected: ["server/hq/integrationsHubEngine.ts"],
       };
       checks.push(check);
-      if (!ok) {
+      if (!ok && !result.pending) {
         issues.push(
           issueFromCheck(check, {
             rootCause: "Production integration live test failed",
@@ -943,87 +944,22 @@ export async function runEnterpriseReadinessCertification(opts?: {
     }
   }
 
-  // Monitoring aggregate for performance/deploy
-  {
-    const monTimed = await timed(() => buildEnterpriseMonitoringOverview({ bypassCache: true }));
-    const mon = monTimed.value as EnterpriseMonitoringOverview | undefined;
-    if (mon && !monTimed.error) {
-      const monitoringScore = mon.overallScore;
-      checks.push({
-        id: "perf-monitoring-overall",
-        category: "performance",
-        label: "Enterprise Monitoring overall",
-        module: "Monitoring",
-        path: "/hq/monitoring",
-        status:
-          monitoringScore == null
-            ? "pending_manual"
-            : monitoringScore >= 80
-              ? "pass"
-              : monitoringScore >= 60
-                ? "warn"
-                : "fail",
-        score: monitoringScore,
-        detail:
-          monitoringScore == null
-            ? `${mon.overallStatus} · score unavailable · not treated as zero · ${mon.uptimeLabel} uptime · ${mon.alerts?.length || 0} alerts`
-            : `${mon.overallStatus} · ${mon.uptimeLabel} uptime · ${mon.alerts?.length || 0} alerts`,
-        latencyMs: monTimed.latencyMs,
-        live: true,
-      });
-      const deployAligned = mon.components?.find((c) => c.id.includes("deploy") || c.label.toLowerCase().includes("deploy"));
-      const deployScore = deployAligned?.score;
-      const deployFailure =
-        deployAligned?.status === "degraded" ||
-        deployAligned?.status === "unreachable" ||
-        deployAligned?.status === "critical";
-      if (deployAligned && (deployScore != null || deployFailure)) {
-        checks.push({
-          id: "deploy-monitoring-component",
-          category: "deployment",
-          label: deployAligned.label,
-          module: "Deployment",
-          path: "/hq/monitoring",
-          status:
-            deployAligned.status === "healthy"
-              ? "pass"
-              : deployAligned.status === "critical"
-                ? "fail"
-                : deployFailure
-                  ? "warn"
-                  : "pending_manual",
-          score: deployScore ?? null,
-          detail: deployAligned.detail,
-          latencyMs: 0,
-          live: true,
-        });
-      }
-    } else {
-      const check: ErcCheck = {
-        id: "perf-monitoring-overall",
-        category: "performance",
-        label: "Enterprise Monitoring overall",
-        module: "Monitoring",
-        path: "/hq/monitoring",
-        status: "fail",
-        score: 0,
-        detail: monTimed.error || "Monitoring overview failed",
-        latencyMs: monTimed.latencyMs,
-        live: true,
-      };
-      checks.push(check);
-      issues.push(
-        issueFromCheck(check, {
-          rootCause: "Monitoring aggregator failed",
-          recommendedFix: "Investigate enterpriseMonitoringEngine and dependent services",
-          severity: "high",
-          effort: "2–6h",
-          files: ["server/hq/enterpriseMonitoringEngine.ts"],
-        })
-      );
-    }
+  // Combined monitoring builders can invoke operational integration tests.
+  // Keep these unknown until a scoped, non-mutating probe is reviewed.
+  checks.push({ id: "perf-monitoring-overall", category: "performance", label: "Monitoring and deployment flows",
+    module: "Monitoring", path: "/hq/monitoring", status: "pending_manual", score: null,
+    detail: "UNVERIFIED: combined monitoring builder not run during read-only assessment. Inspect endpoint and deployment evidence separately.",
+    latencyMs: 0, live: false });
+  for (const acceptance of REQUIRED_ACCEPTANCE_TESTS) {
+    checks.push({ id: `acceptance-${acceptance.id}`, category: "quality", label: acceptance.label,
+      module: acceptance.label, path: acceptance.path, status: "pending_manual", score: null,
+      detail: `UNVERIFIED: ${acceptance.test}`, latencyMs: 0, live: false });
   }
-
+  if (!liveIntegrations) {
+    for (const provider of INTEGRATION_PROVIDERS) checks.push({ id: `int-${provider.id}`,
+      category: provider.category, label: provider.label, module: provider.label, path: "/hq/integrations",
+      status: "pending_manual", score: null, detail: "UNVERIFIED: integration probes disabled for this run.", latencyMs: 0, live: false });
+  }
   checks.push(...(await runQualityChecks(deepQuality)));
   for (const c of checks.filter((x) => x.id.startsWith("quality-") && (x.status === "fail" || x.status === "pending_manual" || x.status === "warn"))) {
     if (issues.some((i) => i.checkId === c.id)) continue;
@@ -1044,6 +980,12 @@ export async function runEnterpriseReadinessCertification(opts?: {
     );
   }
 
+  for (const check of checks.filter((c) => c.status === "pending_manual")) {
+    if (issues.some((i) => i.checkId === check.id)) continue;
+    issues.push(issueFromCheck(check, { rootCause: "Acceptance evidence missing; not a confirmed operational failure",
+      recommendedFix: check.detail, severity: "medium", effort: "Scope and run the stated acceptance test" }));
+  }
+
   const pillars = pillarScores(checks);
   // Overall readiness: mean of check scores (strict) — certification needs 100
   const overallReadiness = avg(checks.map((c) => c.score));
@@ -1056,7 +998,7 @@ export async function runEnterpriseReadinessCertification(opts?: {
   const completedAt = new Date().toISOString();
   const speechSummary = certified
     ? `Enterprise Readiness Certification ${ERC_VERSION}: CERTIFIED at ${overallReadiness}%. All live checks passed.`
-    : `Enterprise Readiness Certification ${ERC_VERSION}: NOT CERTIFIED — ${overallReadiness}% ready, ${issues.filter((i) => i.status === "open").length} open issues (${openBlocking.length} critical/high). Target is ${ERC_CERTIFICATION_TARGET}%.`;
+    : `Enterprise Readiness Certification ${ERC_VERSION}: NOT CERTIFIED — ${overallReadiness}% scored-check result (not completion), ${issues.filter((i) => i.status === "open").length} open issues (${openBlocking.length} critical/high). Target is ${ERC_CERTIFICATION_TARGET}%.`;
 
   const run: ErcCertificationRun = {
     id,
@@ -1289,7 +1231,7 @@ export async function runEnterpriseReadinessCommand(opts: {
   }
   if (!opts.founderMode) {
     return {
-      speechSummary: "Running Enterprise Readiness Certification requires Founder Mode (live production probes).",
+      speechSummary: "Running Enterprise Readiness Certification requires Founder Mode (read-only production probes; audit records are saved).",
       founderApprovalRequired: true,
     };
   }

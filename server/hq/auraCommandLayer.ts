@@ -23,6 +23,7 @@ import {
 } from "./auraActionRegistry";
 import { buildAuraMemoryContext, recordAuraTurn } from "./auraMemory";
 import { answerWithToolEvidence, isMacEngineeringCapabilityQuestion, MAC_ENGINEERING_CAPABILITY_REPLY } from "./auraCommandReplies";
+import { isReadinessAssessmentQuestion, explainReadinessAssessment } from "./auraReadinessAssessment";
 import { withOpenAiCredentialFallback, formatOpenAiAuthError, resolveOpenAiCredentials } from "../lib/openaiConfig";
 import {
   buildAuraIdentitySystemBlock,
@@ -313,6 +314,24 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
       poweredBy: "AURA",
       identity: publicIdentitySummary(identity),
     };
+  }
+
+  // A broad assessment is a report request, not authorization to diagnose code,
+  // invoke operational integration tests, or prepare changes mentioned in its text.
+  if (isReadinessAssessmentQuestion(command)) {
+    if (!(identity.isFounder || identity.founderMode || identityAllowsModule(identity, "software_division"))) {
+      return { reply: "HQ readiness evidence requires authorized Software Division access.", actions: [], approvalsCreated: [],
+        poweredBy: "AURA Trust Layer", identity: publicIdentitySummary(identity) };
+    }
+    const { getLatestCertificationRun } = await import("./enterpriseReadinessCertificationEngine");
+    let reply: string;
+    try {
+      reply = explainReadinessAssessment(await getLatestCertificationRun());
+    } catch {
+      reply = "The saved readiness checklist could not be read. Current readiness is UNVERIFIED. No operational probes or repairs were run. Open Enterprise Readiness to inspect the load error.";
+    }
+    return { reply, actions: [], approvalsCreated: [], poweredBy: "AURA Readiness Assessment",
+      navigation: { path: "/hq/enterprise-readiness", label: "Open Enterprise Readiness" }, identity: publicIdentitySummary(identity) };
   }
 
   // Answer capability questions before keywords inside the question trigger an action.
