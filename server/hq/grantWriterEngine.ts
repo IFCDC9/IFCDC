@@ -3,6 +3,7 @@
  * version history, and async full-proposal generation (avoids client timeouts).
  */
 import { assertGrantDraftEligibility } from "./grantEligibilityReview";
+import { grantOrganizationNameWarnings } from "./grantNarrativeIntegrity";
 import { getDb } from "../db";
 import { grantId, logGrantActivity } from "./grantsSchema";
 import { auraExecutiveChat } from "../lib/ifcdc";
@@ -322,6 +323,8 @@ export async function grantWritingAssistProduction(opts: {
   }
 
   const refreshed = await assertGrantDraftEligibility(opts.applicationId);
+  const nameWarnings = grantOrganizationNameWarnings(content, refreshed.profile?.facts.find((f) => f.key === "legalName")?.value);
+  if (nameWarnings.length) throw new Error(`AURA draft rejected: ${nameWarnings.join(" ")}`);
   if (JSON.stringify([refreshed.profile, refreshed.review]) !== JSON.stringify([eligibility.profile, eligibility.review])) {
     throw new Error("Organization facts or notice review changed while drafting. Regenerate from the current evidence.");
   }

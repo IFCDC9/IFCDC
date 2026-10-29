@@ -20,6 +20,7 @@ export type EnrichedOpp = {
   deadlineLabel: string;
   programFit: { labels: string[] };
   statusLabel: string;
+  startAvailability?: { canStart: boolean; reason: string };
   lastSynced: string | null;
   dataSourceLabel: string;
   url: string | null;
@@ -41,7 +42,7 @@ export const GrantOpportunityTable: React.FC<{
   });
 
   const startApp = useMutation({
-    mutationFn: (opportunityId: string) => grantsApi.startGrantApplication(opportunityId, true),
+    mutationFn: (opportunityId: string) => grantsApi.startGrantApplication(opportunityId, false),
     onSuccess: (data) => {
       if (data.applicationId) onStartApplication?.(data.applicationId);
       qc.invalidateQueries({ queryKey: ["grant-enriched-applications"] });
@@ -95,8 +96,8 @@ export const GrantOpportunityTable: React.FC<{
                     <button type="button" className="hq-btn hq-btn-sm hq-btn-secondary" disabled={scoringId === o.id} onClick={() => { setScoringId(o.id); scoreOpp.mutate(o.id); }}>
                       <Zap size={12} /> {scoringId === o.id ? "…" : "Score"}
                     </button>
-                    <button type="button" className="hq-btn hq-btn-sm hq-btn-primary" disabled={startApp.isPending} onClick={() => startApp.mutate(o.id)}>
-                      Start Application
+                    <button type="button" className="hq-btn hq-btn-sm hq-btn-primary" disabled={startApp.isPending || !o.startAvailability?.canStart} title={o.startAvailability?.reason ?? "Verify listing availability"} onClick={() => startApp.mutate(o.id)}>
+                      {o.startAvailability?.canStart ? "Start Application" : "Unavailable — review notice"}
                     </button>
                   </div>
                 </td>
@@ -182,7 +183,7 @@ export const GrantApplicationsHub: React.FC<{
   });
 
   return (
-    <HqPanel title="Grant Applications" subtitle="Tracked applications from discovery through award — founder approval required before submit">
+    <HqPanel title="Grant Applications" subtitle="Working applications exclude timestamp-tagged QA records. Founder approval required before submission.">
       <GrantSubNav
         items={[
           { id: "all", label: "Applications" },

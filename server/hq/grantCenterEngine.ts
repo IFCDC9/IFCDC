@@ -1,3 +1,4 @@
+import { excludeQaApplicationsSql, excludeQuarantinedOpportunitySql } from "./grantQaFixtureQuarantine";
 import { getOpportunityEligibility, compareReviewedFunding } from "./grantEligibilityReview";
 /**
  * Grant Center — unified enterprise platform (modular command hub)
@@ -106,7 +107,7 @@ export async function buildGrantCenterPlatform() {
   const db = await getDb();
   const counts = {
     opportunities: (await db.get<{ c: number }>("SELECT COUNT(*) as c FROM grant_opportunities"))?.c ?? 0,
-    applications: (await db.get<{ c: number }>("SELECT COUNT(*) as c FROM grant_applications"))?.c ?? 0,
+    applications: (await db.get<{ c: number }>(`SELECT COUNT(*) as c FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")}`))?.c ?? 0,
     awards: (await db.get<{ c: number }>("SELECT COUNT(*) as c FROM grant_awards WHERE status = 'active'"))?.c ?? 0,
     templates: (await db.get<{ c: number }>("SELECT COUNT(*) as c FROM grant_templates WHERE is_active = 1"))?.c ?? 0,
     funders: (await db.get<{ c: number }>("SELECT COUNT(*) as c FROM grant_funders"))?.c ?? 0,
@@ -285,7 +286,7 @@ export async function buildWriterStudio(applicationId: string, opts?: { template
     activeDraftJob: activeJob,
     proposalCompleteness: completeness,
     readiness,
-    readinessScore: readiness?.readinessScore ?? completeness.completionPct,
+    readinessScore: readiness?.readinessScore ?? null,
     humanReviewRequired: true,
     founderApprovalRequired: true,
   };
@@ -308,7 +309,7 @@ export async function buildOpportunityFinder(filters?: { category?: string; geog
          WHEN o.funder LIKE '%State%' OR o.funder LIKE '%NJ%' THEN 'state'
          WHEN o.funder LIKE '%Foundation%' THEN 'foundation'
          ELSE 'corporate' END as funder_category
-    FROM grant_opportunities o WHERE o.status != 'closed'${productionGrantOpportunitySqlFilter("o")}`;
+    FROM grant_opportunities o WHERE o.status != 'closed'${productionGrantOpportunitySqlFilter("o")}${excludeQuarantinedOpportunitySql("o.id")}`;
   const params: string[] = [];
   if (filters?.q) { sql += " AND (o.title LIKE ? OR o.funder LIKE ? OR o.description LIKE ?)"; const q = `%${filters.q}%`; params.push(q, q, q); }
   if (filters?.geography) { sql += " AND o.geography = ?"; params.push(filters.geography); }

@@ -38,7 +38,16 @@ function log(status, msg, detail = "") {
   results[status === "pass" ? "pass" : "fail"]++;
 }
 
+export function assertQaRequestAllowed(url, opts = {}, env = process.env) {
+  const method = String(opts.method || "GET").toUpperCase();
+  if (!productionGrantOpportunityWritesAllowed(env) && !["GET", "HEAD"].includes(method)
+      && !(method === "POST" && new URL(url).pathname === "/api/auth/login")) {
+    throw new Error("Production grant QA blocks fixture writes; use an isolated test database for CRUD checks.");
+  }
+}
+
 async function jsonFetch(url, opts = {}) {
+  assertQaRequestAllowed(url, opts);
   const res = await fetch(url, {
     ...opts,
     headers: { ...(opts.headers || {}), ...(opts.body ? { "Content-Type": "application/json" } : {}) },
@@ -196,17 +205,15 @@ async function main() {
 
     const readOpp = await jsonFetch(`${BASE}/api/hq/grants/opportunities`, auth);
     const found = (readOpp.body?.opportunities ?? []).some((o) => o.id === oppId);
-    log(found ? "pass" : "fail", "CRUD: Read opportunity list");
+    log(readOpp.ok && !found ? "pass" : "fail", "QA opportunity excluded from working opportunity list");
   }
 
-  if (oppId) {
-    await jsonFetch(`${BASE}/api/hq/grants/opportunities/${oppId}`, {
-      ...auth,
-      method: "PATCH",
-      body: JSON.stringify({ status: "closed" }),
-    });
-    log("pass", "CRUD: Close QA opportunity (cleanup)");
   }
+
+  if (!productionGrantOpportunityWritesAllowed()) {
+    log("pass", "Production QA skips all fixture writes (applications, narratives, templates and funders)");
+    emitReport(results.fail > 0 ? 1 : 0);
+    return;
   }
 
   const createApp = await jsonFetch(`${BASE}/api/hq/grants/applications`, {
@@ -238,6 +245,26 @@ async function main() {
       body: JSON.stringify({ content: "QA executive summary draft for production validation." }),
     });
     log(saveSection.ok ? "pass" : "fail", "CRUD: Save writer section");
+  }
+
+  if (oppId) {
+    const closed = await jsonFetch(`${BASE}/api/hq/grants/opportunities/${oppId}`, {
+      ...auth,
+      method: "PATCH",
+      body: JSON.stringify({ status: "closed" }),
+    });
+    log(closed.ok ? "pass" : "fail", "CRUD: Close QA opportunity (cleanup)");
+    const rejected = await jsonFetch(`${BASE}/api/hq/grants/applications`, {
+      ...auth,
+      method: "POST",
+      body: JSON.stringify({ title: `${QA_TAG} Closed Application`, opportunity_id: oppId }),
+    });
+    log(rejected.res.status === 409 ? "pass" : "fail", "Closed opportunity cannot create an application", String(rejected.res.status));
+  }
+  if (appId) {
+    const applications = await jsonFetch(`${BASE}/api/hq/grants/applications`, auth);
+    const visible = (applications.body?.applications ?? []).some((row) => row.id === appId);
+    log(applications.ok && !visible ? "pass" : "fail", "QA application excluded from working application list");
   }
 
   const createTemplate = await jsonFetch(`${BASE}/api/hq/grants/library/templates`, {

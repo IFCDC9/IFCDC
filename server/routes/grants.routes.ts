@@ -1,3 +1,5 @@
+import { grantOpportunityAvailability } from "../../shared/grantOpportunityAvailability";
+import { excludeQaApplicationsSql, excludeQuarantinedOpportunitySql } from "../hq/grantQaFixtureQuarantine";
 import { Router } from "express";
 import type { Request, Response } from "express";
 import { getDb } from "../db";
@@ -710,7 +712,7 @@ router.post("/opportunities/:id/start-application", async (req: Request, res: Re
     actorEmail: req.hqUser?.email,
     generateDrafts: req.body?.generateDrafts === true,
   });
-  if (!result.ok) return res.status(404).json(result);
+  if (!result.ok) return res.status(result.error === "Opportunity not found" ? 404 : 409).json(result);
   res.status(result.existing ? 200 : 201).json(result);
 });
 
@@ -829,7 +831,7 @@ router.post("/writer-studio/:applicationId/sections/:sectionKey/restore/:version
 
 router.get("/opportunities", async (_req, res) => {
   const db = await getDb();
-  const rows = await db.all("SELECT * FROM grant_opportunities ORDER BY deadline ASC");
+  const rows = await db.all(`SELECT * FROM grant_opportunities WHERE 1=1${excludeQuarantinedOpportunitySql("id")} ORDER BY deadline ASC`);
   res.json({ opportunities: rows });
 });
 
@@ -890,7 +892,7 @@ router.get("/applications", async (_req, res) => {
     SELECT a.*, o.title as opportunity_title, o.funder
     FROM grant_applications a
     LEFT JOIN grant_opportunities o ON a.opportunity_id = o.id
-    ORDER BY a.updated_at DESC
+    WHERE 1=1${excludeQaApplicationsSql("a.id")} ORDER BY a.updated_at DESC
   `);
   res.json({ applications: rows });
 });
@@ -899,6 +901,12 @@ router.post("/applications", async (req, res) => {
   const { opportunity_id, title, amount_requested, assigned_to, notes } = req.body;
   if (!title) return res.status(400).json({ error: "title is required" });
   const db = await getDb();
+  if (opportunity_id) {
+    const opportunity = await db.get<Record<string, unknown>>("SELECT * FROM grant_opportunities WHERE id = ?", opportunity_id);
+    if (!opportunity) return res.status(404).json({ error: "Opportunity not found" });
+    const availability = grantOpportunityAvailability(opportunity);
+    if (!availability.canStart) return res.status(409).json({ error: availability.reason });
+  }
   const now = new Date().toISOString();
   const appId = grantId();
   await db.run(

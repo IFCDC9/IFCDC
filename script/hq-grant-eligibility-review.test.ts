@@ -166,3 +166,15 @@ test("approval requires a supported matching budget and resolved placeholders", 
   await db.run("UPDATE grant_writer_sections SET content = 'Reviewed proposed project' WHERE id = 'section'");
   assert.deepEqual(await reviewEngine.grantApprovalEvidenceBlockers("app"), []);
 });
+
+test("writer rejects conflicting organization name and approval blocks an older conflicting draft", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => Response.json({ id: "chat-name-test", choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: "Imperial Foundation Community Development Corporation (IFCDC) proposes mentoring." } }] })) as typeof fetch;
+  try {
+    const writer = await import("../server/hq/grantWriterEngine");
+    await assert.rejects(writer.grantWritingAssistProduction({ prompt: "Draft", applicationId: "app", sectionKey: "executive_summary" }), /draft rejected.*verified legal name/);
+    await db.run("UPDATE grant_writer_sections SET content = 'Imperial Foundation Community Development Corporation proposes mentoring.' WHERE id = 'section'");
+    assert.match((await reviewEngine.grantApprovalEvidenceBlockers("app")).join(" "), /conflicts with the verified legal name/);
+    assert.match((await db.get("SELECT content FROM grant_writer_sections WHERE id = 'section'")).content, /Corporation/, "historic draft remains available for review");
+  } finally { globalThis.fetch = originalFetch; }
+});

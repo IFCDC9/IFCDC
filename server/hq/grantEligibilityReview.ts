@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { getDb } from "../db";
 import { GRANT_FACT_KEYS, type GrantProfile, type GrantNoticeReview, type GrantEligibilityAssessment } from "../../shared/grantEligibility";
 import { logHqAudit } from "./hqAuditLog";
+import { grantOpportunityAvailability } from "../../shared/grantOpportunityAvailability";
+import { grantOrganizationNameWarnings } from "./grantNarrativeIntegrity";
 
 const REQUIRED_FACTS = ["legalName", "taxStatus", "serviceArea", "programs"];
 const FEATURES = ["multi_year", "renewable", "general_operating", "admin_costs"];
@@ -110,6 +112,10 @@ export async function getOpportunityEligibility(opportunityId: string): Promise<
   const assessed = assessEligibility(profile, review, current);
   if (!opp) { assessed.status = "needs_review"; assessed.canDraft = false; assessed.reasons.push("Opportunity not found."); }
   if (opp && !["open", "active", "researching"].includes(String(opp.status))) { assessed.canDraft = false; assessed.status = "ineligible"; assessed.reasons.push("Opportunity is not open for applications."); }
+  if (opp) {
+    const availability = grantOpportunityAvailability(opp);
+    if (!availability.canStart) { assessed.canDraft = false; assessed.status = "ineligible"; assessed.reasons.push(availability.reason); }
+  }
   return { ...assessed, profile, review, opportunity: opp ? { id: opportunityId, title: String(opp.title), url: String(opp.url ?? ""), funder: String(opp.funder ?? ""), description: String(opp.description ?? "").slice(0, 15000) } : null };
 }
 export async function saveGrantNoticeReview(opportunityId: string, input: unknown, actorEmail: string) {
@@ -148,6 +154,7 @@ export async function grantApprovalEvidenceBlockers(applicationId: string): Prom
   const sections = await db.all<{ content: string }[]>("SELECT content FROM grant_writer_sections WHERE application_id = ?", applicationId);
   if (!sections.length) reasons.push("Prepare and review the application narrative before approval.");
   if (sections.some((s) => /\[VERIFICATION NEEDED\b/i.test(s.content))) reasons.push("Resolve all verification placeholders before approval.");
+  reasons.push(...grantOrganizationNameWarnings(sections.map((s) => s.content).join("\n"), assessment.profile?.facts.find((f) => f.key === "legalName")?.value));
   return reasons;
 }
 

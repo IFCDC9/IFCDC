@@ -1,3 +1,4 @@
+import { excludeQaApplicationsSql, excludeQuarantinedOpportunitySql } from "./grantQaFixtureQuarantine";
 import { getDb } from "../db";
 import crypto from "crypto";
 import { allowGrantDemoSeed } from "./grantProductionPolicy";
@@ -27,11 +28,11 @@ export async function buildGrantExecutiveDashboard(): Promise<GrantExecutiveDash
   const db = await getDb();
 
   const openOpportunities = (await db.get<{ c: number }>(
-    `SELECT COUNT(*) as c FROM grant_opportunities WHERE status = 'open'${LIVE_OPP_FILTER}`
+    `SELECT COUNT(*) as c FROM grant_opportunities WHERE 1=1${excludeQuarantinedOpportunitySql("id")} AND status = 'open'${LIVE_OPP_FILTER}`
   ))?.c ?? 0;
 
   const pendingApplications = (await db.get<{ c: number }>(
-    "SELECT COUNT(*) as c FROM grant_applications WHERE status IN ('draft','submitted','under_review')"
+    `SELECT COUNT(*) as c FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")} AND status IN ('draft','submitted','under_review')`
   ))?.c ?? 0;
 
   const upcomingDeadlines = (await db.get<{ c: number }>(
@@ -47,7 +48,7 @@ export async function buildGrantExecutiveDashboard(): Promise<GrantExecutiveDash
   ))?.c ?? 0;
 
   const pipelineValue = (await db.get<{ t: number }>(
-    "SELECT COALESCE(SUM(amount_requested), 0) as t FROM grant_applications WHERE status IN ('draft','submitted','under_review')"
+    `SELECT COALESCE(SUM(amount_requested), 0) as t FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")} AND status IN ('draft','submitted','under_review')`
   ))?.t ?? 0;
 
   const activeAwards = (await db.get<{ c: number }>(
@@ -68,24 +69,24 @@ export async function buildGrantExecutiveDashboard(): Promise<GrantExecutiveDash
   ))?.t ?? 0) / 100;
 
   const awarded = (await db.get<{ c: number }>(
-    "SELECT COUNT(*) as c FROM grant_applications WHERE status = 'awarded'"
+    `SELECT COUNT(*) as c FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")} AND status = 'awarded'`
   ))?.c ?? 0;
   const totalApps = (await db.get<{ c: number }>(
-    "SELECT COUNT(*) as c FROM grant_applications WHERE status NOT IN ('draft')"
+    `SELECT COUNT(*) as c FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")} AND status NOT IN ('draft')`
   ))?.c ?? 0;
   const winRate = totalApps > 0 ? Math.round((awarded / totalApps) * 100) : 0;
 
   const oppPipeline = await db.get<{ c: number; t: number }>(
-    `SELECT COUNT(*) as c, COALESCE(SUM(amount_max), 0) as t FROM grant_opportunities WHERE status = 'open'${LIVE_OPP_FILTER}`
+    `SELECT COUNT(*) as c, COALESCE(SUM(amount_max), 0) as t FROM grant_opportunities WHERE 1=1${excludeQuarantinedOpportunitySql("id")} AND status = 'open'${LIVE_OPP_FILTER}`
   );
   const appliedPipeline = await db.get<{ c: number; t: number }>(
-    "SELECT COUNT(*) as c, COALESCE(SUM(amount_requested), 0) as t FROM grant_applications WHERE status = 'submitted'"
+    `SELECT COUNT(*) as c, COALESCE(SUM(amount_requested), 0) as t FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")} AND status = 'submitted'`
   );
   const reviewPipeline = await db.get<{ c: number; t: number }>(
-    "SELECT COUNT(*) as c, COALESCE(SUM(amount_requested), 0) as t FROM grant_applications WHERE status = 'under_review'"
+    `SELECT COUNT(*) as c, COALESCE(SUM(amount_requested), 0) as t FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")} AND status = 'under_review'`
   );
   const awardedPipeline = await db.get<{ c: number; t: number }>(
-    "SELECT COUNT(*) as c, COALESCE(SUM(amount_requested), 0) as t FROM grant_applications WHERE status = 'awarded'"
+    `SELECT COUNT(*) as c, COALESCE(SUM(amount_requested), 0) as t FROM grant_applications WHERE 1=1${excludeQaApplicationsSql("id")} AND status = 'awarded'`
   );
   const activePipeline = await db.get<{ c: number; t: number }>(
     "SELECT COUNT(*) as c, COALESCE(SUM(amount), 0) as t FROM grant_awards WHERE status = 'active'"
