@@ -33,5 +33,23 @@ test('radio API enforces roles, validates uploads, schedules and serves range au
  assert.equal(audio.status,206); assert.equal(await audio.text(),'ID3');
  const state=await (await fetch(`${base}/station`,{headers})).json();
  assert.equal(state.tracks.length,1); assert.equal(state.slots.length,1); assert.equal(state.log.length,2); assert.equal(state.streaming,false);
+ assert.deepEqual(state.crates,[]);
+ const patch=(body:unknown,role='owner')=>fetch(`${base}/library/${track.id}/catalog`,{method:'PATCH',headers:{'x-test-role':role,'Content-Type':'application/json'},body:JSON.stringify(body)});
+ assert.equal((await patch({artist:'Artist'},'radio_host')).status,403);
+ assert.equal((await patch({filename:'bad.mp3'})).status,400);
+ assert.equal((await patch({artist:'Artist',genre:'Hip Hop',bpm:90,content:'clean',preference:'favorite'})).status,200);
+ const crate=(body:unknown,role='owner')=>fetch(`${base}/crates`,{method:'POST',headers:{'x-test-role':role,'Content-Type':'application/json'},body:JSON.stringify(body)});
+ assert.equal((await crate({name:'No permission',tracks:[track.id]},'radio_host')).status,403);
+ assert.equal((await crate({name:'Missing track',tracks:['00000000-0000-4000-8000-000000000000']})).status,400);
+ assert.equal((await crate({name:'Bad range',rules:{minBpm:110,maxBpm:80}})).status,400);
+ assert.equal((await crate({name:'No matches',rules:{genre:'Jazz'}})).status,400);
+ const built=await crate({name:'Clean favorites',rules:{cleanOnly:true,approvedOnly:true}});
+ assert.equal(built.status,201);const savedCrate=await built.json();assert.deepEqual(savedCrate.tracks,[track.id]);
+ const manual=await crate({name:'Selected',tracks:[track.id,track.id]});assert.equal(manual.status,201);assert.deepEqual((await manual.json()).tracks,[track.id]);
+ assert.equal((await fetch(`${base}/crates/${savedCrate.id}`,{method:'DELETE',headers:{'x-test-role':'radio_host'}})).status,403);
+ assert.equal((await fetch(`${base}/crates/${savedCrate.id}`,{method:'DELETE',headers})).status,204);
+ const updated=await (await fetch(`${base}/station`,{headers})).json();
+ assert.equal(updated.crates.length,1);assert.equal(updated.tracks[0].duration,10);assert.equal(updated.tracks[0].catalog.artist,'Artist');assert.equal(updated.slots.length,1);
+
  } finally {server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(directory,{recursive:true,force:true});}
 });

@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { TrackCatalog, RadioCrates, type CatalogTrack } from '../components/radio/RadioCatalog';
+import type { Crate } from '../../../server/radio/catalog';
 import { useAuth } from '../auth/AuthContext';
-type Track = { id: string; title: string; duration: number };
+type Track = CatalogTrack;
 type Slot = { id: string; title: string; start: string; tracks: string[] };
-type State = { configured: boolean; playout?: { enabled: boolean; ready: boolean; mode: string; error: string | null }; tracks: Track[]; slots: Slot[]; log: { at: string; action: string }[]; now: { track: Track; offset: number; index: number; slot: Slot } | null };
+type State = { configured: boolean; crates?: Crate[]; playout?: { enabled: boolean; ready: boolean; mode: string; error: string | null }; tracks: Track[]; slots: Slot[]; log: { at: string; action: string }[]; now: { track: Track; offset: number; index: number; slot: Slot } | null };
 export default function RadioStation() {
   const { user } = useAuth();
   const canManage = ['admin', 'owner', 'founder'].includes(user?.role || '');
@@ -10,6 +12,7 @@ export default function RadioStation() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
+  const [catalogSearch, setCatalogSearch] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
   const audio = useRef<HTMLAudioElement>(null);
   const streamAudio = useRef<HTMLAudioElement>(null);
@@ -84,9 +87,11 @@ export default function RadioStation() {
       <section className="border rounded-xl p-5 space-y-3"><h2 className="text-xl font-semibold">Audio library ({state.tracks.length})</h2>
         {canManage && <label className="block">Upload MP3 (maximum 25 MB)<input className="block mt-2" type="file" accept="audio/mpeg,.mp3" disabled={busy || !state.configured} onChange={e => { const file = e.target.files?.[0]; e.target.value=''; if (file) { if (file.size > 25*1024*1024) setError('MP3 exceeds 25 MB'); else action(() => upload(file)); } }} /></label>}
         {state.tracks.length === 0 && <p>Upload your first recording or station ID to begin.</p>}
-        {state.tracks.map(t => <label key={t.id} className="flex gap-3 items-center p-2 border-b"><input aria-label={`Select ${t.title}`} type="checkbox" disabled={!canManage} checked={selected.includes(t.id)} onChange={e => setSelected(e.target.checked ? [...selected,t.id] : selected.filter(id => id !== t.id))}/><span>{t.title} · {Math.round(t.duration)} sec</span></label>)}
+        <label>Search catalog<input className="block bg-background border rounded p-2" value={catalogSearch} onChange={e=>setCatalogSearch(e.target.value)} placeholder="Title, artist, genre, mood, or sound notes"/></label>
+        {state.tracks.filter(t=>`${t.title} ${JSON.stringify(t.catalog || {})}`.toLocaleLowerCase().includes(catalogSearch.toLocaleLowerCase())).map(t => <div key={t.id}><label className="flex gap-3 items-center p-2 border-b"><input aria-label={`Select ${t.title}`} type="checkbox" disabled={!canManage} checked={selected.includes(t.id)} onChange={e => setSelected(e.target.checked ? [...selected,t.id] : selected.filter(id => id !== t.id))}/><span>{t.title} · {Math.round(t.duration)} sec</span></label><TrackCatalog track={t} canManage={canManage} busy={busy} action={action} request={request}/></div>)}
         {selected.length > 0 && <p>Playback order: {selected.map(id => state.tracks.find(t => t.id === id)?.title).join(' → ')} <button onClick={() => setSelected([])}>Clear</button></p>}
       </section>
+      <RadioCrates crates={state.crates || []} tracks={state.tracks} selected={selected} setSelected={setSelected} canManage={canManage} busy={busy || !state.configured} action={action} request={request}/>
       <section className="border rounded-xl p-5 space-y-3"><h2 className="text-xl font-semibold">Show schedule</h2>
         {canManage && <form className="flex flex-wrap gap-3" onSubmit={e => { e.preventDefault(); const form=e.currentTarget; const data=new FormData(form); action(async () => { await request('/api/radio/schedule', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:data.get('title'),start:new Date(String(data.get('start'))).toISOString(),tracks:selected})}); form.reset(); setSelected([]); }); }}>
           <input className="bg-background border rounded p-2" name="title" placeholder="Show title" aria-label="Show title" maxLength={200} required />
