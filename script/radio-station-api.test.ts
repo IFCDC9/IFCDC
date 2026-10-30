@@ -1,0 +1,34 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import express from 'express';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import type { AddressInfo } from 'node:net';
+test('radio API enforces roles, validates uploads, schedules and serves range audio', async () => {
+ const directory=await mkdtemp(path.join(os.tmpdir(),'radio-api-'));
+ process.env.RADIO_DATA_DIR=directory;
+ const {default:router}=await import('../server/routes/radio-station');
+ const app=express(); app.use(express.json());
+ app.use((req,_res,next) => { const role=req.header('x-test-role'); if(role) req.user={id:'test-founder',role}; next(); });
+ app.use('/api/radio',router);
+ const server=app.listen(0,'127.0.0.1');
+ await new Promise<void>(resolve => server.once('listening',resolve));
+ const base=`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/radio`;
+ const headers={'x-test-role':'owner'};
+ try {
+ assert.equal((await fetch(`${base}/station`)).status,401);
+ assert.equal((await fetch(`${base}/station`,{headers:{'x-test-role':'barber'}})).status,403);
+ assert.equal((await fetch(`${base}/station`,{headers:{'x-test-role':'radio_host'}})).status,200);
+ assert.equal((await fetch(`${base}/schedule`,{method:'POST',headers:{'x-test-role':'radio_host','Content-Type':'application/json'},body:'{}'})).status,403);
+ assert.equal((await fetch(`${base}/library?title=Invalid&duration=10`,{method:'POST',headers:{...headers,'Content-Type':'audio/mpeg'},body:'invalid audio'})).status,400);
+ const upload=await fetch(`${base}/library?title=Station%20ID&duration=10`,{method:'POST',headers:{...headers,'Content-Type':'audio/mpeg'},body:Buffer.from('ID3test-audio')});
+ assert.equal(upload.status,201); const track=await upload.json();
+ const scheduled=await fetch(`${base}/schedule`,{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({title:'Test show',start:new Date(Date.now()+1000).toISOString(),tracks:[track.id]})});
+ assert.equal(scheduled.status,201);
+ const audio=await fetch(`${base}/library/${track.id}/audio`,{headers:{...headers,Range:'bytes=0-2'}});
+ assert.equal(audio.status,206); assert.equal(await audio.text(),'ID3');
+ const state=await (await fetch(`${base}/station`,{headers})).json();
+ assert.equal(state.tracks.length,1); assert.equal(state.slots.length,1); assert.equal(state.log.length,2); assert.equal(state.streaming,false);
+ } finally {server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(directory,{recursive:true,force:true});}
+});

@@ -1,0 +1,58 @@
+import express, { Router, type Request, type Response, type NextFunction } from 'express';
+import { randomUUID } from 'node:crypto';
+import { writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { z } from 'zod';
+import { requireAuth } from '../middleware/auth';
+import { StationStore, nowPlaying } from '../radio/station';
+const router = Router();
+const store = new StationStore(process.env.RADIO_DATA_DIR || '');
+const readAccess = requireAuth(['radio_host', 'radio', 'admin', 'EXEC', 'founder']);
+const manage = requireAuth(['admin', 'founder']);
+const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => { fn(req,res).catch(next); };
+router.get('/station', readAccess, wrap(async (_req,res) => {
+  if (!store.directory) return res.json({ configured: false, tracks: [], slots: [], log: [], now: null, streaming: false });
+  const state = await store.read();
+  res.json({ configured: true, ...state, now: nowPlaying(state), streaming: false });
+}));
+router.post('/library', manage, express.raw({ type: 'audio/mpeg', limit: '25mb' }), wrap(async (req,res) => {
+  const metadata = z.object({ title: z.string().trim().min(1).max(200), duration: z.coerce.number().positive().max(86400) }).parse(req.query);
+  const audio = req.body;
+  if (!Buffer.isBuffer(audio) || audio.length < 3 || !(audio.subarray(0,3).toString() === 'ID3' || (audio[0] === 255 && (audio[1] & 224) === 224))) return res.status(400).json({ error: 'Upload an MP3 audio file (maximum 25 MB).' });
+  const id = randomUUID();
+  const track = { ...metadata, id, filename: `${id}.mp3` };
+  await store.update(req.user!.id, `Uploaded ${track.title}`, async state => {
+    if (state.tracks.length >= 500) throw new Error('Library limit reached (500 tracks).');
+    const file = path.join(store.directory, track.filename);
+    await writeFile(file, audio, { flag: 'wx', mode: 0o600 });
+    state.tracks.push(track);
+  });
+  res.status(201).json(track);
+}));
+router.get('/library/:id/audio', readAccess, wrap(async (req,res) => {
+  const state = await store.read();
+  const track = state.tracks.find(t => t.id === req.params.id);
+  if (!track) return res.status(404).json({ error: 'Track not found' });
+  res.type('audio/mpeg').sendFile(path.resolve(store.directory, track.filename));
+}));
+router.post('/schedule', manage, wrap(async (req,res) => {
+  const slot = z.object({ title: z.string().trim().min(1).max(200), start: z.string().datetime(), tracks: z.array(z.string().uuid()).min(1).max(200) }).parse(req.body);
+  const state = await store.update(req.user!.id, `Scheduled ${slot.title}`, state => {
+    if (slot.tracks.some(id => !state.tracks.some(t => t.id === id))) throw new Error('One or more tracks no longer exist.');
+    if (Date.parse(slot.start) < Date.now() - 60000) throw new Error('Choose a current or future start time.');
+    if (state.slots.length >= 1000) throw new Error('Schedule limit reached. Remove old shows first.');
+    state.slots.push({ ...slot, id: randomUUID() });
+  });
+  res.status(201).json(state.slots.at(-1));
+}));
+router.delete('/schedule/:id', manage, wrap(async (req,res) => {
+  await store.update(req.user!.id, `Removed scheduled show ${req.params.id}`, state => { state.slots = state.slots.filter(s => s.id !== req.params.id); });
+  res.sendStatus(204);
+}));
+router.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  if (err instanceof z.ZodError) return res.status(400).json({ error: err.issues.map(i => i.message).join('; ') });
+  if (err.type === 'entity.too.large') return res.status(413).json({ error: 'MP3 exceeds 25 MB.' });
+  console.error('Radio station:', err);
+  res.status(503).json({ error: err.message || 'Radio storage unavailable' });
+});
+export default router;
