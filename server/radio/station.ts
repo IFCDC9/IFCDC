@@ -1,9 +1,10 @@
+import type { Catalog, Crate } from './catalog';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename, readdir } from 'node:fs/promises';
 import path from 'node:path';
-export type Track = { id: string; title: string; duration: number; filename: string };
+export type Track = { id: string; title: string; duration: number; filename: string; catalog?: Catalog; catalogUpdatedAt?: string; catalogUpdatedBy?: string };
 export type Slot = { id: string; title: string; start: string; tracks: string[] };
-export type Station = { tracks: Track[]; slots: Slot[]; log: { at: string; actor: string; action: string }[] };
+export type Station = { crates?: Crate[]; tracks: Track[]; slots: Slot[]; log: { at: string; actor: string; action: string }[] };
 export function nowPlaying(state: Station, time = Date.now()) {
   // Newer shows take precedence; a completed override does not revive an older show.
   const slot = [...state.slots].filter(s => Date.parse(s.start) <= time).sort((a,b) => Date.parse(b.start)-Date.parse(a.start))[0];
