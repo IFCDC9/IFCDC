@@ -14,6 +14,7 @@ export function registerPublicPageRoutes(app: Express): void {
   app.get("/", (req, res, next) => publicWebsiteHost(req.get("host") || "") ? sendWebsite(res, "cdc-home.html") : next());
   app.get("/index.html", (_req, res) => sendWebsite(res, "cdc-home.html"));
   app.get("/design-website", (_req, res) => sendWebsite(res, "cdc-design-app.html"));
+  app.get(["/listen", "/listen.html"], (_req,res) => sendWebsite(res,"cdc-radio.html"));
   app.get("/website", (_req, res) => sendWebsite(res, "cdc-home.html"));
   const websitePages: Record<string,string> = { client: "client", "design-app": "design-app", about: "about", programs: "programs", services: "services", contact: "contact", careers: "careers", media: "media", "privacy-policy": "privacy", "terms-of-use": "terms" };
   for (const [route, file] of Object.entries(websitePages)) {

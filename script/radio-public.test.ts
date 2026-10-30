@@ -1,0 +1,51 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import express from 'express';
+import cookieParser from 'cookie-parser';
+import { randomUUID } from 'node:crypto';
+import { StationStore } from '../server/radio/station';
+test('public status is gated and sanitized; durable listener sessions cannot access private HQ radio',async()=>{
+ const dir=await mkdtemp(path.join(os.tmpdir(),'radio-listeners-'));process.env.NODE_ENV='test';process.env.IFCDC_DATA_DIR=dir;process.env.RADIO_DATA_DIR=path.join(dir,'radio');
+ const {publicRadioRouter}=await import('../server/routes/radio-public');
+ const {getDb}=await import('../server/db');
+ const {hqAuthRequired}=await import('../server/middleware/hqAuth');
+ const {default:privateRadio}=await import('../server/routes/radio-station');
+ const store=new StationStore(process.env.RADIO_DATA_DIR);const id=randomUUID();let enabled=false;
+ await store.update('founder','seed',s=>{s.tracks=[{id,title:'Public tone',filename:'PRIVATE.mp3',duration:10}];s.log.push({at:new Date().toISOString(),actor:'PRIVATE_ID',action:'PRIVATE_LOG'});});
+ const playout={status:()=>({ready:true,trackId:id,trackTitle:'Public tone',showTitle:'Test show',mode:'scheduled'}),listen:(res:any)=>res.type('audio/mpeg').send(Buffer.from('stream'))} as any;
+ const app=express();app.use(cookieParser());app.use('/api/public/radio',publicRadioRouter(store,playout,{enabled:()=>enabled,origins:()=>['https://ifcdc.org']}));app.use('/api/radio',hqAuthRequired,privateRadio);
+ const server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r));const base=`http://127.0.0.1:${(server.address() as any).port}`;
+ const call=(route:string,method='GET',body?:any,cookie='',origin='https://ifcdc.org')=>fetch(base+'/api/public/radio'+route,{method,headers:{Origin:origin,'Content-Type':'application/json','X-Radio-Client':'website',...(cookie?{Cookie:cookie}:{})},...(body?{body:JSON.stringify(body)}:{})});
+ try {
+  assert.equal((await(await call('/status')).json()).available,false);assert.equal((await call('/stream')).status,503);
+  assert.equal((await call('/signup','POST',{displayName:'Listener',email:'listener@example.test',password:'long-password-123'})).status,503);
+  enabled=true;
+  const status=await(await call('/status')).json();assert.equal(status.now.id,id);assert.ok(!JSON.stringify(status).includes('PRIVATE'));assert.equal((await call('/stream')).status,200);
+  const signup={displayName:'Listener',email:'listener@example.test',password:'long-password-123'};
+  assert.equal((await call('/signup','POST',signup,'','https://evil.test')).status,403);
+  assert.equal((await call('/signup','POST',{...signup,role:'owner'})).status,400);
+  const created=await call('/signup','POST',signup);assert.equal(created.status,201);const setCookie=created.headers.get('set-cookie')!;assert.match(setCookie,/HttpOnly/);assert.match(setCookie,/SameSite=Strict/);assert.match(setCookie,/Path=\/api\/public\/radio/);const cookie=setCookie.split(';')[0];
+  const account=await created.json();assert.equal(account.profile.email,signup.email);assert.ok(!JSON.stringify(account).includes('password'));assert.equal(account.profile.role,undefined);
+  const row=await(await getDb()).get('SELECT * FROM radio_listeners WHERE email=?',signup.email);assert.ok(!row.password_hash.includes(signup.password));assert.ok(row.password_hash.includes(':'));
+  assert.equal((await call('/signup','POST',signup)).status,409);
+  assert.equal((await call('/login','POST',{email:signup.email,password:'incorrect-password'})).status,401);
+  const login=await call('/login','POST',{email:signup.email,password:signup.password});assert.equal(login.status,200);const secondCookie=login.headers.get('set-cookie')!.split(';')[0];
+  const profile={displayName:'My sound',avatar:'vinyl',genres:['Soul'],favorites:[id]};assert.equal((await call('/me','PATCH',profile)).status,401);
+  assert.equal((await call('/me','PATCH',{...profile,role:'owner'},cookie)).status,400);
+  assert.equal((await call('/me','PATCH',{...profile,favorites:[randomUUID()]},cookie)).status,400);
+  assert.equal((await call('/me','PATCH',profile,cookie)).status,200);
+  const me=await(await call('/me','GET',undefined,cookie)).json();assert.equal(me.profile.displayName,'My sound');assert.equal(me.savedTracks[0].title,'Public tone');assert.equal((await(await call('/me')).json()).profile,null);
+  assert.equal((await fetch(base+'/api/radio/station',{headers:{Cookie:cookie}})).status,401);
+  assert.equal((await fetch(base+'/api/radio/stream',{headers:{Cookie:cookie}})).status,401);
+  const sessionRows=await(await getDb()).all('SELECT token_hash FROM radio_listener_sessions');assert.ok(!sessionRows.some(r=>cookie.includes(r.token_hash)));
+  enabled=false;assert.equal((await call('/me','DELETE',undefined,cookie)).status,204);assert.equal((await(await call('/me','GET',undefined,secondCookie)).json()).profile,null);
+  assert.equal((await(await getDb()).get('SELECT count(*) AS count FROM radio_listeners')).count,0);
+ } finally {server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));await(await getDb()).close();await rm(dir,{recursive:true,force:true});}
+});
+test('website navigation and homepage lead to the actual listener page; no HQ control forms in public HTML',async()=>{
+ const root=new URL('../public/',import.meta.url);for(const file of ['cdc-home.html','cdc-about.html','cdc-services.html','cdc-media.html'])assert.match(await readFile(new URL(file,root),'utf8'),/href="\/listen"/);
+ const html=await readFile(new URL('cdc-radio.html',root),'utf8');assert.match(html,/Your frequency/);assert.match(html,/signup-form/);assert.ok(!html.includes('/api/radio/library'));assert.ok(!html.includes('Schedule selected tracks'));
+});

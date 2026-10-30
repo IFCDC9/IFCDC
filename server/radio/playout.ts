@@ -25,10 +25,12 @@ export class RadioPlayout {
   private fault: string | null = null;
   private unavailable = new Map<string,number>();
   private trackTitle: string | null = null;
+  private trackId: string | null = null;
+  private showTitle: string | null = null;
   constructor(private store: StationStore, private ffmpeg = process.env.RADIO_FFMPEG_PATH || 'ffmpeg') {}
   status() {
     return { enabled: !this.stopped, ready: !this.stopped && !!this.encoder && this.lastBytesAt > 0 && Date.now()-this.lastBytesAt < 5000,
-      mode: this.mode, trackTitle:this.trackTitle, error: this.fault, listeners: this.listeners.size, bytes: this.bytes,
+      mode: this.mode, trackTitle:this.trackTitle, trackId:this.trackId, showTitle:this.showTitle, error: this.fault, listeners: this.listeners.size, bytes: this.bytes,
       lastAudioAt: this.lastBytesAt ? new Date(this.lastBytesAt).toISOString() : null };
   }
   start() {
@@ -93,7 +95,7 @@ export class RadioPlayout {
         input = ['-re','-ss',String(selection.offset),'-i',file,'-t',String(Math.max(0.05,selection.track.duration-selection.offset))];
       } else input = ['-re','-f','lavfi','-i','anullsrc=r=44100:cl=stereo'];
       const decoder = spawn(this.ffmpeg,['-hide_banner','-loglevel','error',...input,'-vn','-f','s16le','-ar','44100','-ac','2','pipe:1']);
-      this.decoder = decoder; this.key = key; this.mode = selection?.mode || 'silence'; this.trackTitle=selection?.track.title || null;
+      this.decoder = decoder; this.key = key; this.mode = selection?.mode || 'silence'; this.trackTitle=selection?.track.title || null; this.trackId=selection?.track.id || null;this.showTitle=selection?.slot.title || null;
       if(!this.unavailable.size)this.fault = null;
       decoder.stdout.pipe(this.encoder!.stdin,{end:false});
       decoder.stderr.resume();

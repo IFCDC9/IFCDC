@@ -42,6 +42,8 @@ const GRANTS_OPERATOR = {
 app.use("/client-sites", express.json({ limit: "16kb" }));
 app.use("/api/client", express.json({ limit: "16kb" }));
 app.use("/api/hq/client-projects", express.json({ limit: "16kb" }));
+app.use("/api/public/radio", express.json({ limit: "8kb" }));
+app.use("/api/public/radio", (error: any, _req: express.Request, res: express.Response, next: express.NextFunction) => { if(error?.type === "entity.too.large") { res.status(413).json({error:"Listener request exceeds 8 KB."}); return; } next(error); });
 app.use("/api/public/support", express.json({ limit: "100kb" }));
 app.use("/api/public/website", express.json({ limit: "7mb" }));
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || "55mb" }));
