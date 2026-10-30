@@ -25,7 +25,7 @@ test('only approved public hosts receive public root; HQ and forwarded-host inje
  assert.equal((await rootRequest({Host:'hq.ifcdc.org','X-Forwarded-Host':'ifcdc.org'})).text,'PRIVATE HQ SPA');
 });
 test('all public page paths and historical HTML aliases serve the new website without a login',async()=>{
- for(const route of ['/website','/about','/programs','/services', '/design-app','/design-website','/contact','/careers','/media','/privacy-policy','/terms-of-use','/about.html','/programs.html','/contact.html']){const response=await call(route);assert.equal(response.status,200,route);assert.match(await response.text(),/service@ifcdc.org/,route);}
+ for(const route of ['/listen','/listen.html','/website','/about','/programs','/services', '/design-app','/design-website','/contact','/careers','/media','/privacy-policy','/terms-of-use','/about.html','/programs.html','/contact.html']){const response=await call(route);assert.equal(response.status,200,route);assert.match(await response.text(),/service@ifcdc.org/,route);}
 });
 test('content validation blocks executable, private, credentialed, and unsupported embed URLs',()=>{
  for(const value of ['javascript:alert(1)','http://example.test/x','https://127.0.0.1/x','https://localhost/x','https://user:pass@example.com/x','https://name.internal/x'])assert.throws(()=>websiteUrl(value,'link'));

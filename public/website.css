@@ -5,3 +5,5 @@
 @media(max-width:760px){.emblem-stage{overflow:clip}}
 
 .designer-invitation{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:1rem 0;border-bottom:1px solid var(--line,#33404b)}
+
+.public-website .radio-invitation{display:flex;align-items:center;justify-content:space-between;gap:28px;padding:40px;margin:40px 0;border:1px solid #a4894880;border-radius:14px;background:radial-gradient(ellipse at 85% 20%,#d5b66e20,transparent 65%),#171d1a}.public-website .radio-invitation h2{color:#f2d18c;margin:8px 0;font-size:clamp(28px,4vw,46px)}.public-website .radio-invitation p{color:#c4cbc3}.public-website .radio-invitation .button{white-space:nowrap}@media(max-width:650px){.public-website .radio-invitation{flex-direction:column;align-items:flex-start;padding:25px}}

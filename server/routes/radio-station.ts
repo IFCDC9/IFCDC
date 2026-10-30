@@ -1,3 +1,4 @@
+import { publicRadioRouter } from './radio-public';
 import { inspectMp3 } from '../radio/media';
 import { recurrenceSchema } from '../radio/automation';
 import { buildCrate, catalogSchema, crateRulesSchema } from '../radio/catalog';
@@ -12,6 +13,7 @@ import { StationStore, nowPlaying } from '../radio/station';
 const router = Router();
 const store = new StationStore(process.env.RADIO_DATA_DIR || '');
 const playout = new RadioPlayout(store);
+export const radioListenerRouter=publicRadioRouter(store,playout);
 export function startRadioPlayout() {
   if (process.env.RADIO_PLAYOUT_ENABLED !== 'true') return;
   playout.start();
