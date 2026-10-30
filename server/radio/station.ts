@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, readdir } from 'node:fs/promises';
 import path from 'node:path';
 export type Track = { id: string; title: string; duration: number; filename: string };
 export type Slot = { id: string; title: string; start: string; tracks: string[] };
@@ -9,10 +9,10 @@ export function nowPlaying(state: Station, time = Date.now()) {
   const slot = [...state.slots].filter(s => Date.parse(s.start) <= time).sort((a,b) => Date.parse(b.start)-Date.parse(a.start))[0];
   if (!slot) return null;
   let elapsed = (time - Date.parse(slot.start)) / 1000;
-  for (const id of slot.tracks) {
+  for (const [index, id] of slot.tracks.entries()) {
     const track = state.tracks.find(t => t.id === id);
     if (!track) continue;
-    if (elapsed < track.duration) return { slot, track, offset: elapsed };
+    if (elapsed < track.duration) return { slot, track, index, offset: elapsed };
     elapsed -= track.duration;
   }
   return null;
@@ -24,7 +24,10 @@ export class StationStore {
     if (!this.directory) throw new Error('Configure RADIO_DATA_DIR on a persistent disk before using radio storage.');
     await mkdir(this.directory, { recursive: true });
     try { return JSON.parse(await readFile(path.join(this.directory, 'station.json'), 'utf8')); }
-    catch (error: any) { if (error.code === 'ENOENT') return { tracks: [], slots: [], log: [] }; throw error; }
+    catch (error: any) { if (error.code === 'ENOENT') {
+      if ((await readdir(this.directory)).some(name => name.endsWith('.mp3'))) throw new Error('Radio manifest is missing but audio files exist. Restore the manifest before uploading; existing audio was preserved.');
+      return { tracks: [], slots: [], log: [] };
+    } throw error; }
   }
   update(actor: string, action: string, change: (state: Station) => void | Promise<void>) {
     const job = this.pending.then(async () => {
