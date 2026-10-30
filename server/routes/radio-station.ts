@@ -1,3 +1,5 @@
+import { inspectMp3 } from '../radio/media';
+import { recurrenceSchema } from '../radio/automation';
 import { buildCrate, catalogSchema, crateRulesSchema } from '../radio/catalog';
 import { RadioPlayout } from '../radio/playout';
 import express, { Router, type Request, type Response, type NextFunction } from 'express';
@@ -31,7 +33,8 @@ router.post('/library', manage, express.raw({ type: 'audio/mpeg', limit: '25mb' 
   const audio = req.body;
   if (!Buffer.isBuffer(audio) || audio.length < 3 || !(audio.subarray(0,3).toString() === 'ID3' || (audio[0] === 255 && (audio[1] & 224) === 224))) return res.status(400).json({ error: 'Upload an MP3 audio file (maximum 25 MB).' });
   const id = randomUUID();
-  const track = { ...metadata, id, filename: `${id}.mp3` };
+  const duration=await inspectMp3(audio);
+  const track = { ...metadata, duration, durationVerifiedAt:new Date().toISOString(), id, filename: `${id}.mp3` };
   await store.update(req.user!.id, `Uploaded ${track.title}`, async state => {
     if (state.tracks.length >= 500) throw new Error('Library limit reached (500 tracks).');
     const file = path.join(store.directory, track.filename);
@@ -72,6 +75,26 @@ router.get('/library/:id/audio', readAccess, wrap(async (req,res) => {
   const track = state.tracks.find(t => t.id === req.params.id);
   if (!track) return res.status(404).json({ error: 'Track not found' });
   res.type('audio/mpeg').sendFile(path.resolve(store.directory, track.filename));
+}));
+router.post('/recurring', manage, wrap(async (req,res) => {
+  const show=recurrenceSchema.parse(req.body);
+  const state=await store.update(req.user!.id, `Created recurring show ${show.title}`,s=>{
+    if(show.tracks.some(id=>!s.tracks.some(t=>t.id===id)))throw Object.assign(new Error('Track not found'),{status:400});
+    if(show.tracks.reduce((total,id)=>total+s.tracks.find(t=>t.id===id)!.duration,0)>86400)throw Object.assign(new Error('Recurring shows must be no longer than 24 hours'),{status:400});
+    s.recurring ||= [];if(s.recurring.length>=100)throw Object.assign(new Error('Recurring show limit reached (100)'),{status:400});
+    s.recurring.push({...show,id:randomUUID(),createdAt:new Date().toISOString()});
+  });
+  res.status(201).json(state.recurring!.at(-1));
+}));
+router.delete('/recurring/:id', manage, wrap(async (req,res) => {
+  await store.update(req.user!.id, `Removed recurring show ${req.params.id}`,s=>{s.recurring=(s.recurring || []).filter(r=>r.id!==req.params.id);});res.sendStatus(204);
+}));
+router.put('/fallback', manage, wrap(async (req,res) => {
+  const {tracks}=z.object({tracks:z.array(z.string().uuid()).max(200)}).strict().parse(req.body);
+  await store.update(req.user!.id,'Updated fallback rotation',s=>{
+    if(tracks.some(id=>{const t=s.tracks.find(t=>t.id===id);return !t || t.catalog?.content!=='clean' || !['approved','favorite'].includes(t.catalog.preference);}))throw Object.assign(new Error('Fallback requires tracks tagged clean and approved or favorite.'),{status:400});
+    s.fallback={tracks,anchor:new Date().toISOString()};
+  });res.sendStatus(204);
 }));
 router.post('/schedule', manage, wrap(async (req,res) => {
   const slot = z.object({ title: z.string().trim().min(1).max(200), start: z.string().datetime(), tracks: z.array(z.string().uuid()).min(1).max(200) }).parse(req.body);

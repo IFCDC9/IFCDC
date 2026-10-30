@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import path from 'node:path';
 import type { Response } from 'express';
-import { StationStore, nowPlaying } from './station';
+import { StationStore, selectPlayback } from './station';
 
 function stopChild(child: ChildProcessWithoutNullStreams | undefined) {
   if (child?.pid && child.pid > 0 && child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
@@ -23,10 +23,12 @@ export class RadioPlayout {
   private bytes = 0;
   private mode = 'disabled';
   private fault: string | null = null;
+  private unavailable = new Map<string,number>();
+  private trackTitle: string | null = null;
   constructor(private store: StationStore, private ffmpeg = process.env.RADIO_FFMPEG_PATH || 'ffmpeg') {}
   status() {
     return { enabled: !this.stopped, ready: !this.stopped && !!this.encoder && this.lastBytesAt > 0 && Date.now()-this.lastBytesAt < 5000,
-      mode: this.mode, error: this.fault, listeners: this.listeners.size, bytes: this.bytes,
+      mode: this.mode, trackTitle:this.trackTitle, error: this.fault, listeners: this.listeners.size, bytes: this.bytes,
       lastAudioAt: this.lastBytesAt ? new Date(this.lastBytesAt).toISOString() : null };
   }
   start() {
@@ -64,7 +66,20 @@ export class RadioPlayout {
         stopChild(this.encoder); this.encoder = undefined; this.stopDecoder();
       }
       if (!this.encoder) this.createEncoder();
-      const selection = nowPlaying(state);
+      for(const [id,until] of this.unavailable) if(until<=Date.now()) this.unavailable.delete(id);
+      let selection = selectPlayback(state,Date.now(),new Set(this.unavailable.keys()));
+      // Missing files fall back immediately without changing saved shows.
+      while(selection) {
+        try {
+          if(!/^[a-f0-9-]+\.mp3$/i.test(selection.track.filename)) throw new Error('Invalid stored filename');
+          await access(path.resolve(this.store.directory,selection.track.filename));
+          break;
+        } catch {
+          this.unavailable.set(selection.track.id,Date.now()+60000);
+          this.fault='A media file is unavailable; using fallback or silence.';
+          selection=selectPlayback(state,Date.now(),new Set(this.unavailable.keys()));
+        }
+      }
       // Include index to support repeated tracks in a single show.
       const key = selection ? `${selection.slot.id}:${selection.index}` : 'silence';
       if (this.decoder && this.key === key) return;
@@ -78,12 +93,14 @@ export class RadioPlayout {
         input = ['-re','-ss',String(selection.offset),'-i',file,'-t',String(Math.max(0.05,selection.track.duration-selection.offset))];
       } else input = ['-re','-f','lavfi','-i','anullsrc=r=44100:cl=stereo'];
       const decoder = spawn(this.ffmpeg,['-hide_banner','-loglevel','error',...input,'-vn','-f','s16le','-ar','44100','-ac','2','pipe:1']);
-      this.decoder = decoder; this.key = key; this.mode = selection ? 'scheduled' : 'silence'; this.fault = null;
+      this.decoder = decoder; this.key = key; this.mode = selection?.mode || 'silence'; this.trackTitle=selection?.track.title || null;
+      if(!this.unavailable.size)this.fault = null;
       decoder.stdout.pipe(this.encoder!.stdin,{end:false});
       decoder.stderr.resume();
       const failed = () => {
         if (this.decoder !== decoder) return;
-        this.stopDecoder(); this.fault = 'Audio decoder failed; retrying in five seconds.'; this.mode = 'error'; this.retryAt = Date.now()+5000;
+        if(selection)this.unavailable.set(selection.track.id,Date.now()+60000);
+        this.stopDecoder(); this.fault = 'Audio decoder failed; switching to fallback or silence.'; this.mode = 'error';
       };
       decoder.on('error',failed);
       decoder.on('close',code => { if (this.decoder !== decoder) return; if (code !== 0) failed(); else { this.decoder=undefined; this.key=''; } });

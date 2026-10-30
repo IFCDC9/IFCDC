@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
 import { RadioPlayout } from '../server/radio/playout';
+import { catalogSchema } from '../server/radio/catalog';
 import { StationStore } from '../server/radio/station';
 const delay = (ms:number) => new Promise(r => setTimeout(r,ms));
 async function until(check:()=>boolean, timeout=15000) {
@@ -33,6 +34,18 @@ test('real FFmpeg streams without listeners, follows schedule, returns to silenc
   await until(()=>playout.status().mode==='scheduled');
   await until(()=>playout.status().mode==='silence');
   assert.equal(playout.status().error,null);
+  await store.update('test','fallback',s=>{s.tracks[0].catalog=catalogSchema.parse({content:'clean',preference:'approved'});s.fallback={tracks:['a'],anchor:new Date().toISOString()};});
+  await until(()=>playout.status().mode==='fallback');
+  await store.update('test','missing show',s=>{s.tracks.push({id:'b',title:'Missing',filename:'b.mp3',duration:60});s.slots.push({id:'missing',title:'Missing',start:new Date().toISOString(),tracks:['b']});});
+  await until(()=>playout.status().mode==='fallback' && !!playout.status().error);
+  assert.equal(playout.status().trackTitle,'Tone');
+  await writeFile(path.join(dir,'c.mp3'),'corrupt');
+  await store.update('test','corrupt show',s=>{s.tracks.push({id:'c',title:'Corrupt',filename:'c.mp3',duration:60});s.slots.push({id:'corrupt',title:'Corrupt',start:new Date().toISOString(),tracks:['c']});});
+  await until(()=>playout.status().mode==='fallback' && !!playout.status().error?.includes('decoder failed'));
+  const recoveredBytes=playout.status().bytes;await until(()=>playout.status().bytes>recoveredBytes,5000);
+  // Same persisted rotation resumes after constructing a fresh worker.
+  playout.stop();const restarted=new RadioPlayout(new StationStore(dir));
+  try {restarted.start();await until(()=>restarted.status().ready && restarted.status().mode==='fallback');}finally{restarted.stop();}
   playout.stop(); assert.equal(playout.status().ready,false); assert.equal(playout.status().enabled,false);
  } finally { playout.stop(); server.closeAllConnections(); await new Promise<void>(r=>server.close(()=>r())); await rm(dir,{recursive:true,force:true}); }
 });

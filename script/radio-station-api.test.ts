@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
+import { spawnSync } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -25,12 +26,15 @@ test('radio API enforces roles, validates uploads, schedules and serves range au
  assert.equal((await fetch(`${base}/station`,{headers:{'x-test-role':'radio_host'}})).status,200);
  assert.equal((await fetch(`${base}/schedule`,{method:'POST',headers:{'x-test-role':'radio_host','Content-Type':'application/json'},body:'{}'})).status,403);
  assert.equal((await fetch(`${base}/library?title=Invalid&duration=10`,{method:'POST',headers:{...headers,'Content-Type':'audio/mpeg'},body:'invalid audio'})).status,400);
- const upload=await fetch(`${base}/library?title=Station%20ID&duration=10`,{method:'POST',headers:{...headers,'Content-Type':'audio/mpeg'},body:Buffer.from('ID3test-audio')});
- assert.equal(upload.status,201); const track=await upload.json();
+ const mp3=spawnSync('ffmpeg',['-hide_banner','-loglevel','error','-f','lavfi','-i','sine=frequency=440:duration=10','-c:a','libmp3lame','-f','mp3','pipe:1']);
+ assert.equal(mp3.status,0);
+ assert.equal((await fetch(`${base}/library?title=Fake&duration=10`,{method:'POST',headers:{...headers,'Content-Type':'audio/mpeg'},body:Buffer.from('ID3broken')})).status,400);
+ const upload=await fetch(`${base}/library?title=Station%20ID&duration=999`,{method:'POST',headers:{...headers,'Content-Type':'audio/mpeg'},body:mp3.stdout});
+ assert.equal(upload.status,201); const track=await upload.json();const verifiedDuration=track.duration;assert.ok(verifiedDuration>=10 && verifiedDuration<11);assert.ok(track.durationVerifiedAt);
  const scheduled=await fetch(`${base}/schedule`,{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({title:'Test show',start:new Date(Date.now()+1000).toISOString(),tracks:[track.id]})});
  assert.equal(scheduled.status,201);
  const audio=await fetch(`${base}/library/${track.id}/audio`,{headers:{...headers,Range:'bytes=0-2'}});
- assert.equal(audio.status,206); assert.equal(await audio.text(),'ID3');
+ assert.equal(audio.status,206); assert.deepEqual(Buffer.from(await audio.arrayBuffer()),mp3.stdout.subarray(0,3));
  const state=await (await fetch(`${base}/station`,{headers})).json();
  assert.equal(state.tracks.length,1); assert.equal(state.slots.length,1); assert.equal(state.log.length,2); assert.equal(state.streaming,false);
  assert.deepEqual(state.crates,[]);
@@ -49,7 +53,21 @@ test('radio API enforces roles, validates uploads, schedules and serves range au
  assert.equal((await fetch(`${base}/crates/${savedCrate.id}`,{method:'DELETE',headers:{'x-test-role':'radio_host'}})).status,403);
  assert.equal((await fetch(`${base}/crates/${savedCrate.id}`,{method:'DELETE',headers})).status,204);
  const updated=await (await fetch(`${base}/station`,{headers})).json();
- assert.equal(updated.crates.length,1);assert.equal(updated.tracks[0].duration,10);assert.equal(updated.tracks[0].catalog.artist,'Artist');assert.equal(updated.slots.length,1);
+ assert.equal(updated.crates.length,1);assert.equal(updated.tracks[0].duration,verifiedDuration);assert.equal(updated.tracks[0].catalog.artist,'Artist');assert.equal(updated.slots.length,1);
+
+ const recurrence={title:'Daily',startDate:'2026-10-30',time:'09:00',timezone:'America/New_York',weekdays:[0,1,2,3,4,5,6],tracks:[track.id]};
+ const post=(url:string,body:unknown,role='owner',method='POST')=>fetch(`${base}${url}`,{method,headers:{'x-test-role':role,'Content-Type':'application/json'},body:JSON.stringify(body)});
+ assert.equal((await post('/recurring',recurrence,'radio_host')).status,403);
+ assert.equal((await post('/recurring',{...recurrence,timezone:'Invalid'})).status,400);
+ const repeating=await post('/recurring',recurrence);assert.equal(repeating.status,201);const rule=await repeating.json();
+ assert.equal((await post('/fallback',{tracks:[track.id]},'radio_host','PUT')).status,403);
+ assert.equal((await post('/fallback',{tracks:[track.id]},'owner','PUT')).status,204);
+ await patch({content:'explicit',preference:'approved'});
+ assert.equal((await post('/fallback',{tracks:[track.id]},'owner','PUT')).status,400);
+ const automated=await (await fetch(`${base}/station`,{headers})).json();assert.equal(automated.recurring.length,1);assert.deepEqual(automated.fallback.tracks,[track.id]);
+ assert.equal((await fetch(`${base}/recurring/${rule.id}`,{method:'DELETE',headers:{'x-test-role':'radio_host'}})).status,403);
+ assert.equal((await fetch(`${base}/recurring/${rule.id}`,{method:'DELETE',headers})).status,204);
+ assert.equal((await post('/fallback',{tracks:[]},'owner','PUT')).status,204);
 
  } finally {server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(directory,{recursive:true,force:true});}
 });
