@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Catalog, Crate } from '../../../../server/radio/catalog';
-export type CatalogTrack = {id:string;title:string;duration:number;catalog?:Catalog;catalogUpdatedAt?:string};
+export type CatalogTrack = {id:string;title:string;duration:number;durationVerifiedAt?:string;catalog?:Catalog;catalogUpdatedAt?:string};
 type Run = (fn:()=>Promise<void>)=>Promise<void>;
 type Request = (url:string,options:RequestInit)=>Promise<void>;
 const textFields = ['artist','genre','era','key','mood','kickBass','transitionNotes'] as const;

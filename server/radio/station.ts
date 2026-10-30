@@ -1,13 +1,14 @@
+import { recurringSlots, fallbackSelection, type RecurringShow, type Fallback } from './automation';
 import type { Catalog, Crate } from './catalog';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename, readdir } from 'node:fs/promises';
 import path from 'node:path';
-export type Track = { id: string; title: string; duration: number; filename: string; catalog?: Catalog; catalogUpdatedAt?: string; catalogUpdatedBy?: string };
+export type Track = { id: string; title: string; duration: number; filename: string; catalog?: Catalog; durationVerifiedAt?: string; catalogUpdatedAt?: string; catalogUpdatedBy?: string };
 export type Slot = { id: string; title: string; start: string; tracks: string[] };
-export type Station = { crates?: Crate[]; tracks: Track[]; slots: Slot[]; log: { at: string; actor: string; action: string }[] };
+export type Station = { recurring?: RecurringShow[]; fallback?: Fallback; crates?: Crate[]; tracks: Track[]; slots: Slot[]; log: { at: string; actor: string; action: string }[] };
 export function nowPlaying(state: Station, time = Date.now()) {
   // Newer shows take precedence; a completed override does not revive an older show.
-  const slot = [...state.slots].filter(s => Date.parse(s.start) <= time).sort((a,b) => Date.parse(b.start)-Date.parse(a.start))[0];
+  const slot = [...state.slots, ...recurringSlots(state.recurring || [], time)].filter(s => Date.parse(s.start) <= time).sort((a,b) => Date.parse(b.start)-Date.parse(a.start))[0];
   if (!slot) return null;
   let elapsed = (time - Date.parse(slot.start)) / 1000;
   for (const [index, id] of slot.tracks.entries()) {
@@ -17,6 +18,12 @@ export function nowPlaying(state: Station, time = Date.now()) {
     elapsed -= track.duration;
   }
   return null;
+}
+export function selectPlayback(state: Station, time=Date.now(), excluded:ReadonlySet<string>=new Set()) {
+  const scheduled=nowPlaying(state,time);
+  if(scheduled && !excluded.has(scheduled.track.id))return {...scheduled,mode:'scheduled' as const};
+  const fallback=fallbackSelection(state,time,excluded);
+  return fallback ? {...fallback,mode:'fallback' as const} : null;
 }
 export class StationStore {
   private pending: Promise<unknown> = Promise.resolve();

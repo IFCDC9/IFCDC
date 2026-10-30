@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { RadioAutomation, localDateTime } from '../components/radio/RadioAutomation';
+import type { RecurringShow, Fallback } from '../../../server/radio/automation';
 import { TrackCatalog, RadioCrates, type CatalogTrack } from '../components/radio/RadioCatalog';
 import type { Crate } from '../../../server/radio/catalog';
 import { useAuth } from '../auth/AuthContext';
 type Track = CatalogTrack;
 type Slot = { id: string; title: string; start: string; tracks: string[] };
-type State = { configured: boolean; crates?: Crate[]; playout?: { enabled: boolean; ready: boolean; mode: string; error: string | null }; tracks: Track[]; slots: Slot[]; log: { at: string; action: string }[]; now: { track: Track; offset: number; index: number; slot: Slot } | null };
+type State = { configured: boolean; recurring?:RecurringShow[]; fallback?:Fallback; crates?: Crate[]; playout?: { enabled: boolean; ready: boolean; mode: string; trackTitle?:string | null; error: string | null }; tracks: Track[]; slots: Slot[]; log: { at: string; action: string }[]; now: { track: Track; offset: number; index: number; slot: Slot } | null };
 export default function RadioStation() {
   const { user } = useAuth();
   const canManage = ['admin', 'owner', 'founder'].includes(user?.role || '');
@@ -73,7 +75,7 @@ export default function RadioStation() {
     {!state ? <p>Loading station…</p> : <>
       {!state.configured && <p className="border border-amber-500 rounded p-4">Station storage needs setup. Configure RADIO_DATA_DIR on a persistent disk before uploading or scheduling.</p>}
       <section className="border rounded-xl p-5 space-y-3"><h2 className="text-xl font-semibold">Private continuous stream</h2>
-        <p>{state.playout?.enabled ? `Server playback: ${state.playout.mode}` : 'Server playback is disabled. Set RADIO_PLAYOUT_ENABLED=true to enable.'}</p>
+        <p>{state.playout?.enabled ? `Server playback: ${state.playout.mode}${state.playout.trackTitle ? ' — '+state.playout.trackTitle : ''}` : 'Server playback is disabled. Set RADIO_PLAYOUT_ENABLED=true to enable.'}</p>
         {state.playout?.error && <p role="alert">{state.playout.error}</p>}
         {state.playout?.ready && <audio ref={streamAudio} controls preload="none" src="/api/radio/stream" onPlay={() => setListening(false)} />}
         <p>One server stream follows the schedule and sends silence between shows. It continues without browser listeners. Private HQ access only; public broadcasting is not connected.</p>
@@ -88,20 +90,21 @@ export default function RadioStation() {
         {canManage && <label className="block">Upload MP3 (maximum 25 MB)<input className="block mt-2" type="file" accept="audio/mpeg,.mp3" disabled={busy || !state.configured} onChange={e => { const file = e.target.files?.[0]; e.target.value=''; if (file) { if (file.size > 25*1024*1024) setError('MP3 exceeds 25 MB'); else action(() => upload(file)); } }} /></label>}
         {state.tracks.length === 0 && <p>Upload your first recording or station ID to begin.</p>}
         <label>Search catalog<input className="block bg-background border rounded p-2" value={catalogSearch} onChange={e=>setCatalogSearch(e.target.value)} placeholder="Title, artist, genre, mood, or sound notes"/></label>
-        {state.tracks.filter(t=>`${t.title} ${JSON.stringify(t.catalog || {})}`.toLocaleLowerCase().includes(catalogSearch.toLocaleLowerCase())).map(t => <div key={t.id}><label className="flex gap-3 items-center p-2 border-b"><input aria-label={`Select ${t.title}`} type="checkbox" disabled={!canManage} checked={selected.includes(t.id)} onChange={e => setSelected(e.target.checked ? [...selected,t.id] : selected.filter(id => id !== t.id))}/><span>{t.title} · {Math.round(t.duration)} sec</span></label><TrackCatalog track={t} canManage={canManage} busy={busy} action={action} request={request}/></div>)}
+        {state.tracks.filter(t=>`${t.title} ${JSON.stringify(t.catalog || {})}`.toLocaleLowerCase().includes(catalogSearch.toLocaleLowerCase())).map(t => <div key={t.id}><label className="flex gap-3 items-center p-2 border-b"><input aria-label={`Select ${t.title}`} type="checkbox" disabled={!canManage} checked={selected.includes(t.id)} onChange={e => setSelected(e.target.checked ? [...selected,t.id] : selected.filter(id => id !== t.id))}/><span>{t.title} · {Math.round(t.duration)} sec · {t.durationVerifiedAt ? 'duration verified' : 'legacy duration unverified'}</span></label><TrackCatalog track={t} canManage={canManage} busy={busy} action={action} request={request}/></div>)}
         {selected.length > 0 && <p>Playback order: {selected.map(id => state.tracks.find(t => t.id === id)?.title).join(' → ')} <button onClick={() => setSelected([])}>Clear</button></p>}
       </section>
       <RadioCrates crates={state.crates || []} tracks={state.tracks} selected={selected} setSelected={setSelected} canManage={canManage} busy={busy || !state.configured} action={action} request={request}/>
       <section className="border rounded-xl p-5 space-y-3"><h2 className="text-xl font-semibold">Show schedule</h2>
         {canManage && <form className="flex flex-wrap gap-3" onSubmit={e => { e.preventDefault(); const form=e.currentTarget; const data=new FormData(form); action(async () => { await request('/api/radio/schedule', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:data.get('title'),start:new Date(String(data.get('start'))).toISOString(),tracks:selected})}); form.reset(); setSelected([]); }); }}>
           <input className="bg-background border rounded p-2" name="title" placeholder="Show title" aria-label="Show title" maxLength={200} required />
-          <label>Start (your local time)<input className="block bg-background border rounded p-2" name="start" type="datetime-local" required /></label>
+          <label>Start (your local time)<input className="block bg-background border rounded p-2" name="start" type="datetime-local" defaultValue={localDateTime()} required /></label>
           <button className="border rounded p-2" disabled={busy || !state.configured || !selected.length}>Schedule selected tracks</button>
         </form>}
         <p className="text-sm">Select tracks in playback order above. Newer scheduled shows interrupt older shows. Times are saved in UTC.</p>
         {state.slots.length === 0 && <p>No shows scheduled yet.</p>}
         {[...state.slots].sort((a,b) => Date.parse(a.start)-Date.parse(b.start)).map(s => <div className="flex flex-wrap justify-between gap-3 border-b p-2" key={s.id}><span>{s.title} · {new Date(s.start).toLocaleString()} · {s.tracks.length} tracks</span>{canManage && <button disabled={busy} onClick={() => action(() => request(`/api/radio/schedule/${s.id}`,{method:'DELETE'}))}>Remove show</button>}</div>)}
       </section>
+      <RadioAutomation recurring={state.recurring || []} fallback={state.fallback} tracks={state.tracks} selected={selected} canManage={canManage} busy={busy || !state.configured} action={action} request={request}/>
       <section className="border rounded-xl p-5"><h2 className="text-xl font-semibold">Station activity</h2>{state.log.slice(-10).reverse().map((entry,i) => <p key={i}>{new Date(entry.at).toLocaleString()} — {entry.action}</p>)}</section>
     </>}
   </section>;
