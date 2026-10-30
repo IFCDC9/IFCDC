@@ -18,6 +18,9 @@ test('radio API enforces roles, validates uploads, schedules and serves range au
  const headers={'x-test-role':'owner'};
  try {
  assert.equal((await fetch(`${base}/station`)).status,401);
+ assert.equal((await fetch(`${base}/stream`)).status,401);
+ assert.equal((await fetch(`${base}/stream`,{headers:{'x-test-role':'barber'}})).status,403);
+ assert.equal((await fetch(`${base}/stream`,{headers})).status,503);
  assert.equal((await fetch(`${base}/station`,{headers:{'x-test-role':'barber'}})).status,403);
  assert.equal((await fetch(`${base}/station`,{headers:{'x-test-role':'radio_host'}})).status,200);
  assert.equal((await fetch(`${base}/schedule`,{method:'POST',headers:{'x-test-role':'radio_host','Content-Type':'application/json'},body:'{}'})).status,403);

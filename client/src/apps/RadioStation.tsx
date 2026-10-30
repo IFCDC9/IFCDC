@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 type Track = { id: string; title: string; duration: number };
 type Slot = { id: string; title: string; start: string; tracks: string[] };
-type State = { configured: boolean; tracks: Track[]; slots: Slot[]; log: { at: string; action: string }[]; now: { track: Track; offset: number; slot: Slot } | null };
+type State = { configured: boolean; playout?: { enabled: boolean; ready: boolean; mode: string; error: string | null }; tracks: Track[]; slots: Slot[]; log: { at: string; action: string }[]; now: { track: Track; offset: number; index: number; slot: Slot } | null };
 export default function RadioStation() {
   const { user } = useAuth();
   const canManage = ['admin', 'owner', 'founder'].includes(user?.role || '');
@@ -12,6 +12,7 @@ export default function RadioStation() {
   const [listening, setListening] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const audio = useRef<HTMLAudioElement>(null);
+  const streamAudio = useRef<HTMLAudioElement>(null);
   const current = useRef('');
   async function refresh() {
     const response = await fetch('/api/radio/station', { credentials: 'include' });
@@ -30,7 +31,7 @@ export default function RadioStation() {
     if (!player) return;
     if (!listening || !state?.now) { player.pause(); current.current = ''; return; }
     const now = state.now;
-    const key = `${now.slot.id}:${now.track.id}`;
+    const key = `${now.slot.id}:${now.index}`;
     if (current.current === key) return;
     current.current = key;
     player.src = `/api/radio/library/${now.track.id}/audio`;
@@ -68,9 +69,15 @@ export default function RadioStation() {
     {error && <p role="alert" className="border border-red-500 rounded p-3">{error}</p>}
     {!state ? <p>Loading station…</p> : <>
       {!state.configured && <p className="border border-amber-500 rounded p-4">Station storage needs setup. Configure RADIO_DATA_DIR on a persistent disk before uploading or scheduling.</p>}
+      <section className="border rounded-xl p-5 space-y-3"><h2 className="text-xl font-semibold">Private continuous stream</h2>
+        <p>{state.playout?.enabled ? `Server playback: ${state.playout.mode}` : 'Server playback is disabled. Set RADIO_PLAYOUT_ENABLED=true to enable.'}</p>
+        {state.playout?.error && <p role="alert">{state.playout.error}</p>}
+        {state.playout?.ready && <audio ref={streamAudio} controls preload="none" src="/api/radio/stream" onPlay={() => setListening(false)} />}
+        <p>One server stream follows the schedule and sends silence between shows. It continues without browser listeners. Private HQ access only; public broadcasting is not connected.</p>
+      </section>
       <section className="border rounded-xl p-5 space-y-3"><h2 className="text-xl font-semibold">Scheduled now</h2>
         <p>{state.now ? `${state.now.slot.title} — ${state.now.track.title}` : 'No scheduled audio playing'}</p>
-        <button className="border rounded px-4 py-2" disabled={!state.now} onClick={() => setListening(!listening)}>{listening ? 'Stop listening' : 'Listen to scheduled audio'}</button>
+        <button className="border rounded px-4 py-2" disabled={!state.now} onClick={() => { streamAudio.current?.pause(); setListening(!listening); }}>{listening ? 'Stop listening' : 'Listen to scheduled audio'}</button>
         <audio ref={audio} onEnded={() => { current.current = ''; refresh().catch(e => setError(e.message)); }} onError={() => { setListening(false); current.current = ''; setError('Audio could not be loaded. Check the media file and connection.'); }} />
         <p className="text-sm">Listening follows the show clock. This browser preview is not a continuous broadcast stream.</p>
       </section>

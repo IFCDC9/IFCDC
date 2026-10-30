@@ -1,3 +1,4 @@
+import { RadioPlayout } from '../radio/playout';
 import express, { Router, type Request, type Response, type NextFunction } from 'express';
 import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
@@ -7,13 +8,22 @@ import { requireAuth } from '../middleware/auth';
 import { StationStore, nowPlaying } from '../radio/station';
 const router = Router();
 const store = new StationStore(process.env.RADIO_DATA_DIR || '');
+const playout = new RadioPlayout(store);
+export function startRadioPlayout() {
+  if (process.env.RADIO_PLAYOUT_ENABLED !== 'true') return;
+  playout.start();
+  // Preserve process termination while cleaning up child encoders.
+  process.once('SIGTERM', () => { playout.stop(); process.exit(0); });
+  process.once('SIGINT', () => { playout.stop(); process.exit(0); });
+}
 const readAccess = requireAuth(['radio_host', 'radio', 'admin', 'EXEC', 'founder']);
 const manage = requireAuth(['admin', 'founder']);
 const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => { fn(req,res).catch(next); };
+router.get('/stream', readAccess, (_req,res) => playout.listen(res));
 router.get('/station', readAccess, wrap(async (_req,res) => {
-  if (!store.directory) return res.json({ configured: false, tracks: [], slots: [], log: [], now: null, streaming: false });
+  if (!store.directory) return res.json({ configured: false, tracks: [], slots: [], log: [], now: null, streaming: false, playout: playout.status() });
   const state = await store.read();
-  res.json({ configured: true, ...state, now: nowPlaying(state), streaming: false });
+  res.json({ configured: true, ...state, now: nowPlaying(state), streaming: false, playout: playout.status() });
 }));
 router.post('/library', manage, express.raw({ type: 'audio/mpeg', limit: '25mb' }), wrap(async (req,res) => {
   const metadata = z.object({ title: z.string().trim().min(1).max(200), duration: z.coerce.number().positive().max(86400) }).parse(req.query);
