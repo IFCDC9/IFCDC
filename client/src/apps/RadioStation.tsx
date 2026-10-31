@@ -70,7 +70,9 @@ export default function RadioStation() {
         probe.src = url;
       });
       if (!Number.isFinite(duration) || duration <= 0) throw new Error('Invalid audio duration');
-      await request(`/api/radio/library?${new URLSearchParams({title: file.name.replace(/\.mp3$/i,''), duration: String(duration)})}`, { method: 'POST', headers: { 'Content-Type': 'audio/mpeg' }, body: file });
+      const uploaded=await fetch(`/api/radio/library?${new URLSearchParams({title: file.name.replace(/\.mp3$/i,''), duration: String(duration)})}`, { method: 'POST', headers: { 'Content-Type': 'audio/mpeg' }, credentials:'include', body: file });
+      if(!uploaded.ok){const data=await uploaded.json().catch(()=>({}));throw new Error(data.error || `Upload failed (${uploaded.status})`);}
+      return Boolean((await uploaded.json()).duplicate);
     } finally { URL.revokeObjectURL(url); }
   }
   const panels=[['overview','Overview'],['library','Audio library'],['crates','Custom crates'],['shows','Show schedule'],['automation','Automation'],['activity','Activity']];

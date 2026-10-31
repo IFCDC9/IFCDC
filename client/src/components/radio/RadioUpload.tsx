@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 
-export function RadioUpload({disabled,upload,refresh}:{disabled:boolean;upload:(file:File)=>Promise<void>;refresh:()=>Promise<void>}) {
+export function RadioUpload({disabled,upload,refresh}:{disabled:boolean;upload:(file:File)=>Promise<boolean|void>;refresh:()=>Promise<void>}) {
  const [running,setRunning]=useState(false);
  const [progress,setProgress]=useState('');
  const [failures,setFailures]=useState<string[]>([]);
@@ -20,7 +20,7 @@ export function RadioUpload({disabled,upload,refresh}:{disabled:boolean;upload:(
     setProgress(`Importing ${processed+1} of ${files.length}: ${name}`);
     if(!/\.mp3$/i.test(file.name) || file.name.startsWith('._')){skipped++;}
     else if(file.size===0 || file.size>25*1024*1024){failed++;errors.push(`${name}: ${file.size===0?'Empty file':'Exceeds 25 MB'}`);}
-    else {try{await upload(file);imported++;}catch(e){failed++;errors.push(`${name}: ${e instanceof Error?e.message:'Upload failed'}`);}}
+    else {try{if(await upload(file))skipped++;else imported++;}catch(e){failed++;errors.push(`${name}: ${e instanceof Error?e.message:'Upload failed'}`);}}
     processed++;report();
    }
    try{await refresh();}catch{errors.push('Refresh the library to see the latest uploads.');}
@@ -36,7 +36,7 @@ export function RadioUpload({disabled,upload,refresh}:{disabled:boolean;upload:(
    <label>Add MP3 files<input type="file" multiple accept="audio/mpeg,.mp3" disabled={disabled || running} onChange={choose}/></label>
    <label>Add entire music folder<input type="file" multiple ref={node=>{if(node)node.setAttribute('webkitdirectory','');}} disabled={disabled || running} onChange={choose}/></label>
   </div>
-  <p className="r-small">Other formats are skipped. Reimporting a folder can create duplicate tracks. Folder structure is not saved as crates. If folder selection is unavailable on your device, use Add MP3 files.</p>
+  <p className="r-small">Other formats are skipped. Identical audio is skipped on reimport; older uploads are matched by title and audio bytes. Folder structure is not saved as crates. If folder selection is unavailable on your device, use Add MP3 files.</p>
   {running && <button type="button" className="r-ghost" onClick={()=>{stop.current=true;setProgress('Stopping after the current file…');}}>Stop after current file</button>}
   <p role="status" aria-live="polite">{progress}</p>
   {failures.length>0 && <details><summary>Review import issues ({failures.length})</summary><ul>{failures.map((message,i)=><li key={i}>{message}</li>)}</ul></details>}

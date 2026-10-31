@@ -10,7 +10,7 @@ test('radio API enforces roles, validates uploads, schedules and serves range au
  const directory=await mkdtemp(path.join(os.tmpdir(),'radio-api-'));
  process.env.RADIO_DATA_DIR=directory;
  const {default:router}=await import('../server/routes/radio-station');
- const app=express(); app.use(express.json());
+ const app=express(); app.use(express.json({limit:'1mb'}));
  app.use((req,_res,next) => { const role=req.header('x-test-role'); if(role) req.user={id:'test-founder',role}; next(); });
  app.use('/api/radio',router);
  const server=app.listen(0,'127.0.0.1');
@@ -36,7 +36,11 @@ test('radio API enforces roles, validates uploads, schedules and serves range au
  const audio=await fetch(`${base}/library/${track.id}/audio`,{headers:{...headers,Range:'bytes=0-2'}});
  assert.equal(audio.status,206); assert.deepEqual(Buffer.from(await audio.arrayBuffer()),mp3.stdout.subarray(0,3));
  const state=await (await fetch(`${base}/station`,{headers})).json();
- assert.equal(state.tracks.length,1); assert.equal(state.slots.length,1); assert.equal(state.log.length,2); assert.equal(state.streaming,false);
+ assert.equal(state.tracks.length,1); assert.equal(state.slots.length,1); assert.equal(state.log.length,2);
+ const repeated=await fetch(`${base}/library?title=Station%20ID&duration=999`,{method:'POST',headers:{...headers,'Content-Type':'audio/mpeg'},body:mp3.stdout});
+ assert.equal(repeated.status,200);assert.equal((await repeated.json()).duplicate,true);
+ assert.equal((await (await fetch(`${base}/station`,{headers})).json()).tracks.length,1);
+ assert.equal(state.streaming,false);
  assert.deepEqual(state.crates,[]);
  const patch=(body:unknown,role='owner')=>fetch(`${base}/library/${track.id}/catalog`,{method:'PATCH',headers:{'x-test-role':role,'Content-Type':'application/json'},body:JSON.stringify(body)});
  assert.equal((await patch({artist:'Artist'},'radio_host')).status,403);
@@ -72,13 +76,13 @@ test('radio API enforces roles, validates uploads, schedules and serves range au
 
  const {StationStore}=await import('../server/radio/station');
  const {randomUUID}=await import('node:crypto');
- const fullLibrary=Array.from({length:500},(_,i)=>({...track,id:randomUUID(),title:`Library track ${i}`}));
+ const fullLibrary=Array.from({length:1650},(_,i)=>({...track,id:randomUUID(),title:`Library track ${i}`}));
  await new StationStore(directory).update('test-founder','Seed full library',state=>{state.tracks=fullLibrary;});
  const fullCrate=await crate({name:'Full Music Library',rules:{}});
- assert.equal(fullCrate.status,201);assert.equal((await fullCrate.json()).tracks.length,500);
+ assert.equal(fullCrate.status,201);assert.equal((await fullCrate.json()).tracks.length,1650);
  const ids=fullLibrary.map(t=>t.id);
  assert.equal((await post('/schedule',{title:'Full rotation',start:new Date(Date.now()+60000).toISOString(),tracks:ids})).status,201);
- assert.equal((await crate({name:'Too many',tracks:[...ids,randomUUID()]})).status,400);
+ assert.equal((await crate({name:'Too many',tracks:Array.from({length:5001},()=>randomUUID())})).status,400);
 
  } finally {server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(directory,{recursive:true,force:true});}
 });

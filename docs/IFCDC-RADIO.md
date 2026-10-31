@@ -99,3 +99,5 @@ Deployment acceptance: open /radio and confirm the new studio style, then open /
 Station managers can use Audio library → Add entire music folder to recursively import MP3 files, or Add MP3 files for multiple selection. Imports run sequentially, retain the existing authenticated upload and server validation, and enforce the existing 25 MB per-file limit. Keep the tab open. Progress and per-file failures are shown; Stop finishes the current upload before ending the batch. Unsupported formats and macOS resource-fork files are skipped. Imports do not deduplicate existing tracks or turn folders into crates.
 
 Crates, scheduled shows, recurring shows, and fallback track selections accept up to 500 tracks, matching the station library capacity. Failed studio actions scroll to the error message.
+
+Library expansion: up to 5,000 tracks per library/crate/show/rotation. New uploads use SHA-256 to avoid byte-identical reimports; legacy uploads are compared by title, size, and bytes. Re-select the same folder with unchanged filenames to resume. Keep 100 MiB disk headroom; uploads stop with a storage message when unavailable. This does not enlarge the Render disk.

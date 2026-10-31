@@ -4,8 +4,8 @@ import { recurrenceSchema } from '../radio/automation';
 import { buildCrate, catalogSchema, crateRulesSchema } from '../radio/catalog';
 import { RadioPlayout } from '../radio/playout';
 import express, { Router, type Request, type Response, type NextFunction } from 'express';
-import { randomUUID } from 'node:crypto';
-import { writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { readFile, stat, statfs, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth';
@@ -36,14 +36,29 @@ router.post('/library', manage, express.raw({ type: 'audio/mpeg', limit: '25mb' 
   if (!Buffer.isBuffer(audio) || audio.length < 3 || !(audio.subarray(0,3).toString() === 'ID3' || (audio[0] === 255 && (audio[1] & 224) === 224))) return res.status(400).json({ error: 'Upload an MP3 audio file (maximum 25 MB).' });
   const id = randomUUID();
   const duration=await inspectMp3(audio);
-  const track = { ...metadata, duration, durationVerifiedAt:new Date().toISOString(), id, filename: `${id}.mp3` };
+  const contentHash=createHash('sha256').update(audio).digest('hex');
+  let duplicate=false;
+  let existingId='';
+  const track = { ...metadata, contentHash, duration, durationVerifiedAt:new Date().toISOString(), id, filename: `${id}.mp3` };
   await store.update(req.user!.id, `Uploaded ${track.title}`, async state => {
-    if (state.tracks.length >= 500) throw new Error('Library limit reached (500 tracks).');
+    for(const existing of state.tracks){
+      if(existing.contentHash===contentHash){duplicate=true;existingId=existing.id;return;}
+      if(!existing.contentHash && existing.title===metadata.title){
+        const existingFile=path.join(store.directory,existing.filename);
+        if((await stat(existingFile)).size===audio.length){
+          existing.contentHash=createHash('sha256').update(await readFile(existingFile)).digest('hex');
+          if(existing.contentHash===contentHash){duplicate=true;existingId=existing.id;return;}
+        }
+      }
+    }
+    if (state.tracks.length >= 5000) throw new Error('Library limit reached (5,000 tracks).');
+    const disk=await statfs(store.directory);
+    if(disk.bavail*disk.bsize<audio.length+100*1024*1024)throw new Error('Radio disk is nearly full. Increase the persistent disk before importing more music.');
     const file = path.join(store.directory, track.filename);
     await writeFile(file, audio, { flag: 'wx', mode: 0o600 });
     state.tracks.push(track);
   });
-  res.status(201).json(track);
+  res.status(duplicate?200:201).json(duplicate?{id:existingId,duplicate:true}:track);
 }));
 router.patch('/library/:id/catalog', manage, wrap(async (req,res) => {
   const catalog = catalogSchema.parse(req.body);
@@ -55,12 +70,12 @@ router.patch('/library/:id/catalog', manage, wrap(async (req,res) => {
   res.json(state.tracks.find(t=>t.id===req.params.id));
 }));
 router.post('/crates', manage, wrap(async (req,res) => {
-  const input=z.object({name:z.string().trim().min(1).max(100),tracks:z.array(z.string().uuid()).max(500).optional(),rules:crateRulesSchema.optional()}).strict()
+  const input=z.object({name:z.string().trim().min(1).max(100),tracks:z.array(z.string().uuid()).max(5000).optional(),rules:crateRulesSchema.optional()}).strict()
     .refine(v=>(v.tracks !== undefined) !== (v.rules !== undefined),{message:'Choose selected tracks or builder rules'}).parse(req.body);
   const state=await store.update(req.user!.id, `Created crate ${input.name}`, s=>{
     const tracks=input.rules ? buildCrate(s.tracks,input.rules) : [...new Set(input.tracks!)];
     if (!tracks.length) throw Object.assign(new Error('No tracks match. Catalog tracks or change your selection.'),{status:400});
-    if (tracks.length>500) throw Object.assign(new Error('Crates support up to 500 tracks. Narrow the builder rules.'),{status:400});
+    if (tracks.length>5000) throw Object.assign(new Error('Crates support up to 5,000 tracks. Narrow the builder rules.'),{status:400});
     if (tracks.some(id=>!s.tracks.some(t=>t.id===id))) throw Object.assign(new Error('Track not found'),{status:400});
     s.crates ||= [];
     if(s.crates.length>=200) throw Object.assign(new Error('Crate limit reached (200). Remove an unused crate.'),{status:400});
@@ -92,14 +107,14 @@ router.delete('/recurring/:id', manage, wrap(async (req,res) => {
   await store.update(req.user!.id, `Removed recurring show ${req.params.id}`,s=>{s.recurring=(s.recurring || []).filter(r=>r.id!==req.params.id);});res.sendStatus(204);
 }));
 router.put('/fallback', manage, wrap(async (req,res) => {
-  const {tracks}=z.object({tracks:z.array(z.string().uuid()).max(500)}).strict().parse(req.body);
+  const {tracks}=z.object({tracks:z.array(z.string().uuid()).max(5000)}).strict().parse(req.body);
   await store.update(req.user!.id,'Updated fallback rotation',s=>{
     if(tracks.some(id=>{const t=s.tracks.find(t=>t.id===id);return !t || t.catalog?.content!=='clean' || !['approved','favorite'].includes(t.catalog.preference);}))throw Object.assign(new Error('Fallback requires tracks tagged clean and approved or favorite.'),{status:400});
     s.fallback={tracks,anchor:new Date().toISOString()};
   });res.sendStatus(204);
 }));
 router.post('/schedule', manage, wrap(async (req,res) => {
-  const slot = z.object({ title: z.string().trim().min(1).max(200), start: z.string().datetime(), tracks: z.array(z.string().uuid()).min(1).max(500) }).parse(req.body);
+  const slot = z.object({ title: z.string().trim().min(1).max(200), start: z.string().datetime(), tracks: z.array(z.string().uuid()).min(1).max(5000) }).parse(req.body);
   const state = await store.update(req.user!.id, `Scheduled ${slot.title}`, state => {
     if (slot.tracks.some(id => !state.tracks.some(t => t.id === id))) throw new Error('One or more tracks no longer exist.');
     if (Date.parse(slot.start) < Date.now() - 60000) throw new Error('Choose a current or future start time.');

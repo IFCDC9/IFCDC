@@ -3,7 +3,7 @@ import type { Catalog, Crate } from './catalog';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename, readdir } from 'node:fs/promises';
 import path from 'node:path';
-export type Track = { id: string; title: string; duration: number; filename: string; catalog?: Catalog; durationVerifiedAt?: string; catalogUpdatedAt?: string; catalogUpdatedBy?: string };
+export type Track = { id: string; title: string; duration: number; filename: string; contentHash?:string; catalog?: Catalog; durationVerifiedAt?: string; catalogUpdatedAt?: string; catalogUpdatedBy?: string };
 export type Slot = { id: string; title: string; start: string; tracks: string[] };
 export type Station = { recurring?: RecurringShow[]; fallback?: Fallback; crates?: Crate[]; tracks: Track[]; slots: Slot[]; log: { at: string; actor: string; action: string }[] };
 export function nowPlaying(state: Station, time = Date.now()) {
