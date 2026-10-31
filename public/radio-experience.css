@@ -4,3 +4,6 @@
 .radio-experience .r-skip{position:absolute;left:-10000px;top:12px;z-index:20}.radio-experience .r-skip:focus{left:12px}
 
 .radio-experience .r-orbit-core small{font-size:8px;letter-spacing:.15em;white-space:nowrap;text-align:center}
+
+/* Approved IFCDC Radio identity */
+.radio-experience .r-brand-logo{width:52px;height:52px;object-fit:contain;flex-shrink:0}.radio-experience .r-hero-logo{display:block;width:min(100%,390px);height:auto;aspect-ratio:1;object-fit:contain;margin:12px auto}.radio-experience .r-signal{overflow:hidden}
