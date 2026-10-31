@@ -1,0 +1,21 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {JSDOM} from 'jsdom';
+import React, {act} from 'react';
+import {createRoot} from 'react-dom/client';
+import {RadioUpload} from '../client/src/components/radio/RadioUpload';
+test('folder import skips unsupported files, continues after failures and refreshes once',async()=>{
+ const dom=new JSDOM('<div id="root"></div>');
+ Object.assign(globalThis,{window:dom.window,document:dom.window.document,IS_REACT_ACT_ENVIRONMENT:true});
+ const calls:string[]=[];let refreshes=0;
+ const root=createRoot(document.getElementById('root')!);
+ await act(async()=>root.render(React.createElement(RadioUpload,{disabled:false,upload:async(file:File)=>{calls.push(file.name);if(file.name==='bad.mp3')throw new Error('Invalid audio');},refresh:async()=>{refreshes++;}})));
+ const input=document.querySelector('input[webkitdirectory]')!;
+ const files=['song.mp3','notes.txt','bad.mp3','next.MP3','._hidden.mp3'].map(name=>new dom.window.File(['audio'],name));
+ Object.defineProperty(input,'files',{value:files});
+ await act(async()=>{input.dispatchEvent(new dom.window.Event('change',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,20));});
+ assert.deepEqual(calls,['song.mp3','bad.mp3','next.MP3']);assert.equal(refreshes,1);
+ assert.match(document.body.textContent!,/2 imported · 2 skipped · 1 failed · 0 remaining/);
+ assert.match(document.body.textContent!,/bad.mp3: Invalid audio/);
+ await act(async()=>root.unmount());dom.window.close();
+});

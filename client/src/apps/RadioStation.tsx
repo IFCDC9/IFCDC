@@ -1,3 +1,4 @@
+import { RadioUpload } from '../components/radio/RadioUpload';
 import '../../../public/radio-experience.css';
 import { RadioTower, Headphones, ArrowUpRight, Disc3 } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
@@ -56,7 +57,7 @@ export default function RadioStation() {
   }
   async function request(url: string, options: RequestInit) {
     const res = await fetch(url, { ...options, credentials: 'include' });
-    if (!res.ok) { const data = await res.json(); throw new Error(data.error || 'Request failed'); }
+    if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(data.error || `Request failed (${res.status})`); }
   }
   async function upload(file: File) {
     const url = URL.createObjectURL(file);
@@ -106,7 +107,7 @@ export default function RadioStation() {
 </details>
     </>}
     {tab==='library' && <>      <section className="border rounded-xl p-5 space-y-3"><h2 className="text-xl font-semibold">Audio library ({state.tracks.length})</h2>
-        {canManage && <label className="block">Upload MP3 (maximum 25 MB)<input className="block mt-2" type="file" accept="audio/mpeg,.mp3" disabled={busy || !state.configured} onChange={e => { const file = e.target.files?.[0]; e.target.value=''; if (file) { if (file.size > 25*1024*1024) setError('MP3 exceeds 25 MB'); else action(() => upload(file)); } }} /></label>}
+        {canManage && <RadioUpload disabled={busy || !state.configured} upload={upload} refresh={refresh}/> }
         {state.tracks.length === 0 && <p>Upload your first recording or station ID to begin.</p>}
         <label>Search catalog<input className="block bg-background border rounded p-2" value={catalogSearch} onChange={e=>setCatalogSearch(e.target.value)} placeholder="Title, artist, genre, mood, or sound notes"/></label>
         {state.tracks.filter(t=>`${t.title} ${JSON.stringify(t.catalog || {})}`.toLocaleLowerCase().includes(catalogSearch.toLocaleLowerCase())).map(t => <div key={t.id}><label className="r-track-select"><input aria-label={`Select ${t.title}`} type="checkbox" disabled={!canManage} checked={selected.includes(t.id)} onChange={e => setSelected(e.target.checked ? [...selected,t.id] : selected.filter(id => id !== t.id))}/><span>{t.title} · {Math.round(t.duration)} sec · {t.durationVerifiedAt ? 'duration verified' : 'legacy duration unverified'}</span></label><TrackCatalog track={t} canManage={canManage} busy={busy} action={action} request={request}/></div>)}
