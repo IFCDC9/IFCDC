@@ -53,7 +53,7 @@ export default function RadioStation() {
   }, [state, listening]);
   async function action(fn: () => Promise<void>) {
     setBusy(true); setError('');
-    try { await fn(); await refresh(); } catch (e: any) { setError(e.message); } finally { setBusy(false); }
+    try { await fn(); await refresh(); } catch (e: any) { setError(e.message); requestAnimationFrame(() => document.querySelector('[role="alert"]')?.scrollIntoView({behavior:'smooth',block:'center'})); } finally { setBusy(false); }
   }
   async function request(url: string, options: RequestInit) {
     const res = await fetch(url, { ...options, credentials: 'include' });

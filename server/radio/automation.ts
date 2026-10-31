@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { Slot, Station } from './station';
 const dateSchema=z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(s=>{const d=new Date(`${s}T12:00:00Z`);return Number.isFinite(+d)&&d.toISOString().slice(0,10)===s;},'Choose a valid date');
-export const recurrenceSchema=z.object({title:z.string().trim().min(1).max(200),startDate:dateSchema,time:z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),timezone:z.string().max(100).refine(t=>{try {new Intl.DateTimeFormat('en-US',{timeZone:t});return true;}catch{return false;}},'Unknown timezone'),weekdays:z.array(z.number().int().min(0).max(6)).min(1).max(7),tracks:z.array(z.string().uuid()).min(1).max(200)}).strict();
+export const recurrenceSchema=z.object({title:z.string().trim().min(1).max(200),startDate:dateSchema,time:z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),timezone:z.string().max(100).refine(t=>{try {new Intl.DateTimeFormat('en-US',{timeZone:t});return true;}catch{return false;}},'Unknown timezone'),weekdays:z.array(z.number().int().min(0).max(6)).min(1).max(7),tracks:z.array(z.string().uuid()).min(1).max(500)}).strict();
 export type RecurringShow=z.infer<typeof recurrenceSchema>&{id:string;createdAt:string};
 export type Fallback={tracks:string[];anchor:string};
 const formatters=new Map<string,Intl.DateTimeFormat>();
