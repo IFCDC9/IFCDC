@@ -69,5 +69,16 @@ test('radio API enforces roles, validates uploads, schedules and serves range au
  assert.equal((await fetch(`${base}/recurring/${rule.id}`,{method:'DELETE',headers})).status,204);
  assert.equal((await post('/fallback',{tracks:[]},'owner','PUT')).status,204);
 
+
+ const {StationStore}=await import('../server/radio/station');
+ const {randomUUID}=await import('node:crypto');
+ const fullLibrary=Array.from({length:500},(_,i)=>({...track,id:randomUUID(),title:`Library track ${i}`}));
+ await new StationStore(directory).update('test-founder','Seed full library',state=>{state.tracks=fullLibrary;});
+ const fullCrate=await crate({name:'Full Music Library',rules:{}});
+ assert.equal(fullCrate.status,201);assert.equal((await fullCrate.json()).tracks.length,500);
+ const ids=fullLibrary.map(t=>t.id);
+ assert.equal((await post('/schedule',{title:'Full rotation',start:new Date(Date.now()+60000).toISOString(),tracks:ids})).status,201);
+ assert.equal((await crate({name:'Too many',tracks:[...ids,randomUUID()]})).status,400);
+
  } finally {server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(directory,{recursive:true,force:true});}
 });

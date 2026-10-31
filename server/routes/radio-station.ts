@@ -55,12 +55,12 @@ router.patch('/library/:id/catalog', manage, wrap(async (req,res) => {
   res.json(state.tracks.find(t=>t.id===req.params.id));
 }));
 router.post('/crates', manage, wrap(async (req,res) => {
-  const input=z.object({name:z.string().trim().min(1).max(100),tracks:z.array(z.string().uuid()).max(200).optional(),rules:crateRulesSchema.optional()}).strict()
+  const input=z.object({name:z.string().trim().min(1).max(100),tracks:z.array(z.string().uuid()).max(500).optional(),rules:crateRulesSchema.optional()}).strict()
     .refine(v=>(v.tracks !== undefined) !== (v.rules !== undefined),{message:'Choose selected tracks or builder rules'}).parse(req.body);
   const state=await store.update(req.user!.id, `Created crate ${input.name}`, s=>{
     const tracks=input.rules ? buildCrate(s.tracks,input.rules) : [...new Set(input.tracks!)];
     if (!tracks.length) throw Object.assign(new Error('No tracks match. Catalog tracks or change your selection.'),{status:400});
-    if (tracks.length>200) throw Object.assign(new Error('Crates support up to 200 tracks. Narrow the builder rules.'),{status:400});
+    if (tracks.length>500) throw Object.assign(new Error('Crates support up to 500 tracks. Narrow the builder rules.'),{status:400});
     if (tracks.some(id=>!s.tracks.some(t=>t.id===id))) throw Object.assign(new Error('Track not found'),{status:400});
     s.crates ||= [];
     if(s.crates.length>=200) throw Object.assign(new Error('Crate limit reached (200). Remove an unused crate.'),{status:400});
@@ -92,14 +92,14 @@ router.delete('/recurring/:id', manage, wrap(async (req,res) => {
   await store.update(req.user!.id, `Removed recurring show ${req.params.id}`,s=>{s.recurring=(s.recurring || []).filter(r=>r.id!==req.params.id);});res.sendStatus(204);
 }));
 router.put('/fallback', manage, wrap(async (req,res) => {
-  const {tracks}=z.object({tracks:z.array(z.string().uuid()).max(200)}).strict().parse(req.body);
+  const {tracks}=z.object({tracks:z.array(z.string().uuid()).max(500)}).strict().parse(req.body);
   await store.update(req.user!.id,'Updated fallback rotation',s=>{
     if(tracks.some(id=>{const t=s.tracks.find(t=>t.id===id);return !t || t.catalog?.content!=='clean' || !['approved','favorite'].includes(t.catalog.preference);}))throw Object.assign(new Error('Fallback requires tracks tagged clean and approved or favorite.'),{status:400});
     s.fallback={tracks,anchor:new Date().toISOString()};
   });res.sendStatus(204);
 }));
 router.post('/schedule', manage, wrap(async (req,res) => {
-  const slot = z.object({ title: z.string().trim().min(1).max(200), start: z.string().datetime(), tracks: z.array(z.string().uuid()).min(1).max(200) }).parse(req.body);
+  const slot = z.object({ title: z.string().trim().min(1).max(200), start: z.string().datetime(), tracks: z.array(z.string().uuid()).min(1).max(500) }).parse(req.body);
   const state = await store.update(req.user!.id, `Scheduled ${slot.title}`, state => {
     if (slot.tracks.some(id => !state.tracks.some(t => t.id === id))) throw new Error('One or more tracks no longer exist.');
     if (Date.parse(slot.start) < Date.now() - 60000) throw new Error('Choose a current or future start time.');
