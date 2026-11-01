@@ -10,7 +10,7 @@ import type { Crate } from '../../../server/radio/catalog';
 import { useAuth } from '../auth/AuthContext';
 type Track = CatalogTrack;
 type Slot = { id: string; title: string; start: string; tracks: string[] };
-type State = { configured: boolean; recurring?:RecurringShow[]; fallback?:Fallback; crates?: Crate[]; playout?: { enabled: boolean; ready: boolean; mode: string; trackTitle?:string | null; error: string | null }; tracks: Track[]; slots: Slot[]; log: { at: string; action: string }[]; now: { track: Track; offset: number; index: number; slot: Slot } | null };
+type State = { programming?:import('../../../server/radio/programming').Programming; configured: boolean; recurring?:RecurringShow[]; fallback?:Fallback; crates?: Crate[]; playout?: { enabled: boolean; ready: boolean; mode: string; trackTitle?:string | null; error: string | null }; tracks: Track[]; slots: Slot[]; log: { at: string; action: string }[]; now: { track: Track; offset: number; index: number; slot: Slot } | null };
 export default function RadioStation() {
   const { user } = useAuth();
   const canManage = ['admin', 'owner', 'founder'].includes(user?.role || '');
@@ -57,24 +57,20 @@ export default function RadioStation() {
     try { await fn(); await refresh(); } catch (e: any) { setError(e.message); requestAnimationFrame(() => document.querySelector('[role="alert"]')?.scrollIntoView({behavior:'smooth',block:'center'})); } finally { setBusy(false); }
   }
   async function request(url: string, options: RequestInit) {
-    const res = await fetch(url, { ...options, credentials: 'include' });
-    if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(data.error || `Request failed (${res.status})`); }
+    const res = await fetch(url, { signal:AbortSignal.timeout(30000), ...options, credentials: 'include' });
+    if (!res.ok) { const data = await res.json().catch(() => ({})); throw Object.assign(new Error(data.error || `Request failed (${res.status})`),{status:res.status}); }
   }
   async function upload(file: File) {
-    const url = URL.createObjectURL(file);
-    try {
-      const duration = await new Promise<number>((resolve, reject) => {
-        const probe = new Audio(); probe.preload = 'metadata';
-        const timer = setTimeout(() => { probe.src = ''; reject(new Error('Could not read audio duration')); }, 15000);
-        probe.onloadedmetadata = () => { clearTimeout(timer); resolve(probe.duration); probe.src = ''; };
-        probe.onerror = () => { clearTimeout(timer); reject(new Error('Unable to read MP3')); };
-        probe.src = url;
-      });
-      if (!Number.isFinite(duration) || duration <= 0) throw new Error('Invalid audio duration');
-      const uploaded=await fetch(`/api/radio/library?${new URLSearchParams({title: file.name.replace(/\.mp3$/i,''), duration: String(duration)})}`, { method: 'POST', headers: { 'Content-Type': 'audio/mpeg' }, credentials:'include', body: file });
-      if(!uploaded.ok){const data=await uploaded.json().catch(()=>({}));throw new Error(data.error || `Upload failed (${uploaded.status})`);}
-      return Boolean((await uploaded.json()).duplicate);
-    } finally { URL.revokeObjectURL(url); }
+    // Duration and tags are verified server-side; avoid a browser metadata probe stalling a batch.
+    let response:Response|undefined;
+    for(let attempt=0;attempt<3;attempt++){
+      response=await fetch(`/api/radio/library?${new URLSearchParams({title:file.name.replace(/\.mp3$/i,''),duration:'1'})}`,{method:'POST',headers:{'Content-Type':'audio/mpeg'},credentials:'include',body:file,signal:AbortSignal.timeout(120000)}).catch(()=>{throw Object.assign(new Error('Upload timed out or lost connection. Re-select the folder after reconnecting; completed files will be skipped.'),{status:503});});
+      if(response.status!==429)break;
+      if(attempt<2)await new Promise(resolve=>setTimeout(resolve,Math.min(60000,Math.max(1000,Number(response!.headers.get('retry-after') || '5')*1000))));
+    }
+    const data=await response!.json().catch(()=>({}));
+    if(!response!.ok)throw Object.assign(new Error(data.error || `Upload failed (${response!.status})`),{status:response!.status});
+    return Boolean(data.duplicate);
   }
   const panels=[['overview','Overview'],['library','Audio library'],['crates','Custom crates'],['shows','Show schedule'],['automation','Automation'],['activity','Activity']];
   const upcoming=(state?.slots || []).filter(x=>Date.parse(x.start)>Date.now()).sort((a,b)=>Date.parse(a.start)-Date.parse(b.start)).slice(0,4);
@@ -90,6 +86,7 @@ export default function RadioStation() {
     <main className="r-wrap">
     <section className="r-hero"><div className="r-hero-copy"><span className="r-label">Your private station workspace</span><h1>Shape the sound.<br/><em>Move the culture.</em></h1><p>A home for your music, your voices and your next great show. Build the station your community deserves.</p><div className="r-hero-actions"><button id="radio-studio-tune" className="r-primary" disabled={!state?.playout?.ready} onClick={()=>void tune()}><Headphones size={17}/>{streamPlaying ? 'Disconnect' : 'Tune in'}</button><button className="r-ghost" onClick={()=>setTab('library')}>Build your library <ArrowUpRight size={16}/></button></div><span className="r-status" data-ready={!!state?.playout?.ready}>{state?.playout?.ready ? 'Private stream connected' : 'Private stream preparing'}</span></div>
     <div className="r-signal" aria-hidden="true"><div className="r-signal-top"><span>IFCDC / STATION STUDIO</span><span>01 — INDEPENDENT SOUND</span></div><RadioReactiveLogo audio={streamAudio}/><div className="r-signal-bottom"><span>CONNECTED BY COMMUNITY</span><div className="r-bars">{Array.from({length:12},(_,i)=><i key={i}/>)}</div></div></div></section>
+    <p className="r-small">Studio update: storage guards · batch diagnostics · audio-reactive logo · programming rules</p>
     {error && <p role="alert" className="r-alert">{error}</p>}
     {state?.playout?.error && <p role="alert" className="r-alert">{state.playout.error}</p>}
     <section className="r-player" aria-label="Private continuous stream"><div className="r-player-icon"><RadioTower size={26}/></div><div><span className="r-label" style={{marginBottom:5}}>Private continuous stream · {state?.playout?.mode || 'connecting'}</span><div className="r-player-title">{state?.playout?.trackTitle || state?.now?.track.title || 'Your next listening moment'}</div><p className="r-player-sub">{state?.now?.slot.title || 'Between shows. Fallback music or silence follows your station settings.'}</p></div><div><audio ref={streamAudio} controls preload="none" aria-label="Private station audio" src={state?.playout?.ready ? '/api/radio/stream' : undefined} onPlay={()=>{setListening(false);setStreamPlaying(true);}} onPause={()=>setStreamPlaying(false)} onEnded={()=>setStreamPlaying(false)} onError={()=>{setStreamPlaying(false);setError('The stream disconnected. Press Tune in to reconnect.');}}/></div></section>
@@ -130,7 +127,7 @@ export default function RadioStation() {
         {[...state.slots].sort((a,b) => Date.parse(a.start)-Date.parse(b.start)).map(s => <div className="flex flex-wrap justify-between gap-3 border-b p-2" key={s.id}><span>{s.title} · {new Date(s.start).toLocaleString()} · {s.tracks.length} tracks</span>{canManage && <button disabled={busy} onClick={() => action(() => request(`/api/radio/schedule/${s.id}`,{method:'DELETE'}))}>Remove show</button>}</div>)}
       </section>
 </>}
-    {tab==='automation' && <>      <RadioAutomation recurring={state.recurring || []} fallback={state.fallback} tracks={state.tracks} selected={selected} canManage={canManage} busy={busy || !state.configured} action={action} request={request}/>
+    {tab==='automation' && <>      <RadioAutomation programming={state.programming} recurring={state.recurring || []} fallback={state.fallback} tracks={state.tracks} selected={selected} canManage={canManage} busy={busy || !state.configured} action={action} request={request}/>
 </>}
     {tab==='activity' && <>      <section className="border rounded-xl p-5"><h2 className="text-xl font-semibold">Station activity</h2>{state.log.slice(-10).reverse().map((entry,i) => <p key={i}>{new Date(entry.at).toLocaleString()} — {entry.action}</p>)}</section></>}
     </div></>}

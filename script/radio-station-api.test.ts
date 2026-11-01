@@ -84,5 +84,15 @@ test('radio API enforces roles, validates uploads, schedules and serves range au
  assert.equal((await post('/schedule',{title:'Full rotation',start:new Date(Date.now()+60000).toISOString(),tracks:ids})).status,201);
  assert.equal((await crate({name:'Too many',tracks:Array.from({length:5001},()=>randomUUID())})).status,400);
 
+ const storage=await(await fetch(`${base}/storage`,{headers})).json();assert.equal(storage.limit,5000);assert.equal(storage.tracks,1650);assert.ok(storage.freeBytes>0);
+ assert.equal((await post('/programming/enable',{},'radio_host')).status,403);
+ assert.equal((await post('/programming/preview',{})).status,400);
+ const {catalogSchema}=await import('../server/radio/catalog');
+ await new StationStore(directory).update('test-founder','Review programming tracks',state=>{state.tracks=state.tracks.slice(0,3).map((t,i)=>({...t,catalog:catalogSchema.parse({artist:`Artist ${i}`,bpm:90+i,mood:'soulful',version:'full',content:'clean',preference:'approved'})}));});
+ const program=await post('/programming/preview',{});assert.equal(program.status,200);assert.equal((await program.json()).tracks.length,3);
+ assert.equal((await post('/programming/enable',{})).status,200);
+ const programmed=await(await fetch(`${base}/station`,{headers})).json();assert.equal(programmed.programming.enabled,true);assert.equal(programmed.fallback.tracks.length,3);
+ assert.equal((await post('/programming/disable',{})).status,204);
+
  } finally {server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(directory,{recursive:true,force:true});}
 });

@@ -1,3 +1,4 @@
+import type { Programming, AirHistory } from './programming';
 import { recurringSlots, fallbackSelection, type RecurringShow, type Fallback } from './automation';
 import type { Catalog, Crate } from './catalog';
 import { randomUUID } from 'node:crypto';
@@ -5,7 +6,7 @@ import { mkdir, readFile, writeFile, rename, readdir, realpath } from 'node:fs/p
 import path from 'node:path';
 export type Track = { id: string; title: string; duration: number; filename: string; contentHash?:string; bytes?:number; catalog?: Catalog; durationVerifiedAt?: string; catalogUpdatedAt?: string; catalogUpdatedBy?: string };
 export type Slot = { id: string; title: string; start: string; tracks: string[] };
-export type Station = { recurring?: RecurringShow[]; fallback?: Fallback; crates?: Crate[]; tracks: Track[]; slots: Slot[]; log: { at: string; actor: string; action: string }[] };
+export type Station = { programming?:Programming; airHistory?:AirHistory[]; recurring?: RecurringShow[]; fallback?: Fallback; crates?: Crate[]; tracks: Track[]; slots: Slot[]; log: { at: string; actor: string; action: string }[] };
 export function nowPlaying(state: Station, time = Date.now()) {
   // Newer shows take precedence; a completed override does not revive an older show.
   const slot = [...state.slots, ...recurringSlots(state.recurring || [], time)].filter(s => Date.parse(s.start) <= time).sort((a,b) => Date.parse(b.start)-Date.parse(a.start))[0];

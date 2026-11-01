@@ -1,3 +1,5 @@
+import { fallbackSelection } from './automation';
+import { blockedForAir, artistKeys, eligibility } from './programming';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import path from 'node:path';
@@ -27,6 +29,7 @@ export class RadioPlayout {
   private trackTitle: string | null = null;
   private trackId: string | null = null;
   private showTitle: string | null = null;
+  private guardedSelection?:{value:NonNullable<ReturnType<typeof selectPlayback>>;at:number;sourceSlotId:string};
   constructor(private store: StationStore, private ffmpeg = process.env.RADIO_FFMPEG_PATH || 'ffmpeg') {}
   status() {
     return { enabled: !this.stopped, ready: !this.stopped && !!this.encoder && this.lastBytesAt > 0 && Date.now()-this.lastBytesAt < 5000,
@@ -69,7 +72,32 @@ export class RadioPlayout {
       }
       if (!this.encoder) this.createEncoder();
       for(const [id,until] of this.unavailable) if(until<=Date.now()) this.unavailable.delete(id);
-      let selection = selectPlayback(state,Date.now(),new Set(this.unavailable.keys()));
+      const choose=(excluded:Set<string>)=>{
+        const selected=selectPlayback(state,Date.now(),excluded);if(selected || !state.programming?.enabled)return selected;
+        const ids=state.tracks.filter(track=>track.catalog?.category==='station-id' && track.catalog.content==='clean' && ['approved','favorite'].includes(track.catalog.preference)).map(track=>track.id);
+        const emergency=fallbackSelection({...state,fallback:{tracks:ids,anchor:'1970-01-01T00:00:00.000Z'}},Date.now(),excluded);
+        return emergency ? {...emergency,mode:'fallback' as const} : null;
+      };
+      let selection = choose(new Set(this.unavailable.keys()));
+      let ruleExcluded=new Set<string>();
+      if(state.programming?.enabled){
+        const sourceSlotId=selection?.slot.id || 'silence';
+        const pinned=this.guardedSelection;
+        const pinnedTrack=pinned && state.tracks.find(track=>track.id===pinned.value.track.id);
+        if(pinned && pinnedTrack && !eligibility(pinnedTrack,state.programming) && (!selection || selection.mode!=='scheduled' || selection.slot.id===pinned.sourceSlotId || Date.parse(selection.slot.start)<=pinned.at) && !this.unavailable.has(pinned.value.track.id) && pinned.value.offset+(Date.now()-pinned.at)/1000<pinned.value.track.duration){
+          selection={...pinned.value,track:pinnedTrack,offset:pinned.value.offset+(Date.now()-pinned.at)/1000};
+        } else {
+          this.guardedSelection=undefined;
+          if(selection){
+            const candidateKey=`${selection.slot.id}:${selection.index}`;
+            ruleExcluded=blockedForAir(state,candidateKey,selection.track);
+            if(ruleExcluded.has(selection.track.id)){
+              selection=choose(new Set([...this.unavailable.keys(),...ruleExcluded]));
+              if(selection)this.guardedSelection={value:selection,at:Date.now(),sourceSlotId};
+            }
+          }
+        }
+      } else this.guardedSelection=undefined;
       // Missing files fall back immediately without changing saved shows.
       while(selection) {
         try {
@@ -79,11 +107,18 @@ export class RadioPlayout {
         } catch {
           this.unavailable.set(selection.track.id,Date.now()+60000);
           this.fault='A media file is unavailable; using fallback or silence.';
-          selection=selectPlayback(state,Date.now(),new Set(this.unavailable.keys()));
+          if(state.programming?.enabled)ruleExcluded=blockedForAir(state,'missing-file-replacement',selection.track);
+          selection=choose(new Set([...this.unavailable.keys(),...ruleExcluded]));
         }
       }
       // Include index to support repeated tracks in a single show.
       const key = selection ? `${selection.slot.id}:${selection.index}` : 'silence';
+      if(selection && state.programming?.enabled && selection.track.catalog?.category==='music') {
+        await this.store.update('radio-automation','Started programmed music',current=>{
+          if(current.airHistory?.at(-1)?.key!==key)current.airHistory=[...(current.airHistory || []),{key,trackId:selection!.track.id,artists:artistKeys(selection!.track),at:new Date().toISOString()}].slice(-20);
+        });
+        if(this.stopped)return;
+      }
       if (this.decoder && this.key === key) return;
       this.stopDecoder();
       let input: string[];
@@ -96,7 +131,7 @@ export class RadioPlayout {
       } else input = ['-re','-f','lavfi','-i','anullsrc=r=44100:cl=stereo'];
       const decoder = spawn(this.ffmpeg,['-hide_banner','-loglevel','error',...input,'-vn','-f','s16le','-ar','44100','-ac','2','pipe:1']);
       this.decoder = decoder; this.key = key; this.mode = selection?.mode || 'silence'; this.trackTitle=selection?.track.title || null; this.trackId=selection?.track.id || null;this.showTitle=selection?.slot.title || null;
-      if(!this.unavailable.size)this.fault = null;
+      if(!this.unavailable.size)this.fault = !selection && state.programming?.enabled ? 'No eligible music or approved station ID is available. Review catalog tags and media files.' : null;
       decoder.stdout.pipe(this.encoder!.stdin,{end:false});
       decoder.stderr.resume();
       const failed = () => {

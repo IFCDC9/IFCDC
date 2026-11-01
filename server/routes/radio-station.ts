@@ -1,5 +1,6 @@
+import { createProgram, programmingSchema } from '../radio/programming';
 import { publicRadioRouter } from './radio-public';
-import { inspectMp3 } from '../radio/media';
+import { inspectMp3Details } from '../radio/media';
 import { recurrenceSchema } from '../radio/automation';
 import { buildCrate, catalogSchema, crateRulesSchema } from '../radio/catalog';
 import { RadioPlayout } from '../radio/playout';
@@ -35,11 +36,12 @@ router.post('/library', manage, express.raw({ type: 'audio/mpeg', limit: '25mb' 
   const audio = req.body;
   if (!Buffer.isBuffer(audio) || audio.length < 3 || !(audio.subarray(0,3).toString() === 'ID3' || (audio[0] === 255 && (audio[1] & 224) === 224))) return res.status(400).json({ error: 'Upload an MP3 audio file (maximum 25 MB).' });
   const id = randomUUID();
-  const duration=await inspectMp3(audio);
+  const details=await inspectMp3Details(audio);
+  const {duration}=details;
   const contentHash=createHash('sha256').update(audio).digest('hex');
   let duplicate=false;
   let existingId='';
-  const track = { ...metadata, contentHash, duration, durationVerifiedAt:new Date().toISOString(), id, filename: `${id}.mp3` };
+  const track = { ...metadata, bytes:audio.length, catalog:catalogSchema.parse({artist:details.artist,genre:details.genre,mood:details.mood,bpm:details.bpm,version:/\ba[\s-]*ca?p+p?ell?a?s?\b/i.test(metadata.title)?'acappella':/\binstrumental\b/i.test(metadata.title)?'instrumental':'unknown'}), contentHash, duration, durationVerifiedAt:new Date().toISOString(), id, filename: `${id}.mp3` };
   await store.update(req.user!.id, `Uploaded ${track.title}`, async state => {
     for(const existing of state.tracks){
       if(existing.contentHash===contentHash){duplicate=true;existingId=existing.id;return;}
@@ -53,12 +55,38 @@ router.post('/library', manage, express.raw({ type: 'audio/mpeg', limit: '25mb' 
     }
     if (state.tracks.length >= 5000) throw new Error('Library limit reached (5,000 tracks).');
     const disk=await statfs(store.directory);
-    if(disk.bavail*disk.bsize<audio.length+100*1024*1024)throw new Error('Radio disk is nearly full. Increase the persistent disk before importing more music.');
+    if(disk.bavail*disk.bsize<audio.length+100*1024*1024)throw Object.assign(new Error('Radio disk is nearly full. Increase the persistent disk before importing more music.'),{status:507});
     const file = path.join(store.directory, track.filename);
     await writeFile(file, audio, { flag: 'wx', mode: 0o600 });
     state.tracks.push(track);
   });
   res.status(duplicate?200:201).json(duplicate?{id:existingId,duplicate:true}:track);
+}));
+router.get('/storage',readAccess,wrap(async(_req,res)=>{
+  const state=await store.read();const disk=await statfs(store.directory);
+  res.json({tracks:state.tracks.length,limit:5000,freeBytes:disk.bavail*disk.bsize,reserveBytes:100*1024*1024});
+}));
+for(const mode of ['preview','enable'] as const)router.post('/programming/'+mode,manage,wrap(async(req,res)=>{
+  const rules=programmingSchema.parse(req.body);
+  if(mode==='preview')return res.json(createProgram((await store.read()).tracks,rules));
+  let report:ReturnType<typeof createProgram>;
+  await store.update(req.user!.id,'Enabled artist-separated tempo and mood programming',state=>{
+    report=createProgram(state.tracks,rules);state.programming={...rules,enabled:true};state.fallback={tracks:report.tracks,anchor:new Date().toISOString()};
+  });res.json(report!);
+}));
+router.post('/programming/disable',manage,wrap(async(req,res)=>{await store.update(req.user!.id,'Disabled programming guards',state=>{if(state.programming)state.programming.enabled=false;});res.sendStatus(204);}));
+router.post('/library/:id/read-tags',manage,wrap(async(req,res)=>{
+  const found=(await store.read()).tracks.find(t=>t.id===req.params.id);
+  if(!found || !/^[a-f0-9-]+\.mp3$/i.test(found.filename))return res.status(404).json({error:'Track not found'});
+  const metadata=await inspectMp3Details(await readFile(path.join(store.directory,found.filename)));
+  await store.update(req.user!.id,'Read embedded music tags',state=>{
+    const track=state.tracks.find(t=>t.id===found.id);if(!track)return;
+    const existing=catalogSchema.parse(track.catalog || {});
+    track.catalog={...existing,artist:existing.artist || metadata.artist,genre:existing.genre || metadata.genre,mood:existing.mood || metadata.mood,bpm:existing.bpm ?? metadata.bpm};
+    if(/\ba[\s-]*ca?p+p?ell?a?s?\b/i.test(track.title))track.catalog.version='acappella';
+    else if(existing.version==='unknown' && /\binstrumental\b/i.test(track.title))track.catalog.version='instrumental';
+    track.catalogUpdatedAt=new Date().toISOString();
+  });res.sendStatus(204);
 }));
 router.patch('/library/:id/catalog', manage, wrap(async (req,res) => {
   const catalog = catalogSchema.parse(req.body);
@@ -131,6 +159,6 @@ router.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof z.ZodError) return res.status(400).json({ error: err.issues.map(i => i.message).join('; ') });
   if (err.type === 'entity.too.large') return res.status(413).json({ error: 'MP3 exceeds 25 MB.' });
   console.error('Radio station:', err);
-  res.status(err.status === 400 ? 400 : 503).json({ error: err.message || 'Radio storage unavailable' });
+  res.status([400,507].includes(err.status) ? err.status : 503).json({ error: err.message || 'Radio storage unavailable' });
 });
 export default router;

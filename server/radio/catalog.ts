@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { Track } from './station';
 const label = z.string().trim().max(100);
 export const catalogSchema = z.object({
+  version: z.enum(['unknown','full','instrumental','acappella']).default('unknown'),
   artist: label.default(''), genre: label.default(''), era: label.default(''),
   bpm: z.number().min(20).max(300).nullable().default(null), key: label.default(''),
   mood: label.default(''), energy: z.enum(['unknown','low','medium','high']).default('unknown'),

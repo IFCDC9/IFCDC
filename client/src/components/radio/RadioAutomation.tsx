@@ -1,8 +1,10 @@
+import { RadioProgramming } from './RadioProgramming';
+import type { Programming } from '../../../../server/radio/programming';
 import React from 'react';
 import type { RecurringShow, Fallback } from '../../../../server/radio/automation';
 import type { CatalogTrack } from './RadioCatalog';
 export function localDateTime(date=new Date(Date.now()+120000)) {return new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);}
-export function RadioAutomation({recurring,fallback,tracks,selected,canManage,busy,action,request}:{recurring:RecurringShow[];fallback?:Fallback;tracks:CatalogTrack[];selected:string[];canManage:boolean;busy:boolean;action:(fn:()=>Promise<void>)=>Promise<void>;request:(url:string,options:RequestInit)=>Promise<void>}) {
+export function RadioAutomation({programming,recurring,fallback,tracks,selected,canManage,busy,action,request}:{programming?:Programming;recurring:RecurringShow[];fallback?:Fallback;tracks:CatalogTrack[];selected:string[];canManage:boolean;busy:boolean;action:(fn:()=>Promise<void>)=>Promise<void>;request:(url:string,options:RequestInit)=>Promise<void>}) {
  const send=(url:string,body:unknown,method='POST')=>request(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
  return <section className="border rounded-xl p-5 space-y-3"><h2 className="text-xl font-semibold">Daily station automation</h2>
  <p>Use the current show selection, including any station IDs, to create a recurring show. Newer show starts interrupt earlier shows. Completed shows give way to fallback music or silence.</p>
@@ -21,6 +23,7 @@ export function RadioAutomation({recurring,fallback,tracks,selected,canManage,bu
  {recurring.length===0 && <p>No recurring shows yet.</p>}
  {recurring.map(show=><div key={show.id} className="border-b p-2"><p>{show.title} · {show.time} {show.timezone} · {show.weekdays.map(day=>['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][day]).join(', ')} · from {show.startDate} · {show.tracks.length} tracks</p>
  {canManage && <button disabled={busy} onClick={()=>void action(()=>request(`/api/radio/recurring/${show.id}`,{method:'DELETE'}))}>Remove recurring show</button>}</div>)}
+ <RadioProgramming {...{programming,tracks,canManage,busy,action,request}}/>
  <h3 className="font-semibold">Fallback rotation</h3><p>Plays between shows and when a show track cannot be played. Only tracks tagged clean and approved or favorite qualify. Changing those tags immediately removes a track from fallback eligibility.</p>
  <p>{fallback?.tracks.length ? fallback.tracks.map(id=>tracks.find(t=>t.id===id)?.title || 'Missing track').join(' → ') : 'No fallback configured; gaps play silence.'}</p>
  {canManage && <><button className="border rounded p-2" disabled={busy || !selected.length} onClick={()=>void action(()=>send('/api/radio/fallback',{tracks:selected},'PUT'))}>Use selection as fallback</button> <button disabled={busy || !fallback?.tracks.length} onClick={()=>void action(()=>send('/api/radio/fallback',{tracks:[]},'PUT'))}>Clear fallback</button></>}
