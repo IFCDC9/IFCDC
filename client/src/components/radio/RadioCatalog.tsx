@@ -5,12 +5,12 @@ type Run = (fn:()=>Promise<void>)=>Promise<void>;
 type Request = (url:string,options:RequestInit)=>Promise<void>;
 const textFields = ['artist','genre','era','key','mood','kickBass','transitionNotes'] as const;
 const labels:Record<string,string>={artist:'Artist',genre:'Genre',era:'Era',key:'Musical key',mood:'Mood',kickBass:'Kick and bass notes',transitionNotes:'Transition notes'};
-const options={energy:['unknown','low','medium','high'],content:['unknown','clean','explicit'],category:['music','station-id','interview','advertisement','other'],vocalDensity:['unknown','instrumental','light','dense'],preference:['unreviewed','approved','favorite','rejected']} as const;
-const optionLabels={energy:'Energy',content:'Clean / explicit',category:'Category',vocalDensity:'Vocal density',preference:'Your preference'};
+const options={version:['unknown','full','instrumental','acappella'],energy:['unknown','low','medium','high'],content:['unknown','clean','explicit'],category:['music','station-id','interview','advertisement','other'],vocalDensity:['unknown','instrumental','light','dense'],preference:['unreviewed','approved','favorite','rejected']} as const;
+const optionLabels={version:'Recording version',energy:'Energy',content:'Clean / explicit',category:'Category',vocalDensity:'Vocal density',preference:'Your preference'};
 export function TrackCatalog({track,canManage,busy,action,request}:{track:CatalogTrack;canManage:boolean;busy:boolean;action:Run;request:Request}) {
  const c=track.catalog;
  return <details className="border rounded p-3"><summary>Catalog: {track.title} · {c?.artist || 'Artist unknown'} · {c?.bpm ? `${c.bpm} BPM` : 'BPM unknown'} · {c?.preference || 'unreviewed'}</summary>
- <p>These are operator-entered tags. Sound analysis and transition compatibility have not been verified.</p>
+ <p>Catalog fields can come from embedded file tags or operator edits. Acoustic BPM/mood analysis has not been verified.</p>
  {c && <p>{[c.genre,c.era,c.key,c.mood,c.energy,c.content,c.category,c.vocalDensity].filter(Boolean).join(' · ')}</p>}
  {c && <p>{c.kickBass} {c.transitionNotes}</p>}
  {canManage && <form key={track.catalogUpdatedAt || 'new'} className="flex flex-wrap gap-3" onSubmit={e=>{

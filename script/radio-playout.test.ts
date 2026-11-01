@@ -59,3 +59,18 @@ test('missing FFmpeg reports failure and can be stopped', {timeout:10000}, async
  try {playout.start(); await until(()=>!!playout.status().error,5000); assert.equal(playout.status().ready,false);}
  finally {playout.stop(); await rm(dir,{recursive:true,force:true});}
 });
+
+test('programmed playout replaces adjacent same-artist show music without bouncing between tracks each tick', {timeout:15000},async()=>{
+ const dir=await mkdtemp(path.join(os.tmpdir(),'radio-separated-'));const store=new StationStore(dir);const worker=new RadioPlayout(store);
+ try {
+  await store.update('test','initialize',()=>{});
+  for(const name of ['a','b']){const result=spawnSync('ffmpeg',['-hide_banner','-loglevel','error','-f','lavfi','-i','sine=frequency=400:duration=8','-c:a','libmp3lame',path.join(dir,name+'.mp3')]);assert.equal(result.status,0);}
+  const anchor=new Date().toISOString();
+  const a={id:'a',title:'Artist A',filename:'a.mp3',duration:8,catalog:catalogSchema.parse({artist:'Artist A',version:'full',bpm:90,mood:'soulful',content:'clean',preference:'approved'})};
+  const b={...a,id:'b',title:'Artist B',filename:'b.mp3',catalog:catalogSchema.parse({...a.catalog,artist:'Artist B'})};
+  await store.update('test','seed separated rotation',s=>{s.tracks=[a,b];s.fallback={tracks:['a','b'],anchor};s.slots=[{id:'new-show',title:'Repeated artist',start:anchor,tracks:['a']}];s.programming={enabled:true,mood:'',energy:'any',maxBpmStep:12};s.airHistory=[{key:'previous-show:0',trackId:'a',artists:['artista'],at:anchor}];});
+  worker.start();await until(()=>worker.status().ready && worker.status().trackId==='b',5000);
+  await delay(2200);assert.equal(worker.status().trackId,'b');
+  assert.equal((await store.read()).airHistory?.at(-1)?.trackId,'b');
+ }finally{worker.stop();await rm(dir,{recursive:true,force:true});}
+});

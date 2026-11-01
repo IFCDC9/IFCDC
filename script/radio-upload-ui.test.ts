@@ -8,6 +8,7 @@ test('folder import skips unsupported files, continues after failures and refres
  const dom=new JSDOM('<div id="root"></div>');
  Object.assign(globalThis,{window:dom.window,document:dom.window.document,IS_REACT_ACT_ENVIRONMENT:true});
  const calls:string[]=[];let refreshes=0;
+ const originalFetch=globalThis.fetch;globalThis.fetch=(async()=>({ok:true,json:async()=>({tracks:0,limit:5000,freeBytes:1000000000,reserveBytes:100000000})})) as any;
  const root=createRoot(document.getElementById('root')!);
  await act(async()=>root.render(React.createElement(RadioUpload,{disabled:false,upload:async(file:File)=>{calls.push(file.name);if(file.name==='bad.mp3')throw new Error('Invalid audio');},refresh:async()=>{refreshes++;}})));
  const input=document.querySelector('input[webkitdirectory]')!;
@@ -17,5 +18,17 @@ test('folder import skips unsupported files, continues after failures and refres
  assert.deepEqual(calls,['song.mp3','bad.mp3','next.MP3']);assert.equal(refreshes,1);
  assert.match(document.body.textContent!,/2 imported · 2 skipped · 1 failed · 0 remaining/);
  assert.match(document.body.textContent!,/bad.mp3: Invalid audio/);
- await act(async()=>root.unmount());dom.window.close();
+ await act(async()=>root.unmount());dom.window.close();globalThis.fetch=originalFetch;
+});
+
+test('disk-full response stops the batch immediately and reports unprocessed files',async()=>{
+ const dom=new JSDOM('<div id="root"></div>');Object.assign(globalThis,{window:dom.window,document:dom.window.document,IS_REACT_ACT_ENVIRONMENT:true});
+ const originalFetch=globalThis.fetch;globalThis.fetch=(async()=>({ok:true,json:async()=>({tracks:113,limit:5000,freeBytes:1000000000,reserveBytes:100000000})})) as any;
+ const root=createRoot(document.getElementById('root')!);let calls=0;
+ try {
+  await act(async()=>root.render(React.createElement(RadioUpload,{disabled:false,upload:async()=>{calls++;throw Object.assign(new Error('Radio disk is nearly full'),{status:507});},refresh:async()=>{}})));
+  const input=document.querySelector('input[webkitdirectory]')!;Object.defineProperty(input,'files',{value:['a.mp3','b.mp3','c.mp3'].map(name=>new dom.window.File(['audio'],name))});
+  await act(async()=>{input.dispatchEvent(new dom.window.Event('change',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,20));});
+  assert.equal(calls,1);assert.match(document.body.textContent!,/2 remaining/);assert.ok(document.querySelector('details')!.open);assert.match(document.body.textContent!,/nearly full/);
+ }finally{await act(async()=>root.unmount());dom.window.close();globalThis.fetch=originalFetch;}
 });
