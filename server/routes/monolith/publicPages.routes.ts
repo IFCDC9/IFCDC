@@ -14,6 +14,7 @@ export function registerPublicPageRoutes(app: Express): void {
   app.get("/", (req, res, next) => publicWebsiteHost(req.get("host") || "") ? sendWebsite(res, "cdc-home.html") : next());
   app.get("/index.html", (_req, res) => sendWebsite(res, "cdc-home.html"));
   app.get("/design-website", (_req, res) => sendWebsite(res, "cdc-design-app.html"));
+  app.get("/podcasts", (_req,res) => sendWebsite(res,"cdc-podcasts.html"));
   app.get(["/radio-studio"], (_req,res) => sendWebsite(res,"cdc-radio-studio.html"));
   app.get(["/listen", "/listen.html"], (_req,res) => sendWebsite(res,"cdc-radio.html"));
   app.get("/website", (_req, res) => sendWebsite(res, "cdc-home.html"));

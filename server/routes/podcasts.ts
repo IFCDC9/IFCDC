@@ -1,0 +1,31 @@
+import express, { Router, type Request, type Response, type NextFunction } from 'express';
+import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
+import { getDb } from '../db';
+import { getListener, ListenerError } from '../radio/listeners';
+import { websiteOrigins } from '../hq/publicWebsite';
+
+// Episodes reference creator-hosted media; no files are written to the radio disk.
+export const episodeSchema = z.object({title:z.string().trim().min(1).max(160),description:z.string().trim().max(4000).default(''),format:z.enum(['audio','video','download']),url:z.string().url().max(2048).refine(value=>{const u=new URL(value);return u.protocol==='https:'&&!u.username&&!u.password;},'Use a public HTTPS link without credentials.'),published:z.boolean().default(false),rights:z.literal(true)}).strict();
+export const showSchema=z.object({title:z.string().trim().min(2).max(120),description:z.string().trim().max(2000),category:z.string().trim().min(1).max(60)}).strict();
+let ready:Promise<any>|undefined;
+async function database(){if(!ready)ready=(async()=>{const d=await getDb();await d.exec(`CREATE TABLE IF NOT EXISTS podcast_shows(id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,title TEXT NOT NULL,description TEXT NOT NULL,category TEXT NOT NULL,created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS podcast_episodes(id TEXT PRIMARY KEY,show_id TEXT NOT NULL,title TEXT NOT NULL,description TEXT NOT NULL,format TEXT NOT NULL,url TEXT NOT NULL,published INTEGER NOT NULL,created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS podcast_episodes_show ON podcast_episodes(show_id);`);return d;})().catch(e=>{ready=undefined;throw e;});return ready;}
+export function podcastRouter(options:{origins?:()=>string[]}={}){
+ const r=Router();r.use((_q,s,n)=>{s.set({'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});n();});
+ const wrap=(fn:(q:Request,s:Response)=>Promise<unknown>)=>(q:Request,s:Response,n:NextFunction)=>{fn(q,s).catch(n);};
+ async function owner(q:Request){const u=await getListener(q.cookies?.ifcdc_radio_listener||'');if(!u)throw new ListenerError(401,'Sign in through IFCDC Radio first.');return u.id as string;}
+ async function owned(q:Request){const id=z.string().uuid().parse(q.params.id);const uid=await owner(q);const d=await database();if(!await d.get('SELECT id FROM podcast_shows WHERE id=? AND owner_id=?',id,uid))throw new ListenerError(404,'Podcast not found.');return id;}
+ r.get('/',wrap(async(_q,s)=>{const d=await database();s.json({shows:await d.all(`SELECT s.id,s.title,s.description,s.category,json_extract(l.profile,'$.displayName') AS creator FROM podcast_shows s JOIN radio_listeners l ON l.id=s.owner_id WHERE EXISTS(SELECT 1 FROM podcast_episodes e WHERE e.show_id=s.id AND e.published=1) ORDER BY s.created_at DESC LIMIT 200`)});}));
+ r.get('/mine',wrap(async(q,s)=>{const uid=await owner(q);const d=await database();s.json({shows:await d.all('SELECT * FROM podcast_shows WHERE owner_id=? ORDER BY created_at DESC',uid),episodes:await d.all('SELECT e.* FROM podcast_episodes e JOIN podcast_shows s ON s.id=e.show_id WHERE s.owner_id=? ORDER BY e.created_at DESC',uid)});}));
+ r.get('/:id',wrap(async(q,s)=>{const id=z.string().uuid().parse(q.params.id);const d=await database();const show=await d.get(`SELECT s.id,s.title,s.description,s.category,json_extract(l.profile,'$.displayName') AS creator FROM podcast_shows s JOIN radio_listeners l ON l.id=s.owner_id WHERE s.id=?`,id);const episodes=await d.all('SELECT id,title,description,format,url,created_at FROM podcast_episodes WHERE show_id=? AND published=1 ORDER BY created_at DESC LIMIT 500',id);if(!show||!episodes.length)throw new ListenerError(404,'No published podcast found.');s.json({show,episodes});}));
+ r.use((q,s,n)=>{if(!(options.origins||websiteOrigins)().includes(q.get('origin')||'')||q.get('x-radio-client')!=='website')return s.status(403).json({error:'Use the IFCDC website to edit podcasts.'});owner(q).then(()=>n()).catch(n);});
+ r.use(express.json({limit:'16kb'}));
+ r.post('/',wrap(async(q,s)=>{const uid=await owner(q);const v=showSchema.parse(q.body);const d=await database();const id=randomUUID();const result=await d.run('INSERT INTO podcast_shows SELECT ?,?,?,?,?,? WHERE (SELECT count(*) FROM podcast_shows WHERE owner_id=?)<10',id,uid,v.title,v.description,v.category,Date.now(),uid);if(!result.changes)throw new ListenerError(409,'You can create up to ten podcast series.');s.status(201).json({id});}));
+ r.post('/:id/episodes',wrap(async(q,s)=>{const id=await owned(q);const v=episodeSchema.parse(q.body);const d=await database();const episode=randomUUID();const result=await d.run('INSERT INTO podcast_episodes SELECT ?,?,?,?,?,?,?,? WHERE (SELECT count(*) FROM podcast_episodes WHERE show_id=?)<500',episode,id,v.title,v.description,v.format,v.url,Number(v.published),Date.now(),id);if(!result.changes)throw new ListenerError(409,'This series has reached 500 episodes.');s.status(201).json({id:episode});}));
+ r.patch('/:id/episodes/:episode',wrap(async(q,s)=>{const id=await owned(q);const eid=z.string().uuid().parse(q.params.episode);const v=episodeSchema.parse(q.body);const d=await database();const result=await d.run('UPDATE podcast_episodes SET title=?,description=?,format=?,url=?,published=? WHERE id=? AND show_id=?',v.title,v.description,v.format,v.url,Number(v.published),eid,id);if(!result.changes)throw new ListenerError(404,'Episode not found.');s.sendStatus(204);}));
+ r.delete('/:id/episodes/:episode',wrap(async(q,s)=>{const id=await owned(q);const d=await database();await d.run('DELETE FROM podcast_episodes WHERE id=? AND show_id=?',z.string().uuid().parse(q.params.episode),id);s.sendStatus(204);}));
+ r.delete('/:id',wrap(async(q,s)=>{const id=await owned(q);const d=await database();await d.run('DELETE FROM podcast_episodes WHERE show_id=?',id);await d.run('DELETE FROM podcast_shows WHERE id=?',id);s.sendStatus(204);}));
+ r.use((e:any,_q:Request,s:Response,_n:NextFunction)=>s.status(e instanceof z.ZodError?400:e instanceof ListenerError?e.status:503).json({error:e instanceof z.ZodError?'Check the fields and use a valid HTTPS media link.':e instanceof ListenerError?e.message:'Podcast service is temporarily unavailable.'}));return r;
+}
