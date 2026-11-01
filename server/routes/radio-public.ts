@@ -1,3 +1,5 @@
+import path from 'node:path';
+import { customerRadioRouter } from './radio-customer';
 import express, { Router, type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import { StationStore } from '../radio/station';
@@ -23,6 +25,7 @@ export function publicRadioRouter(store:StationStore,playout:RadioPlayout,option
  }));
  router.get('/stream',(req,res)=>{if(!enabled())return res.status(503).json({error:'Public listening is not enabled yet.'});playout.listen(res);});
  router.get('/me',wrap(async(req,res)=>{const user=await getListener(req.cookies?.[COOKIE] || '');const state=user ? await store.read():null;res.json({profile:user,savedTracks:state?.tracks.filter(t=>user!.favorites.includes(t.id)).map(t=>({id:t.id,title:t.title})) || []});}));
+ router.use('/stations',customerRadioRouter({root:store.directory ? path.join(store.directory,'customer-stations') : '',origins:options.origins}));
  router.use((req,res,next)=>{
   if(!enabled() && ['/signup','/login'].includes(req.path))return res.status(503).json({error:'Listener registration opens with public radio.'});
   if(!(options.origins || websiteOrigins)().includes(req.get('origin') || '') || req.get('x-radio-client')!=='website')return res.status(403).json({error:'Use the IFCDC Radio website to update your listener account.'});
