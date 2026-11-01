@@ -30,3 +30,15 @@ test('storage survives restart and serializes concurrent writes; failed update d
  } finally {await rm(dir,{recursive:true,force:true});}
 });
 test('storage refuses silent ephemeral fallback', async () => {await assert.rejects(new StationStore('').read(),/RADIO_DATA_DIR/);});
+
+test('storage rejects malformed and relative paths before creating a library', async () => {
+ for(const invalid of ['\n\n/opt/render/project/src/data/radio','/tmp/radio ','relative/radio']) {
+  await assert.rejects(new StationStore(invalid).read(), /absolute path/);
+ }
+});
+test('production refuses an unmounted storage root', async () => {
+ const old=process.env.NODE_ENV, root=process.env.RADIO_PERSISTENT_ROOT;
+ const dir=await mkdtemp(path.join(os.tmpdir(),'radio-unmounted-'));
+ try { process.env.NODE_ENV='production';process.env.RADIO_PERSISTENT_ROOT=dir;await assert.rejects(new StationStore(path.join(dir,'radio')).read(),/persistent mount/); }
+ finally { if(old===undefined)delete process.env.NODE_ENV;else process.env.NODE_ENV=old;if(root===undefined)delete process.env.RADIO_PERSISTENT_ROOT;else process.env.RADIO_PERSISTENT_ROOT=root;await rm(dir,{recursive:true,force:true}); }
+});
