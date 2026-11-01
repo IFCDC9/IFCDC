@@ -1,7 +1,7 @@
 import { recurringSlots, fallbackSelection, type RecurringShow, type Fallback } from './automation';
 import type { Catalog, Crate } from './catalog';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile, rename, readdir } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 export type Track = { id: string; title: string; duration: number; filename: string; contentHash?:string; bytes?:number; catalog?: Catalog; durationVerifiedAt?: string; catalogUpdatedAt?: string; catalogUpdatedBy?: string };
 export type Slot = { id: string; title: string; start: string; tracks: string[] };
@@ -30,7 +30,24 @@ export class StationStore {
   constructor(readonly directory: string) {}
   async read(): Promise<Station> {
     if (!this.directory) throw new Error('Configure RADIO_DATA_DIR on a persistent disk before using radio storage.');
-    await mkdir(this.directory, { recursive: true });
+    if (this.directory !== this.directory.trim() || /[\r\n\x00]/.test(this.directory) || !path.isAbsolute(this.directory)) {
+      throw new Error('RADIO_DATA_DIR must be an absolute path with no leading/trailing spaces or newlines. Uploads are blocked to protect your library.');
+    }
+    if(process.env.NODE_ENV === 'production') {
+      if(process.platform !== 'linux') throw new Error('A verified Linux persistent mount is required for production radio storage. Use development mode for local testing.');
+      const root = process.env.RADIO_PERSISTENT_ROOT || process.env.IFCDC_DATA_DIR || '/opt/render/project/src/data';
+      if(!path.isAbsolute(root) || root !== root.trim()) throw new Error('Radio persistent storage root is invalid.');
+      const mounted = await realpath(root);
+      const mounts = await readFile('/proc/self/mountinfo', 'utf8');
+      const decode = (value:string) => value.replace(/\\([0-7]{3})/g, (_, octal:string) => String.fromCharCode(parseInt(octal,8)));
+      if(!mounts.split('\n').some(line => decode(line.split(' ')[4] || '') === mounted)) throw new Error('Radio storage root is not a verified persistent mount. Uploads are blocked.');
+      const relative = path.relative(path.resolve(root), this.directory);
+      if(relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('RADIO_DATA_DIR must be inside the persistent storage root.');
+      await mkdir(this.directory, { recursive: true });
+      const resolved = await realpath(this.directory);
+      const actualRelative = path.relative(mounted, resolved);
+      if(actualRelative.startsWith('..') || path.isAbsolute(actualRelative)) throw new Error('Radio directory resolves outside the persistent mount. Uploads are blocked.');
+    } else await mkdir(this.directory, { recursive: true });
     try { return JSON.parse(await readFile(path.join(this.directory, 'station.json'), 'utf8')); }
     catch (error: any) { if (error.code === 'ENOENT') {
       if ((await readdir(this.directory)).some(name => name.endsWith('.mp3'))) throw new Error('Radio manifest is missing but audio files exist. Restore the manifest before uploading; existing audio was preserved.');
