@@ -1,3 +1,4 @@
+import BeautyStore from '../components/BeautyStore';
 import React, { useEffect, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 
@@ -38,7 +39,7 @@ const BarbershopApp: React.FC = () => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [date, setDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
-  const [activeTab, setActiveTab] = useState<"schedule" | "book" | "notifications" | "time">("schedule");
+  const [activeTab, setActiveTab] = useState<"schedule" | "book" | "notifications" | "time" | "store">("schedule");
   const [sendingReminder, setSendingReminder] = useState<string | null>(null);
   const [reminderMessage, setReminderMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -219,6 +220,7 @@ const BarbershopApp: React.FC = () => {
             My Hours
           </button>
         </nav>
+        <button onClick={() => setActiveTab("store")} data-testid="tab-store">Beauty Supply</button>
         <div className="app-header-user">
           <span>{user?.name || user?.email}</span>
           <button onClick={handleLogout} data-testid="btn-logout">Logout</button>
@@ -226,6 +228,7 @@ const BarbershopApp: React.FC = () => {
       </header>
 
       <main className="app-main">
+        {activeTab === "store" && <BeautyStore />}
         {activeTab === "schedule" && (
           <section className="app-section" data-testid="section-schedule">
             {reminderMessage && (

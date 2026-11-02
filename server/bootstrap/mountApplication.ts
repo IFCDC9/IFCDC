@@ -1,3 +1,4 @@
+import beautyRouter from '../routes/beauty';
 import radioStationRouter, { startRadioPlayout, radioListenerRouter } from "../routes/radio-station";
 import { hqAuthRequired } from "../middleware/hqAuth";
 import {publishedClientSitesRouter} from '../routes/clientProduction.routes';
@@ -64,6 +65,7 @@ export async function mountApplication(app: Express, opts: MountApplicationOptio
   registerTwilioAuraRoutes(app);
 
   app.use(cookieParser());
+  app.use("/api/beauty", beautyRouter);
   app.use("/api/public/radio", radioListenerRouter);
   app.use("/api/radio", hqAuthRequired, radioStationRouter);
   startRadioPlayout();
