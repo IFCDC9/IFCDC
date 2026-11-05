@@ -85,6 +85,211 @@ function requireFounder(ctx: ExecutiveActionContext): ExecutiveActionResult | nu
   };
 }
 
+export type ExecutiveFollowUpIdentity = {
+  userId?: string | null;
+  email?: string | null;
+  role?: string | null;
+  isFounder?: boolean;
+};
+
+export type ExecutiveFollowUpOutcome = "success" | "failure" | "missing_access";
+
+export type ExecutiveFollowUpCode =
+  | "created"
+  | "no_qualifying_opportunity"
+  | "grant_center_unreadable"
+  | "task_write_failed"
+  | "missing_access";
+
+export type ExecutiveFollowUpResult = {
+  outcome: ExecutiveFollowUpOutcome;
+  status: "done" | "error";
+  code: ExecutiveFollowUpCode;
+  summary: string;
+  linkedOpportunityId: string | null;
+  taskId: string | null;
+  assignedTo: string | null;
+  externalRecipient: null;
+  sendsMail: false;
+  submitsGrant: false;
+  spends: false;
+  qualifyingOpportunityCount: number;
+};
+
+function followUpBase(partial: Omit<ExecutiveFollowUpResult, "externalRecipient" | "sendsMail" | "submitsGrant" | "spends">): ExecutiveFollowUpResult {
+  return {
+    ...partial,
+    externalRecipient: null,
+    sendsMail: false,
+    submitsGrant: false,
+    spends: false,
+  };
+}
+
+async function recordFollowUpAudit(opts: {
+  identity: ExecutiveFollowUpIdentity | null | undefined;
+  result: ExecutiveFollowUpResult;
+}): Promise<void> {
+  const action = opts.result.outcome === "missing_access"
+    ? "aura_internal_follow_up_denied"
+    : opts.result.outcome === "failure"
+      ? "aura_internal_follow_up_failed"
+      : opts.result.code === "created"
+        ? "aura_internal_follow_up_created"
+        : "aura_internal_follow_up_none";
+  await logHqAudit({
+    action,
+    entityType: "internal_executive_follow_up",
+    entityId: opts.result.taskId ?? opts.result.linkedOpportunityId ?? undefined,
+    detail: opts.result.summary.slice(0, 400),
+    actorId: opts.identity?.userId ?? undefined,
+    actorEmail: opts.identity?.email ?? undefined,
+    metadata: {
+      outcome: opts.result.outcome,
+      code: opts.result.code,
+      linkedOpportunityId: opts.result.linkedOpportunityId,
+      qualifyingOpportunityCount: opts.result.qualifyingOpportunityCount,
+      sendsMail: false,
+      submitsGrant: false,
+      spends: false,
+      externalRecipient: null,
+    },
+  });
+}
+
+/**
+ * Founder-only internal follow-up. Operating-funding links use the same
+ * daily-briefing list (live, non-fixture, potential_funding, payroll/HR/administration yes).
+ * Does not send mail, submit a grant, spend, or invent an opportunity.
+ */
+export async function createInternalExecutiveFollowUp(opts: {
+  identity?: ExecutiveFollowUpIdentity | null;
+  title?: string;
+  linkOperatingFunding: boolean;
+}): Promise<ExecutiveFollowUpResult> {
+  const { founderApprovalAllowed } = await import("./auraActorIdentity");
+  const identity = opts.identity ?? null;
+  const allowed = founderApprovalAllowed({
+    id: identity?.userId,
+    email: identity?.email,
+    role: identity?.role,
+    isFounder: identity?.isFounder === true,
+  });
+  if (!allowed) {
+    const result = followUpBase({
+      outcome: "missing_access",
+      status: "error",
+      code: "missing_access",
+      summary: "Missing access. An internal Founder follow-up requires the authenticated Founder account.",
+      linkedOpportunityId: null,
+      taskId: null,
+      assignedTo: null,
+      qualifyingOpportunityCount: 0,
+    });
+    await recordFollowUpAudit({ identity, result });
+    return result;
+  }
+
+  const assignedTo = getFounderEmail();
+  let linkedOpportunityId: string | null = null;
+  let title = (opts.title || "").trim();
+  let qualifyingOpportunityCount = 0;
+
+  if (opts.linkOperatingFunding) {
+    const { presentDailyBriefingGrants, readFounderGrantsBriefing } = await import("./grantRecurringFundingEngine");
+    const db = await getDb();
+    const presented = presentDailyBriefingGrants(await readFounderGrantsBriefing(db));
+    if (presented.liveReadFailed) {
+      const result = followUpBase({
+        outcome: "failure",
+        status: "error",
+        code: "grant_center_unreadable",
+        summary: presented.liveReadError || "Grant Center records could not be read.",
+        linkedOpportunityId: null,
+        taskId: null,
+        assignedTo: null,
+        qualifyingOpportunityCount: 0,
+      });
+      await recordFollowUpAudit({ identity, result });
+      return result;
+    }
+    const items = presented.operatingFundingList.items.filter((item) => (
+      item.source === "live"
+      && item.fixtureLabel == null
+      && item.fundingStatus === "potential_funding"
+      && item.yesDimensions.length > 0
+    ));
+    qualifyingOpportunityCount = items.length;
+    const item = items[0] ?? null;
+    if (!item) {
+      const result = followUpBase({
+        outcome: "success",
+        status: "done",
+        code: "no_qualifying_opportunity",
+        summary: "No qualifying operating-funding opportunity. Nothing was created and no opportunity was invented.",
+        linkedOpportunityId: null,
+        taskId: null,
+        assignedTo: null,
+        qualifyingOpportunityCount: 0,
+      });
+      await recordFollowUpAudit({ identity, result });
+      return result;
+    }
+    linkedOpportunityId = item.id;
+    if (!title) title = `Internal HQ follow-up: ${item.fundingSource}`.slice(0, 180);
+  }
+
+  if (!title) title = "Internal HQ follow-up";
+  try {
+    const { createWorkflowInstance } = await import("./workflowEngine");
+    const instance = await createWorkflowInstance({
+      workflowKey: "internal_follow_up",
+      title,
+      entityType: "internal_executive_follow_up",
+      entityId: linkedOpportunityId ?? undefined,
+      assignedTo,
+      priority: "normal",
+      payload: {
+        source: opts.linkOperatingFunding ? "operating_funding_list" : "internal_hq_follow_up",
+        fundingStatus: linkedOpportunityId ? "potential_funding" : null,
+        sendsMail: false,
+        submitsGrant: false,
+        spends: false,
+        externalRecipient: null,
+      },
+    }) as { id?: string } | undefined;
+    const taskId = instance?.id ? String(instance.id) : "";
+    if (!taskId) throw new Error("Internal follow-up was not stored.");
+    const result = followUpBase({
+      outcome: "success",
+      status: "done",
+      code: "created",
+      summary: linkedOpportunityId
+        ? `Internal follow-up assigned to the Founder and linked to ${linkedOpportunityId}.`
+        : "Internal HQ follow-up assigned to the Founder. No external recipient.",
+      linkedOpportunityId,
+      taskId,
+      assignedTo,
+      qualifyingOpportunityCount,
+    });
+    await recordFollowUpAudit({ identity, result });
+    return result;
+  } catch (err) {
+    const result = followUpBase({
+      outcome: "failure",
+      status: "error",
+      code: "task_write_failed",
+      summary: err instanceof Error ? err.message : "Internal follow-up could not be stored.",
+      linkedOpportunityId: null,
+      taskId: null,
+      assignedTo: null,
+      qualifyingOpportunityCount,
+    });
+    await recordFollowUpAudit({ identity, result });
+    return result;
+  }
+}
+
 /** High-impact verbs that still require staging / explicit confirm — not casual Founder ops. */
 export function detectHighImpactBlockedIntent(command: string): string | null {
   const patterns: { re: RegExp; verb: string }[] = [
