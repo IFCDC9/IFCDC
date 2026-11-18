@@ -16,7 +16,6 @@ import {
   extractDetroitDrafts,
   grantCenterResearchPayload,
   isDetroitRelatedGrant,
-  scanBrowserStorage,
   type DetroitDraft,
   type DetroitPublicRecord,
   type DetroitRecordType,
@@ -124,7 +123,7 @@ const DetroitWorkspacePage: React.FC = () => {
       setImportReport(
         result.imported || result.skippedDuplicates || result.invalid
           ? `Imported ${result.imported}. Skipped ${result.skippedDuplicates} duplicate(s) without overwriting. Invalid ${result.invalid}.`
-          : "No Site records were found to import.",
+          : "No new records were imported. HQ was not overwritten.",
       );
       await client.invalidateQueries({ queryKey: ["detroit-workspace-records"] });
     },
@@ -156,23 +155,6 @@ const DetroitWorkspacePage: React.FC = () => {
       (item.opportunity_id && ids.has(item.opportunity_id)) || /detroit|dlba|land bank/i.test(`${item.title} ${item.notes}`),
     );
   }, [applications.data, detroitGrants]);
-
-  const scanSiteStorage = () => {
-    try {
-      const scanned = scanBrowserStorage(window.localStorage);
-      if (!scanned.matchedKeys.length) {
-        setImportReport("No Detroit Site records exist in this browser. Nothing was discarded. HQ remains the source of truth.");
-        return;
-      }
-      if (!scanned.drafts.length) {
-        setImportReport(`Found ${scanned.matchedKeys.length} Detroit-related browser key(s), but no importable records. Nothing was overwritten.`);
-        return;
-      }
-      importRecords.mutate(scanned.drafts);
-    } catch {
-      setImportReport("This browser could not be scanned. HQ records were not changed.");
-    }
-  };
 
   const importPasted = () => {
     try {
@@ -355,16 +337,11 @@ const DetroitWorkspacePage: React.FC = () => {
 
         <HqPanel title="Legacy Site import" subtitle="Non-destructive. HQ records are never overwritten or discarded.">
           <p className="hq-muted-text">
-            The former ChatGPT Site is not an HQ store. Scan this browser or paste an export. If no Site records exist, the import reports that and leaves HQ unchanged.
+            The former ChatGPT Site is a different origin, so HQ cannot read its browser storage. Export a backup from the Detroit Site, then paste that JSON here. Import is additive: duplicates are skipped, and existing HQ records are never overwritten or discarded.
           </p>
-          <div style={{ display: "flex", gap: ".5rem", flexWrap: "wrap" }}>
-            <button type="button" className="hq-btn hq-btn-sm hq-btn-primary" onClick={scanSiteStorage} disabled={importRecords.isPending}>
-              Scan this browser for Site records
-            </button>
-            <button type="button" className="hq-btn hq-btn-sm hq-btn-ghost" onClick={importPasted} disabled={importRecords.isPending}>
-              Import pasted JSON
-            </button>
-          </div>
+          <button type="button" className="hq-btn hq-btn-sm hq-btn-primary" onClick={importPasted} disabled={importRecords.isPending}>
+            Import pasted JSON
+          </button>
           <label style={{ display: "block", marginTop: ".8rem" }}>
             Site export JSON
             <textarea className="hq-input hq-textarea" rows={4} value={importText} onChange={(event) => setImportText(event.target.value)} placeholder='{"records":[]}' />

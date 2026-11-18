@@ -72,7 +72,7 @@ test("nine work areas have fields and import never overwrites HQ records", () =>
   );
 });
 
-test("browser scan and grant matching stay conservative", () => {
+test("pasted JSON extraction and grant matching stay conservative", () => {
   const storage = {
     keys: ["ifcdc-detroit-site", "unrelated", "dlba-lots"],
     values: {
@@ -89,6 +89,11 @@ test("browser scan and grant matching stay conservative", () => {
   assert.equal(scanned.drafts.length, 1);
   assert.equal(scanned.drafts[0].title, "Vacant lot");
   assert.equal(extractDetroitDrafts({ records: [] }).length, 0);
+  assert.equal(extractDetroitDrafts({
+    records: [
+      { type: "property", title: "Pasted lot", payload: { address: "Unknown" } },
+    ],
+  }).length, 1);
   assert.equal(isDetroitRelatedGrant({ title: "Community facility", funder: "Example" }), false);
   assert.equal(isDetroitRelatedGrant({ title: "Detroit land reuse", funder: "DLBA" }), true);
   assert.equal(grantCenterResearchPayload({ title: "CDBG", payload: {} }), null);
@@ -132,8 +137,13 @@ test("authenticated HQ API creates, edits, and imports without overwrite", async
 test("HQ page keeps edit actions visible and does not claim live Aura search", () => {
   const page = readFileSync(new URL("../client/src/pages/hq/DetroitWorkspacePage.tsx", import.meta.url), "utf8");
   assert.match(page, /Update shared record/);
-  assert.match(page, /Scan this browser for Site records/);
+  assert.match(page, /Export a backup from the Detroit Site/);
+  assert.match(page, /Import pasted JSON/);
+  assert.match(page, /duplicates are skipped/);
   assert.match(page, /Open Grant Center/);
   assert.match(page, /Aura is not running a live Detroit grant search/);
+  assert.doesNotMatch(page, /Scan this browser/);
+  assert.doesNotMatch(page, /scanned Site/i);
+  assert.doesNotMatch(page, /scanBrowserStorage/);
   assert.equal(page.includes(":hover"), false);
 });

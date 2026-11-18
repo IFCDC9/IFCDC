@@ -18,7 +18,7 @@ Applications can link to existing Grant Center opportunities/applications and ca
 
 ## Legacy Site
 
-The ChatGPT Detroit research Site is not the system of record. Import from this browser or pasted JSON is additive only: duplicates are skipped, HQ records are never overwritten or discarded.
+The ChatGPT Detroit research Site is not the system of record. HQ cannot read that Site’s browser storage. Export a backup from the Site, then paste the JSON into HQ. Import is additive only: duplicates are skipped, HQ records are never overwritten or discarded.
 
 ## Gates
 
