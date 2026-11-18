@@ -89,6 +89,7 @@ const AuraEnterpriseBrainV1Page = lazyWithRetry(
 const IntegrationsHubPage = lazyWithRetry(() => import("./pages/hq/IntegrationsHubPage"), "IntegrationsHubPage");
 const EmailReadinessPage = lazyWithRetry(() => import("./pages/hq/EmailReadinessPage"), "EmailReadinessPage");
 const SsoGatewayPage = lazyWithRetry(() => import("./pages/hq/SsoGatewayPage"), "SsoGatewayPage");
+const DetroitWorkspacePage = lazyWithRetry(() => import("./pages/hq/DetroitWorkspacePage"), "DetroitWorkspacePage");
 const FounderCommandCenterPage = lazyWithRetry(() => import("./pages/hq/FounderCommandCenterPage"), "FounderCommandCenterPage");
 const BoardPortalPage = lazyWithRetry(() => import("./pages/hq/BoardPortalPage"), "BoardPortalPage");
 const EnterpriseReportingPage = lazyWithRetry(() => import("./pages/hq/EnterpriseReportingPage"), "EnterpriseReportingPage");
@@ -200,6 +201,7 @@ const App: React.FC = () => (
           <Route path="/hq/programs/:slug" element={<HqRoute path="/hq/programs"><ProgramModulePage /></HqRoute>} />
           <Route path="/hq/finance" element={<HqRoute path="/hq/finance"><FinancialCenterPage /></HqRoute>} />
           <Route path="/hq/grants" element={<HqRoute path="/hq/grants"><GrantCenterPage /></HqRoute>} />
+          <Route path="/hq/detroit" element={<HqRoute path="/hq/detroit"><DetroitWorkspacePage /></HqRoute>} />
           <Route path="/hq/analytics" element={<HqRoute path="/hq/analytics"><OrganizationAnalyticsPage /></HqRoute>} />
           <Route path="/hq/notifications" element={<HqRoute path="/hq/notifications"><NotificationsCenterPage /></HqRoute>} />
           <Route path="/hq/volunteers" element={<Navigate to="/hq/people?type=volunteer" replace />} />
