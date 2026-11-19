@@ -1142,15 +1142,27 @@ export const grantsApi = {
     apiFetch<{ programSlug: string; programLabel: string; matches: Record<string, unknown>[] }>(
       `/intelligence/programs/${programSlug}/matches`
     ),
-  enrichedOpportunities: (params?: { filter?: string; programSlug?: string; q?: string; limit?: number }) => {
+  enrichedOpportunities: (params?: { filter?: string; programSlug?: string; q?: string; limit?: number; initiative?: string }) => {
     const qs = new URLSearchParams();
     if (params?.filter) qs.set("filter", params.filter);
     if (params?.programSlug) qs.set("programSlug", params.programSlug);
     if (params?.q) qs.set("q", params.q);
     if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.initiative) qs.set("initiative", params.initiative);
     const q = qs.toString();
     return apiFetch<{ opportunities: Record<string, unknown>[] }>(`/intelligence/opportunities${q ? `?${q}` : ""}`);
   },
+  discoveryPreview: (initiative?: string) =>
+    apiFetch<{
+      checkedAt: string;
+      feeds: { id: string; label: string; liveSearch: boolean; note: string; missingCredentialNames: string[] }[];
+      queries: { keyword: string; initiative: string; source: string; error?: string; count: number }[];
+      opportunities: Record<string, unknown>[];
+      writesGrantCenter: false;
+      submitsGrant: false;
+    }>(`/discovery/preview${initiative ? `?initiative=${encodeURIComponent(initiative)}` : ""}`, { timeoutMs: 60_000 }),
+  hrStaffPipeline: () => apiFetch<Record<string, unknown>>("/hr-staff-pipeline"),
+  fundingWalkthrough: () => apiFetch<Record<string, unknown>>("/initiatives/walkthrough"),
   enrichedApplications: (status?: string) =>
     apiFetch<{ applications: Record<string, unknown>[] }>(
       `/applications/enriched${status ? `?status=${status}` : ""}`

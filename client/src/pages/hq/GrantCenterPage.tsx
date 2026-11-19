@@ -12,6 +12,7 @@ import { formatCurrency } from "../../utils/safeFormat";
 import { lazyWithRetry } from "../../utils/lazyWithRetry";
 import { GrantLibraryPanel, GrantWriterStudioPanel, GrantIntelligencePanel, GrantOpportunityFinderPanel } from "../../components/hq/grants/GrantCenterEnterprisePanels";
 import { GrantDiscoverHub, GrantApplicationsHub } from "../../components/hq/grants/GrantLifecycleHub";
+import { GrantNjDetroitFundingPanel } from "../../components/hq/grants/GrantNjDetroitFundingPanel";
 import { GrantFullApplicationWorkspace } from "../../components/hq/grants/GrantFullApplicationWorkspace";
 import { GrantEnterprisePipelineHub } from "../../components/hq/grants/GrantEnterprisePipelineHub";
 import {
@@ -631,6 +632,9 @@ const GrantCenterPage: React.FC = () => {
             </div>
             <div style={{ marginBottom: "1.25rem" }}>
               <GrantIntelligencePanel onStartApplication={handleStartApplication} />
+            </div>
+            <div style={{ marginBottom: "1.25rem" }}>
+              <GrantNjDetroitFundingPanel />
             </div>
             <div style={{ marginBottom: "1.25rem" }}>
               <GrantDiscoverHub onStartApplication={handleStartApplication} />

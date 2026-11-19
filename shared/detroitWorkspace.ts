@@ -404,7 +404,18 @@ export function grantCenterResearchPayload(record: {
   title: string;
   sourceUrl?: string | null;
   payload: Record<string, string>;
-}): { title: string; funder: string; description: string; url: string; eligibility: string; geography: string; source_type: string } | null {
+}): {
+  title: string;
+  funder: string;
+  description: string;
+  url: string;
+  eligibility: string;
+  geography: string;
+  source_type: string;
+  initiative_scope: "detroit_initiative";
+  verification_status: string;
+  eligibility_evidence: string;
+} | null {
   const funder = record.payload.funder?.trim();
   if (!funder) return null;
   return {
@@ -413,11 +424,14 @@ export function grantCenterResearchPayload(record: {
     description: [
       record.payload.notes,
       "Eligibility and availability remain Unknown until verified in Grant Center.",
-      "This research item was saved from the Detroit HQ workspace. Aura is not running a live Detroit grant search.",
+      "This research item was saved from the Detroit HQ workspace. Aura is not running a live Detroit grant search from this save action.",
     ].filter(Boolean).join("\n"),
     url: record.sourceUrl || record.payload.listingUrl || "",
     eligibility: record.payload.eligibilityStatus || UNKNOWN_UNTIL_VERIFIED,
     geography: "Detroit, Michigan — unverified",
     source_type: "detroit_workspace_research",
+    initiative_scope: "detroit_initiative",
+    verification_status: UNKNOWN_UNTIL_VERIFIED,
+    eligibility_evidence: record.payload.eligibilityStatus || UNKNOWN_UNTIL_VERIFIED,
   };
 }
