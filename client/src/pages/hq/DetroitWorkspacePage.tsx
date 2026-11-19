@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Pencil, Plus, Sparkles } from "lucide-react";
@@ -171,6 +171,11 @@ const DetroitWorkspacePage: React.FC = () => {
 
   const fields = DETROIT_FIELDS[activeType];
 
+  useEffect(() => {
+    document.body.classList.add("detroit-workspace-page");
+    return () => document.body.classList.remove("detroit-workspace-page");
+  }, []);
+
   return (
     <HQLayout
       title="Detroit Property & Program"
@@ -178,7 +183,7 @@ const DetroitWorkspacePage: React.FC = () => {
       auraModule="programs"
       auraActions={["ask", "summarize", "prepare_approval", "explain"]}
     >
-      <div style={{ display: "grid", gap: "1rem" }}>
+      <div className="detroit-workspace" style={{ display: "grid", gap: "1rem" }}>
         <HqPanel title="Build the Detroit opportunity at full scale" subtitle="Concept stage · HQ is the source of truth across phone, tablet, and desktop">
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))", gap: ".8rem" }}>
             {[
@@ -206,7 +211,7 @@ const DetroitWorkspacePage: React.FC = () => {
         </HqPanel>
 
         <HqPanel title="Shared records" subtitle={`${typeLabel} · create, view, and edit on any signed-in HQ device`}>
-          <div role="tablist" aria-label="Detroit work areas" style={{ display: "flex", gap: ".45rem", flexWrap: "wrap", marginBottom: "1rem" }}>
+          <div role="tablist" aria-label="Detroit work areas" className="hq-sub-nav detroit-workspace-tabs">
             {DETROIT_RECORD_TYPES.map((key) => (
               <button
                 key={key}

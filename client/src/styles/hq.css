@@ -1525,3 +1525,45 @@ body.hq-nav-open {
 /* Contextual page-level AURA bar */
 .hq-aura-pagebar { display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 1.25rem; padding: 0.65rem 0.85rem; background: var(--hq-black-card); border: 1px solid var(--hq-border); border-radius: var(--hq-radius); }
 .hq-aura-pagebar-label { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--hq-gold); padding-right: 0.6rem; margin-right: 0.2rem; border-right: 1px solid var(--hq-border); }
+
+/* Detroit workspace — phone polish: contained tab scroller + readable title */
+.detroit-workspace {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+.detroit-workspace .hq-panel,
+.detroit-workspace .hq-panel-body {
+  min-width: 0;
+  max-width: 100%;
+}
+.detroit-workspace-tabs {
+  flex-wrap: nowrap;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.detroit-workspace-tabs .hq-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+body.detroit-workspace-page .hq-topbar {
+  height: auto;
+  min-height: calc(var(--hq-topbar-height) + env(safe-area-inset-top, 0px));
+  align-items: center;
+}
+body.detroit-workspace-page .hq-topbar-title-wrap {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+body.detroit-workspace-page .hq-page-title-truncate {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  max-width: none;
+  line-height: 1.25;
+}
