@@ -34,6 +34,7 @@ import {
   BookOpen,
   Music2,
   Clapperboard,
+  MapPinned,
 } from "lucide-react";
 
 export interface HQNavItem {
@@ -97,6 +98,7 @@ export const HQ_NAV_ITEMS: HQNavItem[] = [
   { label: "Donations", path: "/hq/donations", icon: Heart, section: "Finance" },
 
   { label: "Community Programs", path: "/hq/programs", icon: Users, section: "Programs" },
+  { label: "Detroit Property & Program", path: "/hq/detroit", icon: MapPinned, section: "Programs", badge: "Pilot" },
   { label: "Housing Programs", path: "/hq/housing", icon: Home, section: "Programs" },
   { label: "Scholarship Management", path: "/hq/scholarships", icon: GraduationCap, section: "Programs" },
   { label: "Media Division", path: "/hq/media", icon: Radio, section: "Programs" },

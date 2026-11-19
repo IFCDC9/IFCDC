@@ -1,11 +1,12 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
-import { LayoutDashboard, FileText, Wallet, Sparkles, Bell, Search } from "lucide-react";
+import { LayoutDashboard, FileText, Wallet, Sparkles, Bell, Search, MapPinned } from "lucide-react";
 import { useAuth } from "../../auth/AuthContext";
 
 const MOBILE_NAV = [
   { path: "/hq", icon: LayoutDashboard, label: "Home" },
   { path: "/hq/grants", icon: FileText, label: "Grants" },
+  { path: "/hq/detroit", icon: MapPinned, label: "Detroit" },
   { path: "/hq/finance", icon: Wallet, label: "Finance" },
   { path: "/hq/aura", icon: Sparkles, label: "AURA" },
   { path: "/hq/notifications", icon: Bell, label: "Alerts" },
