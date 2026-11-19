@@ -204,11 +204,13 @@ export async function previewRegionalDiscovery(opts?: { initiative?: FundingInit
 }> {
   const checkedAt = new Date().toISOString();
   const initiative = opts?.initiative && opts.initiative !== "unknown" ? opts.initiative : "all";
-  const queries: { keyword: string; initiative: FundingInitiative; source: string }[] = [
-    { keyword: "New Jersey community development nonprofit", initiative: "nj_programs", source: "grants_gov" },
-    { keyword: "Detroit Michigan community development", initiative: "detroit_initiative", source: "grants_gov" },
-    { keyword: "community development nonprofit", initiative: "shared_org", source: "grants_gov" },
-  ].filter((item) => initiative === "all" || item.initiative === initiative || item.initiative === "shared_org");
+  const queries = (
+    [
+      { keyword: "New Jersey community development nonprofit", initiative: "nj_programs", source: "grants_gov" },
+      { keyword: "Detroit Michigan community development", initiative: "detroit_initiative", source: "grants_gov" },
+      { keyword: "community development nonprofit", initiative: "shared_org", source: "grants_gov" },
+    ] as const
+  ).filter((item) => initiative === "all" || item.initiative === initiative || item.initiative === "shared_org");
 
   const queryReports: { keyword: string; initiative: FundingInitiative; source: string; error?: string; count: number }[] = [];
   const opportunities: DiscoveryCard[] = [];
