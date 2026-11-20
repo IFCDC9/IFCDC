@@ -1155,7 +1155,7 @@ export const grantsApi = {
   discoveryPreview: (initiative?: string) =>
     apiFetch<{
       checkedAt: string;
-      feeds: { id: string; label: string; liveSearch: boolean; note: string; missingCredentialNames: string[] }[];
+      feeds: { id: string; label: string; liveSearch: boolean; note: string; missingCredentialNames: string[]; officialManualPath?: { url: string; exportWhat: string } }[];
       queries: { keyword: string; initiative: string; source: string; error?: string; count: number }[];
       opportunities: Record<string, unknown>[];
       writesGrantCenter: false;
@@ -1163,6 +1163,17 @@ export const grantsApi = {
     }>(`/discovery/preview${initiative ? `?initiative=${encodeURIComponent(initiative)}` : ""}`, { timeoutMs: 60_000 }),
   hrStaffPipeline: () => apiFetch<Record<string, unknown>>("/hr-staff-pipeline"),
   fundingWalkthrough: () => apiFetch<Record<string, unknown>>("/initiatives/walkthrough"),
+  executiveDeskSnapshot: (initiative?: string) =>
+    apiFetch<Record<string, unknown>>(
+      `/executive-desk${initiative ? `?initiative=${encodeURIComponent(initiative)}` : ""}`,
+    ),
+  runExecutiveDesk: (body?: { initiative?: string; persistToGrantCenter?: boolean; prepareBudgets?: boolean; prepareDrafts?: boolean }) =>
+    apiFetch<Record<string, unknown>>("/executive-desk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body ?? {}),
+      timeoutMs: 90_000,
+    }),
   enrichedApplications: (status?: string) =>
     apiFetch<{ applications: Record<string, unknown>[] }>(
       `/applications/enriched${status ? `?status=${status}` : ""}`

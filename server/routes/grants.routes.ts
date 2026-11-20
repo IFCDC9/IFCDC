@@ -174,6 +174,7 @@ import { getVerifiedGrantProfile, saveVerifiedGrantProfile, getOpportunityEligib
 import { isExcludedExecIdentity } from "../hq/auraActorIdentity";
 import { classifyFundingInitiative } from "../../shared/grantInitiativeScope";
 import { previewRegionalDiscovery, walkthroughFundingLifecycle, catalogFeedCapabilities } from "../hq/grantRegionalDiscoveryEngine";
+import { runGrantCenterExecutiveDesk, buildGrantCenterDeskSnapshot } from "../hq/auraGrantCenterExecutiveEngine";
 import { buildHrStaffFundingPipeline } from "../hq/grantHrStaffFundingPipeline";
 const router = Router();
 
@@ -457,6 +458,35 @@ router.get("/initiatives/walkthrough", (_req, res) => {
 
 router.get("/hr-staff-pipeline", async (_req, res) => {
   res.json(await buildHrStaffFundingPipeline());
+});
+
+router.get("/executive-desk", async (req, res) => {
+  const raw = String(req.query.initiative ?? "all");
+  const initiative = raw === "nj_programs" || raw === "detroit_initiative" || raw === "shared_org" ? raw : "all";
+  const snapshot = await buildGrantCenterDeskSnapshot(initiative);
+  res.set("Cache-Control", "no-store");
+  res.json({
+    snapshot,
+    feeds: catalogFeedCapabilities(),
+    walkthrough: walkthroughFundingLifecycle(),
+    writesGrantCenter: false,
+    submitsGrant: false,
+  });
+});
+
+router.post("/executive-desk", async (req, res) => {
+  const raw = String(req.body?.initiative ?? req.query.initiative ?? "all");
+  const initiative = raw === "nj_programs" || raw === "detroit_initiative" || raw === "shared_org" ? raw : "all";
+  const desk = await runGrantCenterExecutiveDesk({
+    initiative,
+    persistToGrantCenter: req.body?.persistToGrantCenter !== false,
+    prepareBudgets: Boolean(req.body?.prepareBudgets),
+    prepareDrafts: Boolean(req.body?.prepareDrafts),
+    actorEmail: req.hqUser?.email,
+    actor: { id: req.hqUser?.id, email: req.hqUser?.email, role: req.hqUser?.role, isFounder: isFounderMode(req) },
+  });
+  res.set("Cache-Control", "no-store");
+  res.json(desk);
 });
 
 router.post("/feeds/sync", async (req, res) => {

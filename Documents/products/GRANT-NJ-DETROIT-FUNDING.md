@@ -2,27 +2,34 @@
 
 **Status:** HQ Grant Center extension (review PR, not production until Founder deploy)  
 **Store:** existing Grant Center (`grant_opportunities` / applications / awards / documents)  
-**Routes:** `/hq/grants` Opportunity Finder · `/hq/detroit` Grant Center connection
+**Routes:** `/hq` Find Funding · `/hq/aura` · `/hq/grants` Opportunity Finder · `/hq/detroit`
 
-## Already live on origin/main (PR #72)
+## Aura executive desk (this branch)
 
-Detroit property workspace, Grant Center research save, conservative Unknown defaults, no DLBA scrape.
+Aura is an **AI operator**, not Founder. From the executive workspace she can:
 
-## This branch
+1. Search official feeds (Grants.gov Search2; ProPublica 990 identities).
+2. Store research in the **same** Grant Center (not a second browser store).
+3. Summarize NJ vs Detroit vs shared-org rows, deadlines, missing documents, HR coverage.
+4. Seed a budget narrative with Unknown line items and open proposal drafts in Grant Center.
+5. Track follow-ups from Grant Center deadlines. Detroit parcel follow-ups stay in `/hq/detroit`.
 
-- Read-only Grants.gov Search2 + ProPublica 990 preview for NJ, Detroit/Michigan, and national keywords.
-- Initiative tags: `nj_programs` | `detroit_initiative` | `shared_org` | `unknown`.
-- HR/payroll coverage panel: payroll is not funded until award + terms.
-- Founder walkthrough: discovery → draft → Founder review → portal confirm → award → renewal.
-- `exec@ifcdc.org` cannot Founder-approve grant submit.
+She does **not** submit, contact funders or DLBA, accept awards, purchase property, commit funds, or Founder-approve. `exec@ifcdc.org` cannot Founder-approve.
 
-## Not live / blocked
+## Walkthrough (no live submit)
 
-- NJ SAGE / NJ DOL APIs — no connector.
-- Detroit Land Bank / Michigan SIGMA APIs — no connector.
-- SAM.gov assistance listings as opportunities — entity probe only (`SAM_GOV_ENABLED`, `SAM_GOV_API_KEY`, `SAM_GOV_UEI`).
-- Corporate CSR — static reference, not live search.
-- Aura is not submitting, contacting funders, buying property, or committing funds.
+1. Search official feeds from HQ / Aura / Grant Center **Find Funding**.
+2. Verify source, date checked, official link, deadline, eligibility evidence, allowable costs, match, missing documents. Unverified = Unknown. Fit score is not eligibility.
+3. Compare NJ program costs, Detroit initiative costs, and shared-org costs on one store.
+4. Prepare budget skeleton and proposal draft in Grant Center (still potential_funding).
+5. Founder review (not exec@ifcdc.org). MFA grant submit unchanged.
+6. Founder submits on the **funder portal** outside HQ.
+7. Record confirmation ID in Grant Center.
+8. Track award, reporting, and renewals. Payroll is not funded until award + terms reviewed.
+
+## Connected vs blocked feeds
+
+See Grant Center panel. Blocked portals stay **unavailable** with an official manual URL and export instructions. Do not scrape.
 
 ## Money status
 

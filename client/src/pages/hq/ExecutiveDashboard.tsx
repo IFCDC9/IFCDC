@@ -68,7 +68,7 @@ const ExecutiveWidgetDashboard = lazyWithRetry(
 
 const QUICK_ACTIONS = [
   { label: "Add Employee", to: "/hq/people", icon: UserPlus },
-  { label: "View Grants", to: "/hq/grants", icon: FileText },
+  { label: "View Grants", to: "/hq/grants?tab=discover", icon: FileText },
   { label: "Analytics Center", to: "/hq/analytics", icon: FileBarChart },
   { label: "Software Health", to: "/hq/software", icon: Monitor },
   { label: "Ask AURA", to: "/hq/aura", icon: Sparkles },

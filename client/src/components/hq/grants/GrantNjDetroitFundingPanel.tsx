@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import { grantsApi } from "../../../api/grantsApi";
 import { HqPanel } from "../HqPanel";
@@ -25,6 +25,24 @@ export const GrantNjDetroitFundingPanel: React.FC = () => {
     queryFn: grantsApi.fundingWalkthrough,
     staleTime: 300_000,
   });
+  const desk = useQuery({
+    queryKey: ["grant-executive-desk", initiative],
+    queryFn: () => grantsApi.executiveDeskSnapshot(initiative === "all" ? undefined : initiative),
+    staleTime: 60_000,
+  });
+  const runDesk = useMutation({
+    mutationFn: () => grantsApi.runExecutiveDesk({
+      initiative: initiative === "all" ? "all" : initiative,
+      persistToGrantCenter: true,
+      prepareBudgets: false,
+      prepareDrafts: false,
+    }),
+    onSuccess: () => {
+      void preview.refetch();
+      void desk.refetch();
+      void hr.refetch();
+    },
+  });
 
   const cards = (preview.data?.opportunities ?? []) as Array<{
     title: string;
@@ -44,12 +62,31 @@ export const GrantNjDetroitFundingPanel: React.FC = () => {
   return (
     <HqPanel
       title="NJ programs & Detroit initiative"
-      subtitle="One Grant Center store. Read-only official feed preview — Aura only claims live search when Grants.gov Search2 or ProPublica actually ran."
+      subtitle="Aura uses this Grant Center store from the executive workspace. Live Search2/990 preview plus stored research — not a second browser store."
     >
       <p className="hq-muted-text">
         Match scores are not eligibility. Amounts stay potential_funding until a submitted application, award, or received revenue is recorded.
-        Founder approval is required before submit. exec@ifcdc.org cannot approve. This panel does not submit, contact funders, or purchase property.
+        Founder approval is required before submit. exec@ifcdc.org cannot approve. Aura is an AI operator, not Founder. This panel does not submit, contact funders, or purchase property.
       </p>
+      <div style={{ display: "flex", gap: ".6rem", flexWrap: "wrap", margin: "0.75rem 0" }}>
+        <button
+          type="button"
+          className="hq-btn hq-btn-sm hq-btn-primary"
+          onClick={() => runDesk.mutate()}
+          disabled={runDesk.isPending}
+        >
+          {runDesk.isPending ? "Aura searching official feeds…" : "Aura: search and store in Grant Center"}
+        </button>
+      </div>
+      {runDesk.isError ? <p role="alert">{grantCallFailureText(runDesk.error, "Aura funding desk failed.")}</p> : null}
+      {desk.data && typeof desk.data.snapshot === "object" && desk.data.snapshot ? (
+        <p className="hq-muted-text">
+          Stored Grant Center rows — NJ {String(((desk.data.snapshot as { byInitiative?: { nj_programs?: unknown[] } }).byInitiative?.nj_programs ?? []).length)},
+          Detroit {String(((desk.data.snapshot as { byInitiative?: { detroit_initiative?: unknown[] } }).byInitiative?.detroit_initiative ?? []).length)},
+          shared-org {String(((desk.data.snapshot as { byInitiative?: { shared_org?: unknown[] } }).byInitiative?.shared_org ?? []).length)}.
+          Deadlines and missing documents stay on this store. Detroit site follow-ups stay in the Detroit workspace.
+        </p>
+      ) : null}
       <div className="hq-founder-command-strip" style={{ margin: "1rem 0", flexWrap: "wrap" }}>
         {([
           ["all", "Both queues"],
@@ -77,6 +114,9 @@ export const GrantNjDetroitFundingPanel: React.FC = () => {
                 {feed.liveSearch ? " — live search on this branch. " : " — no live opportunity search. "}
                 {feed.note}
                 {feed.missingCredentialNames.length > 0 ? ` Missing env names: ${feed.missingCredentialNames.join(", ")}.` : ""}
+                {feed.officialManualPath ? (
+                  <> Manual path: <a href={feed.officialManualPath.url} target="_blank" rel="noreferrer">{feed.officialManualPath.url}</a> — {feed.officialManualPath.exportWhat}</>
+                ) : null}
               </li>
             ))}
           </ul>

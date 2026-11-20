@@ -39,7 +39,7 @@ const BUTTONS: Record<AuraButtonId, ButtonSpec> = {
   ask: { id: "ask", label: "Ask AURA", icon: Sparkles },
   draft: { id: "draft", label: "Draft with AURA", icon: PenLine, actionId: "draft_proposal", autoRun: false },
   summarize: { id: "summarize", label: "Summarize with AURA", icon: FileText, actionId: "summarize", autoRun: true },
-  find_funding: { id: "find_funding", label: "Find Funding", icon: Search, actionId: "find_grants", autoRun: true },
+  find_funding: { id: "find_funding", label: "Find Funding", icon: Search, actionId: "run_grant_center_executive_desk", autoRun: true },
   enterprise_scan: { id: "enterprise_scan", label: "Enterprise Scan", icon: Radar, actionId: "enterprise_funding_scan", autoRun: true },
   generate_report: { id: "generate_report", label: "Generate Report", icon: BarChart3, actionId: "generate_report", autoRun: true },
   prepare_approval: { id: "prepare_approval", label: "Prepare for Approval", icon: ShieldCheck, actionId: "prepare_for_approval", autoRun: true },
