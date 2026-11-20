@@ -171,12 +171,17 @@ import {
 } from "../hq/grantFoundationEngine";
 
 import { getVerifiedGrantProfile, saveVerifiedGrantProfile, getOpportunityEligibility, getApplicationEligibility, saveGrantNoticeReview } from "../hq/grantEligibilityReview";
+import { isExcludedExecIdentity } from "../hq/auraActorIdentity";
+import { classifyFundingInitiative } from "../../shared/grantInitiativeScope";
+import { previewRegionalDiscovery, walkthroughFundingLifecycle, catalogFeedCapabilities } from "../hq/grantRegionalDiscoveryEngine";
+import { buildHrStaffFundingPipeline } from "../hq/grantHrStaffFundingPipeline";
 const router = Router();
 
 /** Production Founder Mode — only verified Founder/owner may approve grants for submission. */
 function isFounderMode(req: Request): boolean {
   const u = req.hqUser;
   if (!u) return false;
+  if (isExcludedExecIdentity(u)) return false;
   const role = String(u.role || "").toLowerCase();
   if (role === "owner" || role === "founder") return true;
   const email = (u.email || "").toLowerCase();
@@ -434,7 +439,24 @@ router.get("/center/platform", async (_req, res) => {
 });
 
 router.get("/feeds/status", async (_req, res) => {
-  res.json({ integrations: await getGrantFeedIntegrationStatus() });
+  res.json({ integrations: await getGrantFeedIntegrationStatus(), capabilities: catalogFeedCapabilities() });
+});
+
+/** Read-only official feed preview. Does not write Grant Center or submit. */
+router.get("/discovery/preview", async (req, res) => {
+  const raw = String(req.query.initiative ?? "all");
+  const initiative = raw === "nj_programs" || raw === "detroit_initiative" || raw === "shared_org" ? raw : "all";
+  const preview = await previewRegionalDiscovery({ initiative });
+  res.set("Cache-Control", "no-store");
+  res.json(preview);
+});
+
+router.get("/initiatives/walkthrough", (_req, res) => {
+  res.json(walkthroughFundingLifecycle());
+});
+
+router.get("/hr-staff-pipeline", async (_req, res) => {
+  res.json(await buildHrStaffFundingPipeline());
 });
 
 router.post("/feeds/sync", async (req, res) => {
@@ -494,11 +516,15 @@ router.get("/intelligence/opportunities", async (req, res) => {
   const programSlug = req.query.programSlug ? String(req.query.programSlug) : undefined;
   const q = req.query.q ? String(req.query.q) : undefined;
   const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  const initiative = req.query.initiative ? String(req.query.initiative) : undefined;
   res.json(await buildEnrichedOpportunityList({
     filter: filter as "all" | "matched" | "program",
     programSlug,
     q,
     limit,
+    initiative: initiative === "nj_programs" || initiative === "detroit_initiative" || initiative === "shared_org" || initiative === "unknown"
+      ? initiative
+      : undefined,
   }));
 });
 
@@ -839,6 +865,7 @@ router.post("/opportunities", async (req, res) => {
   const {
     title, funder, description, amount_min, amount_max, deadline, url, requirements,
     division_slugs, program_areas, eligibility, geography, funder_type, source_type,
+    initiative_scope, date_checked, match_requirements, allowable_costs, eligibility_evidence, verification_status,
   } = req.body;
   if (!title || !funder) return res.status(400).json({ error: "title and funder are required" });
   const db = await getDb();
@@ -850,16 +877,22 @@ router.post("/opportunities", async (req, res) => {
   const programsJson = program_areas
     ? JSON.stringify(Array.isArray(program_areas) ? program_areas : [program_areas])
     : "[]";
+  const classified = classifyFundingInitiative({
+    title, funder, description, geography, eligibility, program_areas, source_type, initiative_scope,
+  });
   await db.run(
     `INSERT INTO grant_opportunities (
       id, title, funder, description, amount_min, amount_max, status, deadline, url, requirements,
       division_slugs, program_areas, eligibility, geography, funder_type, source_type,
-      import_status, last_verified_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?, ?)`,
+      import_status, last_verified_at, created_at, updated_at,
+      initiative_scope, date_checked, match_requirements, allowable_costs, eligibility_evidence, verification_status
+    ) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     oppId, title, funder, description ?? "", amount_min ?? null, amount_max ?? null,
     deadline ?? null, url ?? "", requirements ? JSON.stringify(requirements) : "[]",
     divisionsJson, programsJson, eligibility ?? null, geography ?? null,
-    normalizeFunderType(funder_type) ?? funder_type ?? "foundation", source_type ?? "manual", now, now, now
+    normalizeFunderType(funder_type) ?? funder_type ?? "foundation", source_type ?? "manual", now, now, now,
+    classified.initiative, date_checked ?? now, match_requirements ?? null, allowable_costs ?? null,
+    eligibility_evidence ?? eligibility ?? "Unknown", verification_status ?? "Unknown"
   );
   if (deadline) {
     await db.run(

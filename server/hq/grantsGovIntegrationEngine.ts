@@ -51,10 +51,10 @@ function searchHeaders(): Record<string, string> {
   return headers;
 }
 
-function searchBody(rows: number) {
+function searchBody(rows: number, keyword?: string) {
   return JSON.stringify({
     rows,
-    keyword: searchKeyword(),
+    keyword: (keyword || searchKeyword()).trim(),
     oppStatuses: "posted",
   });
 }
@@ -312,11 +312,11 @@ export async function fetchGrantsGovOpportunityDeadline(externalId: string): Pro
 }
 
 /** Public Search2 — no API key required per Grants.gov API Guide. */
-export async function searchGrantsGovLive(rows = 50) {
+export async function searchGrantsGovLive(rows = 50, keyword?: string) {
   const res = await fetch(SEARCH2_URL, {
     method: "POST",
     headers: searchHeaders(),
-    body: searchBody(rows),
+    body: searchBody(rows, keyword),
     signal: AbortSignal.timeout(20_000),
   });
 

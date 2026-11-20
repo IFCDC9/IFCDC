@@ -64,6 +64,11 @@ const DetroitWorkspacePage: React.FC = () => {
     queryFn: grantsApi.applications,
     staleTime: 60_000,
   });
+  const livePreview = useQuery({
+    queryKey: ["detroit-discovery-preview"],
+    queryFn: () => grantsApi.discoveryPreview("detroit_initiative"),
+    staleTime: 120_000,
+  });
 
   const resetForm = (type = activeType) => {
     setEditingId(null);
@@ -338,6 +343,25 @@ const DetroitWorkspacePage: React.FC = () => {
           {detroitApps.length > 0 && (
             <p className="hq-muted-text" style={{ marginTop: "1rem" }}>{detroitApps.length} Grant Center application(s) mention Detroit-related work. Open them in Grant Center to continue writing — this page does not submit applications.</p>
           )}
+          <h3 style={{ marginTop: "1.25rem" }}>Read-only Grants.gov / ProPublica preview</h3>
+          <p className="hq-muted-text">
+            This preview calls official APIs from Grant Center. It does not write HQ records and does not contact the Detroit Land Bank.
+            {DETROIT_AURA_LIVE_SEARCH ? "" : " The Detroit workspace itself still does not scrape DLBA listings."}
+          </p>
+          {livePreview.isLoading ? <p className="hq-muted-text">Checking official feeds…</p>
+            : livePreview.isError ? <p role="alert">Official feed preview unavailable.</p>
+            : (livePreview.data?.opportunities ?? []).length ? (
+              <ul style={{ listStyle: "none", padding: 0 }}>
+                {(livePreview.data.opportunities as { title: string; funder: string; source: string; dateChecked: string; deadline: string; officialLink: string; eligibilityEvidence: string }[]).slice(0, 12).map((item) => (
+                  <li key={`${item.officialLink}-${item.title}`} style={{ marginBottom: ".6rem" }}>
+                    <strong>{item.title}</strong>
+                    <div className="hq-muted-text">{item.funder} · {item.source} · checked {item.dateChecked} · deadline {item.deadline}</div>
+                    <div className="hq-muted-text">{item.eligibilityEvidence}</div>
+                    {item.officialLink && item.officialLink !== "Unknown" && <a href={item.officialLink} target="_blank" rel="noreferrer">Official source <ExternalLink size={12} /></a>}
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="hq-muted-text">No current Detroit/Michigan keyword hits. Results stay Unknown until an official listing is checked.</p>}
         </HqPanel>
 
         <HqPanel title="Legacy Site import" subtitle="Non-destructive. HQ records are never overwritten or discarded.">

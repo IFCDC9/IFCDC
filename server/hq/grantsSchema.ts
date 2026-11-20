@@ -134,6 +134,7 @@ export async function ensureGrantTables(): Promise<void> {
   await migrateGrantPhase8A3();
   await migrateGrantPhase8A4();
   await migrateGrantPhase8A5();
+  await migrateGrantNjDetroitFunding();
   if (!allowGrantDemoSeed()) {
     return;
   }
@@ -1321,6 +1322,36 @@ async function migrateGrantPhase8A5(): Promise<void> {
   `);
 
   await addCol("grant_evidence_records", "associated_opportunity_ids_json", "TEXT");
+}
+
+/** NJ programs + Detroit initiative tags on the existing Grant Center store. */
+async function migrateGrantNjDetroitFunding(): Promise<void> {
+  const db = await getDb();
+  const addCol = async (table: string, col: string, type: string) => {
+    try {
+      await db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+    } catch {
+      /* exists */
+    }
+  };
+  await addCol("grant_opportunities", "initiative_scope", "TEXT DEFAULT 'unknown'");
+  await addCol("grant_opportunities", "date_checked", "TEXT");
+  await addCol("grant_opportunities", "match_requirements", "TEXT");
+  await addCol("grant_opportunities", "allowable_costs", "TEXT");
+  await addCol("grant_opportunities", "eligibility_evidence", "TEXT");
+  await addCol("grant_opportunities", "verification_status", "TEXT DEFAULT 'Unknown'");
+  await addCol("grant_applications", "initiative_scope", "TEXT");
+  await addCol("grant_awards", "initiative_scope", "TEXT");
+  await addCol("grant_documents", "shared_org", "INTEGER DEFAULT 1");
+  const now = new Date().toISOString();
+  await db.run(
+    `INSERT INTO grant_sources (id, provider_key, label, category, base_url, api_url, status, schedule_hint, notes, created_at, updated_at)
+     VALUES (?, 'michigan_state', 'Michigan / Detroit portals', 'state', 'https://www.michigan.gov', null, 'partial', 'on_demand', 'No official API on this branch — Grants.gov keywords only', ?, ?)
+     ON CONFLICT(provider_key) DO UPDATE SET updated_at = excluded.updated_at`,
+    id(),
+    now,
+    now,
+  );
 }
 
 export async function logGrantActivity(

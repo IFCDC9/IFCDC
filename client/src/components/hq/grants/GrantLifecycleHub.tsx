@@ -82,6 +82,7 @@ export const GrantOpportunityTable: React.FC<{
               <td>{o.fundingAmount?.label ?? fmtGrantAmount()}</td>
               <td>
                 <StatusBadge label={`${o.matchScore}%`} variant={o.matchScore >= 70 ? "success" : o.matchScore >= 55 ? "warning" : "muted"} />
+                <div className="hq-muted-text" style={{ fontSize: "0.7rem" }}>not eligibility</div>
               </td>
               <td>{o.deadlineLabel ?? fmtGrantDeadline(null)}</td>
               <td className="hq-muted-text" style={{ fontSize: "0.78rem" }}>
@@ -117,11 +118,17 @@ export const GrantDiscoverHub: React.FC<{ onStartApplication?: (id: string) => v
   const [view, setView] = useState<"opportunities" | "matched" | "program-matches">("opportunities");
   const [programSlug, setProgramSlug] = useState("housing");
   const [q, setQ] = useState("");
+  const [initiative, setInitiative] = useState("");
 
   const filter = view === "matched" ? "matched" : view === "program-matches" ? "program" : "all";
   const opps = useQuery({
-    queryKey: ["grant-enriched-opportunities", filter, programSlug, q],
-    queryFn: () => grantsApi.enrichedOpportunities({ filter, programSlug: view === "program-matches" ? programSlug : undefined, q: q || undefined }),
+    queryKey: ["grant-enriched-opportunities", filter, programSlug, q, initiative],
+    queryFn: () => grantsApi.enrichedOpportunities({
+      filter,
+      programSlug: view === "program-matches" ? programSlug : undefined,
+      q: q || undefined,
+      initiative: initiative || undefined,
+    }),
     staleTime: 30_000,
   });
 
@@ -132,7 +139,7 @@ export const GrantDiscoverHub: React.FC<{ onStartApplication?: (id: string) => v
   });
 
   return (
-    <HqPanel title="Grant Discovery" subtitle="Live Grants.gov and SAM.gov opportunities matched to IFCDC programs">
+    <HqPanel title="Grant Discovery" subtitle="Grant Center catalog. Match % is not eligibility. SAM.gov is entity status only unless a live opportunity search exists.">
       <GrantSubNav
         items={[
           { id: "opportunities", label: "Opportunities" },
@@ -144,6 +151,12 @@ export const GrantDiscoverHub: React.FC<{ onStartApplication?: (id: string) => v
       />
       <div className="hq-founder-command-strip" style={{ margin: "1rem 0", flexWrap: "wrap" }}>
         <input className="hq-input" placeholder="Search opportunities…" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 200, flex: "1 1 160px" }} />
+        <select className="hq-input" value={initiative} onChange={(e) => setInitiative(e.target.value)} aria-label="Initiative">
+          <option value="">All initiatives</option>
+          <option value="nj_programs">New Jersey programs</option>
+          <option value="detroit_initiative">Detroit initiative</option>
+          <option value="shared_org">Shared org / national</option>
+        </select>
         {view === "program-matches" && (
           <select className="hq-input" value={programSlug} onChange={(e) => setProgramSlug(e.target.value)}>
             {(programs.data ?? []).map((p) => (

@@ -26,6 +26,7 @@ import { productionGrantOpportunitySqlFilter } from "./grantProductionPolicy";
 import { buildApplicationWorkspace } from "./grantFundingEngineV5";
 import { getApplicationWorkflow } from "./grantFundingEngine";
 import { fetchGrantsGovOpportunityDeadline } from "./grantsGovIntegrationEngine";
+import { classifyFundingInitiative, matchScoreDisclaimer, moneyStatusFromGrantRow } from "../../shared/grantInitiativeScope";
 
 /** User-facing grant lifecycle workflow (human approval gate before submit). */
 export const GRANT_DISPLAY_WORKFLOW = [
@@ -57,6 +58,15 @@ export type EnrichedOpportunityRow = {
   dataSourceLabel: string;
   url: string | null;
   compositeScore: number;
+  initiative: string;
+  initiativeEvidence: string;
+  moneyStatus: string;
+  dateChecked: string;
+  eligibilityEvidence: string;
+  allowableCosts: string;
+  matchRequirements: string;
+  matchScoreDisclaimer: string;
+  notGuaranteedMoney: true;
 };
 
 function formatFundingLabel(min: number | null, max: number | null): string {
@@ -79,6 +89,7 @@ function sourceLabel(sourceType: string | null | undefined): string {
     sam_gov: "SAM.gov",
     foundation_directory: "Foundation Directory",
     corporate_csr: "Corporate CSR",
+    detroit_workspace_research: "Detroit workspace research",
     manual: "Manual entry",
   };
   return map[String(sourceType ?? "")] ?? "IFCDC HQ";
@@ -151,6 +162,15 @@ async function mapOpportunityRow(row: Record<string, unknown>): Promise<Enriched
     dataSourceLabel: sourceLabel(fresh.source_type ? String(fresh.source_type) : null),
     url: fresh.url ? String(fresh.url) : null,
     compositeScore: matchScore,
+    initiative: classifyFundingInitiative(fresh).initiative,
+    initiativeEvidence: classifyFundingInitiative(fresh).evidence,
+    moneyStatus: moneyStatusFromGrantRow(fresh),
+    dateChecked: String(fresh.date_checked ?? fresh.last_verified_at ?? fresh.updated_at ?? "Unknown"),
+    eligibilityEvidence: String(fresh.eligibility_evidence ?? fresh.eligibility ?? "Unknown"),
+    allowableCosts: String(fresh.allowable_costs ?? "Unknown"),
+    matchRequirements: String(fresh.match_requirements ?? fresh.requirements ?? "Unknown"),
+    matchScoreDisclaimer: matchScoreDisclaimer(matchScore),
+    notGuaranteedMoney: true,
   };
 }
 
@@ -160,6 +180,7 @@ export async function buildEnrichedOpportunityList(opts?: {
   programSlug?: string;
   q?: string;
   limit?: number;
+  initiative?: string;
 }) {
   const db = await getDb();
   const limit = opts?.limit ?? 100;
@@ -189,12 +210,18 @@ export async function buildEnrichedOpportunityList(opts?: {
   if (opts?.filter === "matched") {
     enriched = enriched.filter((o) => o.matchScore >= 55 || o.programFit.slugs.length > 0);
   }
+  if (opts?.initiative) {
+    enriched = enriched.filter((o) => o.initiative === opts.initiative);
+  }
 
   return {
     opportunities: enriched,
     filter: opts?.filter ?? "all",
     programSlug: opts?.programSlug ?? null,
+    initiative: opts?.initiative ?? null,
     generatedAt: new Date().toISOString(),
+    matchScoresAreNotEligibility: true,
+    notGuaranteedMoney: true,
   };
 }
 
