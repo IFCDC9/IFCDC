@@ -15,6 +15,7 @@
     "precheck": "npm run build:packages",
     "check": "tsc",
     "test": "npm run build",
+    "test:sqlite-full-backup-safety": "node --import tsx --test script/aura-resolve-sqlite-full-backup-safety.test.ts",
     "build:client": "vite build",
     "people:readiness": "node script/people-phase3-readiness.mjs",
     "finance:readiness": "node script/finance-phase4-readiness.mjs",

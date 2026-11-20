@@ -13,7 +13,7 @@ import path from "path";
 import type { Request, Response } from "express";
 import sqlite3 from "sqlite3";
 import { open, Database } from "sqlite";
-import { getBackupDir, getDataDir, getDbPath, getReportsDir } from "../config/dataPaths";
+import { getDataDir, getDbPath } from "../config/dataPaths";
 
 function tokenHash(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
@@ -221,69 +221,9 @@ function bearer(req: { headers: Record<string, unknown> }): string | null {
   return null;
 }
 
-/** Free disposable disk so Resolve enrollment writes are not blocked by SQLITE_FULL. */
-function reclaimDiskForResolveWrites(): { freedBytes: number; actions: string[] } {
-  const actions: string[] = [];
-  let freedBytes = 0;
-  const unlinkSafe = (filePath: string, label: string) => {
-    try {
-      if (!fs.existsSync(filePath)) return;
-      const size = fs.statSync(filePath).size;
-      fs.unlinkSync(filePath);
-      freedBytes += size;
-      actions.push(`${label}:${path.basename(filePath)}`);
-    } catch (err) {
-      console.warn("[aura-resolve] reclaim skip", filePath, err);
-    }
-  };
-
-  const backupDir = getBackupDir();
-  if (fs.existsSync(backupDir)) {
-    const backups = fs
-      .readdirSync(backupDir)
-      .map((name) => {
-        const full = path.join(backupDir, name);
-        try {
-          const st = fs.statSync(full);
-          return st.isFile() ? { full, mtimeMs: st.mtimeMs, size: st.size } : null;
-        } catch {
-          return null;
-        }
-      })
-      .filter((row): row is { full: string; mtimeMs: number; size: number } => Boolean(row))
-      .sort((a, b) => b.mtimeMs - a.mtimeMs);
-    // Drop every backup copy when the disk is full — enrollment needs write headroom.
-    for (const row of backups) unlinkSafe(row.full, "backup");
-  }
-
-  const dataDir = getDataDir();
-  for (const name of fs.readdirSync(dataDir)) {
-    if (!/^ifcdc-.*\.db$/i.test(name) && !/\.db\.(bak|tmp|old)$/i.test(name)) continue;
-    const full = path.join(dataDir, name);
-    if (path.resolve(full) === path.resolve(getDbPath())) continue;
-    unlinkSafe(full, "data-copy");
-  }
-
-  try {
-    const reportsDir = getReportsDir();
-    if (fs.existsSync(reportsDir)) {
-      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
-      for (const name of fs.readdirSync(reportsDir)) {
-        const full = path.join(reportsDir, name);
-        try {
-          const st = fs.statSync(full);
-          if (st.isFile() && st.mtimeMs < cutoff) unlinkSafe(full, "report");
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-  } catch {
-    /* ignore */
-  }
-
-  console.warn("[aura-resolve] disk reclaim", { freedBytes, actions: actions.slice(0, 20) });
-  return { freedBytes, actions };
+export function isSqliteFullError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /SQLITE_FULL|database or disk is full/i.test(message);
 }
 
 async function insertClaimNode(
@@ -346,24 +286,10 @@ export async function claimFirstAuraResolveNode(opts: {
     return await runOnce();
   } catch (err) {
     const message = err instanceof Error ? err.message : "Resolve node database unavailable";
-    if (/SQLITE_FULL|database or disk is full/i.test(message)) {
-      const reclaim = reclaimDiskForResolveWrites();
-      await resetResolveDb("sqlite-full-reclaim");
-      try {
-        const retry = await runOnce();
-        if (retry.ok) return retry;
-        return {
-          ok: false as const,
-          error: `${retry.error} (reclaimed ${reclaim.freedBytes} bytes)`,
-        };
-      } catch (retryErr) {
-        const retryMessage = retryErr instanceof Error ? retryErr.message : String(retryErr);
-        console.error("[aura-resolve] claim retry failed:", retryMessage, reclaim);
-        return {
-          ok: false as const,
-          error: `Resolve node claim failed after reclaim (${reclaim.freedBytes} bytes): ${retryMessage}`,
-        };
-      }
+    // SQLITE_FULL is fail-closed: never delete backups, snapshots, or data copies to "make room".
+    if (isSqliteFullError(err)) {
+      console.error("[aura-resolve] claim failed SQLITE_FULL; backups preserved:", message);
+      return { ok: false as const, error: `Resolve node claim failed: ${message}` };
     }
     console.error("[aura-resolve] claim failed:", message);
     return { ok: false as const, error: `Resolve node claim failed: ${message}` };
