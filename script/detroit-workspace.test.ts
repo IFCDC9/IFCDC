@@ -141,7 +141,8 @@ test("HQ page keeps edit actions visible and does not claim live Aura search", (
   assert.match(page, /Import pasted JSON/);
   assert.match(page, /duplicates are skipped/);
   assert.match(page, /Open Grant Center/);
-  assert.match(page, /Aura is not running a live Detroit grant search/);
+  assert.match(page, /does not scrape DLBA/);
+  assert.match(page, /does not contact the Detroit Land Bank/);
   assert.doesNotMatch(page, /Scan this browser/);
   assert.doesNotMatch(page, /scanned Site/i);
   assert.doesNotMatch(page, /scanBrowserStorage/);

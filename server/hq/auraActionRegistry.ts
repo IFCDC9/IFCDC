@@ -144,11 +144,68 @@ const findGrants: AuraAction = {
       actorEmail: ctx.actorEmail,
     })) as { matches?: unknown[] };
     const matches = Array.isArray(result.matches) ? result.matches : [];
+    const blob = [program, str(args.query), ctx.module, JSON.stringify(ctx.contextRef ?? {})].join(" ");
+    const { isGrantCenterExecutiveDeskQuery, initiativeFromAuraContext, runGrantCenterExecutiveDesk, formatExecutiveDeskSummary } = await import("./auraGrantCenterExecutiveEngine");
+    const runDesk = ctx.module === "executive" || ctx.module === "aura" || ctx.module === "programs" || ctx.module === "grants" || isGrantCenterExecutiveDeskQuery(blob);
+    let desk: unknown;
+    let deskSummary = "";
+    if (runDesk) {
+      const deskResult = await runGrantCenterExecutiveDesk({
+        initiative: initiativeFromAuraContext(blob),
+        persistToGrantCenter: true,
+        prepareBudgets: false,
+        prepareDrafts: false,
+        actorEmail: ctx.actorEmail,
+        actor: { email: ctx.actorEmail, role: ctx.identity?.legacyRole, isFounder: ctx.identity?.isFounder },
+      });
+      desk = deskResult;
+      deskSummary = formatExecutiveDeskSummary(deskResult);
+    }
     return {
       status: "done",
-      summary: `Found ${matches.length} live opportunit${matches.length === 1 ? "y" : "ies"}${program ? ` for ${program}` : " across IFCDC programs"}, ranked by ${sort}.`,
-      data: { matches: matches.slice(0, limit) },
-      navigation: { path: "/hq/grants", label: "Open Grant Center" },
+      summary: deskSummary
+        ? `${deskSummary} Also ranked ${matches.length} stored Grant Center match(es) by ${sort} — not eligibility.`
+        : `Found ${matches.length} live opportunit${matches.length === 1 ? "y" : "ies"}${program ? ` for ${program}` : " across IFCDC programs"}, ranked by ${sort}.`,
+      data: { matches: matches.slice(0, limit), desk },
+      navigation: { path: "/hq/grants?tab=discover", label: "Open Grant Center" },
+    };
+  },
+};
+
+const grantCenterExecutiveDesk: AuraAction = {
+  id: "run_grant_center_executive_desk",
+  label: "Grant Center Funding Desk",
+  module: "grants",
+  kind: "prepare",
+  description:
+    "Aura executive funding role: search official NJ/Detroit feeds, store research in the existing Grant Center, summarize evidence and deadlines, list missing documents, optionally seed budget/proposal drafts. Does not submit, contact funders, or Founder-approve.",
+  parameters: {
+    initiative: { type: "string", enum: ["all", "nj_programs", "detroit_initiative", "shared_org"], description: "Funding queue. Default all." },
+    persistToGrantCenter: { type: "boolean", description: "Write research rows to Grant Center. Default true." },
+    prepareBudgets: { type: "boolean", description: "Seed budget narrative with Unknown line items. Default false." },
+    prepareDrafts: { type: "boolean", description: "Open Grant Center draft workspaces (not submit). Default false." },
+    query: { type: "string", description: "Optional NJ/Detroit wording to pick the queue." },
+  },
+  async run(args, ctx) {
+    const { initiativeFromAuraContext, runGrantCenterExecutiveDesk, formatExecutiveDeskSummary } = await import("./auraGrantCenterExecutiveEngine");
+    const raw = str(args.initiative);
+    const initiative = raw === "nj_programs" || raw === "detroit_initiative" || raw === "shared_org" || raw === "all"
+      ? raw
+      : initiativeFromAuraContext([str(args.query), ctx.module, JSON.stringify(ctx.contextRef ?? {})].join(" "));
+    const desk = await runGrantCenterExecutiveDesk({
+      initiative,
+      persistToGrantCenter: args.persistToGrantCenter !== false,
+      prepareBudgets: Boolean(args.prepareBudgets),
+      prepareDrafts: Boolean(args.prepareDrafts),
+      actorEmail: ctx.actorEmail,
+      actor: { email: ctx.actorEmail, role: ctx.identity?.legacyRole, isFounder: ctx.identity?.isFounder },
+    });
+    return {
+      status: "prepared",
+      summary: formatExecutiveDeskSummary(desk),
+      data: desk,
+      navigation: { path: "/hq/grants?tab=discover", label: "Open Grant Center" },
+      approval: APPROVAL_LINK,
     };
   },
 };
@@ -1900,6 +1957,7 @@ const seRequestFounderApproval: AuraAction = {
 
 export const AURA_ACTIONS: AuraAction[] = [
   findGrants,
+  grantCenterExecutiveDesk,
   fundingIntelligenceScan,
   fundingIntelligenceAsk,
   fundingIntelligenceEnrich,

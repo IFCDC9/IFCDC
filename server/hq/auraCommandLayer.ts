@@ -94,6 +94,7 @@ RULES:
 - Founder Mode may use execute tools: send_email, send_sms, place_call, create_calendar_event, create_document, send_notification, generate_executive_report, enterprise_diagnostics, etc.
 - Software engineering (diagnose bugs, prepare fixes, run tests, prepare PRs, compare GitHub vs Render) must use se_* tools. Never invent test results. Never push/deploy without Founder approval.
 - For high-impact irreversible work (submit grant, payments, production delete/deploy, org-wide blast), stage with prepare_for_approval or queue_grant_submission — do not claim it was submitted.
+- For NJ programs, Detroit initiative, SAGE, SIGMA, DLBA, or "funding desk" work, call run_grant_center_executive_desk. Use the existing Grant Center store. Do not submit, contact funders, or scrape blocked portals.
 - For "find the best live grant / prepare complete application", call run_live_grant_workflow. After Founder approval and portal submit, call confirm_grant_portal_submission with the confirmation ID. Use monitor_grant_application to track status.
 - Casual Founder requests like "email service@ifcdc.org saying …", "text my phone saying …", "call me", "schedule a meeting" MUST call the matching execute tool immediately with only the intended content fields.
 - Be concise and executive. Never invent data.
@@ -761,6 +762,54 @@ export async function runAuraCommand(input: AuraCommandInput): Promise<AuraComma
       poweredBy: "AURA Trust Layer",
       identity: publicIdentitySummary(identity),
     };
+  }
+
+  // NJ / Detroit Grant Center desk — before org-wide enterprise scan so regional work stays on the shared store.
+  try {
+    const { isGrantCenterExecutiveDeskQuery, initiativeFromAuraContext, runGrantCenterExecutiveDesk, formatExecutiveDeskSummary } = await import(
+      "./auraGrantCenterExecutiveEngine"
+    );
+    if (isGrantCenterExecutiveDeskQuery(command) && (identity.founderMode || identityAllowsModule(identity, "grants"))) {
+      const blob = [command, ctx.module, JSON.stringify(ctx.contextRef ?? {})].join(" ");
+      const prepareBudgets = /\bbudget\b/.test(command.toLowerCase());
+      const prepareDrafts = /\b(draft|proposal)\b/.test(command.toLowerCase()) && !/\bsubmit\b/.test(command.toLowerCase());
+      const desk = await runGrantCenterExecutiveDesk({
+        initiative: initiativeFromAuraContext(blob),
+        persistToGrantCenter: true,
+        prepareBudgets,
+        prepareDrafts,
+        actorEmail: ctx.actorEmail,
+        actor: { email: identity.email, role: identity.legacyRole, isFounder: identity.isFounder },
+      });
+      const reply = formatExecutiveDeskSummary(desk);
+      const executed: AuraExecutedAction = {
+        id: "run_grant_center_executive_desk",
+        label: "Grant Center Funding Desk",
+        status: "prepared",
+        summary: reply,
+        data: desk,
+        navigation: { path: "/hq/grants?tab=discover", label: "Open Grant Center" },
+        approval: { path: "/hq/workflows", label: "Review in Workflow Automation" },
+      };
+      await recordAuraTurn({ actorEmail: ctx.actorEmail, module: ctx.module, role: "user", content: command });
+      await recordAuraTurn({ actorEmail: ctx.actorEmail, module: ctx.module, role: "assistant", content: reply, action: executed });
+      await logAuraIdentityAction({
+        identity,
+        action: "aura_grant_center_executive_desk",
+        detail: reply.slice(0, 400),
+        metadata: { initiative: desk.initiative, persist: desk.persist },
+      });
+      return {
+        reply,
+        actions: [executed],
+        navigation: executed.navigation,
+        approvalsCreated: executed.approval ? [executed.approval] : [],
+        poweredBy: identity.founderMode ? "AURA Founder Mode" : "AURA Grant Center Desk",
+        identity: publicIdentitySummary(identity),
+      };
+    }
+  } catch (err) {
+    console.warn("[aura] grant center desk fast-path failed:", err instanceof Error ? err.message : err);
   }
 
   // Enterprise grants mode — acknowledge immediately and run as background job (no request timeout).

@@ -34,6 +34,7 @@ import {
 } from "./auraChatActions";
 
 const DEFAULT_SUGGESTIONS = [
+  "Run the NJ programs and Detroit funding desk",
   "Run enterprise mode — funding report for all IFCDC programs",
   "Find funding across all IFCDC programs",
   "Summarize the board report",

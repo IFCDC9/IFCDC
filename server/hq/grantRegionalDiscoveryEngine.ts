@@ -28,6 +28,11 @@ export type DiscoveryCard = {
   amount: string;
 };
 
+export type OfficialManualPath = {
+  url: string;
+  exportWhat: string;
+};
+
 export type FeedCapability = {
   id: string;
   label: string;
@@ -36,6 +41,7 @@ export type FeedCapability = {
   note: string;
   missingCredentialNames: string[];
   officialHome: string;
+  officialManualPath: OfficialManualPath;
 };
 
 function unknown(value: string | null | undefined): string {
@@ -138,6 +144,10 @@ export function catalogFeedCapabilities(env: NodeJS.ProcessEnv = process.env): F
       note: "Public Applicant API — no API key required. This branch queries posted opportunities.",
       missingCredentialNames: [],
       officialHome: "https://www.grants.gov",
+      officialManualPath: {
+        url: "https://www.grants.gov/search-grants",
+        exportWhat: "Export posted notices (opportunity number, title, agency, close date, eligibility excerpt) and attach the official PDF in Grant Center Documents.",
+      },
     },
     {
       id: "sam_gov",
@@ -151,6 +161,23 @@ export function catalogFeedCapabilities(env: NodeJS.ProcessEnv = process.env): F
         ...(!samUei ? ["SAM_GOV_UEI"] : []),
       ],
       officialHome: "https://sam.gov",
+      officialManualPath: {
+        url: "https://sam.gov/entity-information",
+        exportWhat: "Confirm IFCDC UEI/registration status. Names only — do not paste API keys into chat.",
+      },
+    },
+    {
+      id: "sam_assistance_listings",
+      label: "SAM.gov assistance listings",
+      connected: false,
+      liveSearch: false,
+      note: "Unavailable as an opportunity search on this branch. Entity probe credentials (SAM_GOV_ENABLED, SAM_GOV_API_KEY, SAM_GOV_UEI) do not enable listings search.",
+      missingCredentialNames: ["SAM_GOV_ASSISTANCE_LISTINGS_ENABLED"],
+      officialHome: "https://sam.gov",
+      officialManualPath: {
+        url: "https://sam.gov/search/?index=assistancelisting",
+        exportWhat: "Search Assistance Listings by keyword/CFDA. Save listing number, title, and fiscal year PDF. Listings are program catalogs, not open RFPs, until a current NOFO is verified.",
+      },
     },
     {
       id: "foundation_directory",
@@ -160,33 +187,75 @@ export function catalogFeedCapabilities(env: NodeJS.ProcessEnv = process.env): F
       note: "Foundation identities only. Not current RFPs. Grant programs remain Unknown until the funder listing is checked.",
       missingCredentialNames: [],
       officialHome: "https://projects.propublica.org/nonprofits/",
+      officialManualPath: {
+        url: "https://projects.propublica.org/nonprofits/",
+        exportWhat: "990 identity only. Then open the foundation's official grants page and export current guidelines — 990s are not RFPs.",
+      },
     },
     {
       id: "corporate_csr",
       label: "Corporate CSR reference",
       connected: false,
       liveSearch: false,
-      note: "Static curated links in Grant Center. Not a live corporate grant search on this branch.",
+      note: "Unavailable as a live corporate grant search. Static Grant Center links only.",
       missingCredentialNames: [],
       officialHome: "https://www.grants.gov",
+      officialManualPath: {
+        url: "https://www.grants.gov/search-grants",
+        exportWhat: "From each company's official CSR/community-grants page, export the current RFP or guidelines PDF. Do not scrape prohibited sites.",
+      },
     },
     {
       id: "nj_state",
-      label: "New Jersey state grant portals",
+      label: "New Jersey SAGE",
       connected: false,
       liveSearch: false,
-      note: "No official NJ SAGE / DOL API connector on this branch. NJ hits below come from Grants.gov keywords only.",
+      note: "Unavailable — no official NJ SAGE API connector. Aura does not scrape SAGE.",
       missingCredentialNames: [],
       officialHome: "https://www.nj.gov",
+      officialManualPath: {
+        url: "https://sage.nj.gov",
+        exportWhat: "Sign in to NJ SAGE. Export opportunity title, NOFO/PDF, due date, eligibility, match, and allowable costs. Attach in Grant Center Documents.",
+      },
+    },
+    {
+      id: "nj_dol",
+      label: "New Jersey Department of Labor",
+      connected: false,
+      liveSearch: false,
+      note: "Unavailable — no documented public opportunity API for NJ DOL workforce notices.",
+      missingCredentialNames: [],
+      officialHome: "https://www.nj.gov/labor/",
+      officialManualPath: {
+        url: "https://www.nj.gov/labor/",
+        exportWhat: "Open Workforce Development / notices. Export current NOFO, eligibility, match, and reporting dates. Workforce contracts stay potential_funding until award terms are reviewed.",
+      },
     },
     {
       id: "mi_state",
-      label: "Michigan / Detroit municipal portals",
+      label: "Michigan SIGMA",
       connected: false,
       liveSearch: false,
-      note: "No Detroit Land Bank or Michigan SIGMA connector. Detroit hits below come from Grants.gov keywords only. Aura is not scraping DLBA.",
+      note: "Unavailable — no Michigan SIGMA opportunity connector. Aura is not scraping SIGMA.",
       missingCredentialNames: [],
       officialHome: "https://www.michigan.gov",
+      officialManualPath: {
+        url: "https://sigma.michigan.gov",
+        exportWhat: "Search SIGMA / SOM vendor self-service for grant or contract notices. Export solicitation ID, due date, and terms PDF.",
+      },
+    },
+    {
+      id: "dlba",
+      label: "Detroit Land Bank Authority",
+      connected: false,
+      liveSearch: false,
+      note: "Unavailable — no official DLBA API on this branch. Aura does not scrape or contact DLBA.",
+      missingCredentialNames: [],
+      officialHome: "https://buildingdetroit.org",
+      officialManualPath: {
+        url: "https://buildingdetroit.org",
+        exportWhat: "Founder (not Aura) reviews public listings or inventory exports. Record parcel, status, and source URL in the Detroit workspace. Do not contact DLBA from HQ.",
+      },
     },
   ];
 }
@@ -265,7 +334,7 @@ export function walkthroughFundingLifecycle(): {
 } {
   return {
     steps: [
-      { id: "discovery", label: "Read-only official feed preview", moneyStatus: "potential_funding", autoSubmit: false },
+      { id: "discovery", label: "Aura executive desk searches official feeds and stores research in Grant Center", moneyStatus: "potential_funding", autoSubmit: false },
       { id: "match", label: "Aura / Grant Center match (not eligibility)", moneyStatus: "potential_funding", autoSubmit: false },
       { id: "documents", label: "Shared org documents + checklist", moneyStatus: "potential_funding", autoSubmit: false },
       { id: "budget", label: "Budget prep with Unknown amounts until verified", moneyStatus: "potential_funding", autoSubmit: false },

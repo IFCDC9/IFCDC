@@ -4,8 +4,9 @@ import { readFileSync } from "node:fs";
 import { classifyFundingInitiative, matchScoreDisclaimer, moneyStatusFromGrantRow } from "../shared/grantInitiativeScope";
 import { catalogFeedCapabilities, walkthroughFundingLifecycle } from "../server/hq/grantRegionalDiscoveryEngine";
 import { analyzeRecurringFunding } from "../server/hq/grantRecurringFundingEngine";
-import { isExcludedExecIdentity, founderApprovalAllowed } from "../server/hq/auraActorIdentity";
+import { isExcludedExecIdentity, founderApprovalAllowed, AURA_OPERATOR } from "../server/hq/auraActorIdentity";
 import { grantCenterResearchPayload } from "../shared/detroitWorkspace";
+import { isGrantCenterExecutiveDeskQuery, initiativeFromAuraContext, BUDGET_SKELETON } from "../server/hq/auraGrantCenterExecutiveEngine";
 
 test("NJ, Detroit, and shared org stay separate without inventing eligibility", () => {
   const nj = classifyFundingInitiative({
@@ -85,6 +86,15 @@ test("feed catalog names missing SAM credentials without secrets", () => {
   assert.equal(grants?.liveSearch, true);
   const nj = feeds.find((feed) => feed.id === "nj_state");
   assert.equal(nj?.liveSearch, false);
+  assert.equal(nj?.connected, false);
+  assert.match(nj?.officialManualPath.url ?? "", /sage\.nj\.gov/);
+  assert.match(nj?.officialManualPath.exportWhat ?? "", /Export/);
+  const listings = feeds.find((feed) => feed.id === "sam_assistance_listings");
+  assert.equal(listings?.liveSearch, false);
+  assert.ok(listings?.missingCredentialNames.includes("SAM_GOV_ASSISTANCE_LISTINGS_ENABLED"));
+  const dlba = feeds.find((feed) => feed.id === "dlba");
+  assert.equal(dlba?.connected, false);
+  assert.match(dlba?.officialManualPath.url ?? "", /buildingdetroit\.org/);
 });
 
 test("HQ UI keeps Founder gates and does not claim DLBA scraping", () => {
@@ -94,7 +104,29 @@ test("HQ UI keeps Founder gates and does not claim DLBA scraping", () => {
   assert.match(discover, /not eligibility/);
   assert.match(detroit, /does not contact the Detroit Land Bank/);
   assert.match(panel, /exec@ifcdc.org cannot approve/);
+  assert.match(panel, /Aura: search and store in Grant Center/);
   assert.equal(discover.includes("auraBrainV1ReadOnlyAsk"), false);
+  const buttons = readFileSync(new URL("../client/src/components/hq/aura/AuraActionButtons.tsx", import.meta.url), "utf8");
+  assert.match(buttons, /run_grant_center_executive_desk/);
+  const registry = readFileSync(new URL("../server/hq/auraActionRegistry.ts", import.meta.url), "utf8");
+  assert.match(registry, /id: "run_grant_center_executive_desk"/);
+  assert.equal(registry.includes("auraBrainV1ReadOnlyAsk"), false);
+  const command = readFileSync(new URL("../server/hq/auraCommandLayer.ts", import.meta.url), "utf8");
+  assert.match(command, /NJ \/ Detroit Grant Center desk/);
+  assert.equal(AURA_OPERATOR.isFounder, false);
+  assert.equal(AURA_OPERATOR.kind, "ai_operator");
+});
+
+test("Aura desk query routing stays regional and never auto-submits", () => {
+  assert.equal(isGrantCenterExecutiveDeskQuery("Run the NJ programs and Detroit funding desk"), true);
+  assert.equal(isGrantCenterExecutiveDeskQuery("Find Detroit Land Bank grant deadlines"), true);
+  assert.equal(isGrantCenterExecutiveDeskQuery("Find funding across all IFCDC programs"), false);
+  assert.equal(isGrantCenterExecutiveDeskQuery("submit this grant to the funder"), false);
+  assert.equal(initiativeFromAuraContext("New Jersey SAGE workforce"), "nj_programs");
+  assert.equal(initiativeFromAuraContext("Detroit SIGMA notice"), "detroit_initiative");
+  assert.match(BUDGET_SKELETON, /Payroll is not funded/);
+  const walk = walkthroughFundingLifecycle();
+  assert.equal(walk.steps[0]?.id, "discovery");
 });
 
 test("read-only Grants.gov Search2 returns current posted opportunities", async (t) => {

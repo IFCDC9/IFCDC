@@ -186,7 +186,7 @@ const DetroitWorkspacePage: React.FC = () => {
       title="Detroit Property & Program"
       subtitle="One shared operating workspace for property, grant, and program planning"
       auraModule="programs"
-      auraActions={["ask", "summarize", "prepare_approval", "explain"]}
+      auraActions={["ask", "find_funding", "summarize", "prepare_approval", "explain"]}
     >
       <div className="detroit-workspace" style={{ display: "grid", gap: "1rem" }}>
         <HqPanel title="Build the Detroit opportunity at full scale" subtitle="Concept stage · HQ is the source of truth across phone, tablet, and desktop">
@@ -204,7 +204,7 @@ const DetroitWorkspacePage: React.FC = () => {
           </div>
           <p className="hq-muted-text" style={{ margin: "1rem 0 0" }}>
             <Sparkles size={14} style={{ verticalAlign: "middle" }} /> Working concept only. No site, scope, budget, grant eligibility, or partner has been confirmed.
-            {DETROIT_AURA_LIVE_SEARCH ? "" : " Aura is not running a live Detroit grant search from this page."}
+            {DETROIT_AURA_LIVE_SEARCH ? "" : " Use Find Funding so Aura searches official feeds into Grant Center. This page still does not scrape DLBA."}
           </p>
           <div style={{ display: "flex", gap: ".6rem", flexWrap: "wrap", marginTop: "1rem" }}>
             <Link className="hq-btn hq-btn-primary hq-btn-sm" to="/hq/grants?tab=discover">Open Grant Center</Link>
@@ -325,7 +325,7 @@ const DetroitWorkspacePage: React.FC = () => {
 
         <HqPanel title="Grant Center connection" subtitle="Uses existing HQ Grant Center records. Eligibility and availability stay Unknown until verified.">
           <p className="hq-muted-text">
-            This page reads the signed-in Grant Center catalog. It does not invent awards or amounts, and Aura is not performing a live Detroit search here.
+            This page reads the signed-in Grant Center catalog. Aura Find Funding writes Detroit research into that same store. It does not invent awards or amounts, scrape DLBA, or contact the Detroit Land Bank.
           </p>
           {opportunities.isError ? <p role="alert">Grant Center catalog could not be loaded with this HQ session.</p>
             : opportunities.isLoading ? <p className="hq-muted-text">Loading Grant Center catalog…</p>

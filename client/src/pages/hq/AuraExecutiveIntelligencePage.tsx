@@ -209,7 +209,8 @@ const AuraExecutiveIntelligencePage: React.FC = () => {
     <HQLayout
       title="AURA Executive Intelligence"
       subtitle="Enterprise AI Command Center — briefings, health, predictions, and executive decision support"
-      auraModule="executive-intelligence"
+      auraModule="executive"
+      auraActions={["ask", "find_funding", "summarize", "prepare_approval", "explain"]}
     >
       <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
         <Link to="/hq/aura" className="hq-btn hq-btn-secondary hq-btn-sm"><Sparkles size={14} /> AURA Chat</Link>

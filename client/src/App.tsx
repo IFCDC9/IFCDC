@@ -166,7 +166,7 @@ const App: React.FC = () => (
                 title="Founder Dashboard"
                 subtitle="IFCDC Enterprise Operating System — command center for the entire organization"
                 auraModule="executive"
-                auraActions={["ask", "summarize", "generate_report", "prepare_approval", "explain"]}
+                auraActions={["ask", "find_funding", "summarize", "generate_report", "prepare_approval", "explain"]}
               >
                 <ExecutiveDashboard />
               </HqShellRoute>

@@ -164,7 +164,7 @@ const AuraCommandCenterPage: React.FC = () => {
       title="AURA Command Center"
       subtitle="Enterprise operations hub — ask, brief, monitor, and navigate every Headquarters module"
       auraModule="aura"
-      auraActions={["ask", "enterprise_scan", "summarize", "explain"]}
+      auraActions={["ask", "find_funding", "enterprise_scan", "summarize", "explain"]}
     >
       {status && (
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
