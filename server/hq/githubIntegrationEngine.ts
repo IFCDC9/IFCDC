@@ -82,10 +82,15 @@ export function sameCommitPrefix(a: string, b: string): boolean {
 export type DeploymentCompareEvidence = {
   githubTreeSha?: string | null;
   liveTreeSha?: string | null;
+  /** Informational only. A parent SHA is not proof the trees match. */
   githubParents?: string[];
 };
 
-/** SHA prefixes, identical trees, or a merge commit whose parent is live all count as aligned. */
+function commitTreeSha(payload: { commit?: { tree?: { sha?: string } } } | null | undefined): string | null {
+  return payload?.commit?.tree?.sha?.trim() || null;
+}
+
+/** Aligned only when commit SHAs match or live and main git trees are identical. */
 export function compareDeployment(
   githubSha: string | null,
   liveSha: string | null,
@@ -93,12 +98,9 @@ export function compareDeployment(
 ): GitHubDeploymentStatus {
   if (!githubSha || !liveSha) return "unknown";
   if (sameCommitPrefix(githubSha, liveSha)) return "aligned";
-  if (evidence?.githubTreeSha && evidence.liveTreeSha && evidence.githubTreeSha === evidence.liveTreeSha) {
-    return "aligned";
-  }
-  if ((evidence?.githubParents ?? []).some((parent) => sameCommitPrefix(parent, liveSha))) {
-    return "aligned";
-  }
+  const githubTree = evidence?.githubTreeSha?.trim() || "";
+  const liveTree = evidence?.liveTreeSha?.trim() || "";
+  if (githubTree && liveTree && githubTree === liveTree) return "aligned";
   return "behind";
 }
 
@@ -237,6 +239,7 @@ function snapshotFromProbe(
   branch: string,
   repoRes: { ok: boolean; status: number; data: GithubRepoPayload | null },
   commitRes: { ok: boolean; data: GithubCommitPayload | null },
+  liveCommitRes: { ok: boolean; data: GithubCommitPayload | null },
   rateRes: { ok: boolean },
   latencyMs: number,
   tokenStatus: NonNullable<GitHubIntegrationSnapshot["tokenStatus"]>,
@@ -263,8 +266,8 @@ function snapshotFromProbe(
   const lastPushAt = repoData?.pushed_at ?? latestCommitAt;
   const liveCommit = liveDeployCommit();
   const deploymentStatus = compareDeployment(latestCommitFull, liveCommit, {
-    githubTreeSha: commitData?.commit?.tree?.sha ?? null,
-    githubParents: (commitData?.parents ?? []).map((parent) => String(parent.sha || "")).filter(Boolean),
+    githubTreeSha: commitTreeSha(commitData),
+    liveTreeSha: commitTreeSha(liveCommitRes.data),
   });
   const repositoryHealth = repositoryHealthFromRepo(repoData, branch, repoRes.ok);
   const healthMsg =
@@ -295,12 +298,16 @@ function snapshotFromProbe(
 
 async function probeGithub(owner: string, repo: string, branch: string, token: string | null) {
   const started = Date.now();
-  const [repoRes, commitRes, rateRes] = await Promise.all([
+  const liveSha = liveDeployCommit();
+  const [repoRes, commitRes, rateRes, liveCommitRes] = await Promise.all([
     githubFetch<GithubRepoPayload>(`/repos/${owner}/${repo}`, token),
     githubFetch<GithubCommitPayload>(`/repos/${owner}/${repo}/commits/${encodeURIComponent(branch)}`, token),
     githubFetch<{ rate?: { remaining?: number } }>(`/rate_limit`, token),
+    liveSha
+      ? githubFetch<GithubCommitPayload>(`/repos/${owner}/${repo}/commits/${encodeURIComponent(liveSha)}`, token)
+      : Promise.resolve({ ok: false as const, status: 0, data: null }),
   ]);
-  return { repoRes, commitRes, rateRes, latencyMs: Date.now() - started };
+  return { repoRes, commitRes, liveCommitRes, rateRes, latencyMs: Date.now() - started };
 }
 
 export async function fetchGitHubIntegrationSnapshot(): Promise<GitHubIntegrationSnapshot> {
@@ -318,6 +325,7 @@ export async function fetchGitHubIntegrationSnapshot(): Promise<GitHubIntegratio
         branch,
         pub.repoRes,
         pub.commitRes,
+        pub.liveCommitRes,
         pub.rateRes,
         pub.latencyMs,
         "absent",
@@ -332,6 +340,7 @@ export async function fetchGitHubIntegrationSnapshot(): Promise<GitHubIntegratio
         branch,
         authed.repoRes,
         authed.commitRes,
+        authed.liveCommitRes,
         authed.rateRes,
         authed.latencyMs,
         "accepted"
@@ -346,6 +355,7 @@ export async function fetchGitHubIntegrationSnapshot(): Promise<GitHubIntegratio
         branch,
         pub.repoRes,
         pub.commitRes,
+        pub.liveCommitRes,
         pub.rateRes,
         authed.latencyMs + pub.latencyMs,
         "rejected",
@@ -358,6 +368,7 @@ export async function fetchGitHubIntegrationSnapshot(): Promise<GitHubIntegratio
       branch,
       authed.repoRes,
       authed.commitRes,
+      authed.liveCommitRes,
       authed.rateRes,
       authed.latencyMs,
       "rejected",

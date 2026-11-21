@@ -3,27 +3,56 @@ import test from "node:test";
 import { compareDeployment, sameCommitPrefix } from "../server/hq/githubIntegrationEngine";
 import { scoreFromFindings, type TechFinding } from "../server/hq/auraTechnicalCommandEngine";
 
+const github = "5cc71bf865e7182777753b797b9cbee8efa11a39";
+const live = "978288833181e1b69198bd9dea952660d0e0e364";
+const sameTree = "938883e1c696112da52fa0a4efb61941f50be95e";
+const otherTree = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
 test("sameCommitPrefix matches 7-character Render / GitHub SHAs", () => {
   assert.equal(sameCommitPrefix("978288833181e1b69198bd9dea952660d0e0e364", "9782888"), true);
   assert.equal(sameCommitPrefix("5cc71bf865e7182777753b797b9cbee8efa11a39", "9782888"), false);
 });
 
-test("compareDeployment treats merge-commit parent of live SHA as aligned", () => {
-  const github = "5cc71bf865e7182777753b797b9cbee8efa11a39";
-  const live = "978288833181e1b69198bd9dea952660d0e0e364";
-  assert.equal(compareDeployment(github, live), "behind");
+test("compareDeployment treats exact SHA match as aligned", () => {
+  assert.equal(compareDeployment(github, github), "aligned");
+  assert.equal(compareDeployment(github, github.slice(0, 7)), "aligned");
+});
+
+test("compareDeployment treats parent match with identical trees as aligned", () => {
   assert.equal(
     compareDeployment(github, live, {
       githubParents: ["81bb4767d3b30dbfcaf09eac724333889ff38227", live],
+      githubTreeSha: sameTree,
+      liveTreeSha: sameTree,
     }),
     "aligned",
   );
 });
 
-test("compareDeployment treats identical git trees as aligned", () => {
-  const tree = "938883e1c696112da52fa0a4efb61941f50be95e";
+test("compareDeployment treats parent match with different trees as behind", () => {
   assert.equal(
-    compareDeployment("5cc71bf", "9782888", { githubTreeSha: tree, liveTreeSha: tree }),
+    compareDeployment(github, live, {
+      githubParents: ["81bb4767d3b30dbfcaf09eac724333889ff38227", live],
+      githubTreeSha: sameTree,
+      liveTreeSha: otherTree,
+    }),
+    "behind",
+  );
+});
+
+test("compareDeployment does not treat parent-only match as aligned", () => {
+  assert.equal(compareDeployment(github, live), "behind");
+  assert.equal(
+    compareDeployment(github, live, {
+      githubParents: ["81bb4767d3b30dbfcaf09eac724333889ff38227", live],
+    }),
+    "behind",
+  );
+});
+
+test("compareDeployment treats identical git trees as aligned", () => {
+  assert.equal(
+    compareDeployment("5cc71bf", "9782888", { githubTreeSha: sameTree, liveTreeSha: sameTree }),
     "aligned",
   );
 });
