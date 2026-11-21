@@ -12,6 +12,20 @@ import {
   formatOpenAiAuthError,
   type ResolvedOpenAiCredentials,
 } from "./openaiConfig";
+import {
+  classifyIfcdcServiceProbe,
+  shouldProbeIfcdcSidecarUrl,
+  type IfcdcServiceProbe,
+} from "./ifcdcSidecarProbes";
+
+export {
+  classifyIfcdcServiceProbe,
+  countedPlatformServiceTotals,
+  isHqProductionSidecarRuntime,
+  isLocalIfcdcSidecarUrl,
+  shouldProbeIfcdcSidecarUrl,
+  type IfcdcServiceProbe,
+} from "./ifcdcSidecarProbes";
 
 const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET || "dev-secret";
 
@@ -83,30 +97,50 @@ export const IFCDC_SERVICE_URLS = {
 /**
  * Health of optional sidecar microservices.
  * Phase 7: legacy AURA :4101 is skipped by default (not required for production HQ).
- * Set AURA_LEGACY_4101_PROBE=true to resume probing and log access.
+ * Production/Render: localhost :4100–4104 are not probed (not deployed).
+ * Workstation/dev still probes those URLs.
  */
-export async function checkIfcdcServices(): Promise<Record<string, boolean>> {
+export async function checkIfcdcServiceProbes(): Promise<IfcdcServiceProbe[]> {
   const { shouldProbeLegacy4101, recordLegacy4101Access, getLegacyAuraUrl } = await import(
     "../hq/auraLegacy4101"
   );
-  const results: Record<string, boolean> = {};
+  const probes: IfcdcServiceProbe[] = [];
   for (const [name, url] of Object.entries(IFCDC_SERVICE_URLS)) {
-    if (name === "aura") {
-      if (!shouldProbeLegacy4101()) {
-        recordLegacy4101Access({
-          source: "checkIfcdcServices",
-          route: "GET /health",
-          result: "skipped",
-          detail: "Phase 7 default — legacy :4101 not required; HQ uses in-process OpenAI",
+    if (name === "aura" && !shouldProbeLegacy4101()) {
+      recordLegacy4101Access({
+        source: "checkIfcdcServices",
+        route: "GET /health",
+        result: "skipped",
+        detail: "Phase 7 default — legacy :4101 not required; HQ uses in-process OpenAI",
+        url: getLegacyAuraUrl(),
+      });
+      probes.push(
+        classifyIfcdcServiceProbe({
+          name,
           url: getLegacyAuraUrl(),
-        });
-        // false = sidecar not relied upon (not a production outage)
-        results.aura = false;
-        continue;
-      }
-      try {
-        const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(5000) });
-        results.aura = res.ok;
+          ok: null,
+          probed: false,
+          skipReason: "legacy_4101",
+        })
+      );
+      continue;
+    }
+    if (!shouldProbeIfcdcSidecarUrl(url)) {
+      probes.push(
+        classifyIfcdcServiceProbe({
+          name,
+          url,
+          ok: null,
+          probed: false,
+          skipReason: "production_localhost_sidecar",
+        })
+      );
+      continue;
+    }
+    try {
+      const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(5000) });
+      probes.push(classifyIfcdcServiceProbe({ name, url, ok: res.ok, probed: true }));
+      if (name === "aura") {
         recordLegacy4101Access({
           source: "checkIfcdcServices",
           route: "GET /health",
@@ -114,8 +148,10 @@ export async function checkIfcdcServices(): Promise<Record<string, boolean>> {
           detail: `HTTP ${res.status}`,
           url,
         });
-      } catch (err) {
-        results.aura = false;
+      }
+    } catch (err) {
+      probes.push(classifyIfcdcServiceProbe({ name, url, ok: false, probed: true }));
+      if (name === "aura") {
         recordLegacy4101Access({
           source: "checkIfcdcServices",
           route: "GET /health",
@@ -124,16 +160,14 @@ export async function checkIfcdcServices(): Promise<Record<string, boolean>> {
           url,
         });
       }
-      continue;
-    }
-    try {
-      const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(5000) });
-      results[name] = res.ok;
-    } catch {
-      results[name] = false;
     }
   }
-  return results;
+  return probes;
+}
+
+export async function checkIfcdcServices(): Promise<Record<string, boolean>> {
+  const probes = await checkIfcdcServiceProbes();
+  return Object.fromEntries(probes.map((p) => [p.name, p.status === "ok"]));
 }
 
 /** Production AURA readiness — in-process OpenAI path (not :4101). */

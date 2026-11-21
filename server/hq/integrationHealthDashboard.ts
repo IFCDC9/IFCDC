@@ -3,7 +3,8 @@
  * Isolates connector failures; never throws into other HQ modules.
  */
 import fs from "fs/promises";
-import { checkIfcdcServices } from "../lib/ifcdc";
+import { getEmailDeliveryStatus } from "../lib/notifications";
+import { integrationsHubAuthFromJwt, integrationsHubEmailFromInline } from "../lib/ifcdcSidecarProbes";
 import { getHqUploadRoot } from "./hqFileStorage";
 import {
   buildIntegrationsHubSafe,
@@ -259,56 +260,53 @@ async function probePlatformSystems(): Promise<IntegrationHealthRow[]> {
   const now = new Date().toISOString();
   const rows: IntegrationHealthRow[] = [];
 
-  // Authentication
+  // Authentication — Founder JWT session, not localhost :4100
   {
     const started = Date.now();
     const jwtOk = Boolean((process.env.JWT_SECRET || process.env.SESSION_SECRET || "").trim());
-    const services = await withTimeout(checkIfcdcServices(), 5_000, {} as Record<string, boolean>);
-    const authOk = jwtOk && (services.auth !== false);
+    const auth = integrationsHubAuthFromJwt(jwtOk);
     const latencyMs = Date.now() - started;
     rows.push({
       id: "platform_auth",
       name: "Authentication",
       category: "Platform",
-      displayStatus: authOk ? "Connected" : jwtOk ? "Warning" : "Disconnected",
+      displayStatus: auth.displayStatus,
       status: "platform",
-      healthy: authOk,
+      healthy: auth.healthy,
       latencyMs,
       lastChecked: now,
-      message: authOk ? "Session secrets + auth path ready" : "Auth secret or auth service unavailable",
+      message: auth.message,
       systemKey: "authentication",
     });
     recordIntegrationProbe({
       provider: "platform_auth",
-      ok: authOk,
+      ok: auth.healthy,
       latencyMs,
       message: rows[rows.length - 1]!.message,
     });
   }
 
-  // Notifications service
+  // Notifications — Postmark/Resend/inline email, not localhost :4102
   {
     const started = Date.now();
-    const services = await withTimeout(checkIfcdcServices(), 5_000, {} as Record<string, boolean>);
-    const notifOk = services.notifications !== false && (
-      Boolean((process.env.RESEND_API_KEY || "").trim()) || services.notifications === true
-    );
+    const email = getEmailDeliveryStatus();
+    const notif = integrationsHubEmailFromInline(email.configured);
     const latencyMs = Date.now() - started;
     rows.push({
       id: "platform_notifications",
       name: "Notifications",
       category: "Platform",
-      displayStatus: notifOk ? "Connected" : "Warning",
+      displayStatus: notif.displayStatus,
       status: "platform",
-      healthy: notifOk,
+      healthy: notif.healthy,
       latencyMs,
       lastChecked: now,
-      message: notifOk ? "Notification channel available" : "Notifications service / email channel check",
+      message: notif.message,
       systemKey: "notifications",
     });
     recordIntegrationProbe({
       provider: "platform_notifications",
-      ok: notifOk,
+      ok: notif.healthy,
       latencyMs,
       message: rows[rows.length - 1]!.message,
     });

@@ -4,7 +4,8 @@
 import { pollAllApps, SOFTWARE_DIVISION_APPS } from "./appRegistry";
 import { buildSoftwareDivisionHealthScore } from "./enterpriseHealthScoring";
 import { toHQRole, HQ_MODULE_PERMISSIONS } from "./enterpriseRoles";
-import { checkIfcdcServices } from "../lib/ifcdc";
+import { checkIfcdcServiceProbes } from "../lib/ifcdc";
+import { countedPlatformServiceTotals, type IfcdcServiceProbe } from "../lib/ifcdcSidecarProbes";
 import { getOrganizationMetrics, getMonthlyTrend } from "./metrics";
 import { buildOrganizationHealthScore, buildHeadquartersActivityFeed } from "./analyticsReporting";
 import {
@@ -75,7 +76,7 @@ async function buildExecutiveOverviewBounded(user?: { role?: string; hqRole?: st
 
   const [apps, services, metrics, recentActivity, monthlyTrend, orgHealth, commandHealth] = await Promise.all([
     execTimeout(pollAllApps(), [] as Awaited<ReturnType<typeof pollAllApps>>, "poll-apps"),
-    execTimeout(checkIfcdcServices(), {} as Record<string, boolean>, "platform-services"),
+    execTimeout(checkIfcdcServiceProbes(), [] as IfcdcServiceProbe[], "platform-services"),
     execTimeout(getOrganizationMetrics(), emptyExecutiveOverview().metrics, "org-metrics"),
     execTimeout(buildHeadquartersActivityFeed(12), [], "activity-feed"),
     execTimeout(getMonthlyTrend(), [], "monthly-trend"),
@@ -90,7 +91,8 @@ async function buildExecutiveOverviewBounded(user?: { role?: string; hqRole?: st
   );
 
   const healthyApps = softwareHealth.operational ?? apps.filter((a) => a.healthy).length;
-  const healthyServices = Object.values(services).filter(Boolean).length;
+  const platformCounts = countedPlatformServiceTotals(Array.isArray(services) ? services : []);
+  const healthyServices = platformCounts.healthy;
   const orgFromCommand = commandHealth?.pillars.find((p) => p.id === "organization")?.score;
   const orgHealthScore = orgFromCommand ?? orgHealth.overall ?? 0;
   const organizationHealth =
@@ -127,9 +129,11 @@ async function buildExecutiveOverviewBounded(user?: { role?: string; hqRole?: st
       inDevelopment: SOFTWARE_DIVISION_APPS.filter((a) => a.status === "development" || a.status === "mvp").length,
     },
     platformServices: {
-      total: Object.keys(services).length,
+      total: platformCounts.total,
       healthy: healthyServices,
-      details: services,
+      details: Object.fromEntries(
+        (Array.isArray(services) ? services : []).map((p) => [p.name, p.status === "ok"])
+      ),
     },
     modules: Object.keys(HQ_MODULE_PERMISSIONS),
     user: user ? { role: user.role, hqRole: user.hqRole } : undefined,

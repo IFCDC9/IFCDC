@@ -9,7 +9,8 @@
  * - Projected score estimates only verified-fixable gaps (re-probeable)
  */
 import { getDb } from "../db";
-import { checkIfcdcServices } from "../lib/ifcdc";
+import { checkIfcdcServiceProbes } from "../lib/ifcdc";
+import { countedPlatformServiceTotals, type IfcdcServiceProbe } from "../lib/ifcdcSidecarProbes";
 import { resolveOpenAiCredentials } from "../lib/openaiConfig";
 import { pollAllApps } from "./appRegistry";
 import { buildEnterpriseMonitoringOverview } from "./enterpriseMonitoringEngine";
@@ -352,7 +353,7 @@ export async function buildEnterpriseHealthReport(opts?: {
 
   const [monitoring, services, apps, hub, jobs, kb, grantsProbes, mobileProbes] = await Promise.all([
     withTimeout(buildEnterpriseMonitoringOverview({ bypassCache: true }), 20_000, null),
-    withTimeout(checkIfcdcServices(), 8_000, {} as Record<string, boolean>),
+    withTimeout(checkIfcdcServiceProbes(), 8_000, [] as IfcdcServiceProbe[]),
     withTimeout(pollAllApps(), 12_000, [] as Awaited<ReturnType<typeof pollAllApps>>),
     withTimeout(buildIntegrationsHubSafe(), 14_000, null),
     withTimeout(listScheduledJobs(), 8_000, [] as Awaited<ReturnType<typeof listScheduledJobs>>),
@@ -369,7 +370,10 @@ export async function buildEnterpriseHealthReport(opts?: {
     withTimeout(probeMobile(), 6_000, [] as EhiProbe[]),
   ]);
 
-  const serviceEntries = Object.entries(services || {}).map(([id, healthy]) => ({ id, healthy: Boolean(healthy) }));
+  const sidecarCounts = countedPlatformServiceTotals(Array.isArray(services) ? services : []);
+  const serviceEntries = (Array.isArray(services) ? services : [])
+    .filter((p) => p.status === "ok" || p.status === "down")
+    .map((p) => ({ id: p.name, healthy: p.status === "ok" }));
   const appRows = (apps || []).map((a) => ({
     id: a.id,
     healthy: Boolean(a.healthy),
@@ -396,15 +400,21 @@ export async function buildEnterpriseHealthReport(opts?: {
     {
       id: "microservices",
       label: "IFCDC microservices",
-      ok: serviceEntries.length > 0 && serviceEntries.every((s) => s.healthy),
+      ok: sidecarCounts.notDeployed > 0 && sidecarCounts.total === 0
+        ? true
+        : serviceEntries.length > 0 && serviceEntries.every((s) => s.healthy),
       score:
-        serviceEntries.length === 0
-          ? 0
-          : Math.round((serviceEntries.filter((s) => s.healthy).length / serviceEntries.length) * 100),
+        sidecarCounts.notDeployed > 0 && sidecarCounts.total === 0
+          ? 100
+          : serviceEntries.length === 0
+            ? 0
+            : Math.round((serviceEntries.filter((s) => s.healthy).length / serviceEntries.length) * 100),
       detail:
-        serviceEntries.length === 0
-          ? "No service health URLs configured / reachable"
-          : `${serviceEntries.filter((s) => s.healthy).length}/${serviceEntries.length} healthy`,
+        sidecarCounts.notDeployed > 0 && sidecarCounts.total === 0
+          ? "localhost sidecars on ports 4100–4104 are not deployed. They are not the Headquarters database, Founder session, or Postmark path."
+          : serviceEntries.length === 0
+            ? "No remote service health URLs configured"
+            : `${serviceEntries.filter((s) => s.healthy).length}/${serviceEntries.length} healthy`,
       live: true,
     },
     ...([scoredMonitorProbe("storage", "HQ storage")].filter((probe): probe is EhiProbe => probe != null)),
