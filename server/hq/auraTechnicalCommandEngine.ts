@@ -9,7 +9,12 @@
 import crypto from "crypto";
 import { getDb } from "../db";
 import { getBuildInfo } from "../buildInfo";
-import { checkIfcdcServices } from "../lib/ifcdc";
+import { checkIfcdcServiceProbes, IFCDC_SERVICE_URLS } from "../lib/ifcdc";
+import {
+  productionSidecarTimeoutProbes,
+  techFindingsFromSidecarProbes,
+  type IfcdcServiceProbe,
+} from "../lib/ifcdcSidecarProbes";
 import { buildTransactionalEmailFindings, probeTransactionalEmail } from "../lib/transactionalEmail";
 import { logHqAudit } from "./hqAuditLog";
 import { createLeadershipAlert } from "./criticalAlerts";
@@ -191,7 +196,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
   ]);
 }
 
-function scoreFromFindings(findings: TechFinding[]): { score: number; label: TechBriefing["overallLabel"] } {
+export function scoreFromFindings(findings: TechFinding[]): { score: number; label: TechBriefing["overallLabel"] } {
   if (!findings.length) return { score: 50, label: "unknown" };
   let score = 100;
   for (const f of findings) {
@@ -251,7 +256,7 @@ export async function buildTechnicalCommandBriefing(): Promise<TechBriefing> {
   const [github, hub, services, executive, emailProbe, twilio, founderPhones] = await Promise.all([
     withTimeout(fetchGitHubIntegrationSnapshot(), 4_000, null),
     withTimeout(buildIntegrationsHubSafe(), 8_000, null),
-    withTimeout(checkIfcdcServices(), 3_000, {} as Record<string, boolean>),
+    withTimeout(checkIfcdcServiceProbes(), 3_000, [] as IfcdcServiceProbe[]),
     withTimeout(buildExecutiveHealthSummary(), 4_000, null),
     withTimeout(probeTransactionalEmail(), 4_000, null),
     Promise.resolve(getTwilioEnvStatus()),
@@ -457,28 +462,16 @@ export async function buildTechnicalCommandBriefing(): Promise<TechBriefing> {
     });
   }
 
-  const serviceEntries = Object.entries(services || {});
-  const down = serviceEntries.filter(([, ok]) => !ok).map(([name]) => name);
-  if (down.length) {
-    findings.push({
-      id: "microservices-down",
-      module: "platform",
-      title: "IFCDC microservices unreachable",
-      status: "degraded",
-      severity: "medium",
-      detail: `Down/unreachable: ${down.join(", ")}`,
-      recommendedFix: "HQ uses inline fallbacks in production for some services; verify ports 4100–4104 if required.",
-    });
-  } else if (serviceEntries.length) {
-    findings.push({
-      id: "microservices-ok",
-      module: "platform",
-      title: "Platform microservices",
-      status: "ok",
-      severity: "low",
-      detail: `${serviceEntries.length} service probes completed`,
-    });
-  }
+  const sidecarProbes: IfcdcServiceProbe[] =
+    Array.isArray(services) && services.length
+      ? services
+      : productionSidecarTimeoutProbes(IFCDC_SERVICE_URLS);
+  findings.push(
+    ...techFindingsFromSidecarProbes(sidecarProbes).map((f) => ({
+      ...f,
+      module: "platform" as const,
+    }))
+  );
 
   if (executive && typeof executive === "object") {
     const ex = executive as {

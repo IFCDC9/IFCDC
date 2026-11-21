@@ -8,7 +8,12 @@ import { buildExecutiveDashboard } from "./financeReporting";
 import { buildOperationsHealthScore } from "./enterpriseHealthScoring";
 import { pollAllApps } from "./appRegistry";
 import { buildSoftwareDivisionHealthScore } from "./enterpriseHealthScoring";
-import { checkIfcdcServices } from "../lib/ifcdc";
+import { checkIfcdcServiceProbes, IFCDC_SERVICE_URLS } from "../lib/ifcdc";
+import {
+  countedPlatformServiceTotals,
+  servicesTimeoutIsHqOutage,
+  type IfcdcServiceProbe,
+} from "../lib/ifcdcSidecarProbes";
 import { buildIntegrationsHubSafe } from "./integrationsHubEngine";
 
 export type CommandHealthPillar = {
@@ -117,7 +122,7 @@ export async function buildExecutiveCommandHealth(opts?: { bypassCache?: boolean
       emptyOps,
       "ops"
     ),
-    withTimeout(checkIfcdcServices(), 8_000, {} as Record<string, boolean>, "services"),
+    withTimeout(checkIfcdcServiceProbes(), 8_000, [] as IfcdcServiceProbe[], "services"),
     withTimeout(buildIntegrationsHubSafe(), 18_000, null, "integrations"),
     withTimeout(
       import("./auraTechnicalCommandEngine").then((m) => m.buildTechnicalCommandBriefing()),
@@ -134,12 +139,16 @@ export async function buildExecutiveCommandHealth(opts?: { bypassCache?: boolean
   const services = servicesResult.value;
   const hub = hubResult.value;
   const tech = techResult.value;
+  const servicesOutage = servicesTimeoutIsHqOutage({
+    timedOut: servicesResult.timedOut,
+    urls: IFCDC_SERVICE_URLS,
+  });
   const anyTimedOut =
     orgResult.timedOut ||
     financeResult.timedOut ||
     appsResult.timedOut ||
     opsResult.timedOut ||
-    servicesResult.timedOut ||
+    servicesOutage ||
     hubResult.timedOut ||
     techResult.timedOut;
 
@@ -148,9 +157,10 @@ export async function buildExecutiveCommandHealth(opts?: { bypassCache?: boolean
   const financial = Math.round(Number(finance.financialHealthScore) || pillarScore(prev, "financial"));
   const organization = Math.round(Number(orgHealth.overall) || pillarScore(prev, "organization"));
 
-  const serviceEntries = Object.entries(services || {});
-  const platformHealthy = serviceEntries.filter(([, v]) => v).length;
-  const platformTotal = serviceEntries.length;
+  const serviceProbes: IfcdcServiceProbe[] = Array.isArray(services) ? services : [];
+  const platformCounts = countedPlatformServiceTotals(serviceProbes);
+  const platformHealthy = platformCounts.healthy;
+  const platformTotal = platformCounts.total;
 
   const cards = ((hub as { integrations?: Array<{ status?: string; health?: { healthy?: boolean }; id?: string }> } | null)?.integrations ?? [])
     .filter((c) => c.status !== "coming_soon");

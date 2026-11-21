@@ -10,8 +10,13 @@ import { SOFTWARE_DIVISION_APPS, pollAllApps } from "./appRegistry";
 import { buildExecutiveCommandHealth } from "./executiveCommandHealth";
 import { listLeadershipAlerts } from "./criticalAlerts";
 import { buildHeadquartersActivityFeed, buildOrganizationHealthScore } from "./analyticsReporting";
-import { checkIfcdcServices, IFCDC_SERVICE_URLS } from "../lib/ifcdc";
-import { shouldProbeLegacy4101 } from "./auraLegacy4101";
+import { checkIfcdcServiceProbes, IFCDC_SERVICE_URLS } from "../lib/ifcdc";
+import {
+  brainStatusFromSidecarProbe,
+  isHqProductionSidecarRuntime,
+  productionSidecarTimeoutProbes,
+  type IfcdcServiceProbe,
+} from "../lib/ifcdcSidecarProbes";
 import {
   commandCenterHealthyValue,
   isLocalSidecarUrl,
@@ -359,7 +364,7 @@ export async function buildExecutiveCommandCenterV1(opts: {
   const [commandHealth, appPoll, services, alerts, activity, lastLoginAt, emailFails] = await Promise.all([
     withTimeout(buildExecutiveCommandHealth(), null, "command-health"),
     withTimeout(pollAllApps() as Promise<Awaited<ReturnType<typeof pollAllApps>> | null>, null, "poll-apps"),
-    withTimeout(checkIfcdcServices(), {} as Record<string, boolean>, "services"),
+    withTimeout(checkIfcdcServiceProbes(), [] as IfcdcServiceProbe[], "services"),
     withTimeout(listLeadershipAlerts(40), [], "alerts"),
     withTimeout(buildHeadquartersActivityFeed(20), [], "activity"),
     withTimeout(resolveLastLoginAt(opts.userEmail), null, "last-login"),
@@ -368,7 +373,13 @@ export async function buildExecutiveCommandCenterV1(opts: {
 
   const appPollTimedOut = appPoll == null;
   const apps = appPoll ?? [];
-  const serviceMapTimedOut = Object.keys(services).length === 0;
+  const serviceProbes: IfcdcServiceProbe[] =
+    Array.isArray(services) && services.length
+      ? services
+      : isHqProductionSidecarRuntime()
+        ? productionSidecarTimeoutProbes(IFCDC_SERVICE_URLS)
+        : [];
+  const serviceMapTimedOut = serviceProbes.length === 0;
 
   if (!commandHealth) {
     warnings.push(`Command health timed out at ${generatedAt}. This is not an outage.`);
@@ -393,19 +404,12 @@ export async function buildExecutiveCommandCenterV1(opts: {
   }
 
   let sidecarMiss = false;
-  for (const [id, ok] of Object.entries(services)) {
-    const url = IFCDC_SERVICE_URLS[id as keyof typeof IFCDC_SERVICE_URLS] || "";
-    const labeled = labelPlatformService({
-      id,
-      ok: Boolean(ok),
-      url,
-      probeSkipped: id === "aura" && !shouldProbeLegacy4101(),
-      at: generatedAt,
-    });
+  for (const probe of serviceProbes) {
+    const labeled = brainStatusFromSidecarProbe(probe);
     if (labeled.status === "not deployed") sidecarMiss = true;
     systems.push({
-      id: `svc-${id}`,
-      label: `Platform · ${id}`,
+      id: `svc-${probe.name}`,
+      label: `Platform · ${probe.name}`,
       status: labeled.status,
       detail: labeled.detail,
     });
