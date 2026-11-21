@@ -123,4 +123,7 @@ services:
     disk:
       name: ifcdc-hq-data
       mountPath: /opt/render/project/src/data
-      sizeGB: 5
+      # Live dashboard disk is ~99–100 GB (4.9 GB used). Render Blueprint `sizeGB`
+      # is whole GiB. Keep 100 so a future Blueprint sync cannot reset the mounted
+      # volume to 5 GB. Do not apply this Blueprint without Founder review.
+      sizeGB: 100
