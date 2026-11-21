@@ -206,10 +206,17 @@ export function scoreFromFindings(findings: TechFinding[]): { score: number; lab
     else if (f.status === "warning") score -= 5;
   }
   score = Math.max(0, Math.min(100, score));
-  if (score >= 85) return { score, label: "healthy" };
-  if (score >= 60) return { score, label: "degraded" };
-  if (score > 0) return { score, label: "critical" };
-  return { score, label: "critical" };
+  let label: TechBriefing["overallLabel"] =
+    score >= 85 ? "healthy" : score >= 60 ? "degraded" : "critical";
+  const hasCriticalFail = findings.some((f) => f.status === "failed" && f.severity === "critical");
+  const hasHighIssue = findings.some(
+    (f) =>
+      (f.status === "failed" || f.status === "degraded") &&
+      (f.severity === "high" || f.severity === "critical"),
+  );
+  if (hasCriticalFail) label = "critical";
+  else if (label === "healthy" && hasHighIssue) label = "degraded";
+  return { score, label };
 }
 
 function formatSpeechBriefing(b: Omit<TechBriefing, "speechSummary" | "smsSummary">): string {

@@ -71,12 +71,34 @@ function liveDeployCommit(): string | null {
   return built ? built.slice(0, 7) : null;
 }
 
-function compareDeployment(githubSha: string | null, liveSha: string | null): GitHubDeploymentStatus {
+export function sameCommitPrefix(a: string, b: string): boolean {
+  const left = a.trim().toLowerCase();
+  const right = b.trim().toLowerCase();
+  if (!left || !right) return false;
+  const n = Math.min(7, left.length, right.length);
+  return left.slice(0, n) === right.slice(0, n);
+}
+
+export type DeploymentCompareEvidence = {
+  githubTreeSha?: string | null;
+  liveTreeSha?: string | null;
+  githubParents?: string[];
+};
+
+/** SHA prefixes, identical trees, or a merge commit whose parent is live all count as aligned. */
+export function compareDeployment(
+  githubSha: string | null,
+  liveSha: string | null,
+  evidence?: DeploymentCompareEvidence,
+): GitHubDeploymentStatus {
   if (!githubSha || !liveSha) return "unknown";
-  const gh = githubSha.slice(0, 7);
-  const live = liveSha.slice(0, 7);
-  if (gh === live) return "aligned";
-  // Render deploys from GitHub — live behind means production not yet on latest main
+  if (sameCommitPrefix(githubSha, liveSha)) return "aligned";
+  if (evidence?.githubTreeSha && evidence.liveTreeSha && evidence.githubTreeSha === evidence.liveTreeSha) {
+    return "aligned";
+  }
+  if ((evidence?.githubParents ?? []).some((parent) => sameCommitPrefix(parent, liveSha))) {
+    return "aligned";
+  }
   return "behind";
 }
 
@@ -94,6 +116,9 @@ function repositoryHealthFromRepo(repo: {
 function deploymentLabel(status: GitHubDeploymentStatus, live: string | null, github: string | null): string {
   switch (status) {
     case "aligned":
+      if (live && github && !sameCommitPrefix(live, github)) {
+        return `Render (${live}) matches GitHub main tree (${github})`;
+      }
       return live ? `Aligned with Render (${live})` : "Aligned with production deploy";
     case "behind":
       return live && github ? `Render (${live}) behind GitHub (${github})` : "Production may need redeploy";
@@ -172,7 +197,12 @@ type GithubRepoPayload = {
 
 type GithubCommitPayload = {
   sha: string;
-  commit: { author?: { date?: string }; committer?: { date?: string } };
+  parents?: Array<{ sha?: string }>;
+  commit: {
+    author?: { date?: string };
+    committer?: { date?: string };
+    tree?: { sha?: string };
+  };
 };
 
 function unavailableSnapshot(
@@ -232,7 +262,10 @@ function snapshotFromProbe(
     commitData?.commit?.committer?.date ?? commitData?.commit?.author?.date ?? null;
   const lastPushAt = repoData?.pushed_at ?? latestCommitAt;
   const liveCommit = liveDeployCommit();
-  const deploymentStatus = compareDeployment(latestCommitFull, liveCommit);
+  const deploymentStatus = compareDeployment(latestCommitFull, liveCommit, {
+    githubTreeSha: commitData?.commit?.tree?.sha ?? null,
+    githubParents: (commitData?.parents ?? []).map((parent) => String(parent.sha || "")).filter(Boolean),
+  });
   const repositoryHealth = repositoryHealthFromRepo(repoData, branch, repoRes.ok);
   const healthMsg =
     repositoryHealth === "healthy" && deploymentStatus === "aligned"
