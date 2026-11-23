@@ -195,12 +195,9 @@ async function buildSamGovCard(feed: Awaited<ReturnType<typeof getGrantFeedInteg
   const missing = required.filter((k) => !envSet(k));
   let live: Awaited<ReturnType<typeof probeSamGovEntityLive>> | null = null;
   if (!missing.length) {
-    const { shouldSkipLiveSamProbe, getLastSamProbe, skippedSamProbeResult } = await import("./samGovProbePolicy");
-    if (shouldSkipLiveSamProbe()) {
-      live = skippedSamProbeResult(getLastSamProbe());
-    } else {
-      live = await probeSamGovEntityLive();
-    }
+    // Never live-call GSA on hub GET / startup cache warm — Test Connection only.
+    const { getLastSamProbe, skippedSamProbeResult } = await import("./samGovProbePolicy");
+    live = skippedSamProbeResult(getLastSamProbe());
   }
 
   const liveOk = Boolean(live?.ok);

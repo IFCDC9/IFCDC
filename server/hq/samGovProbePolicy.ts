@@ -1,20 +1,23 @@
 /**
  * SAM.gov probe gating + HQ vs GSA rate-limit classification.
- * Auto probes (hub page-load, startup retry, watchdog) must not hammer GSA
- * after 401 / 429 / "Message throttled out". Founder Test Connection may force.
+ * Auto probes (hub page-load, startup verify, startup-retry, watchdog, evidence)
+ * must never call api.sam.gov. Founder Test Connection is the only force path.
  *
  * HQ limiter (server/middleware/hqSecurity.ts, 300 req / 60s) JSON:
  *   { error: "Too many requests. Please try again shortly." }
- * That is not SAM.gov.
+ * That is not SAM.gov. Distinct copy; classify HQ_RATE_LIMITED.
  *
  * GSA api.sam.gov (WSO2-style) JSON on quota exhaustion:
  *   { code: "900804", message: "Message throttled out",
  *     description: "You have exceeded your quota. You can access API after … 00:00:00+0000 UTC" }
- * FSD KB0017604: per-key daily API tiers. Observed 429 descriptions name the next access at
- * 00:00:00+0000 UTC (next UTC day), often ~24h from the prior UTC midnight — not HQ's 60s window.
- * Classify as RATE_LIMITED, never AUTH_FAILED. Do not auto-retry until that UTC reset.
+ * Cited: open.gsa.gov Entity Management API rate-limit table; FSD KB0017604 daily
+ * per-key tiers. 429 bodies name next access at 00:00:00+0000 UTC (next UTC day),
+ * often ~24h from the prior UTC midnight — not HQ's 60s window.
+ * Founder may run one Test Connection after that UTC reset, not the same ET calendar morning.
+ * Classify as RATE_LIMITED, never AUTH_FAILED. No auto-retry loop.
  *
  * Hub cache: lastError = last probe message, connected = live.ok only. In-memory only.
+ * Do not write production DB from the cache-reset helper.
  */
 
 export const HQ_API_LIMITER_MESSAGE = "Too many requests. Please try again shortly.";
@@ -37,7 +40,8 @@ type SamProbeGate = {
 
 const gate: SamProbeGate = {
   last: null,
-  skipLiveUntilForced: false,
+  // Auto paths never hit GSA. Cold boot / hub GET / watchdog skip until Founder Test Connection.
+  skipLiveUntilForced: true,
 };
 
 export function isHqLimiterMessage(message: string): boolean {
@@ -63,8 +67,7 @@ export function shouldAutoRetrySam(opts: { httpStatus?: number; message?: string
 }
 
 export function shouldStartupRetryCard(card: { id: string; health?: { message?: string }; status?: string }): boolean {
-  // Hub build already probes SAM once. Startup/watchdog retry uses Test Connection
-  // (force:true) and must never replay api.sam.gov after 401/429 or on a timer.
+  // Hub GET / startup / watchdog must never force SAM Test Connection.
   if (card.id === "sam_gov") return false;
   return true;
 }
@@ -122,17 +125,14 @@ export function hubSamCacheFields(live: { ok?: boolean; message?: string } | nul
 
 export function rememberSamLiveResult(result: SamLiveProbeSnapshot): void {
   gate.last = result;
-  if (!result.ok && !shouldAutoRetrySam(result)) {
-    gate.skipLiveUntilForced = true;
-  }
-  if (result.ok) {
-    gate.skipLiveUntilForced = false;
-  }
+  // Keep auto probes gated even after a successful Founder Test Connection so
+  // hub page-load and boot cannot spend GSA daily quota. Only force:true hits SAM.
+  gate.skipLiveUntilForced = true;
 }
 
 export function shouldSkipLiveSamProbe(force?: boolean): boolean {
   if (force) return false;
-  return gate.skipLiveUntilForced;
+  return true;
 }
 
 export function getLastSamProbe(): SamLiveProbeSnapshot | null {
@@ -180,16 +180,20 @@ export function samHubStatusFromLive(
 }
 
 export function skippedSamProbeResult(cached: SamLiveProbeSnapshot | null): SamLiveProbeSnapshot {
-  const base = cached || {
-    ok: false,
-    message: GSA_THROTTLE_MESSAGE,
-    latencyMs: 0,
-    uei: null,
-    apiKeySet: true,
-  };
+  if (!cached) {
+    return {
+      ok: false,
+      message:
+        "SAM.gov not probed automatically (no live call). Hub is not Connected until Founder Test Connection succeeds.",
+      latencyMs: 0,
+      uei: null,
+      apiKeySet: false,
+    };
+  }
+  if (cached.ok) return cached;
   return {
-    ...base,
+    ...cached,
     ok: false,
-    message: `${base.message} (live SAM probe skipped after 401/429 throttle)`,
+    message: `${cached.message} (live SAM probe skipped — auto paths do not call api.sam.gov)`,
   };
 }

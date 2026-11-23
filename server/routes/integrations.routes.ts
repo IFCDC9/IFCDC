@@ -118,8 +118,12 @@ router.get("/diagnostics", async (_req, res) => {
   }
 });
 
-/** Clear SAM lastError without calling GSA. Founder Test Connection remains the live probe. */
-router.post("/sam_gov/reset-status", async (_req, res) => {
+/** Clear SAM lastError without calling GSA. Founder session required. Does not write SQL. */
+router.post("/sam_gov/reset-status", async (req, res) => {
+  const { isFounderRole } = await import("../hq/auraFounderTrustEngine");
+  if (!req.hqUser || !isFounderRole(req.hqUser.role)) {
+    return res.status(401).json({ error: "Authentication required", samCalled: false, connected: false });
+  }
   const { resetSamGovStatusCache } = await import("../hq/samGovProbePolicy");
   const { invalidateIntegrationsHubCache } = await import("../hq/integrationsHubEngine");
   const result = resetSamGovStatusCache();

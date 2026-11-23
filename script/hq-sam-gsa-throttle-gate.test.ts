@@ -76,6 +76,29 @@ test("no auto-retry after 401/429/GSA throttle", () => {
   );
 });
 
+test("cold auto probe never fetches api.sam.gov and is not Connected", async () => {
+  resetSamGovProbeGateForTests();
+  process.env.SAM_GOV_API_KEY = "test-key-not-live";
+  process.env.SAM_GOV_UEI = "TESTUEI123456";
+  let fetches = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    fetches += 1;
+    throw new Error("network must not be called");
+  };
+  try {
+    const live = await probeSamGovEntityLive();
+    assert.equal(fetches, 0);
+    assert.equal(live.ok, false);
+    assert.equal(samHubStatusFromLive(live, true), "degraded");
+    assert.match(live.message, /not probed automatically/i);
+    assert.equal(hubSamCacheFields(live).connected, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetSamGovProbeGateForTests();
+  }
+});
+
 test("page-load probe loop cannot hammer GSA after throttle", async () => {
   resetSamGovProbeGateForTests();
   process.env.SAM_GOV_API_KEY = "test-key-not-live";
@@ -106,6 +129,34 @@ test("page-load probe loop cannot hammer GSA after throttle", async () => {
     assert.match(first.message, /skipped/i);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("cached successful probe stays Connected without fetching SAM", async () => {
+  resetSamGovProbeGateForTests();
+  rememberSamLiveResult({
+    ok: true,
+    message: "Entity found",
+    latencyMs: 20,
+    uei: "TESTUEI123456",
+    apiKeySet: true,
+    httpStatus: 200,
+  });
+  let fetches = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    fetches += 1;
+    throw new Error("network must not be called");
+  };
+  try {
+    const live = await probeSamGovEntityLive();
+    assert.equal(fetches, 0);
+    assert.equal(live.ok, true);
+    assert.equal(samHubStatusFromLive(live, true), "connected");
+    assert.equal(hubSamCacheFields(live).connected, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetSamGovProbeGateForTests();
   }
 });
 
