@@ -18,7 +18,7 @@ import {
   shouldSkipLiveSamProbe,
   shouldStartupRetryCard,
 } from "../server/hq/samGovProbePolicy.ts";
-import { HQ_API_LIMITER_MESSAGE as HQ_LIMITER_FROM_SECURITY } from "../server/hq/samGovProbePolicy.ts";
+import { hubSamCacheFields } from "../server/hq/samGovProbePolicy.ts";
 import { probeSamGovEntityLive } from "../server/hq/grantFeedConnectors.ts";
 
 test("HQ limiter copy is distinct from GSA Message throttled out", () => {
@@ -29,7 +29,6 @@ test("HQ limiter copy is distinct from GSA Message throttled out", () => {
   assert.equal(isGsaThrottleMessage(GSA_THROTTLE_MESSAGE), true);
   assert.equal(isHqLimiterMessage(GSA_THROTTLE_MESSAGE), false);
   assert.equal(isGsaThrottleMessage(HQ_API_LIMITER_MESSAGE), false);
-  assert.equal(HQ_LIMITER_FROM_SECURITY, HQ_API_LIMITER_MESSAGE);
 });
 
 test("GSA throttle maps to RATE_LIMITED not AUTH_FAILED even on 401 wrapping", () => {
@@ -105,6 +104,11 @@ test("Connected only after successful live probe", () => {
   assert.equal(samHubStatusFromLive(null, true), "degraded");
   assert.equal(samHubStatusFromLive({ ok: false }, true), "degraded");
   assert.equal(samHubStatusFromLive({ ok: true }, true), "connected");
+  assert.deepEqual(hubSamCacheFields({ ok: false, message: GSA_THROTTLE_MESSAGE }), {
+    lastError: GSA_THROTTLE_MESSAGE,
+    connected: false,
+  });
+  assert.deepEqual(hubSamCacheFields({ ok: true, message: "ok" }), { lastError: null, connected: true });
 });
 
 test("forced probe with GSA 401 throttle body is RATE_LIMITED and then gates auto probes", async () => {
@@ -123,7 +127,8 @@ test("forced probe with GSA 401 throttle body is RATE_LIMITED and then gates aut
   try {
     const live = await probeSamGovEntityLive(undefined, { force: true });
     assert.equal(live.ok, false);
-    assert.equal(live.message, "Message throttled out");
+    assert.match(live.message, /RATE_LIMITED/);
+    assert.match(live.message, /Message throttled out/);
     assert.equal(classifyIntegrationError(live.message), "RATE_LIMITED");
     assert.notEqual(classifyIntegrationError(live.message), "AUTH_FAILED");
     assert.equal(samHubStatusFromLive(live, true), "degraded");

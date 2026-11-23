@@ -42,7 +42,7 @@ export type IntegrationHubCard = {
     configured: string[];
   };
   requiredCredentials: { key: string; label: string; configured: boolean }[];
-  health: { healthy: boolean; latencyMs?: number; message: string };
+  health: { healthy: boolean; latencyMs?: number; message: string; lastError?: string | null };
   details?: IntegrationHubDetail[];
   actions: IntegrationHubAction[];
 };

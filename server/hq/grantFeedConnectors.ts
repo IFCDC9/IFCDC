@@ -771,7 +771,10 @@ export async function probeSamGovEntityLive(
     if (gsaBodyLooksThrottled(bodyMessage) || res.status === 429) {
       return finish({
         ok: false,
-        message: bodyMessage || GSA_THROTTLE_MESSAGE,
+        message:
+          `SAM.gov RATE_LIMITED — ${data.message || GSA_THROTTLE_MESSAGE}` +
+          (bodyMessage && bodyMessage !== (data.message || "") ? ` · ${bodyMessage}` : "") +
+          " · GSA daily quota typically resets 00:00 UTC (next UTC day); do not auto-retry",
         latencyMs,
         uei,
         apiKeySet: true,
