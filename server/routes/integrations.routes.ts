@@ -16,6 +16,7 @@ import {
   isQuickBooksConfigured,
 } from "../hq/quickbooksOAuth";
 import { JWT_SECRET } from "../config/auth";
+import { getSuperAdminEmail } from "../config/credentials";
 
 const router = Router();
 
@@ -164,6 +165,25 @@ router.post("/quickbooks/sync", async (req: Request, res: Response) => {
   }
 });
 
+function isFounderSession(req: Request): boolean {
+  const role = String(req.hqUser?.role || "").toLowerCase();
+  if (role === "owner" || role === "founder") return true;
+  const email = String(req.hqUser?.email || "").toLowerCase();
+  return Boolean(email && email === getSuperAdminEmail());
+}
+
+/** Founder-only: clear SAM lastError + hub cache. Does not call api.sam.gov. */
+router.post("/sam_gov/clear-error", async (req: Request, res: Response) => {
+  if (!isFounderSession(req)) {
+    return res.status(403).json({ error: "Founder only", calledSam: false, connected: false });
+  }
+  const { clearSamGovHubLastError } = await import("../hq/integrationsHubEngine");
+  res.json({
+    ...clearSamGovHubLastError(),
+    message: "Cleared SAM lastError and Integrations Hub cache. Did not call api.sam.gov.",
+  });
+});
+
 router.post("/:provider/configure", async (req: Request, res: Response) => {
   const provider = req.params.provider as IntegrationProvider;
   if (provider === "quickbooks") {
@@ -200,7 +220,9 @@ router.post("/:provider/test", async (req, res) => {
     });
   }
   const { testIntegrationHubProvider } = await import("../hq/integrationsHubEngine");
-  const hubResult = await testIntegrationHubProvider(provider);
+  const hubResult = await testIntegrationHubProvider(provider, {
+    allowSamNetwork: provider === "sam_gov",
+  });
   if (hubResult.message !== "Unknown integration") {
     return res.json(hubResult);
   }

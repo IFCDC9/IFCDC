@@ -782,6 +782,13 @@ export async function retryDegradedIntegrations(opts?: {
   const failed: { id: string; message: string }[] = [];
 
   for (const card of slice) {
+    if (card.id === "sam_gov") {
+      failed.push({
+        id: card.id,
+        message: `${card.health?.message || "SAM.gov"} — auto-retry skipped after GSA 429 / Message throttled out`,
+      });
+      continue;
+    }
     try {
       const result = await testIntegrationHubProvider(card.id);
       if (result.success) recovered.push(card.id);

@@ -2096,7 +2096,7 @@ export async function syncFederalIntegrationEvidence(opts?: {
     null;
   try {
     const { probeSamGovEntityLive } = await import("./grantFeedConnectors");
-    samProbe = await probeSamGovEntityLive();
+    samProbe = await probeSamGovEntityLive(undefined, { allowNetwork: false });
   } catch (err) {
     skipped.push({
       evidenceType: "sam_registration",
@@ -2104,17 +2104,7 @@ export async function syncFederalIntegrationEvidence(opts?: {
     });
   }
 
-  // Optional short retry when SAM throttles (common on shared public keys).
-  if (samProbe && !samProbe.ok && /throttl/i.test(samProbe.message || "")) {
-    await new Promise((r) => setTimeout(r, 2500));
-    try {
-      const { probeSamGovEntityLive } = await import("./grantFeedConnectors");
-      const retry = await probeSamGovEntityLive();
-      if (retry.ok) samProbe = retry;
-    } catch {
-      /* keep first probe */
-    }
-  }
+  // Do not auto-retry SAM.gov after GSA 429 / "Message throttled out" (~10 entity calls/day).
 
   let recordsUpserted = 0;
   let ueiVerified = false;
