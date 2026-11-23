@@ -60,6 +60,15 @@ test("no auto-retry after 401/429/GSA throttle", () => {
   );
   assert.equal(
     shouldStartupRetryCard({
+      id: "sam_gov",
+      health: { message: "timeout" },
+      status: "degraded",
+    }),
+    false,
+    "startup/watchdog must never force SAM Test Connection",
+  );
+  assert.equal(
+    shouldStartupRetryCard({
       id: "paypal",
       health: { message: "Message throttled out" },
     }),
@@ -162,6 +171,8 @@ test("reset-status clears lastError without calling SAM and does not set Connect
     assert.equal(result.samCalled, false);
     assert.equal(result.connected, false);
     assert.equal(result.lastError, null);
+    assert.equal(result.skipLiveUntilForced, true);
+    assert.equal(shouldSkipLiveSamProbe(), true);
     assert.equal(samHubStatusFromLive({ ok: false }, true), "degraded");
     const skipped = await probeSamGovEntityLive();
     assert.equal(fetches, 0);

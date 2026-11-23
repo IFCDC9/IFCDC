@@ -63,8 +63,10 @@ export function shouldAutoRetrySam(opts: { httpStatus?: number; message?: string
 }
 
 export function shouldStartupRetryCard(card: { id: string; health?: { message?: string }; status?: string }): boolean {
-  if (card.id !== "sam_gov") return true;
-  return shouldAutoRetrySam({ message: card.health?.message || "" });
+  // Hub build already probes SAM once. Startup/watchdog retry uses Test Connection
+  // (force:true) and must never replay api.sam.gov after 401/429 or on a timer.
+  if (card.id === "sam_gov") return false;
+  return true;
 }
 
 /**
@@ -145,6 +147,7 @@ export function resetSamGovStatusCache(): {
   skipLiveUntilForced: boolean;
   connected: false;
 } {
+  gate.skipLiveUntilForced = true;
   gate.last = {
     ok: false,
     message: "Status cleared. Wait for the GSA throttle window, then use Test Connection once.",
@@ -156,7 +159,7 @@ export function resetSamGovStatusCache(): {
     ok: true,
     samCalled: false,
     lastError: null,
-    skipLiveUntilForced: gate.skipLiveUntilForced,
+    skipLiveUntilForced: true,
     connected: false,
   };
 }
