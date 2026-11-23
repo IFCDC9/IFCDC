@@ -3,7 +3,7 @@
  */
 import { getDb } from "../db";
 import { pollAllApps } from "./appRegistry";
-import { getGrantFeedIntegrationStatus } from "./grantFeedConnectors";
+import { clearSamGovProbeCache, getGrantFeedIntegrationStatus } from "./grantFeedConnectors";
 import { ensureIntegrationTables, INTEGRATION_CATALOG } from "./integrationConnectors";
 import { openAiConfigStatus, verifyOpenAiConnection } from "../lib/openaiConfig";
 
@@ -190,19 +190,23 @@ async function buildSamGovCard(feed: Awaited<ReturnType<typeof getGrantFeedInteg
   const required = ["SAM_GOV_API_KEY", "SAM_GOV_UEI"];
   const feedStatus = feed.samGov;
   const now = new Date().toISOString();
-  const { probeSamGovEntityLive } = await import("./grantFeedConnectors");
+  const { probeSamGovEntityLive, getSamGovLastProbe } = await import("./grantFeedConnectors");
 
   const missing = required.filter((k) => !envSet(k));
   let live: Awaited<ReturnType<typeof probeSamGovEntityLive>> | null = null;
   if (!missing.length) {
-    live = await probeSamGovEntityLive();
+    live = await probeSamGovEntityLive(undefined, { allowNetwork: false });
   }
+  const last = getSamGovLastProbe();
+  const lastError = last && !last.ok ? last.message : null;
 
   const liveOk = Boolean(live?.ok);
   const status = liveOk
     ? "connected"
     : required.every((k) => envSet(k))
-      ? "degraded"
+      ? lastError
+        ? "degraded"
+        : "configured"
       : statusFromEnv(required);
 
   return {
@@ -229,12 +233,23 @@ async function buildSamGovCard(feed: Awaited<ReturnType<typeof getGrantFeedInteg
       { label: "UEI", value: process.env.SAM_GOV_UEI || process.env.IFCDC_SAM_UEI || "Not set" },
       { label: "API key", value: envSet("SAM_GOV_API_KEY") ? "Set" : "Missing" },
       { label: "Last feed sync", value: feedStatus?.lastSync || feedStatus?.note || "—" },
+      ...(lastError ? [{ label: "lastError", value: lastError, status: "danger" as const }] : []),
+      ...(live?.errorCode || last?.errorCode
+        ? [{ label: "Error code", value: String(live?.errorCode || last?.errorCode) }]
+        : []),
       ...(live?.legalBusinessName ? [{ label: "Legal name", value: live.legalBusinessName }] : []),
       ...(live?.httpStatus ? [{ label: "HTTP", value: String(live.httpStatus) }] : []),
     ],
     actions: [
       { id: "open-grants", label: "Open Grant Center", kind: "primary", action: "link", href: "/hq/grants" },
       { id: "test", label: "Test Connection", kind: "secondary", action: "test" },
+      {
+        id: "clear-error",
+        label: "Clear last error (no SAM call)",
+        kind: "secondary",
+        action: "configure",
+        reason: "Founder-only POST /api/hq/integrations/sam_gov/clear-error — clears cache/lastError, does not call api.sam.gov",
+      },
       {
         id: "configure",
         label: required.every((k) => envSet(k)) ? "Configured on Render" : "Not configured",
@@ -1063,7 +1078,17 @@ export function invalidateIntegrationsHubCache(): void {
     .catch(() => undefined);
 }
 
-export async function testIntegrationHubProvider(provider: string) {
+/** Founder-only: drop SAM lastError + hub cache. Does not call api.sam.gov. */
+export function clearSamGovHubLastError(): { cleared: true; calledSam: false } {
+  clearSamGovProbeCache();
+  invalidateIntegrationsHubCache();
+  return { cleared: true, calledSam: false };
+}
+
+export async function testIntegrationHubProvider(
+  provider: string,
+  opts?: { allowSamNetwork?: boolean },
+) {
   if (provider === "github") {
     const { testGitHubIntegrationLive } = await import("./githubIntegrationEngine");
     return testGitHubIntegrationLive();
@@ -1126,7 +1151,9 @@ export async function testIntegrationHubProvider(provider: string) {
   }
   if (provider === "sam_gov") {
     const { probeSamGovEntityLive } = await import("./grantFeedConnectors");
-    const live = await probeSamGovEntityLive();
+    const live = await probeSamGovEntityLive(undefined, {
+      allowNetwork: opts?.allowSamNetwork === true,
+    });
     invalidateIntegrationsHubCache();
     return {
       success: live.ok,
@@ -1137,6 +1164,7 @@ export async function testIntegrationHubProvider(provider: string) {
         { label: "UEI", value: live.uei || "Not set" },
         { label: "API key", value: live.apiKeySet ? "Set" : "Missing" },
         { label: "Latency", value: `${live.latencyMs}ms` },
+        ...(live.errorCode ? [{ label: "Error code", value: live.errorCode }] : []),
         ...(live.legalBusinessName ? [{ label: "Legal name", value: live.legalBusinessName }] : []),
         ...(live.httpStatus ? [{ label: "HTTP", value: String(live.httpStatus) }] : []),
       ],

@@ -110,25 +110,41 @@ const SERVICE_META: Record<
   platform_calendar: { owner: "Operations", environment: "production", productionVsTest: "production" },
 };
 
-function inferErrorCode(message: string): string | undefined {
+export function inferErrorCode(message: string): string | undefined {
   const m = message || "";
+  // Classify GSA throttle (and HQ limiter copy) first so they never become credential-rejected.
+  if (
+    /message throttled out/i.test(m)
+    || /\b429\b/.test(m)
+    || /rate.?limit/i.test(m)
+    || /too many requests\. please try again shortly/i.test(m)
+  ) {
+    return "RATE_LIMITED";
+  }
   if (/timeout/i.test(m)) return "TIMEOUT";
   if (/401|unauthorized|auth failed/i.test(m)) return "AUTH_FAILED";
   if (/403|forbidden/i.test(m)) return "FORBIDDEN";
   if (/404|not found/i.test(m)) return "NOT_FOUND";
-  if (/429|rate.?limit/i.test(m)) return "RATE_LIMITED";
   if (/5\d\d|server error/i.test(m)) return "UPSTREAM_5XX";
   if (/missing|not configured|not set/i.test(m)) return "CONFIG_MISSING";
   if (/dns|domain|unverified/i.test(m)) return "DNS_OR_DOMAIN";
   return undefined;
 }
 
-function inferRootCause(message: string, errorCode?: string): string | undefined {
+export function inferRootCause(message: string, errorCode?: string): string | undefined {
   if (errorCode === "CONFIG_MISSING") return "Required Render environment variable is unset";
   if (errorCode === "AUTH_FAILED") return "API credentials rejected by provider";
   if (errorCode === "TIMEOUT") return "Provider did not respond within probe budget";
   if (errorCode === "DNS_OR_DOMAIN") return "Sender/domain authentication incomplete";
-  if (errorCode === "RATE_LIMITED") return "Provider throttled HQ probes";
+  if (errorCode === "RATE_LIMITED") {
+    if (/message throttled out/i.test(message || "")) {
+      return "GSA Entity API throttled (Message throttled out) — not HQ's 300 req/60s limiter";
+    }
+    if (/too many requests\. please try again shortly/i.test(message || "")) {
+      return "HQ /api/hq limiter (300 req / 60s) — not GSA SAM.gov";
+    }
+    return "Provider throttled HQ probes";
+  }
   if (!message) return undefined;
   return message.slice(0, 180);
 }
@@ -618,7 +634,10 @@ export async function verifyIntegrationsOnStartup(): Promise<void> {
     );
 
     // Auto-retry temporary failures (degraded only) after boot settles.
-    const degraded = (hub.integrations ?? []).filter((c) => c.status === "degraded").slice(0, 4);
+    // Never auto-retry SAM.gov — GSA Entity API is often ~10/day; 429 must not loop.
+    const degraded = (hub.integrations ?? [])
+      .filter((c) => c.status === "degraded" && c.id !== "sam_gov")
+      .slice(0, 4);
     for (const card of degraded) {
       try {
         const result = await testIntegrationHubProvider(card.id);

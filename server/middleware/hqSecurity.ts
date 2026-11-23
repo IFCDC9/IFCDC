@@ -1,7 +1,10 @@
 import type { Request, Response, NextFunction } from "express";
 import rateLimit from "express-rate-limit";
 
-/** Rate limit HQ API routes — enterprise security baseline */
+/**
+ * Rate limit HQ API routes — 300 req / 60s.
+ * Copy is HQ-only. GSA SAM.gov throttle body is "Message throttled out" (typically 429).
+ */
 export const hqApiLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 300,

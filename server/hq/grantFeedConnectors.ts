@@ -686,14 +686,19 @@ export async function syncSamGovStatus(): Promise<FeedSyncResult> {
   }
 }
 
-/** Live SAM.gov entity API probe (Integrations Hub + Evidence Vault). */
-export async function probeSamGovEntityLive(ueiOverride?: string): Promise<{
+/** GSA Entity API gateway body. Distinct from HQ's /api/hq limiter copy. */
+export const SAM_GOV_GSA_THROTTLE_MESSAGE = "Message throttled out";
+/** HQ `hqApiLimiter` (300 req / 60s) — not a SAM.gov/GSA response. */
+export const HQ_API_RATE_LIMIT_MESSAGE = "Too many requests. Please try again shortly.";
+
+export type SamGovLiveProbeResult = {
   ok: boolean;
   message: string;
   latencyMs: number;
   uei: string | null;
   apiKeySet: boolean;
   httpStatus?: number;
+  errorCode?: string;
   legalBusinessName?: string;
   cageCode?: string | null;
   registrationStatus?: string | null;
@@ -703,15 +708,83 @@ export async function probeSamGovEntityLive(ueiOverride?: string): Promise<{
   purposeOfRegistrationCode?: string | null;
   registrationDate?: string | null;
   rawEntityRegistration?: Record<string, unknown> | null;
-}> {
+};
+
+export type SamGovLiveProbeOptions = {
+  /** Founder Test Connection only. Hub aggregation, startup, and retries must omit this. */
+  allowNetwork?: boolean;
+};
+
+let samGovLastProbe: SamGovLiveProbeResult | null = null;
+
+export function isHqApiRateLimitMessage(message: string): boolean {
+  return (message || "").includes(HQ_API_RATE_LIMIT_MESSAGE);
+}
+
+export function isSamGovGsaThrottle(message: string, httpStatus?: number): boolean {
+  if (httpStatus === 429) return true;
+  const m = message || "";
+  if (isHqApiRateLimitMessage(m)) return false;
+  return /message throttled out/i.test(m) || /\b429\b/.test(m);
+}
+
+export function classifySamGovProbeError(message: string, httpStatus?: number): string | undefined {
+  if (isSamGovGsaThrottle(message, httpStatus) || isHqApiRateLimitMessage(message) || /rate.?limit/i.test(message || "")) {
+    return "RATE_LIMITED";
+  }
+  if (httpStatus === 401 || /401|unauthorized|auth failed/i.test(message || "")) return "AUTH_FAILED";
+  if (httpStatus === 403 || /403|forbidden/i.test(message || "")) return "FORBIDDEN";
+  return undefined;
+}
+
+export function getSamGovLastProbe(): SamGovLiveProbeResult | null {
+  return samGovLastProbe;
+}
+
+/** Clears in-memory lastError/cache. Does not call api.sam.gov. */
+export function clearSamGovProbeCache(): { cleared: true; calledSam: false } {
+  samGovLastProbe = null;
+  return { cleared: true, calledSam: false };
+}
+
+function rememberSamGovProbe(result: SamGovLiveProbeResult): SamGovLiveProbeResult {
+  const errorCode = result.errorCode || (!result.ok ? classifySamGovProbeError(result.message, result.httpStatus) : undefined);
+  samGovLastProbe = { ...result, errorCode };
+  return samGovLastProbe;
+}
+
+/** Live SAM.gov entity API probe (Integrations Hub + Evidence Vault). */
+export async function probeSamGovEntityLive(
+  ueiOverride?: string,
+  options?: SamGovLiveProbeOptions,
+): Promise<SamGovLiveProbeResult> {
   const uei = (ueiOverride || process.env.SAM_GOV_UEI || process.env.IFCDC_SAM_UEI || "").trim();
   const apiKey = (process.env.SAM_GOV_API_KEY || "").trim();
   const t0 = Date.now();
+  const last = samGovLastProbe;
+  const founderLiveTest = options?.allowNetwork === true;
+  const hubOrStartup = options?.allowNetwork === false;
+
+  // Never auto-replay GSA Entity API after 429 / "Message throttled out".
+  if (last?.errorCode === "RATE_LIMITED" && !founderLiveTest) {
+    return last;
+  }
+  if (hubOrStartup) {
+    if (last) return last;
+    return {
+      ok: false,
+      message: "SAM.gov live probe deferred — use Test Connection after the GSA window (not HQ 300/60s limiter)",
+      latencyMs: 0,
+      uei: uei || null,
+      apiKeySet: Boolean(apiKey),
+    };
+  }
+
   if (!uei) {
-    return { ok: false, message: "SAM_GOV_UEI not configured on Render", latencyMs: 0, uei: null, apiKeySet: Boolean(apiKey) };
+    return rememberSamGovProbe({ ok: false, message: "SAM_GOV_UEI not configured on Render", latencyMs: 0, uei: null, apiKeySet: Boolean(apiKey) });
   }
   if (!apiKey) {
-    return { ok: false, message: "SAM_GOV_API_KEY not configured on Render", latencyMs: 0, uei, apiKeySet: false };
+    return rememberSamGovProbe({ ok: false, message: "SAM_GOV_API_KEY not configured on Render", latencyMs: 0, uei, apiKeySet: false });
   }
 
   // SAM.gov Entity Management API accepts api_key as query param (preferred) and X-Api-Key header.
@@ -741,38 +814,41 @@ export async function probeSamGovEntityLive(ueiOverride?: string): Promise<{
     };
 
     if (res.status === 401 || res.status === 403) {
-      return {
+      return rememberSamGovProbe({
         ok: false,
         message: `SAM.gov auth failed (${res.status}) — check SAM_GOV_API_KEY permissions for Entity Management API`,
         latencyMs,
         uei,
         apiKeySet: true,
         httpStatus: res.status,
-      };
+      });
     }
     if (!res.ok) {
-      return {
+      return rememberSamGovProbe({
         ok: false,
         message: data.message || data.error?.message || `SAM.gov API ${res.status}`,
         latencyMs,
         uei,
         apiKeySet: true,
         httpStatus: res.status,
-      };
+        errorCode: res.status === 429 || isSamGovGsaThrottle(data.message || data.error?.message || "", res.status)
+          ? "RATE_LIMITED"
+          : classifySamGovProbeError(data.message || data.error?.message || "", res.status),
+      });
     }
 
     const entity = data.entityData?.[0]?.entityRegistration || null;
     const name = entity?.legalBusinessName ? String(entity.legalBusinessName) : undefined;
     const total = Number(data.totalRecords ?? data.entityData?.length ?? 0);
     if (total < 1 && !name && !entity) {
-      return {
+      return rememberSamGovProbe({
         ok: false,
         message: `SAM.gov returned no entity for UEI ${uei}`,
         latencyMs,
         uei,
         apiKeySet: true,
         httpStatus: res.status,
-      };
+      });
     }
 
     const cage =
@@ -807,7 +883,7 @@ export async function probeSamGovEntityLive(ueiOverride?: string): Promise<{
       || /active/i.test(registrationStatus)
       || registrationStatus === "A";
 
-    return {
+    return rememberSamGovProbe({
       ok: true,
       message: name
         ? `SAM.gov entity OK — ${name}${cage ? ` · CAGE ${cage}` : ""}${registrationStatus ? ` · ${registrationStatus}` : ""}`
@@ -827,15 +903,15 @@ export async function probeSamGovEntityLive(ueiOverride?: string): Promise<{
       rawEntityRegistration: entity,
       // expose active hint via message; callers check registrationStatus
       ...(active ? {} : {}),
-    };
+    });
   } catch (err) {
-    return {
+    return rememberSamGovProbe({
       ok: false,
       message: err instanceof Error ? err.message : "SAM.gov probe failed",
       latencyMs: Date.now() - t0,
       uei,
       apiKeySet: true,
-    };
+    });
   }
 }
 
