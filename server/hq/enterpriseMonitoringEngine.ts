@@ -781,7 +781,15 @@ export async function retryDegradedIntegrations(opts?: {
   const recovered: string[] = [];
   const failed: { id: string; message: string }[] = [];
 
+  const { shouldStartupRetryCard } = await import("./samGovProbePolicy");
   for (const card of slice) {
+    if (!shouldStartupRetryCard(card)) {
+      failed.push({
+        id: card.id,
+        message: `${card.health?.message || "SAM.gov gated"} — auto-retry skipped after 401/429 throttle`,
+      });
+      continue;
+    }
     try {
       const result = await testIntegrationHubProvider(card.id);
       if (result.success) recovered.push(card.id);
