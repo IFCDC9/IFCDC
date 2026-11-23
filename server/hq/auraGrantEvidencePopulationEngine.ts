@@ -2104,17 +2104,7 @@ export async function syncFederalIntegrationEvidence(opts?: {
     });
   }
 
-  // Optional short retry when SAM throttles (common on shared public keys).
-  if (samProbe && !samProbe.ok && /throttl/i.test(samProbe.message || "")) {
-    await new Promise((r) => setTimeout(r, 2500));
-    try {
-      const { probeSamGovEntityLive } = await import("./grantFeedConnectors");
-      const retry = await probeSamGovEntityLive();
-      if (retry.ok) samProbe = retry;
-    } catch {
-      /* keep first probe */
-    }
-  }
+  // Do not auto-retry SAM on GSA throttle / 401 / 429 — Founder Test Connection only.
 
   let recordsUpserted = 0;
   let ueiVerified = false;

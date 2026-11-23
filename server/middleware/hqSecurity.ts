@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import rateLimit from "express-rate-limit";
+import { HQ_API_LIMITER_MESSAGE } from "../hq/samGovProbePolicy";
 
 /** Rate limit HQ API routes — enterprise security baseline */
 export const hqApiLimiter = rateLimit({
@@ -7,7 +8,7 @@ export const hqApiLimiter = rateLimit({
   max: 300,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: "Too many requests. Please try again shortly." },
+  message: { error: HQ_API_LIMITER_MESSAGE },
 });
 
 export function hqSecurityHeaders(_req: Request, res: Response, next: NextFunction) {

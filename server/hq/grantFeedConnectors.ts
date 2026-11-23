@@ -6,6 +6,14 @@ import { createHash } from "node:crypto";
 import { getDb } from "../db";
 import { grantId } from "./grantsSchema";
 import { allowStaticCsrFeedSync, allowGrantsGovRssFallback } from "./grantProductionPolicy";
+import {
+  GSA_THROTTLE_MESSAGE,
+  gsaBodyLooksThrottled,
+  getLastSamProbe,
+  rememberSamLiveResult,
+  shouldSkipLiveSamProbe,
+  skippedSamProbeResult,
+} from "./samGovProbePolicy";
 
 export type GrantFeedProvider = "grants_gov" | "sam_gov" | "foundation_directory" | "corporate_csr";
 
@@ -687,7 +695,10 @@ export async function syncSamGovStatus(): Promise<FeedSyncResult> {
 }
 
 /** Live SAM.gov entity API probe (Integrations Hub + Evidence Vault). */
-export async function probeSamGovEntityLive(ueiOverride?: string): Promise<{
+export async function probeSamGovEntityLive(
+  ueiOverride?: string,
+  opts?: { force?: boolean },
+): Promise<{
   ok: boolean;
   message: string;
   latencyMs: number;
@@ -714,6 +725,17 @@ export async function probeSamGovEntityLive(ueiOverride?: string): Promise<{
     return { ok: false, message: "SAM_GOV_API_KEY not configured on Render", latencyMs: 0, uei, apiKeySet: false };
   }
 
+  if (shouldSkipLiveSamProbe(opts?.force)) {
+    return skippedSamProbeResult(getLastSamProbe());
+  }
+
+  const finish = <T extends { ok: boolean; message: string; latencyMs: number; uei: string | null; apiKeySet: boolean; httpStatus?: number }>(
+    result: T,
+  ): T => {
+    rememberSamLiveResult(result);
+    return result;
+  };
+
   // SAM.gov Entity Management API accepts api_key as query param (preferred) and X-Api-Key header.
   const url =
     `https://api.sam.gov/entity-information/v3/entities`
@@ -738,41 +760,57 @@ export async function probeSamGovEntityLive(ueiOverride?: string): Promise<{
       totalRecords?: number;
       message?: string;
       error?: { message?: string };
+      code?: string | number;
+      description?: string;
     };
 
+    const bodyMessage = [data.message, data.error?.message, data.description, data.code]
+      .filter((v) => v != null && String(v).trim())
+      .map(String)
+      .join(" ");
+    if (gsaBodyLooksThrottled(bodyMessage) || res.status === 429) {
+      return finish({
+        ok: false,
+        message: bodyMessage || GSA_THROTTLE_MESSAGE,
+        latencyMs,
+        uei,
+        apiKeySet: true,
+        httpStatus: res.status,
+      });
+    }
     if (res.status === 401 || res.status === 403) {
-      return {
+      return finish({
         ok: false,
         message: `SAM.gov auth failed (${res.status}) — check SAM_GOV_API_KEY permissions for Entity Management API`,
         latencyMs,
         uei,
         apiKeySet: true,
         httpStatus: res.status,
-      };
+      });
     }
     if (!res.ok) {
-      return {
+      return finish({
         ok: false,
-        message: data.message || data.error?.message || `SAM.gov API ${res.status}`,
+        message: bodyMessage || `SAM.gov API ${res.status}`,
         latencyMs,
         uei,
         apiKeySet: true,
         httpStatus: res.status,
-      };
+      });
     }
 
     const entity = data.entityData?.[0]?.entityRegistration || null;
     const name = entity?.legalBusinessName ? String(entity.legalBusinessName) : undefined;
     const total = Number(data.totalRecords ?? data.entityData?.length ?? 0);
     if (total < 1 && !name && !entity) {
-      return {
+      return finish({
         ok: false,
         message: `SAM.gov returned no entity for UEI ${uei}`,
         latencyMs,
         uei,
         apiKeySet: true,
         httpStatus: res.status,
-      };
+      });
     }
 
     const cage =
@@ -807,7 +845,7 @@ export async function probeSamGovEntityLive(ueiOverride?: string): Promise<{
       || /active/i.test(registrationStatus)
       || registrationStatus === "A";
 
-    return {
+    return finish({
       ok: true,
       message: name
         ? `SAM.gov entity OK — ${name}${cage ? ` · CAGE ${cage}` : ""}${registrationStatus ? ` · ${registrationStatus}` : ""}`
@@ -827,15 +865,15 @@ export async function probeSamGovEntityLive(ueiOverride?: string): Promise<{
       rawEntityRegistration: entity,
       // expose active hint via message; callers check registrationStatus
       ...(active ? {} : {}),
-    };
+    });
   } catch (err) {
-    return {
+    return finish({
       ok: false,
       message: err instanceof Error ? err.message : "SAM.gov probe failed",
       latencyMs: Date.now() - t0,
       uei,
       apiKeySet: true,
-    };
+    });
   }
 }
 

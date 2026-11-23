@@ -118,6 +118,15 @@ router.get("/diagnostics", async (_req, res) => {
   }
 });
 
+/** Clear SAM lastError without calling GSA. Founder Test Connection remains the live probe. */
+router.post("/sam_gov/reset-status", async (_req, res) => {
+  const { resetSamGovStatusCache } = await import("../hq/samGovProbePolicy");
+  const { invalidateIntegrationsHubCache } = await import("../hq/integrationsHubEngine");
+  const result = resetSamGovStatusCache();
+  invalidateIntegrationsHubCache();
+  res.json(result);
+});
+
 router.post("/retry-degraded", async (req, res) => {
   try {
     const { retryDegradedIntegrations } = await import("../hq/enterpriseMonitoringEngine");

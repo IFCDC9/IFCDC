@@ -14,6 +14,11 @@ import {
   type IntegrationHubCard,
   type IntegrationHubStatus,
 } from "./integrationsHubEngine";
+import {
+  classifyIntegrationError,
+  inferRootCauseForCode,
+  shouldStartupRetryCard,
+} from "./samGovProbePolicy";
 
 export type IntegrationDisplayStatus = "Connected" | "Warning" | "Disconnected";
 
@@ -111,26 +116,11 @@ const SERVICE_META: Record<
 };
 
 function inferErrorCode(message: string): string | undefined {
-  const m = message || "";
-  if (/timeout/i.test(m)) return "TIMEOUT";
-  if (/401|unauthorized|auth failed/i.test(m)) return "AUTH_FAILED";
-  if (/403|forbidden/i.test(m)) return "FORBIDDEN";
-  if (/404|not found/i.test(m)) return "NOT_FOUND";
-  if (/429|rate.?limit/i.test(m)) return "RATE_LIMITED";
-  if (/5\d\d|server error/i.test(m)) return "UPSTREAM_5XX";
-  if (/missing|not configured|not set/i.test(m)) return "CONFIG_MISSING";
-  if (/dns|domain|unverified/i.test(m)) return "DNS_OR_DOMAIN";
-  return undefined;
+  return classifyIntegrationError(message);
 }
 
 function inferRootCause(message: string, errorCode?: string): string | undefined {
-  if (errorCode === "CONFIG_MISSING") return "Required Render environment variable is unset";
-  if (errorCode === "AUTH_FAILED") return "API credentials rejected by provider";
-  if (errorCode === "TIMEOUT") return "Provider did not respond within probe budget";
-  if (errorCode === "DNS_OR_DOMAIN") return "Sender/domain authentication incomplete";
-  if (errorCode === "RATE_LIMITED") return "Provider throttled HQ probes";
-  if (!message) return undefined;
-  return message.slice(0, 180);
+  return inferRootCauseForCode(message, errorCode);
 }
 
 export function recordIntegrationProbe(
@@ -618,7 +608,11 @@ export async function verifyIntegrationsOnStartup(): Promise<void> {
     );
 
     // Auto-retry temporary failures (degraded only) after boot settles.
-    const degraded = (hub.integrations ?? []).filter((c) => c.status === "degraded").slice(0, 4);
+    // Never auto-retry SAM.gov after 401/429 / GSA throttle — that hammers GSA.
+    const degraded = (hub.integrations ?? [])
+      .filter((c) => c.status === "degraded")
+      .filter((c) => shouldStartupRetryCard(c))
+      .slice(0, 4);
     for (const card of degraded) {
       try {
         const result = await testIntegrationHubProvider(card.id);

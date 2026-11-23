@@ -195,15 +195,22 @@ async function buildSamGovCard(feed: Awaited<ReturnType<typeof getGrantFeedInteg
   const missing = required.filter((k) => !envSet(k));
   let live: Awaited<ReturnType<typeof probeSamGovEntityLive>> | null = null;
   if (!missing.length) {
-    live = await probeSamGovEntityLive();
+    const { shouldSkipLiveSamProbe, getLastSamProbe, skippedSamProbeResult } = await import("./samGovProbePolicy");
+    if (shouldSkipLiveSamProbe()) {
+      live = skippedSamProbeResult(getLastSamProbe());
+    } else {
+      live = await probeSamGovEntityLive();
+    }
   }
 
   const liveOk = Boolean(live?.ok);
-  const status = liveOk
-    ? "connected"
-    : required.every((k) => envSet(k))
-      ? "degraded"
-      : statusFromEnv(required);
+  const { hubSamCacheFields, samHubStatusFromLive } = await import("./samGovProbePolicy");
+  const mapped = samHubStatusFromLive(live, required.every((k) => envSet(k)));
+  const status = mapped === "not_configured" ? statusFromEnv(required) : mapped;
+  const cache = hubSamCacheFields(live);
+  const healthMessage = missing.length
+    ? `Missing: ${missing.join(", ")}`
+    : live?.message || feedStatus?.note || "SAM.gov";
 
   return {
     id: "sam_gov",
@@ -221,14 +228,15 @@ async function buildSamGovCard(feed: Awaited<ReturnType<typeof getGrantFeedInteg
     health: {
       healthy: liveOk,
       latencyMs: live?.latencyMs,
-      message: missing.length
-        ? `Missing: ${missing.join(", ")}`
-        : live?.message || feedStatus?.note || "SAM.gov",
+      message: healthMessage,
+      lastError: cache.lastError,
     },
     details: [
       { label: "UEI", value: process.env.SAM_GOV_UEI || process.env.IFCDC_SAM_UEI || "Not set" },
       { label: "API key", value: envSet("SAM_GOV_API_KEY") ? "Set" : "Missing" },
       { label: "Last feed sync", value: feedStatus?.lastSync || feedStatus?.note || "—" },
+      { label: "Connected", value: cache.connected ? "yes" : "no" },
+      ...(cache.lastError ? [{ label: "Last error", value: cache.lastError }] : []),
       ...(live?.legalBusinessName ? [{ label: "Legal name", value: live.legalBusinessName }] : []),
       ...(live?.httpStatus ? [{ label: "HTTP", value: String(live.httpStatus) }] : []),
     ],
@@ -1126,7 +1134,7 @@ export async function testIntegrationHubProvider(provider: string) {
   }
   if (provider === "sam_gov") {
     const { probeSamGovEntityLive } = await import("./grantFeedConnectors");
-    const live = await probeSamGovEntityLive();
+    const live = await probeSamGovEntityLive(undefined, { force: true });
     invalidateIntegrationsHubCache();
     return {
       success: live.ok,
