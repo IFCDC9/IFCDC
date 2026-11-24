@@ -16,6 +16,9 @@ export type EnterpriseRole =
   | "board_member"
   | "grant_manager"
   | "billing"
+  | "intake_coordinator"
+  | "department_staff"
+  | "clinical_referral_staff"
   | "employee"
   | "volunteer"
   | "barber"
@@ -33,6 +36,9 @@ export const ENTERPRISE_ROLES: EnterpriseRole[] = [
   "board_member",
   "grant_manager",
   "billing",
+  "intake_coordinator",
+  "department_staff",
+  "clinical_referral_staff",
   "employee",
   "volunteer",
   "barber",
@@ -51,6 +57,9 @@ export const ENTERPRISE_ROLE_LABELS: Record<EnterpriseRole, string> = {
   board_member: "Board Member",
   grant_manager: "Grants Operator",
   billing: "Authorized Billing",
+  intake_coordinator: "Intake Coordinator",
+  department_staff: "Department Staff",
+  clinical_referral_staff: "Clinical Referral Staff",
   employee: "Staff",
   volunteer: "Volunteer",
   barber: "Barber",
@@ -71,6 +80,9 @@ export const LEGACY_ROLE_MAP: Record<string, EnterpriseRole> = {
   board: "board_member",
   grant_manager: "grant_manager",
   billing: "billing",
+  intake_coordinator: "intake_coordinator",
+  department_staff: "department_staff",
+  clinical_referral_staff: "clinical_referral_staff",
   manager: "manager",
   director: "program_director",
   program_director: "program_director",
@@ -114,6 +126,9 @@ export type Permission =
   | "hq.settings"
   | "hq.settings.manage"
   | "hq.documents"
+  | "hq.intake"
+  | "hq.intake.department"
+  | "hq.intake.clinical"
   | "hq.intake.medical"
   | "app.barbers"
   | "app.music"
@@ -127,7 +142,8 @@ export const ROLE_PERMISSIONS: Record<EnterpriseRole, Permission[]> = {
   founder: [
     "hq.executive", "hq.hr", "hq.hr.manage", "hq.hr.approve", "hq.hr.self", "hq.payroll", "hq.grants", "hq.grants.manage",
     "hq.finance", "hq.finance.manage", "hq.donations", "hq.programs", "hq.clients", "hq.clients.manage", "hq.software", "hq.aura",
-    "hq.analytics", "hq.notifications", "hq.settings", "hq.settings.manage", "hq.documents", "hq.intake.medical",
+    "hq.analytics", "hq.notifications", "hq.settings", "hq.settings.manage", "hq.documents",
+    "hq.intake", "hq.intake.department", "hq.intake.clinical", "hq.intake.medical",
     "app.barbers", "app.music", "app.radio", "app.tapis", "app.inclusive", "app.swiftware", "app.cryptocoin",
   ],
   executive: [
@@ -163,7 +179,19 @@ export const ROLE_PERMISSIONS: Record<EnterpriseRole, Permission[]> = {
     "hq.finance", "hq.analytics",
   ],
   billing: [
+    "hq.intake",
     "hq.intake.medical",
+  ],
+  intake_coordinator: [
+    "hq.intake",
+  ],
+  department_staff: [
+    "hq.intake",
+    "hq.intake.department",
+  ],
+  clinical_referral_staff: [
+    "hq.intake",
+    "hq.intake.clinical",
   ],
   employee: [
     "hq.hr.self", "hq.programs", "hq.clients", "hq.aura", "hq.notifications", "hq.documents", "app.barbers", "app.music", "app.radio",
@@ -208,6 +236,7 @@ export const HQ_MODULE_PERMISSIONS: Record<string, EnterpriseRole[]> = {
   board: ["founder", "executive", "administrator", "board_member"],
   compliance: ["founder", "executive", "administrator", "board_member"],
   intake_medical: ["founder", "billing"],
+  intake: ["founder", "intake_coordinator", "department_staff", "clinical_referral_staff", "billing"],
 };
 
 /** Route path → required permission */
@@ -236,7 +265,7 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   "/hq/volunteers": "hq.hr",
   "/hq/finance": "hq.finance",
   "/hq/grants": "hq.grants",
-  "/hq/intake": "hq.intake.medical",
+  "/hq/intake": "hq.intake",
   "/hq/donations": "hq.donations",
   "/hq/programs": "hq.programs",
   "/hq/detroit": "hq.programs",
@@ -278,6 +307,9 @@ export const DEFAULT_ROUTES: Record<EnterpriseRole, string> = {
   board_member: "/hq",
   grant_manager: "/hq/grants",
   billing: "/hq/intake",
+  intake_coordinator: "/hq/intake",
+  department_staff: "/hq/intake",
+  clinical_referral_staff: "/hq/intake",
   employee: "/hq/my-workspace",
   volunteer: "/hq/my-workspace",
   barber: "/barber",

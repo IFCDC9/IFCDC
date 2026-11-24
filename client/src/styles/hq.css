@@ -1567,3 +1567,37 @@ body.detroit-workspace-page .hq-page-title-truncate {
   max-width: none;
   line-height: 1.25;
 }
+
+.hq-intake-page { max-width: 920px; }
+.hq-intake-banner { border-color: var(--hq-gold); margin-bottom: 1rem; padding: 1rem; }
+.hq-intake-crisis { border-color: var(--hq-danger); margin-bottom: 1rem; padding: 1rem; }
+.hq-intake-tabs { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.75rem 0; }
+.hq-intake-form { display: grid; gap: 0.85rem; }
+.hq-intake-form label,
+.hq-intake-form select,
+.hq-intake-form input,
+.hq-intake-form textarea,
+.hq-intake-form button {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+}
+.hq-intake-form input,
+.hq-intake-form select,
+.hq-intake-form textarea,
+.hq-intake-form button,
+.hq-intake-tabs .hq-btn {
+  min-height: 44px;
+}
+.hq-intake-check { display: flex !important; align-items: flex-start; gap: 0.5rem; }
+.hq-intake-check input { width: auto !important; min-width: 22px; min-height: 22px; margin-top: 0.35rem; }
+.hq-intake-list { display: grid; gap: 0.5rem; padding: 0; list-style: none; }
+.hq-intake-pre { white-space: pre-wrap; margin-top: 1rem; overflow-x: auto; }
+.hq-intake-message { margin: 0.5rem 0; }
+.hq-intake-audit { font-size: 0.8rem; color: var(--hq-text-muted); }
+
+@media (max-width: 720px) {
+  .hq-intake-page { padding-bottom: 2rem; }
+  .hq-intake-tabs { flex-direction: column; }
+  .hq-intake-tabs .hq-btn { width: 100%; }
+}

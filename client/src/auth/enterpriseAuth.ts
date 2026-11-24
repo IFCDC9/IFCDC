@@ -5,13 +5,15 @@
 
 export type EnterpriseRole =
   | "founder" | "executive" | "administrator" | "hr" | "finance" | "program_director" | "manager"
-  | "board_member" | "grant_manager" | "billing" | "employee" | "volunteer" | "barber" | "client" | "donor";
+  | "board_member" | "grant_manager" | "billing" | "intake_coordinator" | "department_staff"
+  | "clinical_referral_staff" | "employee" | "volunteer" | "barber" | "client" | "donor";
 
 export type Permission =
   | "hq.executive" | "hq.hr" | "hq.hr.manage" | "hq.hr.approve" | "hq.hr.self" | "hq.payroll"
   | "hq.grants" | "hq.grants.manage" | "hq.finance" | "hq.finance.manage"
   | "hq.donations" | "hq.programs" | "hq.clients" | "hq.clients.manage" | "hq.software" | "hq.aura"
-  | "hq.analytics" | "hq.notifications" | "hq.settings" | "hq.settings.manage" | "hq.documents" | "hq.intake.medical"
+  | "hq.analytics" | "hq.notifications" | "hq.settings" | "hq.settings.manage" | "hq.documents"
+  | "hq.intake" | "hq.intake.department" | "hq.intake.clinical" | "hq.intake.medical"
   | "app.barbers" | "app.music" | "app.radio" | "app.tapis"
   | "app.inclusive" | "app.swiftware" | "app.cryptocoin";
 
@@ -53,7 +55,7 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   "/hq/volunteers": "hq.hr",
   "/hq/finance": "hq.finance",
   "/hq/grants": "hq.grants",
-  "/hq/intake": "hq.intake.medical",
+  "/hq/intake": "hq.intake",
   "/hq/donations": "hq.donations",
   "/hq/programs": "hq.programs",
   "/hq/clients": "hq.clients",
@@ -86,6 +88,9 @@ export const ENTERPRISE_ROLE_LABELS: Record<EnterpriseRole, string> = {
   board_member: "Board Member",
   grant_manager: "Grants Operator",
   billing: "Authorized Billing",
+  intake_coordinator: "Intake Coordinator",
+  department_staff: "Department Staff",
+  clinical_referral_staff: "Clinical Referral Staff",
   employee: "Staff",
   volunteer: "Volunteer",
   barber: "Barber",
