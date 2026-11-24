@@ -19,6 +19,7 @@
     "test:sidecar-probes-not-production": "node --import tsx --test script/hq-sidecar-probes-not-production.test.ts script/hq-health-labeling.test.ts",
     "test:disk-blueprint-and-deploy-align": "node --import tsx --test script/hq-github-deploy-alignment.test.ts script/hq-render-disk-blueprint.test.ts",
     "test:intake-medical-billing-readiness": "node --import tsx --test script/hq-intake-medical-billing-readiness.test.ts",
+    "test:universal-participant-intake": "node --import tsx --test script/hq-universal-participant-intake.test.ts script/hq-intake-medical-billing-readiness.test.ts",
     "build:client": "vite build",
     "people:readiness": "node script/people-phase3-readiness.mjs",
     "finance:readiness": "node script/finance-phase4-readiness.mjs",

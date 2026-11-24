@@ -1,13 +1,14 @@
 # HQ Intake Center — Medical & Billing Readiness
 
-**Status:** Prototype only — **not ready for billing** · **not for real PHI**  
-**HQ route:** `/hq/intake`  
+**Status:** Prototype only — **not ready for billing** · **not for real PHI** · **HIPAA Compliance Disabled**  
+**HQ route:** `/hq/intake` (universal intake is primary; this billing workspace is a **separate future** tab)  
 **API:** `/api/hq/intake-medical`  
 **Auth:** existing HQ session (`@ifcdc/auth` / `hqAuthRequired`). No duplicate auth.  
-**Access:** Founder (`owner`/`founder`) and authorized `billing` role only.  
+**Access:** Founder; authorized `billing` for draft claims; `clinical_referral_staff` for clinical notes. Billing does **not** get full clinical by default.  
 **Tenant:** `ifcdc-intake-medical` tables (`hq_intake_*`), isolated from grants, HR, People, Finance, and Detroit.  
 **Data:** synthetic records in tests only. Production boot does **not** seed patients.  
-**Branch:** `hq/intake-medical-billing-readiness` from `origin/main`. Not merged. Not deployed.
+**See also:** `Documents/products/HQ-UNIVERSAL-PARTICIPANT-INTAKE.md`  
+**Branch:** merged via PR #81; coordination continues on `hq/universal-participant-intake`. Not deployed for live PHI.
 
 Aura is **not** a SAM Entity Administrator and is **not** a licensed coder or biller. This workspace does not submit claims, change SAM.gov, send external email, merge to `main`, or deploy.
 
@@ -45,7 +46,7 @@ Facts below are from HQ docs/code on `origin/main` plus this prototype. If it is
 | Render (`ifcdc-hq`, `https://ifcdc-hq-wst6.onrender.com`) | Production HQ web service, Ohio, SQLite disk `ifcdc-hq-data` at `/opt/render/project/src/data` (`render.yaml`) | **Unknown / not verified.** No BAA, Business Associate, or HIPAA-eligible Render plan is documented in HQ product docs. Treat Render as **not HIPAA-cleared** for real PHI unless the Founder files a BAA. |
 | SQLite on Render disk | HQ operational database for grants, people, this prototype’s `hq_intake_*` tables | **Unknown / not a HIPAA-designated store.** Disk persistence is operational, not a covered-entity EHR. |
 | Aura / OpenAI (`AURA_OPENAI_API_KEY`, in-process OpenAI — Phase 7) | Executive chat, grant writer, voice, embeddings | **Unknown / not in place as HIPAA-eligible.** No OpenAI BAA is documented in this repo. **Do not put PHI in Aura prompts, logs, analytics, or error messages.** This prototype’s coding path is **local rules only** and does not call OpenAI. |
-| Postmark / Resend | Transactional HQ email (`POSTMARK_SERVER_TOKEN`, Resend fallback) | **Unknown / not verified for PHI.** Grant and project mail exist; they are not a medical claims channel. This prototype sends **no** email. |
+| Postmark / Resend | Transactional HQ email (`POSTMARK_SERVER_TOKEN`, Resend fallback) | **Postmark does not sign HIPAA BAAs.** Notifications must stay **generic only** and never include health content. This prototype sends **no** email. |
 | Twilio | Voice/SMS for HQ | **Unknown / not verified for PHI** in this billing context |
 | Legacy health-system Prisma routes | Separate API-key health module | **Not wired** to this workspace; do not treat as HIPAA-ready EHR |
 
