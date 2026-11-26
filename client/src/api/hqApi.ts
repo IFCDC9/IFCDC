@@ -127,6 +127,9 @@ export interface AuraMusicCommandCenter {
   recentExports: AuraMusicExport[];
   sections: { id: string; label: string; available: boolean; status?: string; note?: string }[];
   summary: Record<string, string>;
+  nodeLinked?: boolean;
+  connectivityAlerts?: { code: string; severity: "warning" | "danger"; title: string; message: string }[];
+  founderPowerRequirements?: string[];
   nodeId?: string;
   nodeLabel?: string;
   modules?: {

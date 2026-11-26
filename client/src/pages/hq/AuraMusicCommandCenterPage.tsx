@@ -750,9 +750,15 @@ function tabBadge(meta: { status?: string; available?: boolean } | undefined): s
   return null;
 }
 
-function productionNodeBanner(productionNode: string | undefined): { label: string; variant: "success" | "warning" | "danger" | "gold" | "muted"; pulse: boolean } {
+function productionNodeBanner(
+  productionNode: string | undefined,
+  auraMusicReady: boolean | undefined
+): { label: string; variant: "success" | "warning" | "danger" | "gold" | "muted"; pulse: boolean } {
+  if (auraMusicReady && String(productionNode || "").toUpperCase() === "READY") {
+    return { label: "PRODUCTION NODE READY", variant: "success", pulse: true };
+  }
   const state = String(productionNode || "NOT READY").toUpperCase();
-  if (state === "READY") return { label: "PRODUCTION NODE READY", variant: "success", pulse: true };
+  if (state === "READY") return { label: "PRODUCTION NODE NOT READY — LIVE CHECK FAILED", variant: "warning", pulse: false };
   if (state === "RECONNECTING") return { label: "PRODUCTION NODE RECONNECTING", variant: "warning", pulse: true };
   if (state === "OFFLINE") return { label: "PRODUCTION NODE OFFLINE", variant: "danger", pulse: false };
   if (state === "ERROR") return { label: "PRODUCTION NODE ERROR", variant: "danger", pulse: false };
@@ -1932,7 +1938,7 @@ const AuraMusicCommandCenterPage: React.FC = () => {
 
   const data: AuraMusicCommandCenter | undefined = query.data;
   const services = data?.services;
-  const nodeBanner = productionNodeBanner(services?.productionNode);
+  const nodeBanner = productionNodeBanner(services?.productionNode, data?.auraMusicReady);
   const sectionMeta = useMemo(() => {
     const map = new Map((data?.sections ?? []).map((s) => [s.id, s]));
     return map;
@@ -1962,7 +1968,15 @@ const AuraMusicCommandCenterPage: React.FC = () => {
           variant={djPreview?.progress?.overallStatus === "PASSED" || djPreview?.coreFoundation?.status === "PASSED" ? "success" : "gold"}
         />
         <StatusBadge label={`Phase ${data?.currentPhase ?? "2"}`} variant="gold" />
-        <StatusBadge label={data?.mode === "cloud_hq" ? "Cloud HQ" : "Local node linked"} variant="muted" />
+        <StatusBadge
+          label={data?.nodeLinked ? "Production node linked" : data?.mode === "cloud_hq" ? "Cloud HQ — node not linked" : "Node not linked"}
+          variant={data?.nodeLinked ? "muted" : "danger"}
+        />
+        {data?.auraMusicReady ? (
+          <StatusBadge label="Live readiness check passed" variant="success" />
+        ) : (
+          <StatusBadge label="Live readiness check pending" variant="warning" />
+        )}
         <button
           type="button"
           className="hq-btn hq-btn-secondary hq-btn-sm"
@@ -1975,14 +1989,37 @@ const AuraMusicCommandCenterPage: React.FC = () => {
         </button>
       </div>
 
-      {data?.message ? (
+      {(data?.connectivityAlerts?.length ? data.connectivityAlerts : data?.message ? [{ code: "message", severity: "warning" as const, title: "AURA MUSIC", message: data.message }] : []).map((alert) => (
         <div
+          key={alert.code}
           className="hq-panel"
-          style={{ marginBottom: "1rem", borderColor: "rgba(245,158,11,0.35)" }}
+          style={{
+            marginBottom: "1rem",
+            borderColor: alert.severity === "danger" ? "rgba(239,68,68,0.45)" : "rgba(245,158,11,0.35)",
+          }}
         >
-          <div className="hq-panel-body" style={{ padding: "0.9rem 1.1rem", color: "var(--hq-warning)", fontSize: "0.85rem" }}>
-            {data.message}
+          <div
+            className="hq-panel-body"
+            style={{
+              padding: "0.9rem 1.1rem",
+              color: alert.severity === "danger" ? "var(--hq-danger, #f87171)" : "var(--hq-warning)",
+              fontSize: "0.85rem",
+            }}
+          >
+            <strong>{alert.title}</strong>
+            <div style={{ marginTop: "0.35rem" }}>{alert.message}</div>
           </div>
+        </div>
+      ))}
+      {data?.founderPowerRequirements?.length ? (
+        <div style={{ marginBottom: "1rem" }}>
+        <HqPanel title="What must stay powered / open" subtitle="A local setup cannot stay connected if the Mac or Ableton is shut down">
+          <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
+            {data.founderPowerRequirements.map((step) => (
+              <li key={step} style={{ marginBottom: "0.35rem" }}>{step}</li>
+            ))}
+          </ul>
+        </HqPanel>
         </div>
       ) : null}
 
@@ -2088,9 +2125,21 @@ const AuraMusicCommandCenterPage: React.FC = () => {
 
             <div className="hq-kpi-grid">
               <ServiceCard label="Music Intelligence" value={services?.musicIntelligence ?? "OFFLINE"} />
-              <ServiceCard label="Ableton Bridge" value={services?.abletonBridge ?? "OFFLINE"} />
-              <ServiceCard label="Ableton Live" value={services?.abletonLive ?? "DISCONNECTED"} />
-              <ServiceCard label="Production Node" value={services?.productionNode ?? "NOT READY"} />
+              <ServiceCard
+                label="Ableton Bridge"
+                value={services?.abletonBridge ?? "OFFLINE"}
+                meta="HTTP :4177 — can be ONLINE while Live is closed"
+              />
+              <ServiceCard
+                label="Ableton Live"
+                value={services?.abletonLive ?? "DISCONNECTED"}
+                meta="Requires Live + AURA Control Surface heartbeat"
+              />
+              <ServiceCard
+                label="Production Node"
+                value={services?.productionNode ?? "NOT READY"}
+                meta={data?.nodeLinked ? "Linked ≠ ready — live check required" : "Not linked to HQ"}
+              />
               <ServiceCard label="Watchdog" value={services?.watchdog ?? "ERROR"} />
               <ServiceCard
                 label="Last Heartbeat"
@@ -2253,9 +2302,21 @@ const AuraMusicCommandCenterPage: React.FC = () => {
         {tab === "ableton" && data && (
           <>
             <div className="hq-kpi-grid">
-              <ServiceCard label="Ableton Bridge" value={services?.abletonBridge ?? "OFFLINE"} />
-              <ServiceCard label="Ableton Live" value={services?.abletonLive ?? "DISCONNECTED"} />
-              <ServiceCard label="Production Node" value={services?.productionNode ?? "NOT READY"} />
+              <ServiceCard
+                label="Ableton Bridge"
+                value={services?.abletonBridge ?? "OFFLINE"}
+                meta="Bridge online is not Live connected"
+              />
+              <ServiceCard
+                label="Ableton Live"
+                value={services?.abletonLive ?? "DISCONNECTED"}
+                meta="Live readiness check — not inferred from bridge"
+              />
+              <ServiceCard
+                label="Production Node"
+                value={services?.productionNode ?? "NOT READY"}
+                meta={data?.auraMusicReady ? "Ready after live check" : "Not ready until Live answers"}
+              />
               <ServiceCard
                 label="Heartbeat"
                 value={data.lastHeartbeatAt ? "FRESH" : "MISSING"}
